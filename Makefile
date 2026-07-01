@@ -1,4 +1,4 @@
-.PHONY: help install test evals\:binder lint clean
+.PHONY: help install test evals evals\:binder lint clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -12,8 +12,11 @@ test:  ## Run the unit test suite
 
 # Keep modest: high fan-out trips the host CLI's ~60s timeout (12-way -> SIGKILL).
 BINDER_WORKERS ?= 6
-evals\:binder:  ## Run the live binder corpus eval on Haiku (gate: false-positive -> 0; costs money, needs a Claude credential)
-	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/test_binder_corpus.py
+evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
+	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals $(EVAL_ARGS)
+
+evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
+	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
 
 lint:  ## Lint with ruff
 	uv run ruff check .
