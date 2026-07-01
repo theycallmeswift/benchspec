@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"thread-3","timestamp":"2026-06-30T00:00:01Z"}
+{"type":"turn.started","timestamp":"2026-06-30T00:00:02Z"}
+{"type":"item.started","item":{"id":"i1","type":"skill_invocation","name":"archive"}}
+{"type":"item.completed","timestamp":"2026-06-30T00:00:03Z","item":{"id":"i1","type":"skill_invocation","name":"archive","status":"completed"}}
+{"type":"item.completed","timestamp":"2026-06-30T00:00:04Z","item":{"id":"i2","type":"command_execution","command":"ls","status":"completed","exit_code":0}}
+{"type":"item.completed","timestamp":"2026-06-30T00:00:05Z","item":{"id":"i3","type":"agent_message","text":"Thinking...","status":"completed"}}
+{"type":"item.completed","timestamp":"2026-06-30T00:00:06Z","item":{"id":"i4","type":"agent_message","text":"Done.","status":"completed"}}
+{"type":"turn.completed","timestamp":"2026-06-30T00:00:07Z","usage":{"input_tokens":20,"cached_input_tokens":5,"output_tokens":9,"reasoning_output_tokens":3}}

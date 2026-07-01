@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "evalspec"
+dynamic = ["version"]
+description = "A pytest-native runner for coding-agent skill evals, sandboxed under microsandbox."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Swift", email = "swift@majorleaguehacking.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "pytest>=8",
+    "python-dotenv>=1.0",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# Agent CLIs install out-of-band; extras document supported integrations.
+claude = []
+codex = []
+opencode = []
+microsandbox = ["microsandbox>=0.5.6,<0.6"]
+testing = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "pytest-repeat>=0.9,<1",
+    "ruff>=0.6",
+    "microsandbox>=0.5.6,<0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/theycallmeswift/evalspec"
+Documentation = "https://github.com/theycallmeswift/evalspec/tree/dev/docs"
+Issues = "https://github.com/theycallmeswift/evalspec/issues"
+
+[project.scripts]
+evalspec = "evalspec.__main__:main"
+
+[project.entry-points.pytest11]
+evalspec = "evalspec.plugin"
+
+[tool.hatch.version]
+path = "evalspec/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["evalspec"]
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "binder_corpus: live Haiku binder corpus eval (costs money; run via `make evals:binder`)",
+]
+addopts = "-m 'not binder_corpus'"
+

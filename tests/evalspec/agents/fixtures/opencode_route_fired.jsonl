@@ -1,0 +1,4 @@
+{"type":"step_start","part":{"type":"step-start"}}
+{"type":"text","part":{"type":"text","text":"I'll archive this capture."}}
+{"type":"tool_use","part":{"type":"tool","tool":"skill","state":{"status":"completed","input":{"name":"archive"}}}}
+{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":1234}}}

@@ -1,0 +1,4 @@
+{"type":"step_start","part":{"type":"step-start"}}
+{"type":"text","part":{"type":"text","text":"Let me look around first."}}
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"}}}}
+{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":99}}}

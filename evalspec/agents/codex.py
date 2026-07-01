@@ -1,0 +1,468 @@
+"""Codex CLI implementation of the `CodingAgent` interface."""
+
+from __future__ import annotations
+
+import datetime
+import json
+import os
+import asyncio
+
+from evalspec.agents.base import AgentCapabilities, BaseAgent
+from evalspec.agents.judge_cli import run_host_judge
+from evalspec.runner import RunResult
+from evalspec.trajectory import iter_events
+
+_PROVIDER_HOSTS = {
+    "CODEX_API_KEY": ["api.openai.com"],
+    "CODEX_ACCESS_TOKEN": ["chatgpt.com", "auth.openai.com"],
+}
+AUTH_ENV_VARS = tuple(_PROVIDER_HOSTS)
+_RESERVED_HARNESS_ARGS = {
+    "-m",
+    "--model",
+    "-C",
+    "--cd",
+    "--json",
+    "-o",
+    "--output-last-message",
+    "--output-schema",
+    "-i",
+    "--image",
+    "--enable",
+    "--disable",
+    "-c",
+    "--config",
+    "--strict-config",
+    "-p",
+    "--profile",
+    "-s",
+    "--sandbox",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--add-dir",
+    "--oss",
+    "--local-provider",
+    "--skip-git-repo-check",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--ephemeral",
+    "resume",
+    "review",
+}
+_RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("--")}
+_RESERVED_HARNESS_SHORT_FLAGS = {
+    arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
+}
+
+
+def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
+    if harness_args is None:
+        return []
+    for arg in harness_args:
+        if (
+            arg in _RESERVED_HARNESS_ARGS
+            or any(arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS)
+            or any(
+                arg.startswith(flag) and len(arg) > len(flag)
+                for flag in _RESERVED_HARNESS_SHORT_FLAGS
+            )
+        ):
+            raise ValueError(f"reserved harness arg for Codex: {arg}")
+    return harness_args
+
+
+def _auth_json_from_env() -> str | None:
+    path = os.environ.get("CODEX_AUTH_JSON_PATH")
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            auth_json = f.read()
+    except OSError:
+        return None
+    try:
+        data = json.loads(auth_json)
+    except json.JSONDecodeError:
+        return None
+    tokens = data.get("tokens") if isinstance(data, dict) else None
+    if not isinstance(tokens, dict) or not isinstance(tokens.get("access_token"), str):
+        return None
+    return path
+
+
+class CodexAgent(BaseAgent):
+    id = "codex"
+    CODEX_BIN = "/usr/local/bin/codex"
+    AUTH_JSON_GUEST_SOURCE = "/evalspec-codex-auth/auth.json"
+    guest_home = "/root"
+    skill_load_dir = "/root/.codex/skills"
+    capabilities = AgentCapabilities(efforts=(), multi_turn=False, token_split=True)
+    PROVISION_SCRIPT = (
+        "apt-get update && apt-get install -y curl ca-certificates nodejs npm && "
+        "export CODEX_NON_INTERACTIVE=1 && "
+        'npm i -g "@openai/codex@${EVALSPEC_CODEX_VERSION:-latest}" && '
+        "test -x /usr/local/bin/codex"
+    )
+
+    def __init__(
+        self, auth_value: str = "", *, auth_env: str = "CODEX_API_KEY",
+        version: str = "latest", auth_json_path: str = "",
+    ):
+        self._auth_value = auth_value
+        self._auth_env = auth_env
+        self._auth_json_path = auth_json_path
+        self._version = version
+
+    @classmethod
+    def from_env(cls) -> CodexAgent:
+        version = os.environ.get("EVALSPEC_CODEX_VERSION", "latest")
+        for env_name in AUTH_ENV_VARS:
+            value = os.environ.get(env_name)
+            if value:
+                return cls(auth_value=value, auth_env=env_name, version=version)
+        auth_json_path = _auth_json_from_env()
+        if auth_json_path:
+            return cls(auth_json_path=auth_json_path, version=version)
+        return cls(version=version)
+
+    @staticmethod
+    def credential_error() -> str | None:
+        if any(os.environ.get(v) for v in AUTH_ENV_VARS):
+            return None
+        if _auth_json_from_env():
+            return None
+        return (
+            "no Codex credential - set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, "
+            "or CODEX_ACCESS_TOKEN"
+        )
+
+    def version(self) -> str:
+        return self._version
+
+    def artifact_dirs(self) -> list[str]:
+        # Codex populates CODEX_HOME/skills with runtime-managed `.system` skills during
+        # execution. Those are not agent-authored artifacts, and some are not UTF-8-safe
+        # for evalspec's artifact reader, so Codex reports workdir outputs only.
+        return []
+
+    def auth_json_path(self) -> str:
+        return self._auth_json_path
+
+    def guest_env(self) -> dict:
+        return {
+            "HOME": self.guest_home,
+            "CODEX_HOME": f"{self.guest_home}/.codex",
+            "TZ": "UTC",
+            "EVALSPEC_CODEX_VERSION": self._version,
+        }
+
+    def secrets(self) -> list:
+        from microsandbox import Secret
+
+        if self._auth_json_path:
+            return []
+        return [
+            Secret.env(
+                self._auth_env,
+                value=self._auth_value,
+                allow_hosts=_PROVIDER_HOSTS[self._auth_env],
+            )
+        ]
+
+    def build_command(
+        self, prompt, *, plugin_dir, model, effort, resume_session_id, detect_skill,
+        harness_args: list[str] | None = None,
+        workdir: str | None = None,
+    ) -> list[str]:
+        # plugin_dir/resume_session_id/effort/detect_skill are accepted for protocol
+        # parity. Codex exec has no stable evalspec-owned equivalents for them yet.
+        cd = workdir or self.guest_home
+        return [
+            self.CODEX_BIN,
+            "exec",
+            "--json",
+            "-m", model,
+            "-C", cd,
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            *_validate_harness_args(harness_args),
+            prompt,
+        ]
+
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
+        text = line.strip()
+        if not text:
+            return False
+        try:
+            event = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return _item_dispatches_any_skill(_event_item(event), skill_name)
+
+    def detect_fired(self, lines, skill_name: str) -> bool:
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if _item_dispatches_skill(_event_item(event), skill_name):
+                return True
+        return False
+
+    async def _write_auth_json(self, sb) -> None:
+        if not self._auth_json_path:
+            return
+        res = await sb.shell(
+            "mkdir -p /root/.codex && "
+            "umask 077 && "
+            f"cp {self.AUTH_JSON_GUEST_SOURCE} /root/.codex/auth.json",
+            env=self.guest_env(),
+        )
+        if res.exit_code != 0:
+            raise RuntimeError(
+                f"codex auth copy failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
+            )
+
+    def streamed_activity(self, lines) -> bool:
+        activity_events = {"turn.started", "item.started", "item.completed", "turn.completed"}
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and event.get("type") in activity_events:
+                return True
+        return False
+
+    async def provision(self, sb) -> None:
+        res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
+        if res.exit_code != 0:
+            raise RuntimeError(
+                f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
+            )
+
+    async def stage_project_assets(self, sb, project_mount: str) -> None:
+        await self._write_auth_json(sb)
+        dest = self.skill_load_dir
+        await sb.shell(
+            f"mkdir -p {dest} && "
+            f"for src in {project_mount}/skills {project_mount}/.agents/skills "
+            f"{project_mount}/.claude/skills; do "
+            f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
+            f"done",
+            env=self.guest_env(),
+        )
+
+    async def invoke(
+        self, sb, prompt, *, eval_id, config, workdir, plugin_dir, model, effort,
+        resume_session_id, detect_skill, harness_args: list[str] | None = None,
+        extra_env: dict | None = None,
+        timeout: int = 600,
+    ) -> RunResult:
+        from microsandbox.errors import MicrosandboxError
+
+        cmd = self.build_command(
+            prompt, plugin_dir=plugin_dir, model=model, effort=effort,
+            resume_session_id=resume_session_id, detect_skill=detect_skill,
+            harness_args=harness_args, workdir=workdir,
+        )
+        try:
+            await self._write_auth_json(sb)
+            res = await sb.exec(
+                cmd[0], cmd[1:], cwd=workdir,
+                env={**self.guest_env(), **(extra_env or {})},
+                timeout=timeout, stdin=b"",
+            )
+        except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as e:
+            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
+        if res.exit_code != 0:
+            return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
+        return parse_codex_jsonl(res.stdout_text, eval_id, config, detect_skill)
+
+    def judge(self, prompt: str, *, model: str, timeout: int = 300) -> str:
+        return run_host_judge(prompt, model=model, timeout=timeout)
+
+
+def _event_item(event: dict) -> dict:
+    item = event.get("item") if isinstance(event, dict) else None
+    return item if isinstance(item, dict) else {}
+
+
+def _skill_name_matches(actual: str, expected: str) -> bool:
+    return actual == expected or actual.endswith(f":{expected}")
+
+
+def _skill_dispatch_name(item: dict) -> str | None:
+    item_type = item.get("type")
+    if item_type == "skill_invocation":
+        name = item.get("name") or item.get("skill")
+        return name if isinstance(name, str) and name else None
+    if item_type == "tool_call":
+        name = item.get("name")
+        args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+        if name == "Skill":
+            skill = args.get("skill") or args.get("name")
+            return skill if isinstance(skill, str) and skill else None
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def _item_dispatches_skill(item: dict, skill_name: str) -> bool:
+    name = _skill_dispatch_name(item)
+    return isinstance(name, str) and _skill_name_matches(name, skill_name)
+
+
+def _item_dispatches_any_skill(item: dict, skill_name: str | None) -> bool:
+    name = _skill_dispatch_name(item)
+    if name is None:
+        return False
+    if item.get("type") == "tool_call" and item.get("name") != "Skill":
+        return bool(skill_name) and _skill_name_matches(name, skill_name)
+    return True
+
+
+def _timestamp_ms(value) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.replace("Z", "+00:00")
+        try:
+            return int(datetime.datetime.fromisoformat(text).timestamp() * 1000)
+        except ValueError:
+            return None
+    return None
+
+
+def _debug_tail(events: list[dict]) -> str:
+    return json.dumps(events[-3:]) if events else ""
+
+
+def _usage_int(usage: dict, *names: str) -> int:
+    total = 0
+    for name in names:
+        value = usage.get(name)
+        if isinstance(value, int):
+            total += value
+    return total
+
+
+def _codex_trajectory(events: list[dict]) -> list[dict]:
+    traj: list[dict] = []
+    for event in events:
+        if event.get("type") != "item.completed":
+            continue
+        item = _event_item(event)
+        item_type = item.get("type")
+        item_id = item.get("id") or ""
+        if item_type == "skill_invocation":
+            skill = _skill_dispatch_name(item)
+            if skill:
+                traj.append({
+                    "kind": "tool_call",
+                    "id": item_id,
+                    "name": "Skill",
+                    "arguments": {"skill": skill},
+                })
+        elif item_type == "tool_call":
+            skill = _skill_dispatch_name(item)
+            if item.get("name") == "Skill" and skill:
+                traj.append({
+                    "kind": "tool_call",
+                    "id": item_id,
+                    "name": "Skill",
+                    "arguments": {"skill": skill},
+                })
+            else:
+                args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+                traj.append({
+                    "kind": "tool_call",
+                    "id": item_id,
+                    "name": str(item.get("name") or ""),
+                    "arguments": args,
+                })
+        elif item_type == "command_execution":
+            command = item.get("command")
+            args = {"command": command} if isinstance(command, str) else {}
+            traj.append({
+                "kind": "tool_call",
+                "id": item_id,
+                "name": "command_execution",
+                "arguments": args,
+            })
+    return traj
+
+
+def parse_codex_jsonl(
+    stdout: str, eval_id: str, config: str, detect_skill: str | None,
+) -> RunResult:
+    events = list(iter_events(stdout))
+    session_id = ""
+    text_parts: list[str] = []
+    input_tokens = 0
+    cache_read_tokens = 0
+    output_tokens = 0
+    reasoning_tokens = 0
+    is_error = False
+    error_text = ""
+    fired = False
+    first_ts: int | None = None
+    last_ts: int | None = None
+
+    for event in events:
+        ts = _timestamp_ms(event.get("timestamp"))
+        if ts is not None:
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            last_ts = ts if last_ts is None else max(last_ts, ts)
+
+        etype = event.get("type")
+        if etype == "thread.started":
+            tid = event.get("thread_id") or event.get("threadId") or event.get("id")
+            if isinstance(tid, str):
+                session_id = tid
+        elif etype == "item.completed":
+            item = _event_item(event)
+            if item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text)
+            if detect_skill and _item_dispatches_skill(item, detect_skill):
+                fired = True
+        elif etype == "turn.completed":
+            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+            input_tokens += _usage_int(usage, "input_tokens")
+            cache_read_tokens += _usage_int(usage, "cached_input_tokens", "cache_read_input_tokens")
+            output_tokens += _usage_int(usage, "output_tokens")
+            reasoning_tokens += _usage_int(usage, "reasoning_tokens", "reasoning_output_tokens")
+        elif etype in {"turn.failed", "error"}:
+            is_error = True
+            msg = event.get("message") or event.get("error")
+            if isinstance(msg, str):
+                error_text = msg
+
+    total_tokens = input_tokens + cache_read_tokens + output_tokens + reasoning_tokens
+    duration_ms = (last_ts - first_ts) if first_ts is not None and last_ts is not None else 0
+    result_text = "\n\n".join(text_parts) or error_text or _debug_tail(events)
+    return RunResult(
+        eval_id=eval_id,
+        config=config,
+        result_text=result_text,
+        duration_ms=duration_ms,
+        total_tokens=total_tokens,
+        is_error=is_error,
+        session_id=session_id,
+        fired=fired,
+        raw=stdout,
+        trajectory=_codex_trajectory(events),
+        cache_read_tokens=cache_read_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )

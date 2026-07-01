@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"thread-4"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"pwd","status":"completed","exit_code":0}}
+{"type":"turn.completed","usage":{"input_tokens":6,"output_tokens":2}}

@@ -1,0 +1,488 @@
+"""pytest plugin: turn discovered eval files into parametrized `(eval × arm)` tests.
+
+Registers options, parametrizes the single `eval_arm` fixture over `(case, arm)` pairs and
+`test_trigger` over `trigger_query`, and picks one iteration-dir name on the controller that
+all xdist workers share. The test bodies and fixtures live in `cases.py`.
+"""
+
+from __future__ import annotations
+
+import datetime
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+from dotenv import load_dotenv
+
+import evalspec
+from evalspec import report, workspace
+from evalspec.agents import make_agent, resolve_agent_name
+from evalspec.arms import Set, parse_sets, resolve_set
+from evalspec.discovery import (
+    discover_eval_cases,
+    discover_trigger_cases,
+    pyproject_table,
+    resolve_eval_roots,
+    resolve_repo_root,
+)
+from evalspec.schema import SchemaError
+from evalspec.trigger import xfail_applies
+
+_CASES = Path(__file__).parent / "cases.py"
+
+_STARTED_AT = pytest.StashKey[str]()
+_SUMMARY_LINES = pytest.StashKey[list]()
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("evalspec", "skill-eval runner")
+    group.addoption(
+        "--evalspec-model",
+        default=None,
+        help="scalar override of the selected set's `model` default (every inheriting "
+             "arm picks it up). Default None = don't override; the set's own model "
+             "stands. Agent-specific — the agent fails fast if its CLI rejects the value.",
+    )
+    group.addoption(
+        "--evalspec-repo-root",
+        default=None,
+        help="project root whose skills/ tree to test (default: $PROJECT_ROOT, else rootdir)",
+    )
+    group.addoption(
+        "--evalspec-models",
+        default=None,
+        metavar="M[,M...]",
+        help="comma-separated model sweep — expand the selected set into one arm per "
+             "value (baseline = first). File-free single-axis comparison.",
+    )
+    group.addoption(
+        "--evalspec-set",
+        default=None,
+        help="name of the eval set to run (default: the pyproject `default-set`)",
+    )
+    group.addoption(
+        "--evalspec-config",
+        default=None,
+        metavar="FILE",
+        help="path to an untracked TOML layering extra [tool.evalspec.sets.*] over "
+             "pyproject (scratch set for a one-off comparison)",
+    )
+    group.addoption(
+        "--evalspec-harness",
+        default=None,
+        help="scalar override of the selected set's `harness` default",
+    )
+    group.addoption(
+        "--evalspec-effort",
+        default=None,
+        help="scalar override of the selected set's `effort` default",
+    )
+    group.addoption(
+        "--evalspec-env",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="add/override an env entry on the selected set's defaults (repeatable); "
+             "a $VAR value expands from the host environment",
+    )
+    group.addoption(
+        "--evalspec-trigger-mode",
+        default="asymmetric",
+        choices=["majority", "asymmetric", "best-of"],
+        help="trigger-eval scoring (default: asymmetric): 'majority' = >half of 3 "
+             "(reliable routing); 'best-of' = >=1 of 3 (lenient positives AND stricter "
+             "negatives); 'asymmetric' = best-of for should-trigger, majority for should-not",
+    )
+    group.addoption(
+        "--evalspec-trigger-effort",
+        default="low",
+        help="reasoning effort for trigger routing (default: low — routing is a snap "
+             "'which skill fires?' decision, so the model dispatches fast). Agent-"
+             "specific and passed through unvalidated; an unsupported value surfaces "
+             "as an error from the agent CLI.",
+    )
+    group.addoption(
+        "--evalspec-trigger-timeout",
+        type=int,
+        default=20,
+        help="per-pass routing budget in seconds (default: 20). A pass that streams "
+             "model activity but doesn't dispatch within it counts as a non-fire",
+    )
+    group.addoption(
+        "--evalspec-eval-roots",
+        default=None,
+        help="comma-separated paths (relative to repo root) to scan for eval-bearing "
+             "skill dirs (default: skills,.claude/skills; also overridable via "
+             "[tool.evalspec] eval_roots in pyproject.toml)",
+    )
+    group.addoption(
+        "--evalspec-project-marker",
+        default=".claude-plugin/plugin.json",
+        help="path (relative to repo root) whose presence marks the repo as a host "
+             "plugin worth mounting in the sandbox as --plugin-dir "
+             "(default: .claude-plugin/plugin.json — the Claude Code plugin manifest)",
+    )
+    group.addoption(
+        "--evalspec-agent",
+        default=None,
+        help="coding agent for TRIGGER-routing runs (default: claude-code). Output-eval "
+             "task arms now select their harness per arm (each arm's `harness`), so this "
+             "flag no longer governs them. Precedence: this flag > EVALSPEC_AGENT > "
+             "[tool.evalspec] agent in pyproject.toml. Unknown values fail at startup "
+             "naming the source.",
+    )
+    group.addoption(
+        "--evalspec-judge-model",
+        default="sonnet",
+        help="model for the LLM judge (default: sonnet). Must be a Claude alias: "
+             "the judge always shells out to the host `claude` CLI regardless of "
+             "the task agent, and a provider-qualified task model would 404 it. "
+             "Recorded in meta.json — cross-run comparisons need a constant judge.",
+    )
+    group.addoption(
+        "--evalspec-fail-under",
+        type=float,
+        default=None,
+        metavar="PP",
+        help="minimum acceptable with/without delta in percentage points; any "
+             "skill below it fails the run with exit 1 (e.g. 0 = the skill must "
+             "at least match baseline). Uses the raw delta — read the within-noise "
+             "label in benchmark.md before trusting small numbers. Skills without "
+             "both arms (trigger-only) are exempt.",
+    )
+
+
+@pytest.fixture
+def sample_index(request) -> int:
+    # pytest-repeat parametrizes each test with a hidden `__pytest_repeat_step_number`
+    # param (0..N-1). Without --count, the param is absent — default to 0 so single-sample
+    # runs still shard cleanly under sample-0/. Lives on the plugin (not cases.py) so user
+    # test bodies under pytester can resolve it the same way real eval cases do.
+    callspec = getattr(request.node, "callspec", None)
+    if callspec is None:
+        return 0
+    return callspec.params.get("__pytest_repeat_step_number", 0)
+
+
+def _parse_env_pairs(pairs: list) -> dict:
+    out = {}
+    for p in pairs:
+        if "=" not in p:
+            raise pytest.UsageError(f"--evalspec-env expects KEY=VAL, got {p!r}")
+        k, v = p.split("=", 1)
+        out[k] = v
+    return out
+
+
+def _layer_config_sets(table: dict, config_path: str | None) -> dict:
+    """Merge a scratch --evalspec-config file's [tool.evalspec.sets.*] over pyproject's.
+
+    The scratch file uses one shape — a `[tool.evalspec]` table, like pyproject: a file
+    missing it errors rather than mixing its top-level keys into the sets table.
+    """
+    if not config_path:
+        return table
+
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+    try:
+        with Path(config_path).open("rb") as f:
+            raw = tomllib.load(f)
+    except OSError as err:
+        raise pytest.UsageError(f"--evalspec-config {config_path}: {err}") from None
+    except UnicodeDecodeError as err:
+        raise pytest.UsageError(f"--evalspec-config {config_path}: {err}") from None
+    except tomllib.TOMLDecodeError as err:
+        raise pytest.UsageError(f"--evalspec-config {config_path}: {err}") from None
+    scratch = raw.get("tool", {}).get("evalspec")
+    if not isinstance(scratch, dict):
+        raise pytest.UsageError(
+            f"--evalspec-config {config_path}: expected a [tool.evalspec] table "
+            "with [tool.evalspec.sets.<name>]"
+        )
+    merged = dict(table)
+    merged["sets"] = {**table.get("sets", {}), **scratch.get("sets", {})}
+    if scratch.get("default-set"):
+        merged["default-set"] = scratch["default-set"]
+    return merged
+
+
+def resolved_run_set(config) -> Set:
+    """The single eval set this run uses — uniform columns across every skill.
+
+    Layers `--evalspec-config` over pyproject, selects `--evalspec-set` (else
+    default-set), applies scalar/sweep CLI overrides. A malformed or unknown set fails
+    fast as a UsageError at collection.
+    """
+    repo_root = resolve_repo_root(config)
+    table = _layer_config_sets(pyproject_table(repo_root),
+                               config.getoption("evalspec_config"))
+    raw_models = config.getoption("evalspec_models")
+    models = [m.strip() for m in raw_models.split(",") if m.strip()] if raw_models else None
+    try:
+        rawsets, default_set = parse_sets(table)
+        return resolve_set(
+            rawsets, default_set,
+            set_name=config.getoption("evalspec_set"),
+            model=config.getoption("evalspec_model"),
+            harness=config.getoption("evalspec_harness"),
+            effort=config.getoption("evalspec_effort"),
+            env=_parse_env_pairs(config.getoption("evalspec_env")),
+            models=models,
+        )
+    except SchemaError as e:
+        raise pytest.UsageError(str(e)) from None
+
+
+def pytest_configure(config):
+    load_dotenv()  # pick up a project-root .env credential without a manual export; never overrides a real env var
+    config.addinivalue_line(
+        "markers", "evalspec: skill-eval cases run via `make evals` (not `make test`)"
+    )
+    repo_root = resolve_repo_root(config)
+    try:
+        agent_name = resolve_agent_name(
+            config.getoption("evalspec_agent"),
+            pyproject_table(repo_root).get("agent"),
+        )
+    except RuntimeError as e:
+        raise pytest.UsageError(str(e)) from None
+    # Normalize into the env var make_agent() reads everywhere downstream — the
+    # EVALSPEC_ITERATION handoff pattern; xdist workers inherit the controller env.
+    os.environ["EVALSPEC_AGENT"] = agent_name
+    # Self-register the eval cases so `make evals` is just `pytest -p evalspec.plugin`
+    # (+ `-k`/flags) — no `evalspec/cases.py` positional to fat-finger or to union with
+    # a `-k`-style nodeid (which silently re-collected test_eval). Respect a user-given
+    # target. `make test` never loads this plugin, so cases.py stays out of the unit run.
+    if getattr(config.args_source, "name", "") != "ARGS":
+        config.args = [str(_CASES)]
+    if hasattr(config, "workerinput"):
+        # xdist worker: adopt the iteration name the controller chose.
+        workspace.set_current_iteration(config.workerinput["evalspec_iteration"])
+    else:
+        # Controller / serial run: choose once.
+        workspace.set_current_iteration(workspace.next_iteration_name(repo_root))
+        config.stash[_STARTED_AT] = (
+            datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        )
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    # xdist controller → worker: hand the chosen iteration name through workerinput,
+    # which execnet serializes to the worker before its own pytest_configure runs.
+    node.workerinput["evalspec_iteration"] = workspace.current_iteration()
+
+
+def _git_commit(repo_root: Path) -> str | None:
+    # The repo under test isn't guaranteed to be a git repo (vaults often aren't);
+    # a null commit beats a crashed run.
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def build_manifest(
+    *,
+    run_id: str,
+    started_at: str | None,
+    commit: str | None,
+    iteration: str,
+    cfg: dict,
+    token_split: bool | None,
+) -> dict:
+    """Assemble the run manifest from already-resolved identity + config values.
+
+    Pure: the uuid/clock/git/agent reads happen in the caller, so the manifest shape
+    (and the order-independent config_hash) is testable by value without IO."""
+    return {
+        "format_version": 1,
+        "run_id": run_id,
+        "commit": commit,
+        "config_hash": hashlib.sha256(
+            json.dumps(cfg, sort_keys=True).encode()
+        ).hexdigest()[:12],
+        "iteration": iteration,
+        "started_at": started_at,
+        "evalspec_version": evalspec.__version__,
+        "token_split": token_split,
+        **cfg,
+    }
+
+
+def _write_manifest(
+    config, iteration_root: Path, iteration: str, repo_root: Path, run_set: Set | None
+) -> None:
+    """What produced this run — identity (run_id/commit/config_hash) + resolved config —
+    so artifacts self-describe and an aggregator can join multi-arm runs on metadata
+    alone. Thin shell: read nondeterministic identity, hand off to pure `build_manifest`.
+
+    Run-level `agent`/`agent_version` come from the default harness, so they name only one
+    harness even for a multi-harness set; the per-arm roster records each arm's own
+    `harness`/`model`/`effort`/`env` (env redacted). Per-arm agent versions aren't probed.
+    `run_set` is None for a trigger-only run with no eval set — `set`/`arms` degrade to
+    null/empty."""
+    agent_version = token_split = None
+    try:
+        agent = make_agent()
+        agent_version = agent.version()
+        token_split = agent.capabilities.token_split
+    except Exception:
+        # Any failure probing the agent (no credential, missing CLI, version error):
+        # best-effort identity stays null, the resolved config is still recorded.
+        pass
+    cfg = {
+        "agent": os.environ.get("EVALSPEC_AGENT", "claude-code"),
+        "agent_version": agent_version,
+        "set": run_set.name if run_set else None,
+        "arms": [{"name": a.name, "harness": a.harness, "model": a.model,
+                  "effort": a.effort, "env": report.redact_env(a.env),
+                  "harness_args": a.harness_args}
+                 for a in run_set.arms] if run_set else [],
+        "judge_model": config.getoption("evalspec_judge_model"),
+        "trigger_effort": config.getoption("evalspec_trigger_effort"),
+        "trigger_mode": config.getoption("evalspec_trigger_mode"),
+    }
+    manifest = build_manifest(
+        run_id=uuid.uuid4().hex,
+        started_at=config.stash.get(_STARTED_AT, None),
+        commit=_git_commit(repo_root),
+        iteration=iteration,
+        cfg=cfg,
+        token_split=token_split,
+    )
+    (iteration_root / "meta.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # Controller-only, and only when a run actually produced artifacts (a
+    # --collect-only run never creates skills_root). Runs before
+    # pytest_terminal_summary (plain impls fire inside TerminalReporter's
+    # wrapper), so the summary can read what this wrote and a CI gate can still
+    # change session.exitstatus.
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return
+    iteration = workspace.current_iteration_or_none()
+    if iteration is None:
+        return
+    repo_root = resolve_repo_root(config)
+    skills_root = workspace.skills_root(repo_root)
+    if not skills_root.is_dir():
+        return
+    # Resolve the eval set only when this run produced output-eval artifacts — mirrors
+    # pytest_generate_tests' `if cases` guard so the hooks agree on whether a set is
+    # required. A trigger-only project (no eval set declared) still writes artifacts here;
+    # resolving unconditionally would raise UsageError at finish for a config we tolerate.
+    # None → manifest/report degrade.
+    needs_set = any(
+        d.is_dir() and d.name.startswith("eval-")
+        for sd in skills_root.iterdir() if sd.is_dir()
+        for d in sd.iterdir()
+    )
+    run_set = resolved_run_set(config) if needs_set else None
+    _write_manifest(config, skills_root.parent, iteration, repo_root, run_set)
+    lines = []
+    index_lines = []
+    fail_under = config.getoption("evalspec_fail_under")
+    # The baseline arm names the Δ reference; build_benchmark coerces it to None when the
+    # baseline didn't land on disk, so the report scores arms absolutely (no Δ to gate on).
+    # Per-arm metadata is joined onto the report by arm name so the matrix columns and
+    # per-arm sections describe what ran.
+    baseline = run_set.baseline if run_set else None
+    arm_meta = {a.name: {"harness": a.harness, "model": a.model, "effort": a.effort,
+                         "env": report.redact_env(a.env),
+                         "harness_args": a.harness_args}
+                for a in run_set.arms} if run_set else None
+    for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
+        if not any(
+            d.is_dir() and d.name.startswith(("eval-", "trigger-"))
+            for d in skill_dir.iterdir()
+        ):
+            continue
+        skill = skill_dir.name
+        benchmark = report.write_benchmark(
+            skill_dir, label=f"{iteration} · {skill}",
+            baseline=baseline, arm_meta=arm_meta,
+        )
+        lines.append(report.delta_line(skill, benchmark, skill_dir / "benchmark.md"))
+        if fail_under is not None and benchmark["baseline"] is not None:
+            # Gate every non-baseline arm's Δ against the threshold; arms with no Δ
+            # (a missing rate on either side) are skipped, not failed.
+            for arm_name, stats in benchmark["arms"].items():
+                if arm_name == benchmark["baseline"]:
+                    continue
+                delta_pp = stats.get("delta_pp")
+                if delta_pp is not None and delta_pp < fail_under:
+                    lines.append(
+                        f"FAIL fail-under: {skill}/{arm_name} delta {delta_pp:+.0f}pp "
+                        f"< {fail_under:+.0f}pp"
+                    )
+                    if session.exitstatus == 0:
+                        session.exitstatus = 1
+        index_lines += [json.dumps(r) for r in report.index_rows(skill_dir, skill)]
+    if index_lines:
+        (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
+    config.stash[_SUMMARY_LINES] = lines
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    lines = config.stash.get(_SUMMARY_LINES, [])
+    if not lines:
+        return
+    terminalreporter.write_sep("=", "evalspec benchmark")
+    for line in lines:
+        terminalreporter.line(line)
+
+
+def pytest_generate_tests(metafunc):
+    fixtures = metafunc.fixturenames
+    if "eval_arm" in fixtures:
+        # One eval set per run — uniform columns across every skill (resolved once, not
+        # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
+        repo_root = resolve_repo_root(metafunc.config)
+        eval_roots = resolve_eval_roots(metafunc.config)
+        cases = discover_eval_cases(repo_root, eval_roots)
+        # Resolve the set only when there are eval cases to cross with — a trigger-only
+        # collection has no eval_arm pairs and must not require an eval-set pyproject.
+        arms = resolved_run_set(metafunc.config).arms if cases else []
+        pairs = []
+        ids = []
+        for case in cases:
+            for arm in arms:
+                pairs.append((case, arm))
+                ids.append(f"{case.param_id}-{arm.name}")
+        metafunc.parametrize("eval_arm", pairs, ids=ids)
+    if "trigger_query" in fixtures:
+        repo_root = resolve_repo_root(metafunc.config)
+        eval_roots = resolve_eval_roots(metafunc.config)
+        queries = discover_trigger_cases(repo_root, eval_roots)
+        # --evalspec-model is now a set scalar-override defaulting to None; trigger
+        # routing keeps a concrete model, so fall back to sonnet (mirrors cases.py).
+        model = metafunc.config.getoption("evalspec_model") or "sonnet"
+        params = []
+        for q in queries:
+            # A tier-scoped `xfail` is a documented routing miss on SPECIFIC tiers.
+            # Attach the non-strict mark only when the running model is one of them,
+            # so any other tier runs strict and a regression there still fails. The
+            # routing still runs — we keep measuring it.
+            xfail = q.query.get("xfail")
+            marks = (
+                [pytest.mark.xfail(reason=xfail["reason"], strict=False)]
+                if xfail and xfail_applies(xfail, model)
+                else []
+            )
+            params.append(pytest.param(q, marks=marks, id=q.param_id))
+        metafunc.parametrize("trigger_query", params)

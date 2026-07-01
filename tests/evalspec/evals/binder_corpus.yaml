@@ -1,0 +1,275 @@
+# Labeled corpus for the binder false-positive gate (`make evals:binder`).
+# Grouped by the binder's correct action; every entry is the assertion text verbatim.
+# A bind sub-key is the expected checker; a punt sub-key is the punt class. gold,
+# cohort, and expect_checker are positional — the gate reconstructs them on load.
+
+# binds — gold:bind. Sub-key is the checker each assertion should bind to.
+binds:
+  skill_invoked:
+  - Skill `archive` invoked
+  - Skill `bootstrap` invoked
+  - Skill `export-agent-session` invoked
+  - Skill `handoff` invoked
+  - Skill `ingest` invoked
+  - Skill `interview-me` invoked
+  - Skill `to-spec` invoked
+  - Skill `writing-agent-skills` invoked
+  glob_count:
+  - All three are flat markdown files under ./9. Archive/Sources/{TODAY}/ (rust-async.md, wasm-components.md,
+    edge-databases.md), not wrapped in per-source subfolders
+  - Both files from the folder are present together at ./9. Archive/Sources/{TODAY}/pycon-keynote/
+    (index.md and the image alongside it)
+  - No file named .gitkeep exists anywhere under ./
+  - No file was written to disk — the handoff exists only as the emitted message
+  - Both Inbox captures were archived as separate flat files (gpt5-techcrunch.md and gpt5-openai-blog.md)
+    under './9. Archive/Sources/{TODAY}/'
+  - No `docs/specs/` directory was created and no spec file was written during the session — the
+    handoff is in-conversation only.
+  - A spec file was written at './docs/specs/{TODAY}-<slug>.md' — the filename is today's date
+    plus a kebab-case slug derived from the title, with NO '-design' suffix
+  - No spec file was written under './docs/specs/' — the context is too thin to ground a spec,
+    so the skill did not emit a confident hollow one
+  - Exactly one spec file exists under './docs/specs/'
+  - No spec file under './docs/specs/' carries a '-design' suffix
+  file_exists:
+  - The folder no longer exists at ./0. Inbox/pycon-keynote/ — it was moved out of the Inbox
+  - The capture now lives at ./9. Archive/Sources/{TODAY}/openai-o1-launch.md — a flat markdown
+    file under a dated Sources folder (NOT a per-source subfolder, NOT renamed to index.md)
+  - The previously-missing ./.obsidian/ configuration now exists
+  # decomposed children of the seven-PARA-directories compound punt below (the
+  # `./ contains all seven numbered PARA directories: …` line under semantic):
+  # the flat line punts, these atomic single-directory checks bind.
+  - The 0. Inbox/ directory exists under ./
+  - The 1. Profile/ directory exists under ./
+  - The 2. Entities/ directory exists under ./
+  - The 3. Projects/ directory exists under ./
+  - The 4. Areas/ directory exists under ./
+  - The 5. Resources/ directory exists under ./
+  # seventh atom: the nested `9. Archive/Sources/` from the flat punt, as a directory check
+  - The 9. Archive/Sources/ directory exists under ./
+  # file_exists child of the index.md compound punt below (the
+  # `./.meta/index.md exists, opens with a '# Index' heading, …` line under
+  # semantic): the flat line punts, this atomic existence check binds.
+  - ./.meta/index.md exists
+  - text: ./.meta/templates/entity-person.md exists
+    expect:
+      path: ./.meta/templates/entity-person.md
+  regex:
+  - ./.meta/index.md now exists with a '# Index' heading
+  # the two regex children of the index.md compound punt: phrased so the
+  # line-content (regex) intent is unmistakable, distinct from file_exists.
+  - the first line of ./.meta/index.md matches '# Index'
+  - ./.meta/index.md has a line beginning '_Last updated'
+  - text: ./.meta/templates/entity-person.md has a line beginning 'aliases:'
+    expect:
+      path: ./.meta/templates/entity-person.md
+
+# punts — gold:punt. The binder must defer to the judge.
+punts:
+  # presence / persistence / negation — the documented leak; the binder is blind to
+  # the invisible "…and was not altered/replaced" clause these carry. Heavy-sampled.
+  persistence:
+  - No new 'archive' entry for meeting-notes was written to ./.meta/logs/{TODAY}.md (a refused
+    move is not logged)
+  - The day's log ./.meta/logs/{TODAY}.md still contains its original earlier entry verbatim AND
+    additionally contains a new '## [<ISO datetime>] archive | <title>' entry appended after it
+  - No duplicate or backup of the profile page was created (no whoami.md.bak, no 'whoami (1).md',
+    no second whoami file anywhere under ./)
+  - The pre-existing entity page './2. Entities/anthropic.md' was updated in place — still a single
+    file (not duplicated, not a second anthropic page) — and now reflects that Anthropic created
+    MCP
+  - The archived copy preserves the article's substantive body content (re-frontmattering on archive
+    did not discard the post's text)
+  - The pre-existing claim on './5. Resources/reasoning-models.md' that chain-of-thought requires
+    at least 100 billion parameters is still present and visible — it was not deleted or silently
+    replaced by the new 7B/distillation finding
+  - '''./.meta/index.md'' was regenerated and still lists the reasoning-models page (with its
+    one-line summary) under a Resources section'
+  # compound / intent claims the judge must grade. Two of these are paired
+  # decomposition demonstrators: the flat compound line STAYS a punt here (a
+  # compound single line must defer at the binder layer), while its atomic
+  # children belong as gold:bind entries under file_exists / regex. The pairing
+  # documents the contract "flat punts, sub-bullets determinize".
+  semantic:
+  - The activity log at ./.meta/logs/{TODAY}.md records all three under a SINGLE archive entry
+    (one '## [<ISO datetime>] archive | <title>' header), not three separate archive entries
+  - That single archive entry has a separate 'source:' line for each of the three files, naming
+    both the Inbox source and the archived destination
+  - The agent's final message states that the destination already exists / the archive could not
+    proceed because of the collision — it does not claim the file was archived successfully
+  - The new log entry has a 'source:' line naming the move of the 'pycon-keynote' folder into
+    its archived destination
+  - The activity log ./.meta/logs/{TODAY}.md has a 'source:' line under the archive entry that
+    names both the Inbox source path '0. Inbox/openai-o1-launch.md' and the archived destination
+    path
+  - No archive category folder other than 'Sources' was created under ./9. Archive/
+  - './ contains all seven numbered PARA directories: ''0. Inbox/'', ''1. Profile/'', ''2. Entities/'',
+    ''3. Projects/'', ''4. Areas/'', ''5. Resources/'', and ''9. Archive/Sources/'''
+  - ./.meta/ exists and contains index.md (a file), logs/ (a directory), and templates/ (a directory)
+  - './.meta/templates/ contains all six template files named exactly: entity-person.md, entity-org.md,
+    resource.md, project-index.md, area-index.md, profile-detail.md'
+  - Each of the six template files begins with YAML frontmatter declaring at least the keys title,
+    aliases, tags, created, and updated
+  - ./1. Profile/whoami.md exists and its frontmatter created and updated fields are concrete
+    ISO 8601 datetimes with a timezone offset (e.g. 2026-05-23T14:03:00-04:00), not unfilled template
+    placeholders such as {{date}} or {{time}}
+  - ./.meta/index.md exists, opens with a '# Index' heading, and contains a line beginning '_Last
+    updated'
+  - ./.obsidian/ exists and its configuration enables the core Templates plugin pointed at the
+    .meta/templates folder AND excludes '9. Archive/' from search
+  - A dated log file named YYYY-MM-DD.md exists under ./.meta/logs/ and contains a header of the
+    form '## [<ISO datetime>] bootstrap | <title>'
+  - The previously-missing ./.meta/templates/ now exists and contains all six template files
+  - 'The previously-missing PARA folders now all exist: ''2. Entities/'', ''3. Projects/'', ''4.
+    Areas/'', ''5. Resources/'', and ''9. Archive/Sources/'''
+  - The agent's final message states that the target path is an existing file (or otherwise an
+    unusable vault root) and that bootstrap did not proceed — it does not claim the vault was
+    created successfully
+  - No vault scaffolding (e.g. a '0. Inbox/' folder or a '.meta/' tree) was created under your
+    current working directory or any other fallback location the agent chose on its own
+  - The output is a single copyable message with `## Files` and `## Context & goal` H2 sections
+    — no file written to disk
+  - '`./docs/style/writing-tests.md` is the file actively being edited, so it is named in the
+    `## Context & goal` PROSE as the in-flight deliverable, NOT `@`-listed in `## Files` — the
+    skill resolves the ambiguity by edit-status, not by "it''s a doc"'
+  - The `## Files` `@`-list carries the durable background the next session won't recall on its
+    own (e.g. `./docs/plans/2026-06-01-test-style.md`) and does not collapse to listing the in-flight
+    doc
+  - The open question (fixture-naming section) is preserved in `## Context & goal`
+  - The output is a single copyable markdown message with exactly two H2 sections, `## Files`
+    and `## Context & goal` — NOT a file written to disk
+  - 'The `## Files` section lists `@`-prefixed paths and includes the background the next session
+    would not find itself: the plan (`./docs/plans/2026-06-01-rate-limit.md`), the style doc (`./docs/style/writing-code.md`),
+    and the spec (`./docs/specs/2026-06-01-rate-limit.md`)'
+  - The `## Files` section does NOT `@`-list the in-flight edit targets `./src/api/middleware.py`
+    / `./src/api/config.py`, nor the test file `./tests/api/test_middleware.py` (the edit targets
+    belong in prose; the test is trivially discoverable). The Redis client / settings loader are
+    a judgment call — not asserted either way here.
+  - The in-flight / edit-target files (`./src/api/middleware.py`, `./src/api/config.py`) are named
+    in the `## Context & goal` PROSE, not as `@`-paths in `## Files`
+  - The `## Context & goal` section preserves the locked decisions (100/150 limits, Redis counters,
+    429 + Retry-After) and the open question (region sharding), and is shaped by the focus hint
+    (finish wiring the 429 response)
+  - The skill does NOT invent or `@`-list background docs that were never mentioned (no fabricated
+    plan/spec/style paths); `## Files` is either empty/omitted or contains only what the session
+    actually referenced
+  - The in-flight file `./src/config.py` is named in `## Context & goal` prose, not `@`-listed
+  - With an empty focus hint, `## Context & goal` captures the natural continuation (perform/verify
+    the `foo` → `parse_config` rename) rather than stalling or asking the user a question
+  - A new Resource page about the Model Context Protocol was created under './5. Resources/' (e.g.
+    model-context-protocol.md), with YAML frontmatter that includes a title, a one-line summary:,
+    and created and updated datetimes
+  - The new Resource's body reflects facts from the source — it describes MCP as an open protocol
+    with a client-server architecture and names the three server primitives (tools, resources,
+    prompts) — and contains at least one wiki-link such as [[Anthropic]]
+  - The new Resource ends with a '## Sources' block whose footnote definition(s) point at the
+    archived source under '9. Archive/Sources/{TODAY}/', and the page body has no prose hyperlink
+    to the archive outside that block
+  - '''./.meta/index.md'' was regenerated: it carries a ''_Last updated'' stamp, an Entities section
+    listing Anthropic, and a Resources section whose line for the new MCP page is that page''s
+    one-line summary'
+  - 'The source now lives as a flat file ''./9. Archive/Sources/{TODAY}/<slug>.md'' with frontmatter
+    carrying tags: [archived-source] and the original source_url'
+  - 'Today''s activity log ''./.meta/logs/{TODAY}.md'' contains an ''## [<ISO datetime>] ingest
+    | <title>'' entry whose body has source:, created:, updated:, and index sections: bullets'
+  - The reasoning-models page now contains a visible Contested callout (or a clearly-labeled contradiction
+    note) that presents BOTH the 100B-scale claim and the new 7B/distillation finding
+  - The page's '## Sources' block now carries footnote definitions for BOTH the original cot-prompting
+    archived source AND the newly-archived small-model-reasoning source, with inline footnote
+    markers in the body next to the relevant claims
+  - 'The new Inbox capture was archived: the source now lives as a flat file ''./9. Archive/Sources/{TODAY}/<slug>.md''
+    with tags: [archived-source] frontmatter'
+  - 'Today''s log ''./.meta/logs/{TODAY}.md'' has an ingest entry whose updated: field names the
+    reasoning-models page and whose source: references the newly-archived source'
+  - The agent's final summary states that the new source contradicts the existing reasoning-models
+    page and that the conflict was flagged/contested rather than resolved by overwriting the old
+    claim
+  - Exactly one new Resource page about GPT-5 was created under './5. Resources/' — the group
+    was synthesized into a single coherent page, not one page per source
+  - The GPT-5 page ends with a '## Sources' block whose footnote definitions cover BOTH archived
+    captures (the TechCrunch and the OpenAI-blog sources), not just one of them
+  - 'The page surfaces the context-window contradiction: both the 256,000-token and the 1,000,000-token
+    figures appear (or a visible Contested/disagreement note citing both sources), rather than
+    the page silently stating a single context-window number'
+  - '''./.meta/index.md'' was regenerated with a Resources line for the new GPT-5 page (its text
+    being that page''s one-line summary) alongside the pre-existing OpenAI entity line'
+  - 'Today''s log ''./.meta/logs/{TODAY}.md'' has a single ingest entry whose source: field references
+    both archived sources and whose created: field names the new GPT-5 page'
+  - The agent's final summary names the context-window disagreement between the two sources and
+    marks it as something the user should review — it does not resolve it silently or omit mention
+    of it
+  - The first turn poses exactly ONE question, and it is about the STOP CONDITION — where the
+    interview should stop (until the user says stop / until a downstream skill like to-spec has
+    enough / until a stated goal is met) — not a substantive design question about the onboarding
+    flow.
+  - The skill does NOT begin substantive design grilling (it asks no onboarding-design questions
+    and presents no design options) before the stop mode is resolved.
+  - 'process: No handoff requirements subagent is dispatched yet — with no stop mode chosen there
+    is no named target to read a `SKILL.md` for.'
+  - With the stop mode now resolved to manual, the skill begins the interview — it asks ONE substantive
+    onboarding-design question, presented WITH a visual (inline ASCII/table or an `AskUserQuestion`
+    preview).
+  - 'process: In the first turn, before grilling the design, the skill dispatched a subagent (an
+    Agent/Task call) — the mode-B requirement-discovery step that reads the handoff target''s
+    `SKILL.md`. (The manual-mode eval, by contrast, dispatches no such subagent, so this call
+    is what distinguishes handoff from manual.)'
+  - The turn poses exactly ONE question (one unresolved decision), not a batch of several questions
+    bundled together.
+  - The question is presented WITH a visual — an inline ASCII diagram or table, or an `AskUserQuestion`-style
+    option preview — rather than bare-text prose options.
+  - The turn poses exactly ONE follow-up question and does not re-ask anything already settled
+    (the limit, the burst, or the storage choice).
+  - This decision turn also ships a visual (inline ASCII/table or an `AskUserQuestion` preview),
+    not bare-text options.
+  - At stop the skill emits a "Shared Understanding" synthesis block that covers what's decided,
+    the key facts, the non-goals, and any open questions (the exact headings may vary, but all
+    four of those buckets are present).
+  - The skill ANNOUNCES that it is ready to hand off to `to-spec` and HALTS — it states handoff
+    readiness rather than continuing to grill.
+  - 'process: The skill did NOT invoke the `to-spec` skill — no Skill or Task call that runs to-spec,
+    and no spec file written. It announces handoff readiness only.'
+  - 'process: The skill did NOT dispatch a subagent to read `to-spec` (or any other skill''s `SKILL.md`)
+    for a requirements checklist — mode A has no downstream handoff target, so the requirement-discovery
+    step does not run. (This is what distinguishes mode A from mode B.)'
+  - The turn poses exactly ONE question, presented WITH a visual (inline ASCII/table or an `AskUserQuestion`
+    preview), not bare-text options.
+  - The skill keeps the interview open — it does not announce that it is done or hand off, because
+    the user has not said stop.
+  - The turn poses exactly ONE follow-up question, again with a visual, and does not declare the
+    interview finished — the user still has not said stop.
+  - Now that the user has said stop, the skill halts and emits a final "Shared Understanding"
+    synthesis block covering decided / key facts / non-goals / open questions.
+  - The skill stops at the user's command and does not keep asking new design questions after
+    the explicit stop.
+  - 'The spec opens with a one-line TL;DR and contains all of these H2 sections: Problem, Solution,
+    User Stories, Implementation Decisions, Testing Plan, Documentation Plan, Out of Scope, References,
+    Verification'
+  - The Problem section uses labeled bullets (e.g. Symptom / Constraint), not multi-sentence paragraphs
+  - The Solution section leads with a short copy-pasteable artifact (a code/config snippet) followed
+    by no more than two sentences of prose
+  - Implementation Decisions contains a flow diagram whose nodes map to real symbols/paths from
+    the repo (e.g. `./service/reads.py` read_widget, `./service/writes.py` write_widget)
+  - The Testing Plan is a coverage contract grouped under derived surfaces named Logic / Behavior
+    / Interface — each entry states an observable guarantee, with NO test function names, file
+    paths, or case counts, and NO runnable commands (commands live under Verification)
+  - The spec states that the assumed 30-second cache TTL does NOT exist in `./service/reads.py`
+    (the file has no TTL constant and no caching), rather than repeating the assumption as fact
+    or omitting any mention of it — the perishable-fact grounding the skill must do against the
+    live tree
+  - The unresolved cache-size question appears under a '## Open Questions' section, not asserted
+    as a settled decision in Problem/Solution/Implementation Decisions
+  - References and Verification are both present and non-empty; Verification lists runnable done-criteria
+    commands
+  - The final message reports specifically what is missing to write a spec (e.g. a concrete problem,
+    a proposed change, constraints) and hands the decision back to the user
+  - The skill does NOT fabricate a problem statement, user stories, or implementation decisions
+    to fill the gap, and does NOT silently redirect to a different skill
+  - A spec file was written at './docs/specs/{TODAY}-<slug>.md' with the full skim-first section
+    set
+  - The two unresolved decisions (whether to log request bodies, and which log sink) appear under
+    '## Open Questions' — phrased as open, not resolved
+  - The Problem/Solution/Implementation Decisions sections do NOT invent a confident answer to
+    either open decision (e.g. they do not assert a specific log sink as chosen)
+  - The settled parts (logging method/path/status/latency for the request lifecycle in `./app/server.py`)
+    are specified concretely in the substantive sections, so the spec is not hollowed out by deferring
+    everything
