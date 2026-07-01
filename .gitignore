@@ -3,6 +3,7 @@
 .ruff_cache/
 __pycache__/
 *.py[cod]
+*.swp
 tmp/
 dist/
 build/
