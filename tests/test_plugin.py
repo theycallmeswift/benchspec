@@ -11,7 +11,7 @@ import pytest
 
 from evalspec import plugin, workspace
 from evalspec.agents.base import AgentCapabilities
-from tests.evalspec.conftest import seed_arm, seed_trigger
+from tests.support import seed_arm, seed_trigger
 
 ALPHA_MD = """\
 ---

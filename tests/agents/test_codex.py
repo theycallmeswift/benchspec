@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from evalspec.agents.codex import CodexAgent, parse_codex_jsonl
-from tests.evalspec.conftest import FakeExecOutput, FakeSandbox
+from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

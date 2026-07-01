@@ -3,7 +3,7 @@ import json
 import pytest
 
 from evalspec import report
-from tests.evalspec.conftest import seed_arm, seed_trigger
+from tests.support import seed_arm, seed_trigger
 
 
 def test_redact_env_masks_secrets_keeps_urls():

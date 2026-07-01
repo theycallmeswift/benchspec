@@ -8,7 +8,7 @@ import pytest
 
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.runner import parse_run_json
-from tests.evalspec.conftest import FakeExecOutput, FakeSandbox
+from tests.support import FakeExecOutput, FakeSandbox
 
 
 def _agent():

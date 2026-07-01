@@ -7,7 +7,7 @@ from pathlib import Path
 
 from evalspec.mdformat import parse_eval_md
 
-README = Path(__file__).resolve().parents[2] / "README.md"
+README = Path(__file__).resolve().parents[1] / "README.md"
 
 def _embedded_eval_block(md: str) -> str:
     # The eval example is the fenced ```markdown block containing `## Assertions`.

@@ -57,18 +57,17 @@ evalspec = "evalspec.__main__:main"
 evalspec = "evalspec.plugin"
 
 [tool.hatch.version]
-path = "evalspec/__init__.py"
+path = "src/evalspec/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["evalspec"]
+packages = ["src/evalspec"]
 
 [tool.uv]
 package = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evals"]
 markers = [
     "binder_corpus: live Haiku binder corpus eval (costs money; run via `make evals:binder`)",
 ]
 addopts = "-m 'not binder_corpus'"
-

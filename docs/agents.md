@@ -13,7 +13,7 @@ To compare harnesses in output evals, define a multi-harness eval set — arms c
 ## The boundary
 
 ```
-evalspec/agents/
+src/evalspec/agents/
   base.py       # CodingAgent protocol — the contract sandbox.py depends on
   claude.py     # ClaudeCodeAgent
   codex.py      # CodexAgent
@@ -148,7 +148,7 @@ Why the judge stays on the host: grading needs host credentials and reasoning bu
 1. `agents/<name>.py` — implement `CodingAgent`, including `skill_load_dir`, `bridge_skills_home_script()` (symlink it to `FIXED_SKILLS_HOME`), and `cell_env()` (`guest_env` + `EVALSPEC_*`). Reuse `runner.parse_run_json` / `parse_stream_run` if the CLI's output resembles Claude's; otherwise write a parser returning a `RunResult`.
 2. Add `from_env()` + `credential_error()` classmethods.
 3. Register in `_REGISTRY` in `agents/__init__.py`.
-4. `tests/evalspec/agents/test_<name>.py` — mirror `test_opencode.py`: command building, `harness_args` pass-through and reserved-flag rejection, JSONL parsing, secrets, credential preflight, provision, stage, plus the bridge/cell-env/load-dir members (`test_*_bridge_script_symlinks_fixed_home`, `test_*_cell_env_carries_evalspec_vars`, `test_*_skill_load_dir`). Use `evalspec.testing.FakeSandbox` (no real VM).
+4. `tests/agents/test_<name>.py` — mirror `test_opencode.py`: command building, `harness_args` pass-through and reserved-flag rejection, JSONL parsing, secrets, credential preflight, provision, stage, plus the bridge/cell-env/load-dir members (`test_*_bridge_script_symlinks_fixed_home`, `test_*_cell_env_carries_evalspec_vars`, `test_*_skill_load_dir`). Use `evalspec.testing.FakeSandbox` (no real VM).
 5. `make test` + `make lint`, then `EVALSPEC_AGENT=<name> make evals:build` and `EVALSPEC_AGENT=<name> make evals -k <one-fast-skill>` to prove end-to-end boot and run.
 6. Document it here under a worked-example table.
 

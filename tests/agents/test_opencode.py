@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from evalspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
-from tests.evalspec.conftest import FakeExecOutput, FakeSandbox
+from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
