@@ -4,6 +4,7 @@
 __pycache__/
 *.py[cod]
 *.swp
+.env
 tmp/
 dist/
 build/
