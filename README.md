@@ -149,3 +149,4 @@ A few deliberate bets adopters inherit:
 - [`docs/agents.md`](docs/agents.md) — the `CodingAgent` protocol, in-tree implementations, adding another agent.
 - [`docs/configuration.md`](docs/configuration.md) — every CLI flag, env var, and `[tool.evalspec]` pyproject key.
 - [`docs/goals.md`](docs/goals.md) — standing objectives and the harness compatibility targets.
+- [`docs/style/development.md`](docs/style/development.md) — code style guide: conventions, error handling, testing, and Python specifics.
