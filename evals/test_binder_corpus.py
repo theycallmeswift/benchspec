@@ -14,9 +14,9 @@ import os
 import subprocess
 
 import pytest
+from test_binder_corpus_integrity import CORPUS
 
 from evalspec.binder import bind
-from test_binder_corpus_integrity import CORPUS
 
 pytestmark = pytest.mark.binder_corpus
 
