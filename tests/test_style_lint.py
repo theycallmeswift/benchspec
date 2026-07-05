@@ -219,6 +219,55 @@ other = 2
     assert [candidate.line for candidate in section_headers] == [1]
 
 
+def test_find_candidates_does_not_flag_normal_short_rationale_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow ordinary short comments that are not labels or dividers."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# temporary workaround
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    section_headers = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "section-header-comments"
+    ]
+
+    assert section_headers == []
+
+
+def test_find_candidates_flags_provenance_comments_without_prefix_false_positives(
+    tmp_path: Path,
+) -> None:
+    """Flag issue/PR references without misreading ordinary leading words."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# problem statement for this branch
+# process data in batches
+# PR #123 fixes this edge case
+# issue #456 tracks this follow-up
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert [candidate.line for candidate in provenance_comments] == [3, 4]
+
+
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
     tmp_path: Path,
 ) -> None:
