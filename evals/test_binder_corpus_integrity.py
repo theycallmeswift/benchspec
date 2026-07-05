@@ -6,11 +6,11 @@ and enforces the invariants required by the false-positive gate.
 
 from __future__ import annotations
 
-import yaml
 from pathlib import Path
 
-from evalspec.checkers import derive_text
+import yaml
 
+from evalspec.checkers import derive_text
 
 CORPUS_PATH = Path(__file__).resolve().parent / "binder_corpus.yaml"
 

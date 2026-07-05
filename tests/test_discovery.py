@@ -2,15 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import schema
-from evalspec import discovery
-from evalspec.mdformat import MdFormatError
+from evalspec import discovery, schema
 from evalspec.discovery import (
     discover_eval_cases,
     discover_trigger_cases,
+    resolve_environment_config,
     resolve_repo_root,
 )
-from evalspec.discovery import resolve_environment_config
+from evalspec.mdformat import MdFormatError
 
 
 def _trigger_md(skill_name: str, queries: list[str]) -> str:

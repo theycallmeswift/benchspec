@@ -4,9 +4,9 @@ import pytest
 
 from evalspec.trigger import (
     RoutingError,
-    dispatches_skill,
     count_fires,
     detect_skill_fired,
+    dispatches_skill,
     fire_threshold,
     first_dispatched_skill,
     xfail_applies,

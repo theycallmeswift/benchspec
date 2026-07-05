@@ -6,10 +6,10 @@ import pytest
 
 from evalspec import sandbox
 from evalspec.agents.base import FIXED_SKILLS_HOME
-from evalspec.discovery import EnvConfig
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
 from evalspec.agents.opencode import OpenCodeAgent
+from evalspec.discovery import EnvConfig
 from evalspec.runner import RunResult
 from evalspec.testing import FakeExecOutput, FakeSandbox
 

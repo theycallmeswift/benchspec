@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import os
-import asyncio
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
 from evalspec.agents.judge_cli import run_host_judge
