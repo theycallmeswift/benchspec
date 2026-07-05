@@ -4,20 +4,12 @@ from __future__ import annotations
 
 import importlib
 import json
-from pathlib import Path
 
 import pytest
 
 
 def _style_lint():
     return importlib.import_module("evalspec.style_lint")
-
-
-def _write_file(tmp_path: Path, relative_path: str, content: str) -> Path:
-    path = tmp_path / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    return path
 
 
 def test_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys):
@@ -35,11 +27,25 @@ def test_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys):
 
 def test_collect_targets_defaults_to_src_tests_evals(tmp_path, monkeypatch):
     style_lint = _style_lint()
-    src_file = _write_file(tmp_path, "src/evalspec/example.py", "value = 1\n")
-    tests_file = _write_file(tmp_path, "tests/test_example.py", "value = 2\n")
-    evals_file = _write_file(tmp_path, "evals/test_example.py", "value = 3\n")
-    _write_file(tmp_path, "tools/ignored.py", "value = 4\n")
-    _write_file(tmp_path, "src/evalspec/not_python.txt", "value = 5\n")
+    src_file = tmp_path / "src/evalspec/example.py"
+    src_file.parent.mkdir(parents=True, exist_ok=True)
+    src_file.write_text("value = 1\n")
+
+    tests_file = tmp_path / "tests/test_example.py"
+    tests_file.parent.mkdir(parents=True, exist_ok=True)
+    tests_file.write_text("value = 2\n")
+
+    evals_file = tmp_path / "evals/test_example.py"
+    evals_file.parent.mkdir(parents=True, exist_ok=True)
+    evals_file.write_text("value = 3\n")
+
+    ignored_python = tmp_path / "tools/ignored.py"
+    ignored_python.parent.mkdir(parents=True, exist_ok=True)
+    ignored_python.write_text("value = 4\n")
+
+    ignored_text = tmp_path / "src/evalspec/not_python.txt"
+    ignored_text.parent.mkdir(parents=True, exist_ok=True)
+    ignored_text.write_text("value = 5\n")
 
     monkeypatch.chdir(tmp_path)
 
@@ -50,9 +56,17 @@ def test_collect_targets_defaults_to_src_tests_evals(tmp_path, monkeypatch):
 
 def test_collect_targets_respects_explicit_path_args(tmp_path):
     style_lint = _style_lint()
-    explicit_file = _write_file(tmp_path, "custom/one.py", "value = 1\n")
-    nested_file = _write_file(tmp_path, "custom/pkg/two.py", "value = 2\n")
-    _write_file(tmp_path, "src/evalspec/default.py", "value = 3\n")
+    explicit_file = tmp_path / "custom/one.py"
+    explicit_file.parent.mkdir(parents=True, exist_ok=True)
+    explicit_file.write_text("value = 1\n")
+
+    nested_file = tmp_path / "custom/pkg/two.py"
+    nested_file.parent.mkdir(parents=True, exist_ok=True)
+    nested_file.write_text("value = 2\n")
+
+    default_file = tmp_path / "src/evalspec/default.py"
+    default_file.parent.mkdir(parents=True, exist_ok=True)
+    default_file.write_text("value = 3\n")
 
     targets = style_lint.collect_targets([explicit_file, tmp_path / "custom" / "pkg"])
 
@@ -61,7 +75,9 @@ def test_collect_targets_respects_explicit_path_args(tmp_path):
 
 def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(tmp_path):
     style_lint = _style_lint()
-    candidate_path = _write_file(tmp_path, "src/evalspec/example.py", "x = 1\n")
+    candidate_path = tmp_path / "src/evalspec/example.py"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_path.write_text("x = 1\n")
     candidate = style_lint.Candidate(
         path=candidate_path,
         line=1,
@@ -82,7 +98,9 @@ def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(tmp_pat
 
 def test_parse_findings_rejects_unknown_rule_ids(tmp_path):
     style_lint = _style_lint()
-    candidate_path = _write_file(tmp_path, "src/evalspec/example.py", "value = 1\n")
+    candidate_path = tmp_path / "src/evalspec/example.py"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_path.write_text("value = 1\n")
     candidate = style_lint.Candidate(
         path=candidate_path,
         line=1,
@@ -110,9 +128,8 @@ def test_find_candidates_flags_single_letter_bindings_but_allows_unused_undersco
     tmp_path,
 ):
     style_lint = _style_lint()
-    source = _write_file(
-        tmp_path,
-        "sample.py",
+    source = tmp_path / "sample.py"
+    source.write_text(
         """\
 items = [1, 2, 3]
 x = 1
@@ -135,9 +152,8 @@ values = [item for item in items if item > 1]
 
 def test_find_candidates_flags_suppression_comments(tmp_path):
     style_lint = _style_lint()
-    source = _write_file(
-        tmp_path,
-        "sample.py",
+    source = tmp_path / "sample.py"
+    source.write_text(
         """\
 import missing  # noqa: F401
 value = maybe_bad()  # type: ignore[arg-type]
@@ -156,9 +172,8 @@ value = maybe_bad()  # type: ignore[arg-type]
 
 def test_find_candidates_flags_section_headers_but_not_why_comments(tmp_path):
     style_lint = _style_lint()
-    source = _write_file(
-        tmp_path,
-        "sample.py",
+    source = tmp_path / "sample.py"
+    source.write_text(
         """\
 # --- parsing ---
 value = 1
@@ -179,9 +194,8 @@ other = 2
 
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(tmp_path):
     style_lint = _style_lint()
-    source = _write_file(
-        tmp_path,
-        "sample.py",
+    source = tmp_path / "sample.py"
+    source.write_text(
         """\
 def render_prompt() -> str:
     return build_message(
@@ -205,9 +219,8 @@ def render_prompt() -> str:
 
 def test_find_candidates_flags_assigned_indented_triple_quoted_strings(tmp_path):
     style_lint = _style_lint()
-    source = _write_file(
-        tmp_path,
-        "sample.py",
+    source = tmp_path / "sample.py"
+    source.write_text(
         """\
 SYSTEM_PROMPT = \"\"\"
     first line
@@ -232,7 +245,8 @@ def test_run_catches_malformed_model_output_and_stays_advisory(
     capsys,
 ):
     style_lint = _style_lint()
-    source = _write_file(tmp_path, "sample.py", "value = 1\n")
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
     candidate = style_lint.Candidate(
         path=source,
         line=1,
@@ -256,7 +270,8 @@ def test_run_catches_malformed_model_output_and_stays_advisory(
 
 def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch):
     style_lint = _style_lint()
-    source = _write_file(tmp_path, "sample.py", "value = 1\n")
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
     candidate = style_lint.Candidate(
         path=source,
         line=1,
@@ -301,7 +316,8 @@ def test_verify_model_can_filter_findings_when_enabled(
     capsys,
 ):
     style_lint = _style_lint()
-    source = _write_file(tmp_path, "sample.py", "value = 1\n")
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
     candidate = style_lint.Candidate(
         path=source,
         line=1,
@@ -357,7 +373,8 @@ def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(
     capsys,
 ):
     style_lint = _style_lint()
-    source = _write_file(tmp_path, "sample.py", "value = 1\n")
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
     candidate = style_lint.Candidate(
         path=source,
         line=1,
