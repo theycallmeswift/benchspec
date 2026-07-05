@@ -87,17 +87,18 @@ _SUPPRESSION_PATTERNS = (
     "mypy:",
 )
 _SECTION_DIVIDER = re.compile(r"^[-=*_~#\s]+$")
+_SECTION_WRAPPED_LABEL = re.compile(r"^[-=*_~#\s]+[A-Za-z][A-Za-z0-9 /_-]*[-=*_~#\s]+$")
 _SECTION_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /_-]{0,40}$")
 _PROVENANCE_PATTERN = re.compile(
-    r"(?ix)"
-    r"\b(?:pr|issue|fixes)\s*#\d+\b|"
+    r"\b(?:pr|issue|fixes)\s*\#\d+\b|"
     r"\bcommit\s+[0-9a-f]{6,40}\b|"
     r"\badded\s+for\b|"
     r"\bcalled\s+from\b|"
     r"\bcallers?\b|"
     r"\bplanning\s+docs?\b|"
     r"\bsee\s+docs/|"
-    r"\bdocs/"
+    r"\bdocs/",
+    re.IGNORECASE,
 )
 _STRING_PREFIX = re.compile(r"(?i)^[rubf]*")
 
@@ -561,13 +562,28 @@ def _looks_like_section_header(comment_text: str) -> bool:
     normalized = comment_text.strip()
     if _SECTION_DIVIDER.fullmatch(normalized):
         return True
+    if _SECTION_WRAPPED_LABEL.fullmatch(normalized):
+        return True
 
     stripped = normalized.strip("-=*_~# ").strip()
     if not stripped:
         return True
     if not _SECTION_LABEL.fullmatch(stripped):
         return False
-    return len(stripped.split()) <= 4
+    words = stripped.split()
+    if len(words) > 4:
+        return False
+    return all(_is_section_label_word(word) for word in words)
+
+
+def _is_section_label_word(word: str) -> bool:
+    """Return whether a word looks like a section label token."""
+    token = word.strip("/_-")
+    if not token:
+        return False
+    if token.isupper():
+        return True
+    return token[0].isupper() and token[1:] == token[1:].lower()
 
 
 def _is_triple_quoted(token_string: str) -> bool:
