@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import importlib
 import json
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
 
-def _style_lint():
+def _style_lint() -> ModuleType:
+    """Import the style-lint module under test."""
     return importlib.import_module("evalspec.style_lint")
 
 
-def test_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys):
+def test_run_skips_cleanly_without_gemini_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Skip advisory lint cleanly when the Gemini API key is absent."""
     style_lint = _style_lint()
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
@@ -25,7 +33,11 @@ def test_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys):
     assert "skip" in captured.out.lower()
 
 
-def test_collect_targets_defaults_to_src_tests_evals(tmp_path, monkeypatch):
+def test_collect_targets_defaults_to_src_tests_evals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Collect Python files from the default src, tests, and evals roots."""
     style_lint = _style_lint()
     src_file = tmp_path / "src/evalspec/example.py"
     src_file.parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +66,8 @@ def test_collect_targets_defaults_to_src_tests_evals(tmp_path, monkeypatch):
     assert targets == [evals_file, src_file, tests_file]
 
 
-def test_collect_targets_respects_explicit_path_args(tmp_path):
+def test_collect_targets_respects_explicit_path_args(tmp_path: Path) -> None:
+    """Scope target collection to explicit file and directory arguments."""
     style_lint = _style_lint()
     explicit_file = tmp_path / "custom/one.py"
     explicit_file.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +86,10 @@ def test_collect_targets_respects_explicit_path_args(tmp_path):
     assert targets == [explicit_file, nested_file]
 
 
-def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(tmp_path):
+def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(
+    tmp_path: Path,
+) -> None:
+    """Include stable rule metadata and candidate details in detector prompts."""
     style_lint = _style_lint()
     candidate_path = tmp_path / "src/evalspec/example.py"
     candidate_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +112,8 @@ def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(tmp_pat
         assert rule.description in prompt
 
 
-def test_parse_findings_rejects_unknown_rule_ids(tmp_path):
+def test_parse_findings_rejects_unknown_rule_ids(tmp_path: Path) -> None:
+    """Reject model findings that reference unknown rule identifiers."""
     style_lint = _style_lint()
     candidate_path = tmp_path / "src/evalspec/example.py"
     candidate_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,8 +142,9 @@ def test_parse_findings_rejects_unknown_rule_ids(tmp_path):
 
 
 def test_find_candidates_flags_single_letter_bindings_but_allows_unused_underscore(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
+    """Flag single-letter names while allowing `_` as an unused binding."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
@@ -143,14 +161,20 @@ values = [item for item in items if item > 1]
 
     candidates = style_lint.find_candidates(source)
     descriptive_names = [
-        candidate for candidate in candidates if candidate.rule_id == "descriptive-names"
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "descriptive-names"
     ]
 
     assert {candidate.line for candidate in descriptive_names} == {2, 5}
-    assert all("for _ in items" not in candidate.text for candidate in descriptive_names)
+    assert all(
+        "for _ in items" not in candidate.text
+        for candidate in descriptive_names
+    )
 
 
-def test_find_candidates_flags_suppression_comments(tmp_path):
+def test_find_candidates_flags_suppression_comments(tmp_path: Path) -> None:
+    """Flag inline suppression comments for lint and type checkers."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
@@ -170,7 +194,10 @@ value = maybe_bad()  # type: ignore[arg-type]
     assert [candidate.line for candidate in suppression_comments] == [1, 2]
 
 
-def test_find_candidates_flags_section_headers_but_not_why_comments(tmp_path):
+def test_find_candidates_flags_section_headers_but_not_why_comments(
+    tmp_path: Path,
+) -> None:
+    """Flag section headers while preserving rationale comments."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
@@ -192,7 +219,10 @@ other = 2
     assert [candidate.line for candidate in section_headers] == [1]
 
 
-def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(tmp_path):
+def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
+    tmp_path: Path,
+) -> None:
+    """Flag indented triple-quoted call arguments that skip `dedent()`."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
@@ -217,7 +247,10 @@ def render_prompt() -> str:
     assert [candidate.line for candidate in multiline_strings] == [3]
 
 
-def test_find_candidates_flags_assigned_indented_triple_quoted_strings(tmp_path):
+def test_find_candidates_flags_assigned_indented_triple_quoted_strings(
+    tmp_path: Path,
+) -> None:
+    """Flag assigned indented triple-quoted strings that embed whitespace."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
@@ -240,10 +273,11 @@ SYSTEM_PROMPT = \"\"\"
 
 
 def test_run_catches_malformed_model_output_and_stays_advisory(
-    tmp_path,
-    monkeypatch,
-    capsys,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warn and return zero when the model returns malformed output."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text("value = 1\n")
@@ -268,7 +302,11 @@ def test_run_catches_malformed_model_output_and_stays_advisory(
     assert "warning" in captured.out.lower()
 
 
-def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch):
+def test_verify_model_is_not_called_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip verification when no verify model is configured."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text("value = 1\n")
@@ -297,7 +335,12 @@ def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch):
         lambda candidates, *, model: [finding],
     )
 
-    def _verify(findings, candidates, *, verify_model):
+    def _verify(
+        findings: list[Any],
+        candidates: list[Any],
+        *,
+        verify_model: str | None,
+    ) -> list[Any]:
         nonlocal verify_called
         verify_called = True
         return findings
@@ -311,10 +354,11 @@ def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch):
 
 
 def test_verify_model_can_filter_findings_when_enabled(
-    tmp_path,
-    monkeypatch,
-    capsys,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Allow the optional verification model to filter detector findings."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text("value = 1\n")
@@ -350,7 +394,12 @@ def test_verify_model_can_filter_findings_when_enabled(
         lambda candidates, *, model: [first_finding, second_finding],
     )
 
-    def _verify(findings, candidates, *, verify_model):
+    def _verify(
+        findings: list[Any],
+        candidates: list[Any],
+        *,
+        verify_model: str | None,
+    ) -> list[Any]:
         nonlocal seen_verify_model
         seen_verify_model = verify_model
         return [second_finding]
@@ -368,10 +417,11 @@ def test_verify_model_can_filter_findings_when_enabled(
 
 
 def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(
-    tmp_path,
-    monkeypatch,
-    capsys,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Print advisory findings in path:line:col: rule-id message format."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text("value = 1\n")
