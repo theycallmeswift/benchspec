@@ -35,7 +35,7 @@ select = [
 convention = "google"
 ```
 
-Add the Ruff configuration above, add `bin/linters/style_lint.py` for simple local advisory rules, and add `bin/linters/line_break_lint.py` for the tuned hybrid v1 logical-line-break checker.
+Add the Ruff configuration above, add `bin/linters/style_lint.py` for simple deterministic local rules, add `bin/linters/line_break_lint.py` for the tuned hybrid v1 logical-line-break checker, and wire only deterministic checks into blocking lint paths.
 
 ## User Stories
 
@@ -43,14 +43,15 @@ Add the Ruff configuration above, add `bin/linters/style_lint.py` for simple loc
 2. As a contributor, I want **lint rule codes explained inline**, so I can understand project policy without cross-referencing every Ruff code.
 3. As a maintainer, I want **custom checks represented by readable rule IDs**, so diagnostics describe the preference instead of exposing opaque `SL00X` names.
 4. As a maintainer, I want **logical line-break review isolated from other checks**, so we can tune cost, recall, and false positives without destabilizing normal linting.
+5. As a contributor, I want **one blocking lint command and one advisory line-break command**, so I know what must pass before pushing and what is optional review assistance.
 
 ## Implementation Decisions
 
 ```text
 docs/style/development.md
-  ├─► pyproject.toml [tool.ruff.*] ─────────────► make lint
-  ├─► bin/linters/style_lint.py ───────────────► advisory deterministic diagnostics
-  └─► bin/linters/line_break_lint.py ──────────► advisory semantic line-break findings
+  ├─► pyproject.toml [tool.ruff.*] ─────────────► make lint ─────────────► future required CI
+  ├─► bin/linters/style_lint.py ───────────────► make lint ─────────────► future required CI
+  └─► bin/linters/line_break_lint.py ──────────► make lint:line-breaks ─► advisory local/PR review
 ```
 
 - **Ruff configuration is the deterministic base.**
@@ -61,7 +62,7 @@ docs/style/development.md
   - Avoid arbitrary size and complexity limits such as `C901`, `PLR0912`, and `PLR0915` because `docs/style/development.md` rejects line-count-based structure rules.
   - Do not rely on Ruff `DOC` preview rules in the first rollout; docstring existence and Google-style shape are enough for the initial deterministic pass.
 
-- **`bin/linters/style_lint.py` owns simple local rules Ruff cannot express cleanly.**
+- **`bin/linters/style_lint.py` owns simple deterministic local rules Ruff cannot express cleanly.**
   - Define rules in a list so future checks are additive:
 
     ```python
@@ -95,6 +96,7 @@ docs/style/development.md
   - `descriptive-names` uses AST bindings to flag single-letter argument names, assignment targets, loop targets, lambda parameters, and comprehension targets, while allowing `_`.
   - `dedented-multiline-strings` uses tokens plus parent/ancestor context to flag indented triple-quoted strings that are not passed through `textwrap.dedent`.
   - Diagnostics use `path:line:col: rule-id message`; default paths are `src`, `tests`, and `evals`, with optional path arguments for scoped runs.
+  - Exit nonzero when findings exist because this script is intended to become part of the blocking deterministic lint path.
 
 - **Readable custom rule IDs replace `SL00X` codes.**
   - Use `section-header-comments`, `provenance-comments`, and `logical-line-breaks` instead of `SL002`, `SL003`, and `SL006`.
@@ -184,11 +186,33 @@ docs/style/development.md
 
   - Do not run a second confirmation/refinement model call in the first implementation; experiments showed it added cost and strictness without enough value.
   - Output both a concise text diagnostic and optional JSON report. Each finding reports `logical-line-breaks`, `file`, `after_line`, `before_line`, and a one-sentence rationale.
+  - Exit zero by default even when findings exist because findings are advisory review guidance, not a merge gate.
 
-- **`make lint` remains the canonical deterministic interface.**
-  - Keep `uv run ruff check .`.
-  - Add `uv run python bin/linters/style_lint.py` once the deterministic script is implemented and the baseline is cleaned up.
-  - Do not add `bin/linters/line_break_lint.py` to blocking `make lint` until its advisory behavior is explicitly promoted.
+- **Development commands define the rollout boundary.**
+  - `make lint` is the blocking local command contributors run before pushing.
+  - `make lint` runs deterministic checks only:
+
+    ```make
+    lint:  ## Run blocking deterministic lint checks
+    	uv run ruff check .
+    	uv run python bin/linters/style_lint.py
+    ```
+
+  - `make lint:line-breaks` is the advisory model-backed command:
+
+    ```make
+    lint\:line-breaks:  ## Run advisory logical-line-break review
+    	uv run python bin/linters/line_break_lint.py
+    ```
+
+  - `bin/linters/style_lint.py` should also be directly runnable for scoped debugging, for example `uv run python bin/linters/style_lint.py src/evalspec/plugin.py`.
+  - `bin/linters/line_break_lint.py` should be directly runnable for PR review, for example `BASE=origin/dev uv run python bin/linters/line_break_lint.py --json tmp/line-breaks.json`.
+
+- **CI policy mirrors the local blocking command.**
+  - This repo does not currently contain `.github/` workflow files, so this spec does not require adding CI as part of the lint implementation.
+  - If a required CI workflow is added or already exists in the implementation branch, it should run `make lint` and `make test`.
+  - Required CI should not run `make lint:line-breaks` in the first rollout because it requires `GEMINI_API_KEY`, consumes paid model calls, and is intentionally advisory.
+  - A later non-required workflow may run `make lint:line-breaks` on pull requests and publish review comments, but that is a follow-up decision after the advisory output is tuned.
 
 ## Testing Plan
 
@@ -199,8 +223,9 @@ docs/style/development.md
 - **Boundary filtering matches tuned v1** — production and test candidate pairs match the explicit high-value pair sets in this spec.
 
 ### Behavior
-- **The canonical lint path runs deterministic enforcement** — the normal lint command reports Ruff findings and deterministic custom findings together once the deterministic baseline is ready.
-- **The line-break checker produces advisory results** — semantic findings are emitted separately with boundary locations, readable rule IDs, and no blocking exit behavior by default.
+- **The canonical lint path runs deterministic enforcement** — `make lint` reports Ruff findings and deterministic custom findings together.
+- **The advisory line-break path stays separate** — `make lint:line-breaks` emits semantic findings with boundary locations and does not block by default.
+- **Future required CI matches local blocking lint** — any required CI workflow uses `make lint`, not a bespoke lint command.
 
 ### Interface
 - **Scripts behave like lint CLIs** — each script accepts repository paths or defaults, prints diagnostics in a predictable format, and exits nonzero only for the mode that is meant to block.
@@ -216,6 +241,7 @@ docs/style/development.md
 - Adding pre-commit hooks.
 - Building a Ruff plugin.
 - Making model-backed line-break findings blocking in the first rollout.
+- Adding required CI solely for this lint change.
 - Rewriting the current codebase to satisfy every new lint finding.
 - Enforcing subjective design guidance such as DRY boundaries, logging volume, package cohesion, or function extraction.
 - Running confirmation/refinement calls for line-break findings in the first implementation.
@@ -235,9 +261,11 @@ docs/style/development.md
 - `pyproject.toml:10` — the project requires Python `>=3.10`.
 - `pyproject.toml:44` — Ruff is already a dev dependency.
 - `Makefile:21` — `make lint` is already the lint entry point.
+- `Makefile:1` — phony targets are explicitly listed and should include new lint targets when added.
 
 ## Verification
 
 - `python3 scripts/validate_spec.py docs/specs/2026-07-05-style-lint-rules.md` — validates spec structure if the validator is added to this repo.
-- `make lint` — proves deterministic lint configuration and scripts are wired into the canonical lint target.
+- `make lint` — proves deterministic lint configuration and `bin/linters/style_lint.py` are wired into the canonical lint target.
+- `make lint:line-breaks` — proves the advisory model-backed line-break checker is runnable without being part of blocking lint.
 - `make test` — proves checker behavior and the existing suite pass together.
