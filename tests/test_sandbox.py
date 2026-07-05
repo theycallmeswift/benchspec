@@ -779,8 +779,6 @@ def _patch_build_primitives(monkeypatch, fake):
     """Patch microsandbox Sandbox/Snapshot so _build_snapshot_async drives `fake`.
     Records the image passed to Sandbox.create on `fake.create_image` and whether a
     snapshot was sealed on `fake.sealed`."""
-    import evalspec.sandbox as sb_mod  # noqa: F401
-
     fake.create_image = None
     fake.sealed = False
 

@@ -12,7 +12,9 @@ from evalspec.trigger import (
     xfail_applies,
 )
 
-_NO_SLEEP = lambda *_: None  # noqa: E731 - skip real backoff waits in tests
+
+def _no_sleep(*_args):
+    return None
 
 
 def _skill_line(skill_value: str) -> str:
@@ -181,7 +183,7 @@ def test_count_fires_retries_transient_routing_error():
 
     fires = count_fires(
         "q", "bootstrap", "/plugin", "sonnet",
-        passes=1, attempts=3, route=route, sleep=_NO_SLEEP,
+        passes=1, attempts=3, route=route, sleep=_no_sleep,
     )
     assert fires == 1
     assert len(calls) == 2  # first failed, retry succeeded
@@ -196,7 +198,7 @@ def test_count_fires_raises_when_routing_keeps_failing():
     with pytest.raises(RoutingError):
         count_fires(
             "q", "bootstrap", "/plugin", "sonnet",
-            passes=1, attempts=2, route=route, sleep=_NO_SLEEP,
+            passes=1, attempts=2, route=route, sleep=_no_sleep,
         )
 
 
