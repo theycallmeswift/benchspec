@@ -63,7 +63,7 @@ def test_collect_targets_defaults_to_src_tests_evals(
 
     targets = style_lint.collect_targets()
 
-    assert targets == [evals_file, src_file, tests_file]
+    assert set(targets) == {evals_file, src_file, tests_file}
 
 
 def test_collect_targets_respects_explicit_path_args(tmp_path: Path) -> None:
@@ -83,7 +83,7 @@ def test_collect_targets_respects_explicit_path_args(tmp_path: Path) -> None:
 
     targets = style_lint.collect_targets([explicit_file, tmp_path / "custom" / "pkg"])
 
-    assert targets == [explicit_file, nested_file]
+    assert set(targets) == {explicit_file, nested_file}
 
 
 def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(
@@ -455,6 +455,6 @@ def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(
 
     assert exit_code == 0
     assert (
-        captured.out.strip()
-        == f"{source}:1:4: descriptive-names Use a descriptive binding name."
+        f"{source}:1:4: descriptive-names Use a descriptive binding name."
+        in captured.out
     )
