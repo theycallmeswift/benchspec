@@ -4,15 +4,15 @@
 
 **Goal:** Add deterministic Ruff style coverage plus an advisory Gemini-backed custom style checker without slowing the default lint path.
 
-**Architecture:** Ruff owns fast, deterministic checks through `pyproject.toml` and `make lint`. The custom checker is a thin script wrapper over an importable `evalspec.style_lint` module so tests can stub the Gemini boundary cleanly. Deterministic code gathers candidate snippets and prompt context; Gemini remains the source of advisory findings.
+**Architecture:** Ruff owns fast, deterministic checks through `pyproject.toml` and `make lint`, with existing legacy files scoped by `per-file-ignores` so this issue does not become a repo-wide cleanup. The custom checker is a thin script wrapper over an importable `evalspec.style_lint` module so tests can stub the Gemini boundary cleanly. Deterministic code gathers candidate snippets and prompt context; Gemini remains the source of advisory findings.
 
-**Tech Stack:** Python 3.10+, Ruff, pytest, Make, Gemini API over `GEMINI_API_KEY`.
+**Tech Stack:** Python 3.10+, Ruff, pytest, Make, Gemini REST API over `GEMINI_API_KEY` using stdlib `urllib.request` and `json`.
 
 ---
 
 ## File Structure
 
-- Modify `pyproject.toml`: add commented Ruff configuration and Google pydocstyle convention.
+- Modify `pyproject.toml`: add commented Ruff configuration, Google pydocstyle convention, and scoped legacy `per-file-ignores` generated from the current baseline.
 - Modify `Makefile`: add `lint:custom` while keeping `lint` Ruff-only.
 - Create `bin/linters/style_lint.py`: executable CLI wrapper that imports `evalspec.style_lint`.
 - Create `src/evalspec/style_lint.py`: rule dataclasses, path collection, candidate extraction, Gemini prompt/call/parsing, optional verification, output formatting, and `run()`/`main()`.
@@ -54,6 +54,18 @@ select = [
 convention = "google"
 ```
 
+Then add a temporary baseline table to avoid rewriting the current codebase as part of this issue. Generate the exact file/rule pairs from Ruff output, and keep each ignore list as narrow as the current diagnostics allow:
+
+```toml
+[tool.ruff.lint.per-file-ignores]
+"src/evalspec/legacy_file.py" = [
+    "ANN001", # Existing function arguments lack annotations; defer typed cleanup.
+    "D103",   # Existing public functions lack docstrings; defer docstring cleanup.
+]
+```
+
+Use real paths from the current Ruff diagnostics. Do not use `"**/*.py"` or broad rule-family ignores like `"ANN"` or `"D"` because that would make the new policy non-enforcing for new files.
+
 - [ ] **Step 2: Run Ruff and inspect any newly surfaced violations**
 
 Run:
@@ -62,11 +74,11 @@ Run:
 uv run ruff check .
 ```
 
-Expected: either `All checks passed!` or concrete diagnostics caused by the newly enabled rules.
+Expected: concrete diagnostics caused by the newly enabled rules before the scoped baseline is added; `All checks passed!` after the baseline is complete.
 
-- [ ] **Step 3: If Ruff reports repo violations, fix only violations needed for `make lint`**
+- [ ] **Step 3: Add scoped baseline ignores instead of rewriting existing files**
 
-Use the diagnostic paths from Ruff. Keep changes mechanical: docstrings, annotations, imports, stale suppressions, and built-in shadowing only. Do not add size, complexity, preview DOC, or unrelated style rules.
+Use Ruff diagnostics to add `per-file-ignores` entries for existing violations. Keep each entry to the specific rule codes already present in that file. Fix only tiny mechanical violations when the fix is obviously safer than carrying an ignore, such as `I001` import order or an auto-fixable stale suppressions issue. Do not rewrite the repository to add annotations, docstrings, or line wrapping in this issue.
 
 - [ ] **Step 4: Verify fast lint still passes**
 
@@ -81,7 +93,7 @@ Expected: `All checks passed!`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add pyproject.toml <any files mechanically fixed for Ruff>
+git add pyproject.toml <any tiny mechanical Ruff fixes>
 git commit -m "chore: configure ruff style rules"
 git push
 ```
@@ -107,6 +119,8 @@ def test_find_candidates_flags_single_letter_bindings_but_allows_unused_undersco
 def test_find_candidates_flags_suppression_comments(tmp_path): ...
 def test_find_candidates_flags_section_headers_but_not_why_comments(tmp_path): ...
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(tmp_path): ...
+def test_find_candidates_flags_assigned_indented_triple_quoted_strings(tmp_path): ...
+def test_run_catches_malformed_model_output_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
 def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch): ...
 def test_verify_model_can_filter_findings_when_enabled(tmp_path, monkeypatch): ...
 def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
@@ -190,7 +204,7 @@ Implement `find_candidates(path: Path) -> list[Candidate]` using AST, tokenize, 
 - suppression comments containing `noqa`, `type: ignore`, `pyright: ignore`, `pylint: disable`, `ruff: noqa`, or `mypy:`;
 - section-header comments that are only labels or visual dividers;
 - provenance comments mentioning issues, PRs, commits, callers, planning docs, or `see docs/`;
-- indented triple-quoted string expressions not wrapped by `textwrap.dedent`, excluding module/class/function docstrings.
+- all non-docstring indented triple-quoted strings not wrapped by `textwrap.dedent`, including assigned module constants and inline call arguments. Add test fixtures that mirror the assigned-string shapes in `tests/test_plugin.py` and `src/evalspec/agents/opencode.py`.
 
 - [ ] **Step 4: Implement Gemini prompt, call, parse, and optional verification**
 
@@ -204,7 +218,7 @@ def detect_findings(candidates: list[Candidate], *, model: str = DEFAULT_MODEL) 
 def verify_findings(findings: list[Finding], candidates: list[Candidate], *, verify_model: str | None) -> list[Finding]: ...
 ```
 
-Use strict JSON response expectations. Reject unknown rule IDs and malformed finding references with `ValueError`.
+Use strict JSON response expectations. Reject unknown rule IDs and malformed finding references with `ValueError`. Implement `call_gemini()` with stdlib `urllib.request` against the Gemini REST API, not a new SDK dependency, so `pyproject.toml` and `uv.lock` do not need Gemini package changes.
 
 - [ ] **Step 5: Implement CLI run path**
 
@@ -214,6 +228,7 @@ Required behavior:
 - if `GEMINI_API_KEY` is absent, print a clear skip message and return `0`;
 - print findings as `path:line:col: rule-id message`;
 - return `0` even when findings exist;
+- catch Gemini transport errors, malformed JSON, unknown rule IDs, and malformed finding references; print one warning line and return `0` because `make lint:custom` is advisory;
 - accept `--model`, `--verify-model`, and optional path arguments.
 
 - [ ] **Step 6: Add script wrapper**
@@ -360,6 +375,6 @@ Skip this commit if there are no verification fixes.
 
 ## Self-Review
 
-- Spec coverage: Ruff config, inline comments, Google docstrings, custom rule IDs, Gemini 3.1 Flash Lite default, `GEMINI_API_KEY` skip behavior, optional verification model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
+- Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.1 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
 - Placeholder scan: no `TBD`, `TODO`, vague "add tests", or undefined task dependencies remain.
 - Type consistency: `Rule`, `Candidate`, `Finding`, `collect_targets`, `find_candidates`, `build_detector_prompt`, `detect_findings`, `verify_findings`, `run`, and `main` names are consistent across tasks.
