@@ -945,7 +945,7 @@ def _binding_kind_for_name(node: ast.AST, name: str) -> str | None:
         return "other" if _target_binds_name(node.target, name) else None
     if isinstance(node, (ast.For, ast.AsyncFor)):
         return "other" if _target_binds_name(node.target, name) else None
-    if isinstance(node, ast.With):
+    if isinstance(node, (ast.With, ast.AsyncWith)):
         return (
             "other"
             if any(
@@ -1009,7 +1009,7 @@ def _binding_is_visible_at_reference(
             _target_binds_name(candidate.target, name)
             and _node_contains(candidate.iter, reference_node, parents)
         )
-    if isinstance(candidate, ast.With):
+    if isinstance(candidate, (ast.With, ast.AsyncWith)):
         for item in candidate.items:
             if item.optional_vars is None:
                 continue

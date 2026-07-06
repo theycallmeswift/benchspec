@@ -1545,6 +1545,134 @@ with wrap("ok") as dedent:
     assert [candidate.line for candidate in multiline_strings] == [7]
 
 
+def test_find_candidates_allows_async_with_alias_context_before_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow async-with context evaluation before a textwrap alias binds."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def wrap(value: str) -> str:
+    return value
+
+async def render_prompt() -> None:
+    async with wrap(textwrap.dedent(\"\"\"
+        hello
+        world
+    \"\"\")) as textwrap:
+        pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_allows_async_with_alias_context_before_dedent_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow async-with context evaluation before a dedent alias binds."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def wrap(value: str) -> str:
+    return value
+
+async def render_prompt() -> None:
+    async with wrap(dedent(\"\"\"
+        hello
+        world
+    \"\"\")) as dedent:
+        pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_async_with_body_use_after_textwrap_alias_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag async-with body textwrap.dedent use after the alias binds."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def wrap(value: str) -> str:
+    return value
+
+async def render_prompt() -> None:
+    async with wrap("ok") as textwrap:
+        PROMPT = textwrap.dedent(\"\"\"
+            hello
+            world
+        \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [8]
+
+
+def test_find_candidates_flags_async_with_body_use_after_dedent_alias_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag async-with body dedent use after the alias binds."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def wrap(value: str) -> str:
+    return value
+
+async def render_prompt() -> None:
+    async with wrap("ok") as dedent:
+        PROMPT = dedent(\"\"\"
+            hello
+            world
+        \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [8]
+
+
 def test_find_candidates_flags_match_capture_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
