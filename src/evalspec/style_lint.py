@@ -109,9 +109,8 @@ _SECTION_REGION_LABELS = {
 _PROVENANCE_PATTERN = re.compile(
     r"\b(?:pr|issue|fixes)\s*\#\d+\b|"
     r"\bcommit\s+[0-9a-f]{6,40}\b|"
-    r"\badded\s+for\b|"
+    r"\badded\s+for\s+(?:pr|issue|fixes|commit|caller|callers?|docs?)\b|"
     r"\bcalled\s+from\b|"
-    r"\bcallers?\b|"
     r"\bplanning\s+docs?\b|"
     r"^(?:see|per|from)\s+docs/",
     re.IGNORECASE,
