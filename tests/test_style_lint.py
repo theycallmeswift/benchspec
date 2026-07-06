@@ -593,6 +593,55 @@ value = 1
     assert [candidate.line for candidate in provenance_comments] == [1, 2, 3]
 
 
+def test_find_candidates_does_not_flag_legitimate_added_for_or_caller_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow rationale comments that use added-for or caller language locally."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# field added for wire compatibility
+# caller provides the account id
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert provenance_comments == []
+
+
+def test_find_candidates_flags_explicit_caller_and_issue_pr_provenance(
+    tmp_path: Path,
+) -> None:
+    """Flag explicit caller notes and issue/PR-style provenance references."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# called from server.py
+# added for issue #123
+# added for PR #456
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert [candidate.line for candidate in provenance_comments] == [1, 2, 3]
+
+
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
     tmp_path: Path,
 ) -> None:
