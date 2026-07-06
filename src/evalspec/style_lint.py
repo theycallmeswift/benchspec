@@ -666,16 +666,176 @@ def _is_dedent_wrapped(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     current = node
     while current in parents:
         current = parents[current]
-        if isinstance(current, ast.Call) and _is_dedent_call(current.func):
+        if isinstance(current, ast.Call) and _is_dedent_call(
+            current.func,
+            current,
+            parents,
+        ):
             return True
     return False
 
 
-def _is_dedent_call(func: ast.AST) -> bool:
+def _is_dedent_call(
+    func: ast.AST,
+    call: ast.Call,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
     """Return whether a call target resolves to textwrap.dedent."""
+    if isinstance(func, ast.Name):
+        return _name_resolves_to_textwrap_dedent(func.id, call, parents)
     return (
         isinstance(func, ast.Attribute)
         and isinstance(func.value, ast.Name)
         and func.value.id == "textwrap"
         and func.attr == "dedent"
     )
+
+
+def _name_resolves_to_textwrap_dedent(
+    name: str,
+    call: ast.Call,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    """Return whether a bare name resolves to a safe textwrap.dedent import."""
+    scopes = _enclosing_scopes(call, parents)
+    for index in range(len(scopes) - 1, -1, -1):
+        scope = scopes[index]
+        line_limit = call.lineno if index == len(scopes) - 1 else None
+        binding = _last_name_binding(name, scope, line_limit=line_limit)
+        if binding is None:
+            continue
+        return binding == "textwrap_dedent"
+    return False
+
+
+def _enclosing_scopes(
+    node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+) -> list[ast.AST]:
+    """Return enclosing lexical scopes from module to innermost."""
+    scopes: list[ast.AST] = []
+    current: ast.AST | None = node
+    while current is not None:
+        if isinstance(
+            current,
+            (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            scopes.append(current)
+        current = parents.get(current)
+    scopes.reverse()
+    return scopes
+
+
+def _last_name_binding(
+    name: str,
+    scope: ast.AST,
+    *,
+    line_limit: int | None,
+) -> str | None:
+    """Return the last visible binding kind for a name inside one scope."""
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for argument in (
+            list(scope.args.posonlyargs)
+            + list(scope.args.args)
+            + list(scope.args.kwonlyargs)
+        ):
+            if argument.arg == name:
+                return "other"
+        if scope.args.vararg is not None and scope.args.vararg.arg == name:
+            return "other"
+        if scope.args.kwarg is not None and scope.args.kwarg.arg == name:
+            return "other"
+
+    last_binding: tuple[int, str] | None = None
+    for candidate in _iter_scope_bindings(scope):
+        lineno = getattr(candidate, "lineno", None)
+        if lineno is None:
+            continue
+        if line_limit is not None and lineno > line_limit:
+            continue
+        binding = _binding_kind_for_name(candidate, name)
+        if binding is None:
+            continue
+        if last_binding is None or lineno >= last_binding[0]:
+            last_binding = (lineno, binding)
+
+    return None if last_binding is None else last_binding[1]
+
+
+def _iter_scope_bindings(scope: ast.AST) -> list[ast.AST]:
+    """Yield binding-capable nodes in one lexical scope, excluding nested scopes."""
+    bindings: list[ast.AST] = []
+    stack = [scope]
+    while stack:
+        current = stack.pop()
+        bindings.append(current)
+        for child in ast.iter_child_nodes(current):
+            if child is not scope and isinstance(
+                child,
+                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+            ):
+                continue
+            stack.append(child)
+    return bindings
+
+
+def _binding_kind_for_name(node: ast.AST, name: str) -> str | None:
+    """Return the binding kind if a node binds the target name."""
+    if isinstance(node, ast.ImportFrom):
+        if node.module != "textwrap":
+            return _matches_import_binding(node.names, name, safe=False)
+        for alias in node.names:
+            bound_name = alias.asname or alias.name
+            if bound_name != name:
+                continue
+            return "textwrap_dedent" if alias.name == "dedent" else "other"
+        return None
+    if isinstance(node, ast.Import):
+        return _matches_import_binding(node.names, name, safe=False)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return "other" if node.name == name else None
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return (
+            "other"
+            if any(_target_binds_name(target, name) for target in targets)
+            else None
+        )
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return "other" if _target_binds_name(node.target, name) else None
+    if isinstance(node, ast.With):
+        return (
+            "other"
+            if any(
+                item.optional_vars is not None
+                and _target_binds_name(item.optional_vars, name)
+                for item in node.items
+            )
+            else None
+        )
+    if isinstance(node, ast.ExceptHandler):
+        return "other" if node.name == name else None
+    return None
+
+
+def _matches_import_binding(
+    aliases: list[ast.alias],
+    name: str,
+    *,
+    safe: bool,
+) -> str | None:
+    """Return a binding kind for matching import aliases."""
+    for alias in aliases:
+        bound_name = alias.asname or alias.name.split(".")[0]
+        if bound_name == name:
+            return "textwrap_dedent" if safe else "other"
+    return None
+
+
+def _target_binds_name(target: ast.AST, name: str) -> bool:
+    """Return whether an assignment-like target binds the given name."""
+    if isinstance(target, ast.Name):
+        return target.id == name
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_target_binds_name(element, name) for element in target.elts)
+    return False
