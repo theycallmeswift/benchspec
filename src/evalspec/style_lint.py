@@ -113,8 +113,7 @@ _PROVENANCE_PATTERN = re.compile(
     r"\bcalled\s+from\b|"
     r"\bcallers?\b|"
     r"\bplanning\s+docs?\b|"
-    r"\bsee\s+docs/|"
-    r"\bdocs/",
+    r"^(?:see|per|from)\s+docs/",
     re.IGNORECASE,
 )
 _STRING_PREFIX = re.compile(r"(?i)^[rubf]*")
@@ -409,7 +408,12 @@ def run(
                 candidates,
                 verify_model=verify_model,
             )
-    except (urllib.error.URLError, ValueError, json.JSONDecodeError) as error:
+    except (
+        TimeoutError,
+        urllib.error.URLError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
         print(f"warning: advisory style lint skipped due to model error: {error}")
         return 0
 
