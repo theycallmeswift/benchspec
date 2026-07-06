@@ -1299,6 +1299,186 @@ VALUES = [textwrap.dedent(\"\"\"
     assert [candidate.line for candidate in multiline_strings] == [3]
 
 
+def test_find_candidates_flags_namedexpr_shadowing_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Do not trust an imported dedent alias after a walrus rebinding."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+if (dedent := str.strip):
+    PROMPT = dedent(\"\"\"
+        hello
+        world
+    \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [4]
+
+
+def test_find_candidates_flags_namedexpr_shadowing_textwrap_module(
+    tmp_path: Path,
+) -> None:
+    """Do not trust textwrap.dedent after a walrus rebinding of textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+if (textwrap := str):
+    PROMPT = textwrap.dedent(\"\"\"
+        hello
+        world
+    \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [4]
+
+
+def test_find_candidates_allows_with_alias_context_before_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow context expression evaluation before a with-alias shadows textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def wrap(value: str) -> str:
+    return value
+
+with wrap(textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")) as textwrap:
+    pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_allows_with_alias_context_before_dedent_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow context expression evaluation before a with-alias shadows dedent."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def wrap(value: str) -> str:
+    return value
+
+with wrap(dedent(\"\"\"
+    hello
+    world
+\"\"\")) as dedent:
+    pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_with_body_use_after_textwrap_alias_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag with-body textwrap.dedent use after the alias has shadowed the import."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def wrap(value: str) -> str:
+    return value
+
+with wrap("ok") as textwrap:
+    PROMPT = textwrap.dedent(\"\"\"
+        hello
+        world
+    \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [7]
+
+
+def test_find_candidates_flags_with_body_use_after_dedent_alias_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag with-body dedent use after the alias has shadowed the import."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def wrap(value: str) -> str:
+    return value
+
+with wrap("ok") as dedent:
+    PROMPT = dedent(\"\"\"
+        hello
+        world
+    \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [7]
+
+
 def test_find_candidates_flags_match_capture_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
