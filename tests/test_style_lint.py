@@ -1567,6 +1567,63 @@ def test_run_catches_malformed_model_output_and_stays_advisory(
     assert "warning" in captured.out.lower()
 
 
+def test_run_warns_and_continues_on_malformed_python_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warn and continue when one target file cannot be parsed."""
+    style_lint = _style_lint()
+    broken_source = tmp_path / "broken.py"
+    broken_source.write_text("def broken(:\n")
+    valid_source = tmp_path / "valid.py"
+    valid_source.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=valid_source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="x = 1",
+    )
+    finding = style_lint.Finding(
+        path=valid_source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        message="Use a descriptive binding name.",
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        style_lint,
+        "collect_targets",
+        lambda paths=None: [broken_source, valid_source],
+    )
+
+    original_find_candidates = style_lint.find_candidates
+
+    def _find_candidates(path: Path) -> list[Any]:
+        if path == valid_source:
+            return [candidate]
+        return original_find_candidates(path)
+
+    monkeypatch.setattr(style_lint, "find_candidates", _find_candidates)
+    monkeypatch.setattr(
+        style_lint,
+        "detect_findings",
+        lambda candidates, *, model: [finding],
+    )
+
+    exit_code = style_lint.run([broken_source, valid_source])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "warning" in captured.out.lower()
+    assert str(broken_source) in captured.out
+    assert "descriptive-names" in captured.out
+
+
 def test_run_catches_timeout_error_and_stays_advisory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

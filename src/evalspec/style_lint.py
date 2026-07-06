@@ -397,7 +397,10 @@ def run(
     targets = collect_targets(paths)
     candidates: list[Candidate] = []
     for target in targets:
-        candidates.extend(find_candidates(target))
+        try:
+            candidates.extend(find_candidates(target))
+        except (OSError, SyntaxError, UnicodeDecodeError) as error:
+            print(f"warning: advisory style lint skipped {target}: {error}")
 
     try:
         findings = detect_findings(candidates, model=model)
