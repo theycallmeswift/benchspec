@@ -403,17 +403,22 @@ value = 1
     assert section_headers == []
 
 
-def test_find_candidates_flags_all_caps_region_labels(
+def test_find_candidates_flags_structural_and_title_style_region_labels(
     tmp_path: Path,
 ) -> None:
-    """Flag bare all-caps region labels while allowing maintenance tags."""
+    """Flag wrapped or title-style region labels, not bare acronym comments."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
         """\
-# PARSING
-# CONFIG
-# HTTP
+# --- PARSING ---
+# Validation
+# Setup
+# API
+# CLI
+# JSON
+# SQL
+# UTC
 value = 1
 """,
     )
