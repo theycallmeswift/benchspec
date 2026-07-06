@@ -35,7 +35,7 @@ select = [
 convention = "google"
 ```
 
-Add the Ruff configuration above, add `bin/linters/style_lint.py` for slower advisory Gemini 3.1 Flash Lite style rules, and run that script under `make lint:custom` outside the default `make lint` fast path.
+Add the Ruff configuration above, add reusable advisory lint framework code under `lib/style_lint/`, add evalspec-specific policy and CLI orchestration in `bin/linters/style_lint.py`, and run that script under `make lint:custom` outside the default `make lint` fast path.
 
 ## User Stories
 
@@ -49,7 +49,7 @@ Add the Ruff configuration above, add `bin/linters/style_lint.py` for slower adv
 ```text
 docs/style/development.md
   ├─► pyproject.toml [tool.ruff.*] ─────────────► make lint ───────► future required CI
-  └─► bin/linters/style_lint.py ───────────────► make lint:custom ─► advisory style review
+  └─► bin/linters/style_lint.py + lib/style_lint/ ─► make lint:custom ─► advisory style review
 ```
 
 - **Ruff configuration is the deterministic base.**
@@ -63,6 +63,8 @@ docs/style/development.md
 - **`bin/linters/style_lint.py` owns advisory model-backed rules Ruff cannot express cleanly.**
   - Use `gemini-3.1-flash-lite` as the default detector model.
   - Require `GEMINI_API_KEY`; if it is missing, print a clear skip message and exit zero.
+  - Keep reusable framework code under `lib/style_lint/`, not inside `src/evalspec/`, so it can later be extracted.
+  - Keep evalspec-specific business logic in `bin/linters/style_lint.py`: default paths, rule definitions, model defaults, and prompt instructions.
   - Define rules in a list and inject them into one general prompt so future checks are additive:
 
     ```python
@@ -90,12 +92,9 @@ docs/style/development.md
     ]
     ```
 
-  - `no-suppression-comments` flags `# noqa`, `# type: ignore`, `# pyright: ignore`, `# pylint: disable`, `# ruff: noqa`, and `# mypy:` comments.
-  - `section-header-comments` flags comments that are only visual dividers or region labels, such as `# --- parsing ---`, `# Validation`, or `# Setup`, while allowing comments that explain rationale or landmines.
-  - `provenance-comments` flags comments referencing external history or stale context, including `PR #123`, `issue #123`, `fixes #123`, `commit abc123`, `added for`, `called from`, and `see docs/...`.
-  - `descriptive-names` uses AST bindings to flag single-letter argument names, assignment targets, loop targets, lambda parameters, and comprehension targets, while allowing `_`.
-  - `dedented-multiline-strings` uses tokens plus parent/ancestor context to flag indented triple-quoted strings that are not passed through `textwrap.dedent`.
-  - The script may use deterministic prefiltering for cheap candidates, but Gemini 3.1 Flash Lite is the source of advisory findings for these custom rules.
+  - Gemini receives numbered source chunks plus the rule list and decides which snippets violate the rules.
+  - Deterministic framework code should stay limited to file collection, source chunking/numbered line formatting, Gemini transport, strict JSON/schema validation, optional verification, advisory error handling, and output formatting.
+  - Do not keep hand-rolled AST/token helper logic for subjective rule detection in the first rollout.
   - Diagnostics use `path:line:col: rule-id message`; default paths are `src`, `tests`, and `evals`, with optional path arguments for scoped runs.
   - Exit zero by default even when findings exist because model-backed findings are advisory in the first rollout.
   - A future explicit strict flag may return nonzero for findings after the baseline and false-positive rate are understood.

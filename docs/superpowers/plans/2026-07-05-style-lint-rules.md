@@ -4,7 +4,7 @@
 
 **Goal:** Add deterministic Ruff style coverage plus an advisory Gemini-backed custom style checker without slowing the default lint path.
 
-**Architecture:** Ruff owns fast, deterministic checks through `pyproject.toml` and `make lint`, with existing legacy files scoped by `per-file-ignores` so this issue does not become a repo-wide cleanup. The custom checker is a thin script wrapper over an importable `evalspec.style_lint` module so tests can stub the Gemini boundary cleanly. Deterministic code gathers candidate snippets and prompt context; Gemini remains the source of advisory findings.
+**Architecture:** Ruff owns fast, deterministic checks through `pyproject.toml` and `make lint`, with existing legacy files scoped by `per-file-ignores` so this issue does not become a repo-wide cleanup. The custom checker keeps evalspec-specific policy in `bin/linters/style_lint.py` and uses reusable framework code under `lib/style_lint/` for file collection, source chunking, Gemini transport, strict JSON/schema validation, optional verification, advisory error handling, and output formatting. Gemini receives numbered source chunks plus rule definitions and remains the source of advisory findings.
 
 **Tech Stack:** Python 3.10+, Ruff, pytest, Make, Gemini REST API over `GEMINI_API_KEY` using stdlib `urllib.request` and `json`.
 
@@ -14,8 +14,8 @@
 
 - Modify `pyproject.toml`: add commented Ruff configuration, Google pydocstyle convention, and scoped legacy `per-file-ignores` generated from the current baseline.
 - Modify `Makefile`: add `lint:custom` while keeping `lint` Ruff-only.
-- Create `bin/linters/style_lint.py`: executable CLI wrapper that imports `evalspec.style_lint`.
-- Create `src/evalspec/style_lint.py`: rule dataclasses, path collection, candidate extraction, Gemini prompt/call/parsing, optional verification, output formatting, and `run()`/`main()`.
+- Create `lib/style_lint/`: reusable rule/finding dataclasses, path collection, source chunking, Gemini prompt/call/parsing, optional verification, and output formatting.
+- Create `bin/linters/style_lint.py`: repository-specific CLI containing evalspec default paths, rule definitions, model defaults, prompt instructions, advisory `run()`, and `main()`.
 - Create `tests/test_style_lint.py`: focused tests for the custom checker and Makefile-facing behavior.
 
 ---
@@ -110,20 +110,20 @@ git push
 Create `tests/test_style_lint.py` with tests named:
 
 ```python
-def test_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys): ...
-def test_collect_targets_defaults_to_src_tests_evals(tmp_path, monkeypatch): ...
-def test_collect_targets_respects_explicit_path_args(tmp_path): ...
-def test_build_detector_prompt_includes_stable_rule_ids_and_descriptions(tmp_path): ...
+def test_evalspec_package_does_not_own_style_lint_framework(): ...
+def test_cli_owns_repo_specific_rules_prompt_and_default_paths(): ...
+def test_collect_python_files_defaults_to_configured_roots(tmp_path, monkeypatch): ...
+def test_chunk_source_formats_numbered_source_lines(tmp_path): ...
+def test_build_detector_prompt_includes_rules_chunks_and_schema(tmp_path): ...
 def test_parse_findings_rejects_unknown_rule_ids(tmp_path): ...
-def test_find_candidates_flags_single_letter_bindings_but_allows_unused_underscore(tmp_path): ...
-def test_find_candidates_flags_suppression_comments(tmp_path): ...
-def test_find_candidates_flags_section_headers_but_not_why_comments(tmp_path): ...
-def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(tmp_path): ...
-def test_find_candidates_flags_assigned_indented_triple_quoted_strings(tmp_path): ...
-def test_run_catches_malformed_model_output_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
-def test_verify_model_is_not_called_by_default(tmp_path, monkeypatch): ...
-def test_verify_model_can_filter_findings_when_enabled(tmp_path, monkeypatch): ...
-def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
+def test_parse_findings_rejects_boolean_indexes_and_lines(tmp_path): ...
+def test_parse_findings_rejects_lines_outside_referenced_chunk(tmp_path): ...
+def test_call_gemini_rejects_malformed_api_payload_shapes(monkeypatch): ...
+def test_cli_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys): ...
+def test_cli_run_catches_malformed_model_output_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
+def test_cli_run_prints_findings_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
+def test_cli_verify_model_can_filter_findings_when_enabled(tmp_path, monkeypatch, capsys): ...
+def test_cli_verify_model_is_not_called_by_default(tmp_path, monkeypatch): ...
 ```
 
 Use inline `tmp_path` file writers. Monkeypatch the Gemini call function so tests never require network access or `GEMINI_API_KEY` except where intentionally checking the skip path.
@@ -136,7 +136,7 @@ Run:
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_style_lint.py -q
 ```
 
-Expected: failure due to missing `evalspec.style_lint`.
+Expected: failure due to missing `lib.style_lint` and missing repo-specific policy in `bin/linters/style_lint.py`.
 
 - [ ] **Step 3: Commit failing tests**
 
@@ -151,13 +151,14 @@ git push
 ### Task 3: Implement Custom Style Linter
 
 **Files:**
-- Create: `src/evalspec/style_lint.py`
-- Create: `bin/linters/style_lint.py`
+- Create: `lib/style_lint/__init__.py`
+- Create: `lib/__init__.py`
+- Create/modify: `bin/linters/style_lint.py`
 - Test: `tests/test_style_lint.py`
 
-- [ ] **Step 1: Add importable rule and finding model**
+- [ ] **Step 1: Add reusable rule, chunk, and finding models**
 
-In `src/evalspec/style_lint.py`, define:
+In `lib/style_lint/__init__.py`, define:
 
 ```python
 from __future__ import annotations
@@ -165,21 +166,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"))
-
 @dataclass(frozen=True)
 class Rule:
     id: str
     description: str
 
 @dataclass(frozen=True)
-class Candidate:
+class SourceChunk:
+    index: int
     path: Path
-    line: int
-    column: int
-    rule_id: str
-    text: str
+    line_start: int
+    line_end: int
+    numbered_source: str
 
 @dataclass(frozen=True)
 class Finding:
@@ -190,32 +188,26 @@ class Finding:
     message: str
 ```
 
-Define `RULES` with these exact IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`.
+Define `DEFAULT_MODEL`, `DEFAULT_PATHS`, `RULES`, and the evalspec prompt instructions in `bin/linters/style_lint.py`, not in the reusable framework. Use these exact rule IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`.
 
 - [ ] **Step 2: Implement path collection**
 
-Implement `collect_targets(paths: list[Path] | None = None) -> list[Path]` so `None` defaults to existing Python files under `src`, `tests`, and `evals`, while explicit file or directory arguments scope the walk.
+Implement `collect_python_files(paths: list[Path] | None, *, default_paths: tuple[Path, ...]) -> list[Path]` so the caller owns default roots while explicit file or directory arguments scope the walk.
 
-- [ ] **Step 3: Implement deterministic candidate extraction**
+- [ ] **Step 3: Implement source chunking instead of deterministic rule extraction**
 
-Implement `find_candidates(path: Path) -> list[Candidate]` using AST, tokenize, and line scanning:
-
-- single-letter argument, assignment, loop, lambda, and comprehension bindings except `_`;
-- suppression comments containing `noqa`, `type: ignore`, `pyright: ignore`, `pylint: disable`, `ruff: noqa`, or `mypy:`;
-- section-header comments that are only labels or visual dividers;
-- provenance comments mentioning issues, PRs, commits, callers, planning docs, or `see docs/`;
-- all non-docstring indented triple-quoted strings not wrapped by `textwrap.dedent`, including assigned module constants and inline call arguments. Add test fixtures that mirror the assigned-string shapes in `tests/test_plugin.py` and `src/evalspec/agents/opencode.py`.
+Implement `chunk_source_files(paths: list[Path], *, max_lines: int = 120) -> list[SourceChunk]` so Gemini receives source snippets with stable chunk indexes and numbered source lines. Do not keep hand-rolled AST/token rule detectors in the framework; the model receives source chunks and rule definitions directly.
 
 - [ ] **Step 4: Implement Gemini prompt, call, parse, and optional verification**
 
 Implement:
 
 ```python
-def build_detector_prompt(candidates: list[Candidate], rules: list[Rule] = RULES) -> str: ...
-def call_gemini(prompt: str, *, model: str) -> str: ...
-def parse_findings(response: str, candidates: list[Candidate]) -> list[Finding]: ...
-def detect_findings(candidates: list[Candidate], *, model: str = DEFAULT_MODEL) -> list[Finding]: ...
-def verify_findings(findings: list[Finding], candidates: list[Candidate], *, verify_model: str | None) -> list[Finding]: ...
+def build_detector_prompt(*, chunks: list[SourceChunk], rules: list[Rule], instructions: str) -> str: ...
+def call_gemini(*, prompt: str, api_key: str, model: str) -> str: ...
+def parse_findings(response: str, *, chunks: list[SourceChunk], rules: list[Rule]) -> list[Finding]: ...
+def verify_findings(*, findings: list[Finding], chunks: list[SourceChunk], rules: list[Rule], instructions: str, api_key: str, model: str) -> list[Finding]: ...
+def format_findings(findings: list[Finding]) -> list[str]: ...
 ```
 
 Use strict JSON response expectations. Reject unknown rule IDs and malformed finding references with `ValueError`. Implement `call_gemini()` with stdlib `urllib.request` against the Gemini REST API, not a new SDK dependency, so `pyproject.toml` and `uv.lock` do not need Gemini package changes.
@@ -231,16 +223,23 @@ Required behavior:
 - catch Gemini transport errors, malformed JSON, unknown rule IDs, and malformed finding references; print one warning line and return `0` because `make lint:custom` is advisory;
 - accept `--model`, `--verify-model`, and optional path arguments.
 
-- [ ] **Step 6: Add script wrapper**
+- [ ] **Step 6: Add repository-specific CLI**
 
-Create `bin/linters/style_lint.py`:
+Create `bin/linters/style_lint.py` with evalspec-specific policy:
 
 ```python
 """Run repository-specific advisory style lint checks."""
 
 from __future__ import annotations
 
-from evalspec.style_lint import main
+from pathlib import Path
+
+import lib.style_lint as style_lint
+
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"))
+RULES = [...]
+DETECTOR_INSTRUCTIONS = "..."
 
 if __name__ == "__main__":
     raise SystemExit(main())
@@ -259,7 +258,7 @@ Expected: all tests in `tests/test_style_lint.py` pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/evalspec/style_lint.py bin/linters/style_lint.py tests/test_style_lint.py
+git add lib bin/linters/style_lint.py tests/test_style_lint.py
 git commit -m "feat: add advisory style linter"
 git push
 ```
@@ -377,4 +376,4 @@ Skip this commit if there are no verification fixes.
 
 - Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.1 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
 - Placeholder scan: no `TBD`, `TODO`, vague "add tests", or undefined task dependencies remain.
-- Type consistency: `Rule`, `Candidate`, `Finding`, `collect_targets`, `find_candidates`, `build_detector_prompt`, `detect_findings`, `verify_findings`, `run`, and `main` names are consistent across tasks.
+- Type consistency: `Rule`, `SourceChunk`, `Finding`, `collect_python_files`, `chunk_source_files`, `build_detector_prompt`, `parse_findings`, `verify_findings`, `format_findings`, `run`, and `main` names are consistent across tasks.
