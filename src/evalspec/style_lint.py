@@ -16,6 +16,7 @@ from pathlib import Path
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"))
+GEMINI_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -90,20 +91,20 @@ _SECTION_DIVIDER = re.compile(r"^[-=*_~#\s]+$")
 _SECTION_WRAPPED_LABEL = re.compile(r"^[-=*_~#\s]+[A-Za-z][A-Za-z0-9 /_-]*[-=*_~#\s]+$")
 _SECTION_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /_-]{0,40}$")
 _SECTION_REGION_LABELS = {
-    "Build",
-    "Cleanup",
-    "Config",
-    "Configuration",
-    "Configure",
-    "Execute",
-    "Execution",
-    "Parsing",
-    "Results",
-    "Retry",
-    "Setup",
-    "Teardown",
-    "Validation",
-    "Verify",
+    "build",
+    "cleanup",
+    "config",
+    "configuration",
+    "configure",
+    "execute",
+    "execution",
+    "parsing",
+    "results",
+    "retry",
+    "setup",
+    "teardown",
+    "validation",
+    "verify",
 }
 _PROVENANCE_PATTERN = re.compile(
     r"\b(?:pr|issue|fixes)\s*\#\d+\b|"
@@ -199,7 +200,12 @@ def build_detector_prompt(
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
-def call_gemini(prompt: str, *, model: str) -> str:
+def call_gemini(
+    prompt: str,
+    *,
+    model: str,
+    timeout: float = GEMINI_TIMEOUT_SECONDS,
+) -> str:
     """Call the Gemini REST API and return the model's JSON text response."""
     api_key = os.environ["GEMINI_API_KEY"]
     url = (
@@ -218,7 +224,7 @@ def call_gemini(prompt: str, *, model: str) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     if not isinstance(payload, dict):
@@ -610,10 +616,10 @@ def _looks_like_section_header(comment_text: str) -> bool:
     normalized = comment_text.strip()
     if _SECTION_DIVIDER.fullmatch(normalized):
         return True
-    if _SECTION_WRAPPED_LABEL.fullmatch(normalized):
-        return True
 
     stripped = normalized.strip("-=*_~# ").strip()
+    if _SECTION_WRAPPED_LABEL.fullmatch(normalized):
+        return _is_known_region_label(stripped)
     if not stripped:
         return True
     if not _SECTION_LABEL.fullmatch(stripped):
@@ -623,7 +629,12 @@ def _looks_like_section_header(comment_text: str) -> bool:
         return False
     if len(words) == 1 and words[0].isupper():
         return False
-    return stripped in _SECTION_REGION_LABELS
+    return _is_known_region_label(stripped)
+
+
+def _is_known_region_label(text: str) -> bool:
+    """Return whether text matches a known section/region label."""
+    return text.casefold() in _SECTION_REGION_LABELS
 
 
 def _is_triple_quoted(token_string: str) -> bool:
