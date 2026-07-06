@@ -782,11 +782,13 @@ def _has_intermediate_shadowing(
         if isinstance(
             current,
             (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp),
-        ) and any(
-            _target_binds_name(generator.target, name)
-            for generator in current.generators
         ):
-            return True
+            for generator in current.generators:
+                if not _target_binds_name(generator.target, name):
+                    continue
+                if _node_contains(generator.iter, node, parents):
+                    continue
+                return True
         if isinstance(current, ast.match_case) and _pattern_binds_name(
             current.pattern,
             name,
@@ -935,6 +937,11 @@ def _binding_is_visible_at_reference(
         return not (
             _target_binds_name(candidate.target, name)
             and _node_contains(candidate.value, reference_node, parents)
+        )
+    if isinstance(candidate, (ast.For, ast.AsyncFor)):
+        return not (
+            _target_binds_name(candidate.target, name)
+            and _node_contains(candidate.iter, reference_node, parents)
         )
     return True
 

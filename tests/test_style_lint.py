@@ -1189,6 +1189,116 @@ PROMPTS = [dedent(
     assert [candidate.line for candidate in multiline_strings] == [4]
 
 
+def test_find_candidates_allows_for_iterable_evaluation_before_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow iterable evaluation before a for-loop target shadows textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+for textwrap in [textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")]:
+    pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_for_body_use_after_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag loop-body textwrap.dedent() after the target has shadowed the import."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+for textwrap in [str]:
+    PROMPT = textwrap.dedent(\"\"\"
+        hello
+        world
+    \"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [4]
+
+
+def test_find_candidates_allows_comprehension_iterable_before_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Allow comprehension iterable evaluation before the target shadows textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+VALUES = [value for textwrap in [textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")] for value in [1]]
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_comprehension_body_use_after_textwrap_binding(
+    tmp_path: Path,
+) -> None:
+    """Flag comprehension element use after the target has shadowed textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+VALUES = [textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\") for textwrap in [str]]
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [3]
+
+
 def test_find_candidates_flags_match_capture_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
