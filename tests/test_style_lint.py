@@ -544,6 +544,55 @@ value = 1
     assert [candidate.line for candidate in provenance_comments] == [3, 4]
 
 
+def test_find_candidates_does_not_flag_plain_docs_path_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow ordinary current-path comments that mention docs paths."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# load fixture from docs/examples/sample.md
+# compare against docs/reference/output.md
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert provenance_comments == []
+
+
+def test_find_candidates_flags_stale_docs_pointer_phrasing(
+    tmp_path: Path,
+) -> None:
+    """Flag stale pointer phrasing that sends readers to docs/ notes."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# see docs/plans/style-lint.md
+# per docs/adr/style.md
+# planning docs capture the rest
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert [candidate.line for candidate in provenance_comments] == [1, 2, 3]
+
+
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
     tmp_path: Path,
 ) -> None:
@@ -618,6 +667,74 @@ def test_run_catches_malformed_model_output_and_stays_advisory(
     monkeypatch.setattr(style_lint, "collect_targets", lambda paths=None: [source])
     monkeypatch.setattr(style_lint, "find_candidates", lambda path: [candidate])
     monkeypatch.setattr(style_lint, "call_gemini", lambda prompt, *, model: "{")
+
+    exit_code = style_lint.run([source])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "warning" in captured.out.lower()
+
+
+def test_run_catches_timeout_error_and_stays_advisory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warn and return zero when the model call times out directly."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="x = 1",
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(style_lint, "collect_targets", lambda paths=None: [source])
+    monkeypatch.setattr(style_lint, "find_candidates", lambda path: [candidate])
+    monkeypatch.setattr(
+        style_lint,
+        "call_gemini",
+        lambda prompt, *, model: (_ for _ in ()).throw(TimeoutError("timed out")),
+    )
+
+    exit_code = style_lint.run([source])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "warning" in captured.out.lower()
+
+
+def test_run_catches_transport_timeout_and_stays_advisory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warn and return zero when the transport layer raises TimeoutError."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="x = 1",
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(style_lint, "collect_targets", lambda paths=None: [source])
+    monkeypatch.setattr(style_lint, "find_candidates", lambda path: [candidate])
+    monkeypatch.setattr(
+        style_lint.urllib.request,
+        "urlopen",
+        lambda request, *, timeout: (_ for _ in ()).throw(TimeoutError("timed out")),
+    )
 
     exit_code = style_lint.run([source])
 
