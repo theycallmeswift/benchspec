@@ -882,6 +882,8 @@ def _binding_kind_for_name(node: ast.AST, name: str) -> str | None:
             if any(_target_binds_name(target, name) for target in targets)
             else None
         )
+    if isinstance(node, ast.NamedExpr):
+        return "other" if _target_binds_name(node.target, name) else None
     if isinstance(node, (ast.For, ast.AsyncFor)):
         return "other" if _target_binds_name(node.target, name) else None
     if isinstance(node, ast.With):
@@ -938,11 +940,24 @@ def _binding_is_visible_at_reference(
             _target_binds_name(candidate.target, name)
             and _node_contains(candidate.value, reference_node, parents)
         )
+    if isinstance(candidate, ast.NamedExpr):
+        return not (
+            _target_binds_name(candidate.target, name)
+            and _node_contains(candidate.value, reference_node, parents)
+        )
     if isinstance(candidate, (ast.For, ast.AsyncFor)):
         return not (
             _target_binds_name(candidate.target, name)
             and _node_contains(candidate.iter, reference_node, parents)
         )
+    if isinstance(candidate, ast.With):
+        for item in candidate.items:
+            if item.optional_vars is None:
+                continue
+            if not _target_binds_name(item.optional_vars, name):
+                continue
+            if _node_contains(item.context_expr, reference_node, parents):
+                return False
     return True
 
 
