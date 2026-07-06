@@ -602,6 +602,9 @@ def test_find_candidates_does_not_flag_legitimate_added_for_or_caller_comments(
     source.write_text(
         """\
 # field added for wire compatibility
+# added for issue reproduction
+# added for docs generation
+# added for caller-owned cancellation
 # caller provides the account id
 value = 1
 """,
@@ -628,6 +631,7 @@ def test_find_candidates_flags_explicit_caller_and_issue_pr_provenance(
 # called from server.py
 # added for issue #123
 # added for PR #456
+# added for #789
 value = 1
 """,
     )
@@ -639,7 +643,7 @@ value = 1
         if candidate.rule_id == "provenance-comments"
     ]
 
-    assert [candidate.line for candidate in provenance_comments] == [1, 2, 3]
+    assert [candidate.line for candidate in provenance_comments] == [1, 2, 3, 4]
 
 
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
