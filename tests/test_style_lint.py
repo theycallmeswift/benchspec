@@ -16,6 +16,20 @@ def _style_lint() -> ModuleType:
     return importlib.import_module("evalspec.style_lint")
 
 
+def test_makefile_wires_custom_lint_target_and_keeps_lint_ruff_only() -> None:
+    """Keep the default lint target Ruff-only and expose the custom make target."""
+    makefile_text = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
+
+    assert "lint\\:custom" in makefile_text
+    assert "uv run ruff check ." in makefile_text
+    assert "uv run python bin/linters/style_lint.py" in makefile_text
+
+    lint_target_text = makefile_text.split("lint:  ## Lint with ruff", maxsplit=1)[1]
+    lint_target_text = lint_target_text.split("\n\n", maxsplit=1)[0]
+
+    assert "style_lint.py" not in lint_target_text
+
+
 def test_run_skips_cleanly_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
