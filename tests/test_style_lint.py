@@ -919,6 +919,106 @@ def render_prompt() -> str:
     assert [candidate.line for candidate in multiline_strings] == [6]
 
 
+def test_find_candidates_allows_same_line_dedent_call_before_rebinding(
+    tmp_path: Path,
+) -> None:
+    """Allow same-line dedent() calls that happen before a later rebinding."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent; PROMPT = dedent(\"\"\"
+    hello
+    world
+\"\"\"); dedent = str.strip
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_same_line_dedent_rebinding_before_call(
+    tmp_path: Path,
+) -> None:
+    """Flag same-line dedent() calls when rebinding happens earlier on the line."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent; dedent = str.strip; PROMPT = dedent(\"\"\"
+    hello
+    world
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [1]
+
+
+def test_find_candidates_allows_same_line_textwrap_call_before_rebinding(
+    tmp_path: Path,
+) -> None:
+    """Allow same-line textwrap.dedent() calls before a later rebinding."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap; PROMPT = textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\"); textwrap = str
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_same_line_textwrap_rebinding_before_call(
+    tmp_path: Path,
+) -> None:
+    """Flag same-line textwrap.dedent() calls when rebinding comes first."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap; textwrap = str; PROMPT = textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [1]
+
+
 def test_find_candidates_flags_lambda_parameter_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
