@@ -89,6 +89,22 @@ _SUPPRESSION_PATTERNS = (
 _SECTION_DIVIDER = re.compile(r"^[-=*_~#\s]+$")
 _SECTION_WRAPPED_LABEL = re.compile(r"^[-=*_~#\s]+[A-Za-z][A-Za-z0-9 /_-]*[-=*_~#\s]+$")
 _SECTION_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /_-]{0,40}$")
+_SECTION_REGION_LABELS = {
+    "Build",
+    "Cleanup",
+    "Config",
+    "Configuration",
+    "Configure",
+    "Execute",
+    "Execution",
+    "Parsing",
+    "Results",
+    "Retry",
+    "Setup",
+    "Teardown",
+    "Validation",
+    "Verify",
+}
 _PROVENANCE_PATTERN = re.compile(
     r"\b(?:pr|issue|fixes)\s*\#\d+\b|"
     r"\bcommit\s+[0-9a-f]{6,40}\b|"
@@ -607,17 +623,7 @@ def _looks_like_section_header(comment_text: str) -> bool:
         return False
     if len(words) == 1 and words[0].isupper():
         return False
-    return all(_is_section_label_word(word) for word in words)
-
-
-def _is_section_label_word(word: str) -> bool:
-    """Return whether a word looks like a section label token."""
-    token = word.strip("/_-")
-    if not token:
-        return False
-    if token.isupper():
-        return True
-    return token[0].isupper() and token[1:] == token[1:].lower()
+    return stripped in _SECTION_REGION_LABELS
 
 
 def _is_triple_quoted(token_string: str) -> bool:
