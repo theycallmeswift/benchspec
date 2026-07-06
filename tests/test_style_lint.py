@@ -233,11 +233,44 @@ def test_call_gemini_rejects_malformed_api_payload_shapes(
         monkeypatch.setattr(
             style_lint.urllib.request,
             "urlopen",
-            lambda request, *, payload=payload: _Response(payload),
+            lambda request, *, timeout, payload=payload: _Response(payload),
         )
 
         with pytest.raises(ValueError, match="Gemini response"):
             style_lint.call_gemini("{}", model=style_lint.DEFAULT_MODEL)
+
+
+def test_call_gemini_passes_timeout_to_urlopen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass the configured timeout through to urllib."""
+    style_lint = _style_lint()
+    seen_timeout = None
+
+    class _Response:
+        def read(self) -> bytes:
+            return json.dumps(
+                {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+            ).encode("utf-8")
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def _urlopen(request: object, *, timeout: float) -> _Response:
+        nonlocal seen_timeout
+        seen_timeout = timeout
+        return _Response()
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(style_lint.urllib.request, "urlopen", _urlopen)
+
+    response = style_lint.call_gemini("{}", model=style_lint.DEFAULT_MODEL)
+
+    assert response == "{}"
+    assert seen_timeout == style_lint.GEMINI_TIMEOUT_SECONDS
 
 
 def test_verify_findings_rejects_boolean_keep_indexes(
@@ -389,6 +422,30 @@ def test_find_candidates_does_not_flag_title_cased_rationale_comments(
 # Temporary Workaround
 # Retry Logic
 # Happy Path
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    section_headers = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "section-header-comments"
+    ]
+
+    assert section_headers == []
+
+
+def test_find_candidates_does_not_flag_wrapped_rationale_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow wrapped comments that are not known region labels."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# --- Temporary Workaround ---
+# --- why upstream API 500s on cold start ---
 value = 1
 """,
     )
