@@ -706,7 +706,13 @@ def _name_resolves_to_textwrap_dedent(
         if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
             continue
         position_limit = _node_position(call) if index == len(scopes) - 1 else None
-        binding = _last_name_binding(name, scope, position_limit=position_limit)
+        binding = _last_name_binding(
+            name,
+            scope,
+            position_limit=position_limit,
+            reference_node=call,
+            parents=parents,
+        )
         if binding is None:
             continue
         return binding == "textwrap_dedent"
@@ -728,7 +734,13 @@ def _name_resolves_to_textwrap_module(
         if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
             continue
         position_limit = _node_position(call) if index == len(scopes) - 1 else None
-        binding = _last_name_binding(name, scope, position_limit=position_limit)
+        binding = _last_name_binding(
+            name,
+            scope,
+            position_limit=position_limit,
+            reference_node=call,
+            parents=parents,
+        )
         if binding is None:
             continue
         return binding == "textwrap_module"
@@ -789,6 +801,8 @@ def _last_name_binding(
     scope: ast.AST,
     *,
     position_limit: tuple[int, int] | None,
+    reference_node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
 ) -> str | None:
     """Return the last visible binding kind for a name inside one scope."""
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -813,6 +827,13 @@ def _last_name_binding(
             continue
         binding = _binding_kind_for_name(candidate, name)
         if binding is None:
+            continue
+        if not _binding_is_visible_at_reference(
+            candidate,
+            reference_node,
+            parents,
+            name,
+        ):
             continue
         if last_binding is None or position >= last_binding[0]:
             last_binding = (position, binding)
@@ -892,6 +913,32 @@ def _matches_import_binding(
     return None
 
 
+def _binding_is_visible_at_reference(
+    candidate: ast.AST,
+    reference_node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+    name: str,
+) -> bool:
+    """Return whether a binding is visible at the reference point."""
+    if isinstance(candidate, ast.Assign):
+        return not (
+            any(_target_binds_name(target, name) for target in candidate.targets)
+            and _node_contains(candidate.value, reference_node, parents)
+        )
+    if isinstance(candidate, ast.AnnAssign):
+        return not (
+            candidate.value is not None
+            and _target_binds_name(candidate.target, name)
+            and _node_contains(candidate.value, reference_node, parents)
+        )
+    if isinstance(candidate, ast.AugAssign):
+        return not (
+            _target_binds_name(candidate.target, name)
+            and _node_contains(candidate.value, reference_node, parents)
+        )
+    return True
+
+
 def _target_binds_name(target: ast.AST, name: str) -> bool:
     """Return whether an assignment-like target binds the given name."""
     if isinstance(target, ast.Name):
@@ -918,6 +965,20 @@ def _pattern_binds_name(pattern: ast.AST, name: str) -> bool:
     for child in ast.iter_child_nodes(pattern):
         if _pattern_binds_name(child, name):
             return True
+    return False
+
+
+def _node_contains(
+    container: ast.AST,
+    node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    """Return whether node is contained within container."""
+    current: ast.AST | None = node
+    while current is not None:
+        if current is container:
+            return True
+        current = parents.get(current)
     return False
 
 

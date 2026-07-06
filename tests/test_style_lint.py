@@ -1019,6 +1019,118 @@ import textwrap; textwrap = str; PROMPT = textwrap.dedent(\"\"\"
     assert [candidate.line for candidate in multiline_strings] == [1]
 
 
+def test_find_candidates_allows_assignment_rhs_dedent_before_rebinding(
+    tmp_path: Path,
+) -> None:
+    """Allow RHS dedent() calls before the target name is rebound by the assignment."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+dedent = dedent(\"\"\"
+    hello
+    world
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_post_assignment_dedent_rebinding_use(
+    tmp_path: Path,
+) -> None:
+    """Flag later dedent() uses after the imported name has been rebound."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+dedent = dedent(\"\"\"
+    hello
+    world
+\"\"\")
+OTHER = dedent(\"\"\"
+    next
+    prompt
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [6]
+
+
+def test_find_candidates_allows_assignment_rhs_textwrap_before_rebinding(
+    tmp_path: Path,
+) -> None:
+    """Allow RHS textwrap.dedent() before the assignment target rebinds textwrap."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+textwrap = textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_post_assignment_textwrap_rebinding_use(
+    tmp_path: Path,
+) -> None:
+    """Flag later textwrap.dedent() uses after textwrap has been rebound."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+textwrap = textwrap.dedent(\"\"\"
+    hello
+    world
+\"\"\")
+OTHER = textwrap.dedent(\"\"\"
+    next
+    prompt
+\"\"\")
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [6]
+
+
 def test_find_candidates_flags_lambda_parameter_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
