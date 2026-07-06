@@ -705,8 +705,8 @@ def _name_resolves_to_textwrap_dedent(
         scope = scopes[index]
         if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
             continue
-        line_limit = call.lineno if index == len(scopes) - 1 else None
-        binding = _last_name_binding(name, scope, line_limit=line_limit)
+        position_limit = _node_position(call) if index == len(scopes) - 1 else None
+        binding = _last_name_binding(name, scope, position_limit=position_limit)
         if binding is None:
             continue
         return binding == "textwrap_dedent"
@@ -727,8 +727,8 @@ def _name_resolves_to_textwrap_module(
         scope = scopes[index]
         if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
             continue
-        line_limit = call.lineno if index == len(scopes) - 1 else None
-        binding = _last_name_binding(name, scope, line_limit=line_limit)
+        position_limit = _node_position(call) if index == len(scopes) - 1 else None
+        binding = _last_name_binding(name, scope, position_limit=position_limit)
         if binding is None:
             continue
         return binding == "textwrap_module"
@@ -788,7 +788,7 @@ def _last_name_binding(
     name: str,
     scope: ast.AST,
     *,
-    line_limit: int | None,
+    position_limit: tuple[int, int] | None,
 ) -> str | None:
     """Return the last visible binding kind for a name inside one scope."""
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -804,18 +804,18 @@ def _last_name_binding(
         if scope.args.kwarg is not None and scope.args.kwarg.arg == name:
             return "other"
 
-    last_binding: tuple[int, str] | None = None
+    last_binding: tuple[tuple[int, int], str] | None = None
     for candidate in _iter_scope_bindings(scope):
-        lineno = getattr(candidate, "lineno", None)
-        if lineno is None:
+        position = _node_position(candidate)
+        if position is None:
             continue
-        if line_limit is not None and lineno > line_limit:
+        if position_limit is not None and position > position_limit:
             continue
         binding = _binding_kind_for_name(candidate, name)
         if binding is None:
             continue
-        if last_binding is None or lineno >= last_binding[0]:
-            last_binding = (lineno, binding)
+        if last_binding is None or position >= last_binding[0]:
+            last_binding = (position, binding)
 
     return None if last_binding is None else last_binding[1]
 
@@ -919,3 +919,11 @@ def _pattern_binds_name(pattern: ast.AST, name: str) -> bool:
         if _pattern_binds_name(child, name):
             return True
     return False
+
+
+def _node_position(node: ast.AST) -> tuple[int, int] | None:
+    """Return a node source position as (lineno, col_offset)."""
+    lineno = getattr(node, "lineno", None)
+    if lineno is None:
+        return None
+    return (lineno, getattr(node, "col_offset", 0))
