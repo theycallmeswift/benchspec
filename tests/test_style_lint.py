@@ -170,6 +170,35 @@ def test_parse_findings_rejects_rule_id_mismatches_candidate(tmp_path: Path) -> 
         style_lint.parse_findings(response, [candidate])
 
 
+def test_parse_findings_rejects_boolean_candidate_indexes(tmp_path: Path) -> None:
+    """Reject booleans where a candidate index integer is required."""
+    style_lint = _style_lint()
+    candidate_path = tmp_path / "src/evalspec/example.py"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_path.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=candidate_path,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="value = 1",
+    )
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "candidate_index": False,
+                    "rule_id": "descriptive-names",
+                    "message": "This should not be allowed.",
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="Malformed finding reference"):
+        style_lint.parse_findings(response, [candidate])
+
+
 def test_call_gemini_rejects_malformed_api_payload_shapes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -194,6 +223,8 @@ def test_call_gemini_rejects_malformed_api_payload_shapes(
         {"candidates": [{}]},
         {"candidates": [{"content": {}}]},
         {"candidates": [{"content": {"parts": []}}]},
+        {"candidates": [{"content": {"parts": ["text"]}}]},
+        {"candidates": [{"content": {"parts": [{"text": 1}]}}]},
     ]
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -207,6 +238,43 @@ def test_call_gemini_rejects_malformed_api_payload_shapes(
 
         with pytest.raises(ValueError, match="Gemini response"):
             style_lint.call_gemini("{}", model=style_lint.DEFAULT_MODEL)
+
+
+def test_verify_findings_rejects_boolean_keep_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject booleans where verification keep indexes must be integers."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="x = 1",
+    )
+    finding = style_lint.Finding(
+        path=source,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        message="Use a descriptive binding name.",
+    )
+
+    monkeypatch.setattr(
+        style_lint,
+        "call_gemini",
+        lambda prompt, *, model: json.dumps({"keep_indexes": [False]}),
+    )
+
+    with pytest.raises(ValueError, match="Malformed finding reference"):
+        style_lint.verify_findings(
+            [finding],
+            [candidate],
+            verify_model="gemini-3.1-pro",
+        )
 
 
 def test_find_candidates_flags_single_letter_bindings_but_allows_unused_underscore(
@@ -296,6 +364,31 @@ def test_find_candidates_does_not_flag_normal_short_rationale_comments(
     source.write_text(
         """\
 # temporary workaround
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    section_headers = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "section-header-comments"
+    ]
+
+    assert section_headers == []
+
+
+def test_find_candidates_does_not_flag_all_caps_tag_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow bare all-caps tags that are not actual section headers."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# TODO
+# NOTE
+# IMPORTANT
 value = 1
 """,
     )

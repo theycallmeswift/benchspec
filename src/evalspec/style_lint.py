@@ -224,7 +224,16 @@ def call_gemini(prompt: str, *, model: str) -> str:
     if not isinstance(parts, list) or not parts:
         raise ValueError("Gemini response content did not include parts")
 
-    texts = [part["text"] for part in parts if "text" in part]
+    texts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            raise ValueError("Gemini response part must be an object")
+        text = part.get("text")
+        if text is None:
+            continue
+        if not isinstance(text, str):
+            raise ValueError("Gemini response part text must be a string")
+        texts.append(text)
     if not texts:
         raise ValueError("Gemini response did not include text content")
     return "".join(texts)
@@ -250,7 +259,7 @@ def parse_findings(response: str, candidates: list[Candidate]) -> list[Finding]:
             raise ValueError(f"Unknown rule ID: {rule_id}")
 
         candidate_index = raw_finding.get("candidate_index")
-        if not isinstance(candidate_index, int):
+        if type(candidate_index) is not int:
             raise ValueError(f"Malformed finding reference: {candidate_index!r}")
         if candidate_index < 0 or candidate_index >= len(candidates):
             raise ValueError(f"Malformed finding reference: {candidate_index!r}")
@@ -345,7 +354,7 @@ def verify_findings(
     verified_findings: list[Finding] = []
     for keep_index in keep_indexes:
         if (
-            not isinstance(keep_index, int)
+            type(keep_index) is not int
             or keep_index < 0
             or keep_index >= len(findings)
         ):
@@ -595,6 +604,8 @@ def _looks_like_section_header(comment_text: str) -> bool:
         return False
     words = stripped.split()
     if len(words) > 4:
+        return False
+    if len(words) == 1 and words[0].isupper():
         return False
     return all(_is_section_label_word(word) for word in words)
 
