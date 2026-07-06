@@ -718,7 +718,7 @@ def _enclosing_scopes(
     while current is not None:
         if isinstance(
             current,
-            (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+            (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda),
         ):
             scopes.append(current)
         current = parents.get(current)
@@ -733,7 +733,7 @@ def _last_name_binding(
     line_limit: int | None,
 ) -> str | None:
     """Return the last visible binding kind for a name inside one scope."""
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         for argument in (
             list(scope.args.posonlyargs)
             + list(scope.args.args)
