@@ -141,6 +141,74 @@ def test_parse_findings_rejects_unknown_rule_ids(tmp_path: Path) -> None:
         style_lint.parse_findings(response, [candidate])
 
 
+def test_parse_findings_rejects_rule_id_mismatches_candidate(tmp_path: Path) -> None:
+    """Reject model findings that rewrite a candidate's deterministic rule ID."""
+    style_lint = _style_lint()
+    candidate_path = tmp_path / "src/evalspec/example.py"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_path.write_text("value = 1\n")
+    candidate = style_lint.Candidate(
+        path=candidate_path,
+        line=1,
+        column=1,
+        rule_id="descriptive-names",
+        text="value = 1",
+    )
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "candidate_index": 0,
+                    "rule_id": "section-header-comments",
+                    "message": "This should not be allowed.",
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="section-header-comments"):
+        style_lint.parse_findings(response, [candidate])
+
+
+def test_call_gemini_rejects_malformed_api_payload_shapes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject partial Gemini payloads that omit the expected content shape."""
+    style_lint = _style_lint()
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    malformed_payloads = [
+        {"candidates": []},
+        {"candidates": [{}]},
+        {"candidates": [{"content": {}}]},
+        {"candidates": [{"content": {"parts": []}}]},
+    ]
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    for payload in malformed_payloads:
+        monkeypatch.setattr(
+            style_lint.urllib.request,
+            "urlopen",
+            lambda request, *, payload=payload: _Response(payload),
+        )
+
+        with pytest.raises(ValueError, match="Gemini response"):
+            style_lint.call_gemini("{}", model=style_lint.DEFAULT_MODEL)
+
+
 def test_find_candidates_flags_single_letter_bindings_but_allows_unused_underscore(
     tmp_path: Path,
 ) -> None:

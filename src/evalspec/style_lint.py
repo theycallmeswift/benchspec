@@ -205,7 +205,25 @@ def call_gemini(prompt: str, *, model: str) -> str:
     with urllib.request.urlopen(request) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
-    parts = payload["candidates"][0]["content"]["parts"]
+    if not isinstance(payload, dict):
+        raise ValueError("Gemini response must be a JSON object")
+
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("Gemini response did not include candidates")
+
+    first_candidate = candidates[0]
+    if not isinstance(first_candidate, dict):
+        raise ValueError("Gemini response candidate must be an object")
+
+    content = first_candidate.get("content")
+    if not isinstance(content, dict):
+        raise ValueError("Gemini response candidate did not include content")
+
+    parts = content.get("parts")
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("Gemini response content did not include parts")
+
     texts = [part["text"] for part in parts if "text" in part]
     if not texts:
         raise ValueError("Gemini response did not include text content")
@@ -242,6 +260,11 @@ def parse_findings(response: str, candidates: list[Candidate]) -> list[Finding]:
             raise ValueError("Finding message must be a non-empty string")
 
         candidate = candidates[candidate_index]
+        if rule_id != candidate.rule_id:
+            raise ValueError(
+                "Finding rule ID does not match candidate rule ID: "
+                f"{rule_id} != {candidate.rule_id}"
+            )
         findings.append(
             Finding(
                 path=candidate.path,
