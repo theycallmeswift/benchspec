@@ -608,19 +608,16 @@ value = 1
     assert [candidate.line for candidate in provenance_comments] == [1, 2, 3]
 
 
-def test_find_candidates_does_not_flag_legitimate_added_for_or_caller_comments(
+def test_find_candidates_does_not_flag_non_provenance_caller_comments(
     tmp_path: Path,
 ) -> None:
-    """Allow rationale comments that use added-for or caller language locally."""
+    """Allow local caller rationale comments that do not cite provenance."""
     style_lint = _style_lint()
     source = tmp_path / "sample.py"
     source.write_text(
         """\
-# field added for wire compatibility
-# added for issue reproduction
-# added for docs generation
-# added for caller-owned cancellation
 # caller provides the account id
+# caller retries after refresh
 value = 1
 """,
     )
@@ -661,6 +658,33 @@ value = 1
     assert [candidate.line for candidate in provenance_comments] == [1, 2, 3, 4]
 
 
+def test_find_candidates_flags_generic_added_for_provenance_comments(
+    tmp_path: Path,
+) -> None:
+    """Flag generic added-for provenance comments banned by the style guide."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# field added for wire compatibility
+# added for issue reproduction
+# added for docs generation
+# added for caller-owned cancellation
+# caller provides the account id
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    provenance_comments = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "provenance-comments"
+    ]
+
+    assert [candidate.line for candidate in provenance_comments] == [1, 2, 3, 4]
+
+
 def test_find_candidates_flags_indented_triple_quoted_strings_without_dedent(
     tmp_path: Path,
 ) -> None:
@@ -673,6 +697,34 @@ def render_prompt() -> str:
     return build_message(
         \"\"\"
         hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [3]
+
+
+def test_find_candidates_flags_indented_triple_quoted_fstrings_without_dedent(
+    tmp_path: Path,
+) -> None:
+    """Flag indented triple-quoted f-strings that skip `dedent()`."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+def render_prompt(name: str) -> str:
+    return build_message(
+        f\"\"\"
+        hello {name}
         world
         \"\"\"
     )
@@ -1862,3 +1914,42 @@ def test_run_prints_findings_in_path_line_col_rule_format_and_stays_advisory(
         f"{source}:1:4: descriptive-names Use a descriptive binding name."
         in captured.out
     )
+
+
+def test_find_candidates_flags_single_letter_bindings_in_more_binding_forms(
+    tmp_path: Path,
+) -> None:
+    """Flag single-letter names in except, with, walrus, and match bindings."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+try:
+    pass
+except Exception as e:
+    pass
+
+with open("sample.py") as f:
+    pass
+
+if (m := "value"):
+    pass
+
+match {"value": 1}:
+    case {"value": v}:
+        pass
+
+match [1, 2]:
+    case [head, *r]:
+        pass
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    descriptive_names = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "descriptive-names"
+    ]
+
+    assert [candidate.line for candidate in descriptive_names] == [3, 6, 9, 13, 17]

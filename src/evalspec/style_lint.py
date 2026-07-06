@@ -109,13 +109,21 @@ _SECTION_REGION_LABELS = {
 _PROVENANCE_PATTERN = re.compile(
     r"\b(?:pr|issue|fixes)\s*\#\d+\b|"
     r"\bcommit\s+[0-9a-f]{6,40}\b|"
-    r"\badded\s+for\s+(?:(?:pr|issue|fixes)\s*\#\d+|\#\d+|commit\s+[0-9a-f]{6,40})\b|"
+    r"\badded\s+for\b|"
     r"\bcalled\s+from\b|"
     r"\bplanning\s+docs?\b|"
     r"^(?:see|per)\s+docs/",
     re.IGNORECASE,
 )
 _STRING_PREFIX = re.compile(r"(?i)^[rubf]*")
+_TRIPLE_QUOTED_TOKEN_TYPES = frozenset(
+    token_type
+    for token_type in (
+        tokenize.STRING,
+        getattr(tokenize, "FSTRING_START", None),
+    )
+    if token_type is not None
+)
 
 
 def collect_targets(paths: list[Path] | None = None) -> list[Path]:
@@ -479,6 +487,34 @@ def _find_name_candidates(
             for element in target.elts:
                 visit_target(element)
 
+    def visit_match_pattern(pattern: ast.AST) -> None:
+        if isinstance(pattern, ast.MatchAs):
+            if pattern.name is not None:
+                add_name(
+                    pattern.name,
+                    line=pattern.lineno,
+                    column=pattern.col_offset + 1,
+                )
+            if pattern.pattern is not None:
+                visit_match_pattern(pattern.pattern)
+            return
+        if isinstance(pattern, ast.MatchStar):
+            if pattern.name is not None:
+                add_name(
+                    pattern.name,
+                    line=pattern.lineno,
+                    column=pattern.col_offset + 1,
+                )
+            return
+        if isinstance(pattern, ast.MatchMapping) and pattern.rest is not None:
+            add_name(
+                pattern.rest,
+                line=pattern.lineno,
+                column=pattern.col_offset + 1,
+            )
+        for child in ast.iter_child_nodes(pattern):
+            visit_match_pattern(child)
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             for argument in (
@@ -511,6 +547,17 @@ def _find_name_candidates(
             visit_target(node.target)
         elif isinstance(node, ast.comprehension):
             visit_target(node.target)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    visit_target(item.optional_vars)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name is not None:
+                add_name(node.name, line=node.lineno, column=node.col_offset + 1)
+        elif isinstance(node, ast.NamedExpr):
+            visit_target(node.target)
+        elif isinstance(node, ast.match_case):
+            visit_match_pattern(node.pattern)
     return candidates
 
 
@@ -575,27 +622,34 @@ def _find_multiline_string_candidates(
     line_text: list[str],
 ) -> list[Candidate]:
     """Find indented triple-quoted strings that skip textwrap.dedent."""
-    constants = {
+    string_nodes = {
         (node.lineno, node.col_offset): node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            or isinstance(node, ast.JoinedStr)
+        )
     }
     candidates: list[Candidate] = []
     stream = io.StringIO(source)
 
     for token in tokenize.generate_tokens(stream.readline):
-        if token.type != tokenize.STRING or not _is_triple_quoted(token.string):
+        if (
+            token.type not in _TRIPLE_QUOTED_TOKEN_TYPES
+            or not _is_triple_quoted(token.string)
+        ):
             continue
 
         line, column = token.start[0], token.start[1]
         if column == 0:
             continue
 
-        constant = constants.get((line, column))
+        string_node = string_nodes.get((line, column))
         if (
-            constant is None
-            or _is_docstring(constant, parents)
-            or _is_dedent_wrapped(constant, parents)
+            string_node is None
+            or _is_docstring(string_node, parents)
+            or _is_dedent_wrapped(string_node, parents)
         ):
             continue
 
@@ -650,8 +704,10 @@ def _is_triple_quoted(token_string: str) -> bool:
     return literal.startswith('"""') or literal.startswith("'''")
 
 
-def _is_docstring(node: ast.Constant, parents: dict[ast.AST, ast.AST]) -> bool:
-    """Return whether a string constant is used as a docstring."""
+def _is_docstring(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Return whether a string node is used as a docstring."""
+    if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        return False
     parent = parents.get(node)
     if not isinstance(parent, ast.Expr):
         return False
