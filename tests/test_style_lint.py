@@ -828,6 +828,97 @@ class PromptBuilder:
     assert [candidate.line for candidate in multiline_strings] == [6]
 
 
+def test_find_candidates_allows_class_body_dedent_import_for_class_constant(
+    tmp_path: Path,
+) -> None:
+    """Allow class-body dedent imports when used in the same class body."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+class PromptBuilder:
+    from textwrap import dedent
+
+    TEMPLATE = dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_shadowed_textwrap_module_parameter(
+    tmp_path: Path,
+) -> None:
+    """Do not trust `textwrap.dedent` when `textwrap` is shadowed by a parameter."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def render_prompt(textwrap: object) -> str:
+    return textwrap.dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [5]
+
+
+def test_find_candidates_flags_shadowed_textwrap_module_assignment(
+    tmp_path: Path,
+) -> None:
+    """Do not trust `textwrap.dedent` after a local textwrap rebinding."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+import textwrap
+
+def render_prompt() -> str:
+    textwrap = str
+    return textwrap.dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [6]
+
+
 def test_find_candidates_flags_lambda_parameter_shadowing_dedent_alias(
     tmp_path: Path,
 ) -> None:
