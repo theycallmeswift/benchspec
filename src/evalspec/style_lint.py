@@ -686,7 +686,7 @@ def _is_dedent_call(
     return (
         isinstance(func, ast.Attribute)
         and isinstance(func.value, ast.Name)
-        and func.value.id == "textwrap"
+        and _name_resolves_to_textwrap_module(func.value.id, call, parents)
         and func.attr == "dedent"
     )
 
@@ -703,11 +703,35 @@ def _name_resolves_to_textwrap_dedent(
     scopes = _enclosing_scopes(call, parents)
     for index in range(len(scopes) - 1, -1, -1):
         scope = scopes[index]
+        if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
+            continue
         line_limit = call.lineno if index == len(scopes) - 1 else None
         binding = _last_name_binding(name, scope, line_limit=line_limit)
         if binding is None:
             continue
         return binding == "textwrap_dedent"
+    return False
+
+
+def _name_resolves_to_textwrap_module(
+    name: str,
+    call: ast.Call,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    """Return whether a bare name resolves to a safe textwrap module import."""
+    if _has_intermediate_shadowing(name, call, parents):
+        return False
+
+    scopes = _enclosing_scopes(call, parents)
+    for index in range(len(scopes) - 1, -1, -1):
+        scope = scopes[index]
+        if isinstance(scope, ast.ClassDef) and index != len(scopes) - 1:
+            continue
+        line_limit = call.lineno if index == len(scopes) - 1 else None
+        binding = _last_name_binding(name, scope, line_limit=line_limit)
+        if binding is None:
+            continue
+        return binding == "textwrap_module"
     return False
 
 
@@ -721,7 +745,13 @@ def _enclosing_scopes(
     while current is not None:
         if isinstance(
             current,
-            (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda),
+            (
+                ast.Module,
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+                ast.ClassDef,
+                ast.Lambda,
+            ),
         ):
             scopes.append(current)
         current = parents.get(current)
@@ -811,7 +841,7 @@ def _binding_kind_for_name(node: ast.AST, name: str) -> str | None:
     """Return the binding kind if a node binds the target name."""
     if isinstance(node, ast.ImportFrom):
         if node.module != "textwrap":
-            return _matches_import_binding(node.names, name, safe=False)
+            return _matches_import_binding(node.names, name, safe_module=None)
         for alias in node.names:
             bound_name = alias.asname or alias.name
             if bound_name != name:
@@ -819,7 +849,7 @@ def _binding_kind_for_name(node: ast.AST, name: str) -> str | None:
             return "textwrap_dedent" if alias.name == "dedent" else "other"
         return None
     if isinstance(node, ast.Import):
-        return _matches_import_binding(node.names, name, safe=False)
+        return _matches_import_binding(node.names, name, safe_module="textwrap")
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return "other" if node.name == name else None
     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
@@ -850,13 +880,15 @@ def _matches_import_binding(
     aliases: list[ast.alias],
     name: str,
     *,
-    safe: bool,
+    safe_module: str | None,
 ) -> str | None:
     """Return a binding kind for matching import aliases."""
     for alias in aliases:
         bound_name = alias.asname or alias.name.split(".")[0]
         if bound_name == name:
-            return "textwrap_dedent" if safe else "other"
+            if safe_module is not None and alias.name == safe_module:
+                return "textwrap_module"
+            return "other"
     return None
 
 
