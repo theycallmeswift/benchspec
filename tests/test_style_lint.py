@@ -378,6 +378,31 @@ value = 1
     assert section_headers == []
 
 
+def test_find_candidates_does_not_flag_title_cased_rationale_comments(
+    tmp_path: Path,
+) -> None:
+    """Allow title-cased rationale comments that are not known region labels."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# Temporary Workaround
+# Retry Logic
+# Happy Path
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    section_headers = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "section-header-comments"
+    ]
+
+    assert section_headers == []
+
+
 def test_find_candidates_does_not_flag_all_caps_tag_comments(
     tmp_path: Path,
 ) -> None:
@@ -414,6 +439,9 @@ def test_find_candidates_flags_structural_and_title_style_region_labels(
 # --- PARSING ---
 # Validation
 # Setup
+# Parsing
+# Cleanup
+# Configuration
 # API
 # CLI
 # JSON
@@ -430,7 +458,7 @@ value = 1
         if candidate.rule_id == "section-header-comments"
     ]
 
-    assert [candidate.line for candidate in section_headers] == [1, 2, 3]
+    assert [candidate.line for candidate in section_headers] == [1, 2, 3, 4, 5, 6]
 
 
 def test_find_candidates_flags_provenance_comments_without_prefix_false_positives(
