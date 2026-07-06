@@ -697,6 +697,9 @@ def _name_resolves_to_textwrap_dedent(
     parents: dict[ast.AST, ast.AST],
 ) -> bool:
     """Return whether a bare name resolves to a safe textwrap.dedent import."""
+    if _has_intermediate_shadowing(name, call, parents):
+        return False
+
     scopes = _enclosing_scopes(call, parents)
     for index in range(len(scopes) - 1, -1, -1):
         scope = scopes[index]
@@ -724,6 +727,31 @@ def _enclosing_scopes(
         current = parents.get(current)
     scopes.reverse()
     return scopes
+
+
+def _has_intermediate_shadowing(
+    name: str,
+    node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    """Return whether a nested expression scope shadows the target name."""
+    current: ast.AST | None = node
+    while current is not None:
+        if isinstance(
+            current,
+            (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp),
+        ) and any(
+            _target_binds_name(generator.target, name)
+            for generator in current.generators
+        ):
+            return True
+        if isinstance(current, ast.match_case) and _pattern_binds_name(
+            current.pattern,
+            name,
+        ):
+            return True
+        current = parents.get(current)
+    return False
 
 
 def _last_name_binding(
@@ -838,4 +866,24 @@ def _target_binds_name(target: ast.AST, name: str) -> bool:
         return target.id == name
     if isinstance(target, (ast.Tuple, ast.List)):
         return any(_target_binds_name(element, name) for element in target.elts)
+    return False
+
+
+def _pattern_binds_name(pattern: ast.AST, name: str) -> bool:
+    """Return whether a match pattern captures the given name."""
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name == name:
+            return True
+        return (
+            pattern.pattern is not None
+            and _pattern_binds_name(pattern.pattern, name)
+        )
+    if isinstance(pattern, ast.MatchStar):
+        return pattern.name == name
+    if isinstance(pattern, ast.MatchMapping):
+        if pattern.rest == name:
+            return True
+    for child in ast.iter_child_nodes(pattern):
+        if _pattern_binds_name(child, name):
+            return True
     return False

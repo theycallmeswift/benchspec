@@ -857,6 +857,68 @@ render_prompt = lambda dedent: dedent(
     assert [candidate.line for candidate in multiline_strings] == [4]
 
 
+def test_find_candidates_flags_comprehension_target_shadowing_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Do not trust an imported dedent alias when a comprehension target shadows it."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+PROMPTS = [dedent(
+    \"\"\"
+    hello
+    world
+    \"\"\"
+) for dedent in [str.strip]]
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [4]
+
+
+def test_find_candidates_flags_match_capture_shadowing_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Do not trust an imported dedent alias when a match capture shadows it."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def render_prompt(value: object) -> str:
+    match value:
+        case {"dedent": dedent}:
+            return dedent(
+                \"\"\"
+                hello
+                world
+                \"\"\"
+            )
+    return ""
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [7]
+
+
 def test_find_candidates_flags_assigned_indented_triple_quoted_strings(
     tmp_path: Path,
 ) -> None:
