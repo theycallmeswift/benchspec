@@ -86,6 +86,15 @@ _SUPPRESSION_PATTERNS = (
     "ruff: noqa",
     "mypy:",
 )
+_SECTION_TAG_ALLOWLIST = {
+    "BUG",
+    "FIXME",
+    "HACK",
+    "IMPORTANT",
+    "NOTE",
+    "TODO",
+    "WARNING",
+}
 _SECTION_DIVIDER = re.compile(r"^[-=*_~#\s]+$")
 _SECTION_WRAPPED_LABEL = re.compile(r"^[-=*_~#\s]+[A-Za-z][A-Za-z0-9 /_-]*[-=*_~#\s]+$")
 _SECTION_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /_-]{0,40}$")
@@ -606,7 +615,7 @@ def _looks_like_section_header(comment_text: str) -> bool:
     if len(words) > 4:
         return False
     if len(words) == 1 and words[0].isupper():
-        return False
+        return words[0] not in _SECTION_TAG_ALLOWLIST
     return all(_is_section_label_word(word) for word in words)
 
 

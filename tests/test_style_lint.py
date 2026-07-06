@@ -403,6 +403,31 @@ value = 1
     assert section_headers == []
 
 
+def test_find_candidates_flags_all_caps_region_labels(
+    tmp_path: Path,
+) -> None:
+    """Flag bare all-caps region labels while allowing maintenance tags."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+# PARSING
+# CONFIG
+# HTTP
+value = 1
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    section_headers = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "section-header-comments"
+    ]
+
+    assert [candidate.line for candidate in section_headers] == [1, 2, 3]
+
+
 def test_find_candidates_flags_provenance_comments_without_prefix_false_positives(
     tmp_path: Path,
 ) -> None:
