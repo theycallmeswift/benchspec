@@ -1,4 +1,4 @@
-.PHONY: help install test evals evals\:binder lint clean
+.PHONY: help install test evals evals\:binder lint lint\:custom clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -20,6 +20,9 @@ evals\:binder:  ## Alias for `make evals` while the binder corpus is the only li
 
 lint:  ## Lint with ruff
 	uv run ruff check .
+
+lint\:custom:  ## Run custom advisory style checks
+	uv run python bin/linters/style_lint.py
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
