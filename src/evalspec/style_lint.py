@@ -112,7 +112,7 @@ _PROVENANCE_PATTERN = re.compile(
     r"\badded\s+for\s+(?:(?:pr|issue|fixes)\s*\#\d+|\#\d+|commit\s+[0-9a-f]{6,40})\b|"
     r"\bcalled\s+from\b|"
     r"\bplanning\s+docs?\b|"
-    r"^(?:see|per|from)\s+docs/",
+    r"^(?:see|per)\s+docs/",
     re.IGNORECASE,
 )
 _STRING_PREFIX = re.compile(r"(?i)^[rubf]*")
@@ -673,8 +673,6 @@ def _is_dedent_wrapped(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
 
 def _is_dedent_call(func: ast.AST) -> bool:
     """Return whether a call target resolves to textwrap.dedent."""
-    if isinstance(func, ast.Name):
-        return func.id == "dedent"
     return (
         isinstance(func, ast.Attribute)
         and isinstance(func.value, ast.Name)

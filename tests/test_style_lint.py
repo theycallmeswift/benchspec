@@ -553,6 +553,7 @@ def test_find_candidates_does_not_flag_plain_docs_path_comments(
     source.write_text(
         """\
 # load fixture from docs/examples/sample.md
+# from docs/examples/sample.md
 # compare against docs/reference/output.md
 value = 1
 """,
@@ -672,6 +673,37 @@ def render_prompt() -> str:
     ]
 
     assert [candidate.line for candidate in multiline_strings] == [3]
+
+
+def test_find_candidates_flags_local_dedent_wrapper_calls(
+    tmp_path: Path,
+) -> None:
+    """Do not treat a rebound local dedent() helper as textwrap.dedent()."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+def dedent(text: str) -> str:
+    return text.strip()
+
+def render_prompt() -> str:
+    return dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [6]
 
 
 def test_find_candidates_flags_assigned_indented_triple_quoted_strings(
