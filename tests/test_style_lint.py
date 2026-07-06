@@ -706,6 +706,97 @@ def render_prompt() -> str:
     assert [candidate.line for candidate in multiline_strings] == [6]
 
 
+def test_find_candidates_allows_imported_textwrap_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Allow direct `from textwrap import dedent` calls."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def render_prompt() -> str:
+    return dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_allows_renamed_textwrap_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Allow renamed `from textwrap import dedent as ...` calls."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent as clean_text
+
+def render_prompt() -> str:
+    return clean_text(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert multiline_strings == []
+
+
+def test_find_candidates_flags_rebound_textwrap_dedent_alias(
+    tmp_path: Path,
+) -> None:
+    """Do not trust an imported dedent alias after local rebinding."""
+    style_lint = _style_lint()
+    source = tmp_path / "sample.py"
+    source.write_text(
+        """\
+from textwrap import dedent
+
+def render_prompt() -> str:
+    dedent = str.strip
+    return dedent(
+        \"\"\"
+        hello
+        world
+        \"\"\"
+    )
+""",
+    )
+
+    candidates = style_lint.find_candidates(source)
+    multiline_strings = [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dedented-multiline-strings"
+    ]
+
+    assert [candidate.line for candidate in multiline_strings] == [6]
+
+
 def test_find_candidates_flags_assigned_indented_triple_quoted_strings(
     tmp_path: Path,
 ) -> None:
