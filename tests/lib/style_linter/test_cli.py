@@ -167,7 +167,7 @@ def test_cli_run_prints_no_findings_message(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out == "ok: no advisory style findings\n"
+    assert captured.out == "All checks passed!\n"
 
 
 def test_cli_verify_findings_uses_verify_model_when_enabled(
@@ -215,7 +215,7 @@ def test_cli_verify_findings_uses_verify_model_when_enabled(
 
     assert exit_code == 0
     assert calls == [style_lint_cli.DEFAULT_MODEL, "gemini-verifier"]
-    assert captured.out == "ok: no advisory style findings\n"
+    assert captured.out == "All checks passed!\n"
 
 
 def test_cli_verify_findings_defaults_to_detector_model(
@@ -258,7 +258,7 @@ def test_cli_verify_findings_defaults_to_detector_model(
 
     assert exit_code == 0
     assert calls == [style_lint_cli.DEFAULT_MODEL, style_lint_cli.DEFAULT_MODEL]
-    assert captured.out == "ok: no advisory style findings\n"
+    assert captured.out == "All checks passed!\n"
 
 
 def test_cli_verify_model_does_not_enable_verification_by_itself(

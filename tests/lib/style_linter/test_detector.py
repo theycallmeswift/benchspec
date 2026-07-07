@@ -135,3 +135,42 @@ def test_parse_findings_rejects_lines_outside_referenced_chunk(
                 )
             ],
         )
+
+
+def test_parse_findings_recovers_adjacent_same_file_chunk_references(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Recover when the model reports the right line with a stale chunk index."""
+    source = tmp_path / "sample.py"
+    source.write_text(
+        "\n".join(f"value_{line_number} = 1" for line_number in range(1, 131))
+    )
+    chunks = framework.chunk_source_files([source], max_lines=120)
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 127,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+
+    findings = framework.parse_findings(
+        response,
+        chunks=chunks,
+        rules=[
+            framework.Rule(
+                id="descriptive-names",
+                description="Do not use single-letter bindings.",
+            )
+        ],
+    )
+
+    assert findings[0].path == source.resolve()
+    assert findings[0].line == 127
