@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lib.style_lint.models import SourceChunk
+from lib.style_lint.types import SourceChunk
 
 
 def collect_python_files(

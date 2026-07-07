@@ -25,6 +25,10 @@ I'm Swift. I value directness, bias to action, and learning by doing. Lead with 
 - Follow existing patterns in whatever file you're touching.
 - Verify changes with `make test` and `make lint` before claiming work is done. Show the output.
 
+## Directory Structure
+
+- Put plans, specs, and research in `docs/{plans,specs,research}/`.
+
 ## References
 
 Load on demand.

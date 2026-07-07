@@ -14,9 +14,9 @@
 
 - Modify `pyproject.toml`: add commented Ruff configuration, Google pydocstyle convention, and scoped legacy `per-file-ignores` generated from the current baseline.
 - Modify `Makefile`: add `lint:custom` while keeping `lint` Ruff-only.
-- Create `lib/style_lint/`: reusable submodules for rule/finding dataclasses, path collection, source chunking, Gemini prompt/call/parsing, optional verification, advisory runner API, and output formatting.
+- Create `lib/style_lint/`: reusable submodules sliced by linter function: shared types, source collection/chunking, detector prompt/parsing/formatting, Gemini transport, optional verification, and the advisory runner API.
 - Create `bin/linters/style_lint.py`: repository-specific CLI containing evalspec default paths, rule definitions, model defaults, prompt instructions, advisory `run()`, and `main()`.
-- Create `tests/test_style_lint.py`: focused tests for the custom checker and Makefile-facing behavior.
+- Create `tests/lib/style_linter/`: focused tests for the custom checker and Makefile-facing behavior.
 
 ---
 
@@ -103,11 +103,11 @@ git push
 ### Task 2: Add Custom Lint CLI Contract Tests
 
 **Files:**
-- Create: `tests/test_style_lint.py`
+- Create: `tests/lib/style_linter/`
 
 - [ ] **Step 1: Write failing tests for paths, rules, prompt shape, and advisory output**
 
-Create `tests/test_style_lint.py` with tests named:
+Create `tests/lib/style_linter/` with tests named:
 
 ```python
 def test_evalspec_package_does_not_own_style_lint_framework(): ...
@@ -133,7 +133,7 @@ Use inline `tmp_path` file writers. Monkeypatch the Gemini call function so test
 Run:
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_style_lint.py -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/lib/style_linter/ -q
 ```
 
 Expected: failure due to missing `lib.style_lint` and missing repo-specific policy in `bin/linters/style_lint.py`.
@@ -141,7 +141,7 @@ Expected: failure due to missing `lib.style_lint` and missing repo-specific poli
 - [ ] **Step 3: Commit failing tests**
 
 ```bash
-git add tests/test_style_lint.py
+git add tests/lib/style_linter/
 git commit -m "test: cover custom style lint contract"
 git push
 ```
@@ -151,20 +151,20 @@ git push
 ### Task 3: Implement Custom Style Linter
 
 **Files:**
-- Create: `lib/style_lint/models.py`
-- Create: `lib/style_lint/files.py`
-- Create: `lib/style_lint/prompt.py`
+- Create: `lib/style_lint/types.py`
+- Create: `lib/style_lint/source.py`
+- Create: `lib/style_lint/detector.py`
 - Create: `lib/style_lint/gemini.py`
-- Create: `lib/style_lint/findings.py`
+- Create: `lib/style_lint/verifier.py`
 - Create: `lib/style_lint/runner.py`
 - Create: `lib/style_lint/__init__.py`
 - Create: `lib/__init__.py`
 - Create/modify: `bin/linters/style_lint.py`
-- Test: `tests/test_style_lint.py`
+- Test: `tests/lib/style_linter/`
 
 - [ ] **Step 1: Add reusable rule, chunk, and finding models**
 
-In `lib/style_lint/models.py`, define:
+In `lib/style_lint/types.py`, define:
 
 ```python
 from __future__ import annotations
@@ -194,7 +194,7 @@ class Finding:
     message: str
 ```
 
-Keep `lib/style_lint/__init__.py` limited to export control. Define `DEFAULT_MODEL`, `DEFAULT_PATHS`, `RULES`, and the evalspec policy instructions in `bin/linters/style_lint.py`, not in the reusable framework. Use these exact rule IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`.
+Keep `lib/style_lint/__init__.py` limited to export control. Define `DEFAULT_MODEL`, `DEFAULT_PATHS`, `RULES`, and the evalspec policy instructions in `bin/linters/style_lint.py`, not in the reusable framework. Use these exact rule IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`, `semantic-block-newlines`.
 
 - [ ] **Step 2: Implement path collection**
 
@@ -264,15 +264,15 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_style_lint.py -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/lib/style_linter/ -q
 ```
 
-Expected: all tests in `tests/test_style_lint.py` pass.
+Expected: all tests in `tests/lib/style_linter/` pass.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib bin/linters/style_lint.py tests/test_style_lint.py
+git add lib bin/linters/style_lint.py tests/lib/style_linter/
 git commit -m "feat: add advisory style linter"
 git push
 ```
@@ -283,7 +283,7 @@ git push
 
 **Files:**
 - Modify: `Makefile`
-- Test: `tests/test_style_lint.py`
+- Test: `tests/lib/style_linter/`
 
 - [ ] **Step 1: Update phony targets and add `lint:custom`**
 
@@ -296,7 +296,7 @@ lint\:custom:  ## Run custom advisory style checks
 
 - [ ] **Step 2: Add Makefile contract tests**
 
-In `tests/test_style_lint.py`, add tests that read `Makefile` and assert:
+In `tests/lib/style_linter/`, add tests that read `Makefile` and assert:
 
 ```python
 assert "lint\\:custom" in makefile_text
@@ -330,7 +330,7 @@ Expected without `GEMINI_API_KEY`: clear skip message and exit `0`. Expected wit
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Makefile tests/test_style_lint.py
+git add Makefile tests/lib/style_linter/
 git commit -m "chore: add custom lint make target"
 git push
 ```
@@ -345,7 +345,7 @@ git push
 - [ ] **Step 1: Run targeted tests**
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_style_lint.py -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/lib/style_linter/ -q
 ```
 
 Expected: pass.

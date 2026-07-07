@@ -46,12 +46,14 @@ RULES = [
         id="dedented-multiline-strings",
         description="Use textwrap.dedent for indented multiline strings.",
     ),
+    style_lint.Rule(
+        id="semantic-block-newlines",
+        description="Use blank lines to separate semantic blocks for readability.",
+    ),
 ]
 
 POLICY_INSTRUCTIONS = dedent("""\
     Apply evalspec's local Python style guide from docs/style/development.md.
-    Do not report imports, formatting, docstrings, or annotations that Ruff
-    already covers.
 """)
 
 
@@ -108,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify-model")
     parser.add_argument("--max-lines", type=int, default=DEFAULT_CHUNK_LINES)
     args = parser.parse_args(argv)
+
     return run(
         list(args.paths) or None,
         model=args.model,
