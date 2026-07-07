@@ -1,84 +1,12 @@
-"""Finding parsing, verification, and formatting."""
+"""Second-pass verification for advisory lint findings."""
 
 from __future__ import annotations
 
 import importlib
 import json
 
-from lib.style_lint.models import Finding, Rule, SourceChunk
-from lib.style_lint.prompt import DEFAULT_SYSTEM_PROMPT
-
-
-def parse_findings(
-    response: str,
-    *,
-    chunks: list[SourceChunk],
-    rules: list[Rule],
-) -> list[Finding]:
-    """Parse and validate strict JSON detector findings.
-
-    Args:
-        response: Detector JSON response text.
-        chunks: Source chunks originally sent to the detector.
-        rules: Rules originally sent to the detector.
-
-    Returns:
-        Validated advisory findings.
-
-    Raises:
-        ValueError: If the model response violates the schema.
-        json.JSONDecodeError: If the response is not JSON.
-    """
-    payload = json.loads(response)
-    if not isinstance(payload, dict):
-        raise ValueError("Gemini response must be a JSON object")
-
-    raw_findings = payload.get("findings")
-    if not isinstance(raw_findings, list):
-        raise ValueError("Gemini response must include a findings list")
-
-    rule_ids = {rule.id for rule in rules}
-    chunks_by_index = {chunk.index: chunk for chunk in chunks}
-    findings: list[Finding] = []
-    for raw_finding in raw_findings:
-        if not isinstance(raw_finding, dict):
-            raise ValueError("Each finding must be a JSON object")
-
-        chunk_index = _strict_int(raw_finding.get("chunk_index"))
-        line = _strict_int(raw_finding.get("line"))
-        column = _strict_int(raw_finding.get("column"))
-        if chunk_index is None or line is None or column is None:
-            raise ValueError(f"Malformed finding reference: {raw_finding!r}")
-
-        chunk = chunks_by_index.get(chunk_index)
-        if chunk is None:
-            raise ValueError(f"Malformed finding reference: {chunk_index!r}")
-        if line < chunk.line_start or line > chunk.line_end:
-            raise ValueError(
-                f"Finding line {line} is outside chunk {chunk_index}"
-            )
-        if column < 1:
-            raise ValueError(f"Malformed finding reference: {raw_finding!r}")
-
-        rule_id = raw_finding.get("rule_id")
-        if rule_id not in rule_ids:
-            raise ValueError(f"Unknown rule ID: {rule_id}")
-
-        message = raw_finding.get("message")
-        if not isinstance(message, str) or not message.strip():
-            raise ValueError("Finding message must be a non-empty string")
-
-        findings.append(
-            Finding(
-                path=chunk.path,
-                line=line,
-                column=column,
-                rule_id=rule_id,
-                message=message.strip(),
-            )
-        )
-
-    return findings
+from lib.style_lint.detector import DEFAULT_SYSTEM_PROMPT, _strict_int
+from lib.style_lint.types import Finding, Rule, SourceChunk
 
 
 def verify_findings(
@@ -170,24 +98,6 @@ def verify_findings(
         verified_findings.append(findings[parsed_keep_index])
 
     return verified_findings
-
-
-def format_findings(findings: list[Finding]) -> list[str]:
-    """Format findings as path:line:column diagnostics."""
-    return [
-        (
-            f"{finding.path}:{finding.line}:{finding.column}: "
-            f"{finding.rule_id} {finding.message}"
-        )
-        for finding in findings
-    ]
-
-
-def _strict_int(value: object) -> int | None:
-    """Return integer values while rejecting booleans."""
-    if type(value) is int:
-        return value
-    return None
 
 
 def _call_gemini(**kwargs: object) -> str:

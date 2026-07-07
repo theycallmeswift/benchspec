@@ -66,7 +66,7 @@ docs/style/development.md
   - Keep reusable framework code under `lib/style_lint/`, not inside `src/evalspec/`, so it can later be extracted.
   - Keep framework implementation in focused submodules; use `lib/style_lint/__init__.py` only for export control.
   - Keep evalspec-specific business logic in `bin/linters/style_lint.py`: default paths, rule definitions, model defaults, and prompt instructions.
-  - Keep the generic linter system prompt in `lib/style_lint/prompt.py`; keep evalspec policy instructions in `bin/linters/style_lint.py`.
+  - Keep the generic linter system prompt in `lib/style_lint/detector.py`; keep evalspec policy instructions in `bin/linters/style_lint.py`.
   - Define rules in a list and inject them into one general prompt so future checks are additive:
 
     ```python
