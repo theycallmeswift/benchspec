@@ -3,9 +3,9 @@
 An arm is a `harness×model` cell — plus its own `effort` and `env` — carried verbatim
 into one `(eval × arm)` test. Arms live in a named set (`[tool.evalspec.sets.<name>]`):
 the set adds harness/model/effort/env defaults (inherited by arms that omit a key) and a
-`baseline` (the arm every other arm's Δ is measured against). `env` `$VAR`s expand lazily
-at exec time, not resolve time. Validation is fail-fast at config-read time — a bad table
-raises SchemaError naming the defect, not a silent no-op mid-run.
+`baseline` (the arm every other arm's Δ is measured against). `env` `$VAR`s expand
+lazily at exec time, not resolve time. Validation is fail-fast at config-read time — a
+bad table raises SchemaError naming the defect, not a silent no-op mid-run.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from evalspec.schema import SchemaError
 
 @dataclass(frozen=True)
 class Arm:
+    """Represent Arm."""
+
     name: str
     harness: str
     model: str
@@ -31,6 +33,8 @@ class Arm:
 
 @dataclass(frozen=True)
 class Set:
+    """Represent Set."""
+
     name: str
     arms: list[Arm]
     baseline: str | None
@@ -38,6 +42,8 @@ class Set:
 
 @dataclass(frozen=True)
 class RawSet:
+    """Represent RawSet."""
+
     name: str
     defaults: dict
     raw_arms: list[dict]
@@ -51,12 +57,14 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def _arm_name_from_model(model: str) -> str:
+    """Handle _arm_name_from_model."""
     # Replace path-unsafe chars with `-`; arm names are single filesystem path segments
     # (artifact dirs and report discovery break when a `/` creates unexpected nesting).
     return _UNSAFE_NAME_CHARS.sub("-", model)
 
 
 def _validate_harness_args(where: str, value: object) -> list[str]:
+    """Handle _validate_harness_args."""
     if not isinstance(value, list):
         raise SchemaError(f"{where}: `harness_args` must be a list")
     for i, item in enumerate(value):
@@ -66,6 +74,7 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
 
 
 def _validate_env_table(where: str, value: object) -> None:
+    """Handle _validate_env_table."""
     if not isinstance(value, dict):
         raise SchemaError(f"{where}: `env` must be a table")
     for key, item in value.items():
@@ -74,13 +83,7 @@ def _validate_env_table(where: str, value: object) -> None:
 
 
 def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
-    """Parse `[tool.evalspec.sets.<name>]` into validated RawSets + the default-set name.
-
-    Structure-only validation (trust + record): arm names unique per set, harnesses
-    registered, `baseline`/`default-set` name declared things. A pre-migration flat
-    config (no `sets`) is rejected with a pointer to the eval-sets shape, not a silent
-    half-parse.
-    """
+    """Document the behavior."""
     sets_table = table.get("sets")
     if not sets_table or not isinstance(sets_table, dict):
         raise SchemaError(
@@ -122,9 +125,7 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
             if not (isinstance(harness, str) and harness):
                 raise SchemaError(f"{at}: missing `harness` (no arm value, no set default)")
             if harness not in known:
-                raise SchemaError(
-                    f"{at}: unknown harness `{harness}` (known: {sorted(known)})"
-                )
+                raise SchemaError(f"{at}: unknown harness `{harness}` (known: {sorted(known)})")
             if "env" in entry:
                 _validate_env_table(f"{at}: arm-level `env`", entry["env"])
             if "harness_args" in entry:
@@ -153,7 +154,9 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
 
 def expand_env(env: dict, environ: Mapping) -> dict:
     """Expand a `$VAR`/`${VAR}` env value from `environ`; literals pass through.
-    An unset referenced var raises SchemaError (never a silent empty string)."""
+
+    An unset referenced var raises SchemaError (never a silent empty string).
+    """
     out: dict[str, str] = {}
     for key, val in env.items():
         if not isinstance(val, str):
@@ -172,6 +175,7 @@ def expand_env(env: dict, environ: Mapping) -> dict:
 
 
 def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
+    """Handle _materialize_arm."""
     harness = raw.get("harness", defaults.get("harness"))
     if not harness:
         raise SchemaError(f"{where} arm `{name}`: no `harness` (no arm value, no set default)")
@@ -189,13 +193,19 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
 
 
 def resolve_set(
-    rawsets: dict, default_set: str, *,
+    rawsets: dict,
+    default_set: str,
+    *,
     set_name: str | None = None,
-    model: str | None = None, harness: str | None = None, effort: str | None = None,
-    env: dict | None = None, models: list | None = None,
+    model: str | None = None,
+    harness: str | None = None,
+    effort: str | None = None,
+    env: dict | None = None,
+    models: list | None = None,
     environ: Mapping | None = None,
 ) -> Set:
-    """Pick the set (`set_name` or `default_set`), apply CLI scalar overrides to its
+    """Pick the set (`set_name` or `default_set`), apply CLI scalar overrides to its.
+
     defaults, then materialize arms (inheritance + env merge; env stays unexpanded — see
     _materialize_arm).
 
@@ -233,8 +243,10 @@ def resolve_set(
                 suffix += 1
             used.add(candidate)
             unique.append(candidate)
-        arms = [_materialize_arm(sn, {"name": sn, "model": m}, defaults, where)
-                for sn, m in zip(unique, models)]
+        arms = [
+            _materialize_arm(sn, {"name": sn, "model": m}, defaults, where)
+            for sn, m in zip(unique, models, strict=False)
+        ]
         return Set(rs.name, arms, baseline=unique[0])
 
     arms = [_materialize_arm(a["name"], a, defaults, where) for a in rs.raw_arms]

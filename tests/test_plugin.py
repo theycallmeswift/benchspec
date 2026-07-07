@@ -1,11 +1,12 @@
 """Plugin tests via pytester — exercise the hooks in-process, no `claude -p`.
 
 A dummy `test_eval(eval_arm)` is collected with `--collect-only`, so the body never
-runs; we assert on the parametrized node ids the plugin generates. Each project writes
-a `[tool.evalspec]` eval set so `resolved_run_set` has a real set to resolve.
+runs; we assert on the parametrized node ids the plugin generates. Each project writes a
+`[tool.evalspec]` eval set so `resolved_run_set` has a real set to resolve.
 """
 
 import json
+from typing import NoReturn
 
 import pytest
 
@@ -64,7 +65,10 @@ def test_trigger(trigger_query):
 """
 
 
-def _make_project(pytester, skill="myskill", arms_toml=ARMS_TOML):
+def _make_project(
+    pytester: object, skill: object = "myskill", arms_toml: object = ARMS_TOML
+) -> None:
+    """Handle _make_project."""
     (pytester.path / "pyproject.toml").write_text(arms_toml)
     evals = pytester.path / "skills" / skill / "evals"
     (evals / "alpha").mkdir(parents=True)
@@ -74,17 +78,22 @@ def _make_project(pytester, skill="myskill", arms_toml=ARMS_TOML):
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
 
-def _collect(pytester, *extra):
+def _collect(pytester: object, *extra: object) -> object:
+    """Handle _collect."""
     return pytester.runpytest(
-        "-p", "evalspec.plugin",
-        "--collect-only", "-q",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
         "test_cases.py::test_eval",
         *extra,
     )
 
 
-def test_cross_product_of_evals_and_arms(pytester):
+def test_cross_product_of_evals_and_arms(pytester: object) -> None:
+    """Test the expected behavior."""
     _make_project(pytester)
 
     out = _collect(pytester).stdout.str()
@@ -99,15 +108,22 @@ def test_cross_product_of_evals_and_arms(pytester):
     assert out.count("test_eval[") == 4  # 2 evals × 2 arms
 
 
-def test_plugin_self_registers_cases_without_positional(pytester, monkeypatch):
+def test_plugin_self_registers_cases_without_positional(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Test the expected behavior."""
     # `make evals` passes no positional path; the plugin must inject its cases file
     # so they still collect (and so a -k nodeid can't union-collect test_eval).
     _make_project(pytester)
     monkeypatch.setattr(plugin, "_CASES", pytester.path / "test_cases.py")
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin", "--collect-only", "-q",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
         # deliberately no positional target
     )
 
@@ -115,14 +131,19 @@ def test_plugin_self_registers_cases_without_positional(pytester, monkeypatch):
     assert "test_eval[myskill-alpha-baseline]" in out
 
 
-def test_explicit_positional_is_respected(pytester, monkeypatch):
+def test_explicit_positional_is_respected(pytester: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     # When the user passes their own target, the plugin must NOT override it.
     _make_project(pytester)
     monkeypatch.setattr(plugin, "_CASES", pytester.path / "should_not_be_used.py")
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin", "--collect-only", "-q",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
         "test_cases.py::test_eval",
     )
 
@@ -130,7 +151,8 @@ def test_explicit_positional_is_respected(pytester, monkeypatch):
     assert "test_eval[myskill-alpha-baseline]" in result.stdout.str()
 
 
-def test_models_flag_sweeps_arms(pytester):
+def test_models_flag_sweeps_arms(pytester: object) -> None:
+    """Test the expected behavior."""
     # --evalspec-models is a SWEEP, not a filter: it replaces the set's arms with one
     # arm per value (named by it), inheriting the set-level harness.
     _make_project(pytester)
@@ -142,7 +164,8 @@ def test_models_flag_sweeps_arms(pytester):
     assert "test_eval[myskill-alpha-opus]" in out
 
 
-def test_malformed_schema_fails_collection(pytester):
+def test_malformed_schema_fails_collection(pytester: object) -> None:
+    """Test the expected behavior."""
     (pytester.path / "pyproject.toml").write_text(ARMS_TOML)
     evals = pytester.path / "skills" / "myskill" / "evals"
     (evals / "bad").mkdir(parents=True)
@@ -157,12 +180,13 @@ def test_malformed_schema_fails_collection(pytester):
     assert result.ret != 0
 
 
-def test_bad_set_fails_collection(pytester):
+def test_bad_set_fails_collection(pytester: object) -> None:
+    """Test the expected behavior."""
     # A set arm with an unknown harness must fail collection with a UsageError
     # (wrapped SchemaError), not a silent empty roster.
     bad_set = (
         '[tool.evalspec]\ndefault-set = "default"\n'
-        "[tool.evalspec.sets.default]\nmodel = \"sonnet\"\n"
+        '[tool.evalspec.sets.default]\nmodel = "sonnet"\n'
         'arms = [{name="x", harness="nope"}]\n'
     )
     _make_project(pytester, arms_toml=bad_set)
@@ -183,52 +207,74 @@ def test_bad_set_fails_collection(pytester):
 class _SetConfig:
     """Config stub for resolved_run_set: repo root + the eval-set CLI options."""
 
-    def __init__(self, repo_root, *, set_name=None, config=None, model=None,
-                 harness=None, effort=None, env=None, models=None):
+    def __init__(
+        self: object,
+        repo_root: object,
+        *,
+        set_name: object = None,
+        config: object = None,
+        model: object = None,
+        harness: object = None,
+        effort: object = None,
+        env: object = None,
+        models: object = None,
+    ) -> None:
+        """Initialize the instance."""
         self.rootpath = repo_root
-        self._root, self._opts = repo_root, {
-            "evalspec_repo_root": str(repo_root), "evalspec_set": set_name,
-            "evalspec_config": config, "evalspec_model": model,
-            "evalspec_harness": harness, "evalspec_effort": effort,
-            "evalspec_env": env or [], "evalspec_models": models,
-        }
+        self._root, self._opts = (
+            repo_root,
+            {
+                "evalspec_repo_root": str(repo_root),
+                "evalspec_set": set_name,
+                "evalspec_config": config,
+                "evalspec_model": model,
+                "evalspec_harness": harness,
+                "evalspec_effort": effort,
+                "evalspec_env": env or [],
+                "evalspec_models": models,
+            },
+        )
 
-    def getoption(self, name):
+    def getoption(self: object, name: object) -> object:
+        """Handle getoption."""
         return self._opts.get(name)
 
 
-def _write_sets_pyproject(tmp_path):
+def _write_sets_pyproject(tmp_path: object) -> None:
+    """Handle _write_sets_pyproject."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\n'
+        "[tool.evalspec]\n"
         'default-set = "default"\n'
-        '[tool.evalspec.sets.default]\n'
-        'harness = "claude-code"\n'   # set-level default → sweep arms inherit a concrete harness
+        "[tool.evalspec.sets.default]\n"
+        'harness = "claude-code"\n'  # set-level default → sweep arms inherit a concrete harness
         'model = "sonnet"\n'
         'baseline = "baseline"\n'
         'arms = [{name="baseline"}, {name="trial"}]\n'
     )
 
 
-def test_resolved_run_set_reads_pyproject(tmp_path):
+def test_resolved_run_set_reads_pyproject(tmp_path: object) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
     s = plugin.resolved_run_set(_SetConfig(tmp_path))
     assert [a.name for a in s.arms] == ["baseline", "trial"]
     assert s.baseline == "baseline"
 
 
-def test_resolved_run_set_preserves_harness_args(tmp_path):
+def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
+    """Test the expected behavior."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\n'
+        "[tool.evalspec]\n"
         'default-set = "default"\n'
-        '[tool.evalspec.sets.default]\n'
+        "[tool.evalspec.sets.default]\n"
         'harness = "claude-code"\n'
         'model = "sonnet"\n'
         'harness_args = ["--set-flag"]\n'
         'baseline = "baseline"\n'
-        'arms = [\n'
+        "arms = [\n"
         '  {name="baseline"},\n'
         '  {name="trial", harness_args=["--plugin-dir", "/project"]},\n'
-        ']\n'
+        "]\n"
     )
 
     s = plugin.resolved_run_set(_SetConfig(tmp_path))
@@ -237,17 +283,20 @@ def test_resolved_run_set_preserves_harness_args(tmp_path):
     assert s.arms[1].harness_args == ["--set-flag", "--plugin-dir", "/project"]
 
 
-def test_resolved_run_set_set_model_default_not_clobbered(tmp_path):
+def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> None:
+    """Test the expected behavior."""
     # A non-sonnet set default must survive a plain run (no --evalspec-model passed).
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\ndefault-set = "default"\n'
         '[tool.evalspec.sets.default]\nharness = "claude-code"\n'
-        'model = "opus"\nbaseline = "b"\narms = [{name="b"}]\n')
+        'model = "opus"\nbaseline = "b"\narms = [{name="b"}]\n'
+    )
     s = plugin.resolved_run_set(_SetConfig(tmp_path))  # evalspec_model defaults to None
     assert s.arms[0].model == "opus"
 
 
-def test_resolved_run_set_models_sweep(tmp_path):
+def test_resolved_run_set_models_sweep(tmp_path: object) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
 
     s = plugin.resolved_run_set(_SetConfig(tmp_path, models="sonnet,opus"))
@@ -257,13 +306,15 @@ def test_resolved_run_set_models_sweep(tmp_path):
     assert all(a.harness == "claude-code" for a in s.arms)  # inherited, never None
 
 
-def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path):
+def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path: object) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
     with pytest.raises(pytest.UsageError, match="no eval set named"):
         plugin.resolved_run_set(_SetConfig(tmp_path, set_name="ghost"))
 
 
-def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path):
+def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path: object) -> None:
+    """Test the expected behavior."""
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\nreference = "x"\n'
         '[[tool.evalspec.arms]]\nname="x"\nharness="claude-code"\nmodel="opus"\n'
@@ -272,14 +323,20 @@ def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path):
         plugin.resolved_run_set(_SetConfig(tmp_path))
 
 
-def test_resolved_run_set_missing_scratch_config_raises_usageerror(tmp_path):
+def test_resolved_run_set_missing_scratch_config_raises_usageerror(
+    tmp_path: object,
+) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
 
     with pytest.raises(pytest.UsageError, match="--evalspec-config"):
         plugin.resolved_run_set(_SetConfig(tmp_path, config=str(tmp_path / "missing.toml")))
 
 
-def test_resolved_run_set_malformed_scratch_config_raises_usageerror(tmp_path):
+def test_resolved_run_set_malformed_scratch_config_raises_usageerror(
+    tmp_path: object,
+) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
     scratch = tmp_path / "scratch.toml"
     scratch.write_text("[tool.evalspec\n")
@@ -288,7 +345,10 @@ def test_resolved_run_set_malformed_scratch_config_raises_usageerror(tmp_path):
         plugin.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
-def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(tmp_path):
+def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
+    tmp_path: object,
+) -> None:
+    """Test the expected behavior."""
     _write_sets_pyproject(tmp_path)
     scratch = tmp_path / "scratch.toml"
     scratch.write_bytes(b"\xff")
@@ -297,7 +357,8 @@ def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(tmp_path
         plugin.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
-def test_trigger_queries_parametrized(pytester):
+def test_trigger_queries_parametrized(pytester: object) -> None:
+    """Test the expected behavior."""
     evals = pytester.path / "skills" / "myskill" / "evals"
     evals.mkdir(parents=True)
     (evals / "trigger-evals.md").write_text(
@@ -306,9 +367,12 @@ def test_trigger_queries_parametrized(pytester):
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin",
-        "--collect-only", "-q",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
         "test_cases.py::test_trigger",
     )
 
@@ -317,7 +381,8 @@ def test_trigger_queries_parametrized(pytester):
     assert "test_trigger[myskill-q2]" in out
 
 
-def test_trigger_xfail_marks_known_failure_on_listed_tier(pytester):
+def test_trigger_xfail_marks_known_failure_on_listed_tier(pytester: object) -> None:
+    """Test the expected behavior."""
     # On a listed tier (sonnet), the xfail mark attaches: the dummy body passes,
     # so the marked param shows XPASS while the unmarked one passes — proving the
     # mark was attached without real routing.
@@ -331,16 +396,21 @@ def test_trigger_xfail_marks_known_failure_on_listed_tier(pytester):
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin", "-rX",
-        "--evalspec-model", "sonnet",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "-rX",
+        "--evalspec-model",
+        "sonnet",
+        "--evalspec-repo-root",
+        str(pytester.path),
         "test_cases.py::test_trigger",
     )
 
     result.assert_outcomes(passed=1, xpassed=1)
 
 
-def test_trigger_xfail_strict_on_unlisted_tier(pytester):
+def test_trigger_xfail_strict_on_unlisted_tier(pytester: object) -> None:
+    """Test the expected behavior."""
     # On a tier NOT listed (opus), the mark is withheld: the same query runs strict.
     # The dummy body passes, so BOTH params show plain PASS (no xpassed) — proving
     # the gate stays strict where the xfail doesn't apply.
@@ -354,16 +424,21 @@ def test_trigger_xfail_strict_on_unlisted_tier(pytester):
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin", "-rX",
-        "--evalspec-model", "opus",
-        "--evalspec-repo-root", str(pytester.path),
+        "-p",
+        "evalspec.plugin",
+        "-rX",
+        "--evalspec-model",
+        "opus",
+        "--evalspec-repo-root",
+        str(pytester.path),
         "test_cases.py::test_trigger",
     )
 
     result.assert_outcomes(passed=2)
 
 
-def test_count_two_parametrizes_sample_index(pytester, tmp_path):
+def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object) -> None:
+    """Test the expected behavior."""
     # --count 2 must yield 8 items (2 evals × 2 arms × 2 samples) AND the
     # sample_index fixture must resolve to BOTH 0 and 1 — not just `in (0, 1)`,
     # which would silently pass if the fixture regressed to returning 0 for
@@ -372,19 +447,25 @@ def test_count_two_parametrizes_sample_index(pytester, tmp_path):
     # appear with the right count.
     _make_project(pytester)
     log = tmp_path / "samples.log"
-    pytester.makepyfile(test_cases=f"""
+    pytester.makepyfile(
+        test_cases=f"""
 LOG = r"{log}"
 
 def test_eval(eval_arm, sample_index):
     with open(LOG, "a") as f:
         f.write(f"{{sample_index}}\\n")
-""")
+"""
+    )
 
     result = pytester.runpytest(
-        "-p", "evalspec.plugin",
-        "-p", "pytest_repeat",
-        "--evalspec-repo-root", str(pytester.path),
-        "--count", "2",
+        "-p",
+        "evalspec.plugin",
+        "-p",
+        "pytest_repeat",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "--count",
+        "2",
         "test_cases.py::test_eval",
     )
 
@@ -399,13 +480,17 @@ def test_eval(eval_arm, sample_index):
 
 
 class _FakeConfig:
-    def __init__(self, repo_root, fail_under=None):
+    """Represent _FakeConfig."""
+
+    def __init__(self: object, repo_root: object, fail_under: object = None) -> None:
+        """Initialize the instance."""
         self.rootpath = repo_root
         self._repo_root = str(repo_root)
         self._fail_under = fail_under
         self.stash = pytest.Stash()
 
-    def getoption(self, name):
+    def getoption(self: object, name: object) -> object:
+        """Handle getoption."""
         if name == "evalspec_repo_root":
             return self._repo_root
         return {
@@ -424,37 +509,52 @@ class _FakeConfig:
 
 
 class _FakeTR:
-    def __init__(self):
+    """Represent _FakeTR."""
+
+    def __init__(self: object) -> None:
+        """Initialize the instance."""
         self.events = []
         self.lines = []
 
-    def write_sep(self, sep, title):
+    def write_sep(self: object, sep: object, title: object) -> None:
+        """Handle write_sep."""
         self.events.append(("sep", title))
 
-    def line(self, msg):
+    def line(self: object, msg: object) -> None:
+        """Handle line."""
         self.events.append(("line", msg))
         self.lines.append(msg)
 
 
 class _FakeSession:
-    def __init__(self, config):
+    """Represent _FakeSession."""
+
+    def __init__(self: object, config: object) -> None:
+        """Initialize the instance."""
         self.config = config
         self.exitstatus = 0
 
 
 class _StubAgent:
+    """Represent _StubAgent."""
+
     id = "claude-code"
     capabilities = AgentCapabilities(
-        efforts=("low", "medium", "high"), multi_turn=True, token_split=True,
+        efforts=("low", "medium", "high"),
+        multi_turn=True,
+        token_split=True,
     )
 
-    def version(self):
+    def version(self: object) -> str:
+        """Handle version."""
         return "9.9.9"
 
 
-def _finish_and_summarize(tmp_path, monkeypatch=None):
-    """Drive the post-run pipeline the way pytest does: sessionfinish builds the
-    artifacts, terminal_summary only prints."""
+def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> object:
+    """Drive the post-run pipeline the way pytest does: sessionfinish builds the.
+
+    artifacts, terminal_summary only prints.
+    """
     config = _FakeConfig(tmp_path)
     session = _FakeSession(config)
     plugin.pytest_sessionfinish(session, 0)
@@ -463,7 +563,8 @@ def _finish_and_summarize(tmp_path, monkeypatch=None):
     return session, tr
 
 
-def test_terminal_summary_prints_delta(tmp_path, monkeypatch):
+def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -479,7 +580,8 @@ def test_terminal_summary_prints_delta(tmp_path, monkeypatch):
     assert (it / "benchmark.md").is_file()
 
 
-def test_terminal_summary_multi_skill_single_header(tmp_path, monkeypatch):
+def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     # Two skills with eval-* children emit exactly one header and one delta line
     # each (sorted: archive before ingest). A third skill dir that contains only
     # a trigger-q1 subdir now reports too — trigger-only skills are no longer skipped.
@@ -513,19 +615,28 @@ def test_terminal_summary_multi_skill_single_header(tmp_path, monkeypatch):
     assert benchmark["label"] == "iteration_01 · archive"
 
 
-def test_build_manifest_assembles_shape_by_value():
+def test_build_manifest_assembles_shape_by_value() -> None:
+    """Test the expected behavior."""
     # The pure assembler is testable by value (no uuid/clock/git IO) — the shell
     # injects identity. Pins the spread of cfg and the hash, which the IO-bound
     # sessionfinish test below can only presence-check.
     cfg = {
-        "agent": "claude-code", "agent_version": "9.9.9", "model": "sonnet",
-        "judge_model": "sonnet", "eval_effort": "medium",
-        "trigger_effort": "low", "trigger_mode": "asymmetric",
+        "agent": "claude-code",
+        "agent_version": "9.9.9",
+        "model": "sonnet",
+        "judge_model": "sonnet",
+        "eval_effort": "medium",
+        "trigger_effort": "low",
+        "trigger_mode": "asymmetric",
     }
 
     manifest = plugin.build_manifest(
-        run_id="r" * 32, started_at="2026-06-13T00:00:00+00:00", commit="abc123",
-        iteration="iteration_07", cfg=cfg, token_split=True,
+        run_id="r" * 32,
+        started_at="2026-06-13T00:00:00+00:00",
+        commit="abc123",
+        iteration="iteration_07",
+        cfg=cfg,
+        token_split=True,
     )
 
     assert manifest["format_version"] == 1
@@ -534,30 +645,48 @@ def test_build_manifest_assembles_shape_by_value():
     assert manifest["started_at"] == "2026-06-13T00:00:00+00:00"
     assert manifest["iteration"] == "iteration_07"
     assert manifest["token_split"] is True
-    assert manifest["model"] == "sonnet"            # cfg spread in
+    assert manifest["model"] == "sonnet"  # cfg spread in
     assert manifest["trigger_mode"] == "asymmetric"
     assert len(manifest["config_hash"]) == 12
 
 
-def test_build_manifest_config_hash_is_order_independent():
+def test_build_manifest_config_hash_is_order_independent() -> None:
+    """Test the expected behavior."""
     # config_hash hashes cfg with sort_keys, so two cfgs that differ only in key
     # order (and in the non-cfg identity fields) hash identically.
     cfg = {
-        "agent": "claude-code", "agent_version": None, "model": "sonnet",
-        "judge_model": "sonnet", "eval_effort": "medium",
-        "trigger_effort": "low", "trigger_mode": "asymmetric",
+        "agent": "claude-code",
+        "agent_version": None,
+        "model": "sonnet",
+        "judge_model": "sonnet",
+        "eval_effort": "medium",
+        "trigger_effort": "low",
+        "trigger_mode": "asymmetric",
     }
     reordered = dict(reversed(list(cfg.items())))
 
-    a = plugin.build_manifest(run_id="a" * 32, started_at="t1", commit="c1",
-                              iteration="iteration_01", cfg=cfg, token_split=True)
-    b = plugin.build_manifest(run_id="b" * 32, started_at="t2", commit="c2",
-                              iteration="iteration_99", cfg=reordered, token_split=False)
+    a = plugin.build_manifest(
+        run_id="a" * 32,
+        started_at="t1",
+        commit="c1",
+        iteration="iteration_01",
+        cfg=cfg,
+        token_split=True,
+    )
+    b = plugin.build_manifest(
+        run_id="b" * 32,
+        started_at="t2",
+        commit="c2",
+        iteration="iteration_99",
+        cfg=reordered,
+        token_split=False,
+    )
 
     assert a["config_hash"] == b["config_hash"]
 
 
-def test_sessionfinish_writes_run_manifest(tmp_path, monkeypatch):
+def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
         """\
@@ -598,18 +727,23 @@ arms = [
     assert meta["trigger_effort"] == "low"
     assert meta["trigger_mode"] == "asymmetric"
     assert meta["token_split"] is True
-    assert "commit" in meta and "started_at" in meta and "evalspec_version" in meta
+    assert "commit" in meta
+    assert "started_at" in meta
+    assert "evalspec_version" in meta
 
     benchmark = json.loads((it / "benchmark.json").read_text())
     assert benchmark["arms"]["baseline"]["harness_args"] == ["--set-flag"]
     assert benchmark["arms"]["trial"]["harness_args"] == [
-        "--set-flag", "--plugin-dir", "/project",
+        "--set-flag",
+        "--plugin-dir",
+        "/project",
     ]
     md = (it / "benchmark.md").read_text()
     assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in md
 
 
-def test_sessionfinish_trigger_only_without_eval_set(tmp_path, monkeypatch):
+def test_sessionfinish_trigger_only_without_eval_set(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     # A trigger-only run that declared no eval set must finish, not crash: sessionfinish
     # resolves the set only when an `eval-` artifact exists. Here there are only `trigger-`
     # dirs, so the set is never resolved and the manifest degrades to set=None/arms=[].
@@ -628,10 +762,13 @@ def test_sessionfinish_trigger_only_without_eval_set(tmp_path, monkeypatch):
     assert any("router" in m and "trigger 1/1" in m for m in tr.lines)
 
 
-def test_manifest_survives_missing_agent_credential(tmp_path, monkeypatch):
+def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
+
     # No credential / missing CLI must not kill the manifest: identity fields go
     # null, the run configuration is still recorded.
-    def boom():
+    def boom() -> NoReturn:
+        """Handle boom."""
         raise RuntimeError("no credential")
 
     monkeypatch.setattr(plugin, "make_agent", boom)
@@ -648,7 +785,8 @@ def test_manifest_survives_missing_agent_credential(tmp_path, monkeypatch):
     assert meta["set"] == "default"
 
 
-def test_terminal_summary_noop_without_artifacts(tmp_path, monkeypatch):
+def test_terminal_summary_noop_without_artifacts(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     workspace.set_current_iteration("iteration_01")
 
@@ -657,17 +795,20 @@ def test_terminal_summary_noop_without_artifacts(tmp_path, monkeypatch):
     assert tr.events == []
 
 
-def test_unknown_agent_flag_fails_at_startup(pytester):
+def test_unknown_agent_flag_fails_at_startup(pytester: object) -> None:
+    """Test the expected behavior."""
     _make_project(pytester)
 
     result = _collect(pytester, "--evalspec-agent", "not-a-harness")
 
     assert result.ret != 0
     out = result.stderr.str() + result.stdout.str()
-    assert "--evalspec-agent" in out and "not-a-harness" in out
+    assert "--evalspec-agent" in out
+    assert "not-a-harness" in out
 
 
-def test_agent_flag_beats_env(pytester, monkeypatch):
+def test_agent_flag_beats_env(pytester: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setenv("EVALSPEC_AGENT", "opencode")
     _make_project(pytester)
 
@@ -676,7 +817,8 @@ def test_agent_flag_beats_env(pytester, monkeypatch):
     assert result.ret == 0
 
 
-def test_judge_model_flag_is_accepted(pytester):
+def test_judge_model_flag_is_accepted(pytester: object) -> None:
+    """Test the expected behavior."""
     _make_project(pytester)
 
     result = _collect(pytester, "--evalspec-judge-model", "haiku")
@@ -684,7 +826,8 @@ def test_judge_model_flag_is_accepted(pytester):
     assert result.ret == 0
 
 
-def test_sessionfinish_writes_index_jsonl(tmp_path, monkeypatch):
+def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -701,13 +844,14 @@ def test_sessionfinish_writes_index_jsonl(tmp_path, monkeypatch):
     assert sum(1 for r in lines if r["kind"] == "trigger") == 1
 
 
-def test_fail_under_sets_exit_status(tmp_path, monkeypatch):
+def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=0, total=2)      # 0%
-    seed_arm(it, "alpha", "baseline", passes=2, total=2)   # 100% → delta -100pp
+    seed_arm(it, "alpha", "trial", passes=0, total=2)  # 0%
+    seed_arm(it, "alpha", "baseline", passes=2, total=2)  # 100% → delta -100pp
 
     config = _FakeConfig(tmp_path, fail_under=0.0)
     session = _FakeSession(config)
@@ -719,13 +863,14 @@ def test_fail_under_sets_exit_status(tmp_path, monkeypatch):
     assert any("fail-under" in line for line in tr.lines)
 
 
-def test_fail_under_quiet_when_met(tmp_path, monkeypatch):
+def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=2, total=2)      # 100%
-    seed_arm(it, "alpha", "baseline", passes=0, total=2)   # 0% → delta +100pp
+    seed_arm(it, "alpha", "trial", passes=2, total=2)  # 100%
+    seed_arm(it, "alpha", "baseline", passes=0, total=2)  # 0% → delta +100pp
 
     config = _FakeConfig(tmp_path, fail_under=0.0)
     session = _FakeSession(config)
@@ -734,7 +879,8 @@ def test_fail_under_quiet_when_met(tmp_path, monkeypatch):
     assert session.exitstatus == 0
 
 
-def test_fail_under_skipped_without_reference(tmp_path, monkeypatch):
+def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: object) -> None:
+    """Test the expected behavior."""
     # A set with no `baseline` → absolute scores, no Δ to gate; the fail-under
     # threshold is a no-op rather than failing the run.
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())

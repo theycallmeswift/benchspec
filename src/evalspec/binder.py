@@ -1,12 +1,4 @@
-"""Prose→primitive binder: map a plain-prose assertion to a deterministic checker spec at
-grade time when confident, else punt (return None) to the LLM judge.
-
-Tuned for false-negatives, never false-positives: over-punting is free (the judge was already
-going to grade it); a false-positive (a surface check passing on wrong output) is the one outcome
-worse than judging. Presence/persistence/negation (A9) assertions ALWAYS punt — the model is
-blind to the invisible "…and was not replaced" clause. Authors never see this — they write
-prose; the binder derives the deterministic check.
-"""
+"""Document the behavior."""
 
 from __future__ import annotations
 
@@ -38,24 +30,29 @@ _COMPOUND_AFTER_EXISTS_RE = re.compile(
 # the only format field.
 _BINDING_PROMPT = textwrap.dedent(
     """\
-    <role>
-    You convert exactly ONE eval assertion into a deterministic checker spec, OR you decline.
-    You are a conservative classifier, not a grader: you never judge whether the assertion is
-    true, only whether it can be checked mechanically by one of the primitives below WITHOUT
-    reading content for meaning. Declining ("punt") is always free — the assertion will be
-    graded by an LLM judge anyway. The ONLY unacceptable error is emitting a checker that could
-    pass on WRONG output. When in any doubt, punt.
-    </role>
+    <role> You convert exactly ONE eval assertion into a deterministic checker
+    spec, OR you decline. You are a conservative classifier, not a grader: you never
+    judge whether the assertion is true, only whether it can be checked mechanically by
+    one of the primitives below WITHOUT reading content for meaning. Declining ("punt")
+    is always free — the assertion will be graded by an LLM judge anyway. The ONLY
+    unacceptable error is emitting a checker that could pass on WRONG output. When in
+    any doubt, punt. </role>
 
     <primitives>
     Each spec is a JSON object with a `checker` field plus that checker's args:
-    - file_exists  {{"checker":"file_exists","path":"<rel/path>"}}            (optional "should_exist": false to assert absence)
-    - glob_count   {{"checker":"glob_count","glob":"<pattern>","count":<int>}}  (use EITHER "count" XOR "min", never both)
-    - frontmatter_has {{"checker":"frontmatter_has","path":"<rel/path>","key":"<key>"}}  (optional "value":"<expected>")
+    - file_exists  {{"checker":"file_exists","path":"<rel/path>"}}
+      (optional "should_exist": false to assert absence)
+    - glob_count   {{"checker":"glob_count","glob":"<pattern>","count":<int>}}
+      (use EITHER "count" XOR "min", never both)
+    - frontmatter_has {{"checker":"frontmatter_has","path":"<rel/path>","key":"<key>"}}
+      (optional "value":"<expected>")
     - regex        {{"checker":"regex","path":"<rel/path>","pattern":"<regex>"}}
-    - sha256_match {{"checker":"sha256_match","path":"<rel/path>","original":"<named-pre-run-file>"}}  (or "sha256":"<64 hex>")
+    - sha256_match
+      {{"checker":"sha256_match","path":"<rel/path>","original":"<named-pre-run-file>"}}
+      (or "sha256":"<64 hex>")
     - skill_invoked {{"checker":"skill_invoked","skill":"<skill-name>"}}
-    Canonical skill-activation assertion line: `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}}.
+    Canonical skill-activation assertion line:
+    `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}}.
     </primitives>
 
     <rules>
@@ -119,14 +116,19 @@ _BINDING_PROMPT = textwrap.dedent(
     Assertion: - Skill `my-skill` invoked
     {{"checker":"skill_invoked","skill":"my-skill"}}
 
-    Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl (the active session source)
-    {{"checker":"sha256_match","path":"out/session.jsonl","original":".store/projects/proj/sess-0001.jsonl"}}
+    Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl
+    (the active session source)
+    {{"checker":"sha256_match","path":"out/session.jsonl",
+      "original":".store/projects/proj/sess-0001.jsonl"}}
 
-    Assertion: the existing file 9. Archive/Sources/2099-01-01/notes.md is byte-identical to its pre-run content — the collision did not overwrite it
-    {{"checker":"sha256_match","path":"9. Archive/Sources/2099-01-01/notes.md","original":"9. Archive/Sources/2099-01-01/notes.md"}}
+    Assertion: the existing file 9. Archive/Sources/2099-01-01/notes.md is byte-identical
+    to its pre-run content — the collision did not overwrite it
+    {{"checker":"sha256_match","path":"9. Archive/Sources/2099-01-01/notes.md",
+      "original":"9. Archive/Sources/2099-01-01/notes.md"}}
 
     Assertion: the ./build/ directory now exists and contains all the compiled assets
-    {{"punt": true, "reason": "compound — bare existence binds, but 'contains all the assets' is a separate, unverifiable contents claim"}}
+    {{"punt": true, "reason": "compound — bare existence binds, but 'contains all the assets'
+      is a separate, unverifiable contents claim"}}
 
     Assertion: the original note item.md is still present and was not duplicated
     {{"punt": true, "reason": "A9 persistence/negation — blind to the not-duplicated clause"}}
@@ -140,11 +142,17 @@ _BINDING_PROMPT = textwrap.dedent(
 )
 
 
-def bind(assertion_text: str, *, model: str = BINDER_MODEL, call_host=run_host_judge) -> dict | None:
+def bind(
+    assertion_text: str,
+    *,
+    model: str = BINDER_MODEL,
+    call_host: object = run_host_judge,
+) -> dict | None:
     """Return a deterministic checker spec dict for `assertion_text`, or None to punt.
 
     The returned dict is the exact checker-spec shape `checkers.run_assertion` consumes.
-    `call_host` is injected so tests drive the binder with recorded envelopes (no network).
+    `call_host` is injected so tests drive the binder with recorded envelopes (no
+    network).
     """
     if spec := _bind_bare_exists(assertion_text):
         return spec
@@ -156,6 +164,7 @@ def bind(assertion_text: str, *, model: str = BINDER_MODEL, call_host=run_host_j
 
 
 def _clean_bare_exists_path(raw: str) -> str:
+    """Handle _clean_bare_exists_path."""
     path = raw.strip()
     if len(path) >= 2 and path[0] == path[-1] and path[0] in {"'", '"', "`"}:
         path = path[1:-1].strip()
@@ -163,6 +172,7 @@ def _clean_bare_exists_path(raw: str) -> str:
 
 
 def _bind_bare_exists(assertion_text: str) -> dict | None:
+    """Handle _bind_bare_exists."""
     text = assertion_text.strip()
     if _COMPOUND_AFTER_EXISTS_RE.search(text):
         return None
@@ -181,11 +191,7 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
 
 
 def _parse_binding(raw: str) -> dict | None:
-    """Extract the binder's decision from the host-claude `--output-format json` envelope.
-
-    Returns a validated checker spec, or None on punt / any malformed shape. Never raises
-    on bad output — an unsure binder punts.
-    """
+    """Document the behavior."""
     if not isinstance(raw, str):
         return None  # non-string host output (e.g. None on an abnormal call) → punt
     try:
