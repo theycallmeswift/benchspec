@@ -14,7 +14,7 @@
 
 - Modify `pyproject.toml`: add commented Ruff configuration, Google pydocstyle convention, and scoped legacy `per-file-ignores` generated from the current baseline.
 - Modify `Makefile`: add `lint:custom` while keeping `lint` Ruff-only.
-- Create `lib/style_lint/`: reusable rule/finding dataclasses, path collection, source chunking, Gemini prompt/call/parsing, optional verification, and output formatting.
+- Create `lib/style_lint/`: reusable submodules for rule/finding dataclasses, path collection, source chunking, Gemini prompt/call/parsing, optional verification, advisory runner API, and output formatting.
 - Create `bin/linters/style_lint.py`: repository-specific CLI containing evalspec default paths, rule definitions, model defaults, prompt instructions, advisory `run()`, and `main()`.
 - Create `tests/test_style_lint.py`: focused tests for the custom checker and Makefile-facing behavior.
 
@@ -151,6 +151,12 @@ git push
 ### Task 3: Implement Custom Style Linter
 
 **Files:**
+- Create: `lib/style_lint/models.py`
+- Create: `lib/style_lint/files.py`
+- Create: `lib/style_lint/prompt.py`
+- Create: `lib/style_lint/gemini.py`
+- Create: `lib/style_lint/findings.py`
+- Create: `lib/style_lint/runner.py`
 - Create: `lib/style_lint/__init__.py`
 - Create: `lib/__init__.py`
 - Create/modify: `bin/linters/style_lint.py`
@@ -158,7 +164,7 @@ git push
 
 - [ ] **Step 1: Add reusable rule, chunk, and finding models**
 
-In `lib/style_lint/__init__.py`, define:
+In `lib/style_lint/models.py`, define:
 
 ```python
 from __future__ import annotations
@@ -188,7 +194,7 @@ class Finding:
     message: str
 ```
 
-Define `DEFAULT_MODEL`, `DEFAULT_PATHS`, `RULES`, and the evalspec prompt instructions in `bin/linters/style_lint.py`, not in the reusable framework. Use these exact rule IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`.
+Keep `lib/style_lint/__init__.py` limited to export control. Define `DEFAULT_MODEL`, `DEFAULT_PATHS`, `RULES`, and the evalspec policy instructions in `bin/linters/style_lint.py`, not in the reusable framework. Use these exact rule IDs: `no-suppression-comments`, `section-header-comments`, `provenance-comments`, `descriptive-names`, `dedented-multiline-strings`.
 
 - [ ] **Step 2: Implement path collection**
 
@@ -212,7 +218,15 @@ def format_findings(findings: list[Finding]) -> list[str]: ...
 
 Use strict JSON response expectations. Reject unknown rule IDs and malformed finding references with `ValueError`. Implement `call_gemini()` with stdlib `urllib.request` against the Gemini REST API, not a new SDK dependency, so `pyproject.toml` and `uv.lock` do not need Gemini package changes.
 
-- [ ] **Step 5: Implement CLI run path**
+- [ ] **Step 5: Implement library runner API and CLI run path**
+
+In `lib/style_lint/runner.py`, define `StyleLintConfig`, `StyleLintResult`, and:
+
+```python
+def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult: ...
+```
+
+The runner owns the ordered framework pipeline: collect files, chunk source, build the prompt with the framework default system prompt plus caller policy, call Gemini, parse findings, optionally verify findings, format diagnostics, and return warnings instead of raising advisory model errors.
 
 Implement `run(paths: list[Path] | None = None, *, model: str = DEFAULT_MODEL, verify_model: str | None = None) -> int` and `main(argv: list[str] | None = None) -> int`.
 
@@ -237,9 +251,9 @@ from pathlib import Path
 import lib.style_lint as style_lint
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"))
+DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"), Path("bin"), Path("lib"))
 RULES = [...]
-DETECTOR_INSTRUCTIONS = "..."
+POLICY_INSTRUCTIONS = "..."
 
 if __name__ == "__main__":
     raise SystemExit(main())

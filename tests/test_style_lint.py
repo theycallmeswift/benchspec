@@ -47,6 +47,16 @@ def test_makefile_wires_custom_lint_target_and_keeps_lint_ruff_only() -> None:
     assert "style_lint.py" not in lint_target_text
 
 
+def test_plan_file_lives_in_docs_plans() -> None:
+    """Keep implementation plans in the repository-level plans directory."""
+    repo_root = Path(__file__).resolve().parents[1]
+
+    assert (repo_root / "docs/plans/2026-07-05-style-lint-rules.md").exists()
+    assert not (
+        repo_root / "docs/superpowers/plans/2026-07-05-style-lint-rules.md"
+    ).exists()
+
+
 def test_evalspec_package_does_not_own_style_lint_framework() -> None:
     """Keep reusable linter framework code out of the evalspec package."""
     old_module = Path(__file__).resolve().parents[1] / "src/evalspec/style_lint.py"
@@ -55,14 +65,20 @@ def test_evalspec_package_does_not_own_style_lint_framework() -> None:
 
     framework = _framework()
 
-    assert framework.Rule.__module__ == "lib.style_lint"
+    assert framework.Rule.__module__ == "lib.style_lint.models"
 
 
 def test_cli_owns_repo_specific_rules_prompt_and_default_paths() -> None:
     """Keep evalspec-specific lint policy in the repository script."""
     cli = _cli()
 
-    assert cli.DEFAULT_PATHS == (Path("src"), Path("tests"), Path("evals"))
+    assert cli.DEFAULT_PATHS == (
+        Path("src"),
+        Path("tests"),
+        Path("evals"),
+        Path("bin"),
+        Path("lib"),
+    )
     assert {rule.id for rule in cli.RULES} == {
         "no-suppression-comments",
         "section-header-comments",
@@ -70,7 +86,24 @@ def test_cli_owns_repo_specific_rules_prompt_and_default_paths() -> None:
         "descriptive-names",
         "dedented-multiline-strings",
     }
-    assert "docs/style/development.md" in cli.DETECTOR_INSTRUCTIONS
+    assert "docs/style/development.md" in cli.POLICY_INSTRUCTIONS
+    assert "Review the numbered source chunks" not in cli.POLICY_INSTRUCTIONS
+
+
+def test_framework_init_only_exports_submodule_api() -> None:
+    """Keep framework implementation out of the package __init__ module."""
+    framework = _framework()
+    init_text = (
+        Path(__file__).resolve().parents[1] / "lib/style_lint/__init__.py"
+    ).read_text()
+
+    assert "def " not in init_text
+    assert "class " not in init_text
+    assert framework.StyleLintConfig.__module__ == "lib.style_lint.runner"
+    assert (
+        importlib.import_module("lib.style_lint.prompt").DEFAULT_SYSTEM_PROMPT
+        == framework.DEFAULT_SYSTEM_PROMPT
+    )
 
 
 def test_collect_python_files_defaults_to_configured_roots(
@@ -136,9 +169,62 @@ def test_build_detector_prompt_includes_rules_chunks_and_schema(tmp_path: Path) 
     )
 
     assert "Use the repository style guide." in prompt
+    assert "Review the numbered source chunks" in prompt
     assert "descriptive-names" in prompt
     assert "chunk_index" in prompt
     assert "1 | x = 1" in prompt
+
+
+def test_run_advisory_lint_encapsulates_framework_call_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run the reusable lint pipeline from one config object."""
+    framework = _framework()
+    source = tmp_path / "sample.py"
+    source.write_text("x = 1\n")
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+    calls: list[str] = []
+
+    def _call_gemini(**kwargs: object) -> str:
+        calls.append(str(kwargs["model"]))
+        return response
+
+    monkeypatch.setattr(framework, "call_gemini", _call_gemini)
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+            policy_instructions="Use the repository style guide.",
+            api_key="test-key",
+            model="gemini-test",
+        )
+    )
+
+    assert calls == ["gemini-test"]
+    assert len(result.findings) == 1
+    assert result.diagnostics == [
+        f"{source.resolve()}:1:1: descriptive-names Use a descriptive binding name."
+    ]
 
 
 def test_parse_findings_rejects_unknown_rule_ids(tmp_path: Path) -> None:
