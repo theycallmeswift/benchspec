@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 _EVALS_V1 = "evalspec/v1"
 _TRIGGER_V1 = "evalspec-trigger/v1"
@@ -34,25 +33,36 @@ _CHECKER_FIELDS = {
 }
 
 _CHECKER_KEY_TYPES = {
-    "path": str, "glob": str, "original": str, "sha256": str,
-    "key": str, "value": str, "pattern": str, "skill": str,
-    "count": int, "min": int, "should_exist": bool,
+    "path": str,
+    "glob": str,
+    "original": str,
+    "sha256": str,
+    "key": str,
+    "value": str,
+    "pattern": str,
+    "skill": str,
+    "count": int,
+    "min": int,
+    "should_exist": bool,
 }
 
 _KEBAB_HINT = "lowercase alphanumerics separated by hyphens, e.g. `happy-path`"
 
 
 class SchemaError(ValueError):
+    """Represent SchemaError."""
+
     pass
 
 
 def _require(
-    obj: Any,
+    obj: object,
     key: str,
     expected_type: type | tuple[type, ...],
     path: str,
     example: str | None = None,
-) -> Any:
+) -> object:
+    """Handle _require."""
     if key not in obj:
         hint = f" — e.g. {example}" if example else ""
         raise SchemaError(f"{path}: missing required field `{key}`{hint}")
@@ -67,7 +77,8 @@ def _require(
     return val
 
 
-def _optional(obj: Any, key: str, expected_type: type | tuple[type, ...], path: str) -> Any:
+def _optional(obj: object, key: str, expected_type: type | tuple[type, ...], path: str) -> object:
+    """Handle _optional."""
     if key not in obj:
         return None
     val = obj[key]
@@ -82,12 +93,14 @@ def _optional(obj: Any, key: str, expected_type: type | tuple[type, ...], path: 
 
 
 def _reject_extra_keys(obj: dict, allowed: set[str], path: str) -> None:
+    """Handle _reject_extra_keys."""
     extra = set(obj.keys()) - allowed
     if extra:
         raise SchemaError(f"{path}: unknown field(s) {sorted(extra)} (allowed: {sorted(allowed)})")
 
 
-def _validate_string_list(val: Any, key_path: str) -> None:
+def _validate_string_list(val: object, key_path: str) -> None:
+    """Handle _validate_string_list."""
     if not isinstance(val, list):
         raise SchemaError(f"{key_path}: expected list, got {type(val).__name__}")
     if not val:
@@ -100,21 +113,20 @@ def _validate_string_list(val: Any, key_path: str) -> None:
 
 
 def _check_key_type(item: dict, key: str, path: str) -> None:
+    """Handle _check_key_type."""
     val = item[key]
     expected = _CHECKER_KEY_TYPES[key]
     # bool subclasses int: True as a count must not validate.
     if (expected is int and isinstance(val, bool)) or not isinstance(val, expected):
-        raise SchemaError(
-            f"{path}.{key}: expected {expected.__name__}, got {type(val).__name__}"
-        )
+        raise SchemaError(f"{path}.{key}: expected {expected.__name__}, got {type(val).__name__}")
 
 
 def _validate_checker_obj(item: dict, path: str) -> None:
+    """Handle _validate_checker_obj."""
     checker = _require(item, "checker", str, path)
     if checker not in _CHECKER_FIELDS:
         raise SchemaError(
-            f"{path}.checker: `{checker}` is not a known checker "
-            f"(valid: {sorted(_CHECKER_FIELDS)})"
+            f"{path}.checker: `{checker}` is not a known checker (valid: {sorted(_CHECKER_FIELDS)})"
         )
     required, optional = _CHECKER_FIELDS[checker]
     _reject_extra_keys(item, {"type", "checker", "text"} | required | optional, path)
@@ -127,9 +139,7 @@ def _validate_checker_obj(item: dict, path: str) -> None:
         raise SchemaError(f"{path}: glob_count takes exactly one of `count` / `min`")
     if checker == "sha256_match":
         if ("original" in item) == ("sha256" in item):
-            raise SchemaError(
-                f"{path}: sha256_match takes exactly one of `original` / `sha256`"
-            )
+            raise SchemaError(f"{path}: sha256_match takes exactly one of `original` / `sha256`")
         if "sha256" in item and not _SHA256_HEX.match(item["sha256"]):
             raise SchemaError(f"{path}.sha256: must be 64 hex chars (lowercase)")
     if checker == "regex":
@@ -142,7 +152,8 @@ def _validate_checker_obj(item: dict, path: str) -> None:
         raise SchemaError(f"{path}.text: must be non-empty")
 
 
-def _validate_seed(seed: Any, path: str) -> None:
+def _validate_seed(seed: object, path: str) -> None:
+    """Handle _validate_seed."""
     if not isinstance(seed, list):
         raise SchemaError(f"{path}: expected list, got {type(seed).__name__}")
     for i, turn in enumerate(seed):
@@ -157,6 +168,7 @@ def _validate_seed(seed: Any, path: str) -> None:
 
 
 def _validate_evals_v1(data: dict) -> None:
+    """Handle _validate_evals_v1."""
     _reject_extra_keys(data, {"$schema", "evals"}, "root")
     evals = _require(
         data,
@@ -187,14 +199,20 @@ def _validate_evals_v1(data: dict) -> None:
             _validate_seed(item["seed"], f"{path}.seed")
 
         prompt = _require(
-            item, "prompt", str, path,
+            item,
+            "prompt",
+            str,
+            path,
             example='"prompt": "Use the `ingest` skill to add ./x.md."',
         )
         if not prompt.strip():
             raise SchemaError(f"{path}.prompt: must be non-empty")
 
         assertions = _require(
-            item, "assertions", list, path,
+            item,
+            "assertions",
+            list,
+            path,
             example='"assertions": ["a Resource page was created"]',
         )
         if not assertions:
@@ -210,6 +228,7 @@ def _validate_evals_v1(data: dict) -> None:
 
 
 def _validate_trigger_v1(data: dict) -> None:
+    """Handle _validate_trigger_v1."""
     allowed_top = {"$schema", "description", "skill_name", "queries"}
     _reject_extra_keys(data, allowed_top, "root")
 
@@ -245,9 +264,7 @@ def _validate_trigger_v1(data: dict) -> None:
         seen_slugs.add(slug)
 
         _optional(item, "description", str, path)
-        query = _require(
-            item, "query", str, path, example='"query": "archive this meeting note"'
-        )
+        query = _require(item, "query", str, path, example='"query": "archive this meeting note"')
         if not query.strip():
             raise SchemaError(f"{path}.query: must be non-empty")
 
@@ -265,22 +282,29 @@ def _validate_trigger_v1(data: dict) -> None:
             xfail_path = f"{path}.xfail"
             _reject_extra_keys(xfail, {"models", "reason"}, xfail_path)
             models = _require(
-                xfail, "models", list, xfail_path, example='"models": ["sonnet", "haiku"]'
+                xfail,
+                "models",
+                list,
+                xfail_path,
+                example='"models": ["sonnet", "haiku"]',
             )
             _validate_string_list(models, f"{xfail_path}.models")
             for tier in models:
                 if tier not in valid_tiers:
-                    raise SchemaError(
-                        f"{xfail_path}.models: `{tier}` not in {sorted(valid_tiers)}"
-                    )
+                    raise SchemaError(f"{xfail_path}.models: `{tier}` not in {sorted(valid_tiers)}")
             reason = _require(
-                xfail, "reason", str, xfail_path, example='"reason": "sonnet routing boundary; …"'
+                xfail,
+                "reason",
+                str,
+                xfail_path,
+                example='"reason": "sonnet routing boundary; …"',
             )
             if not reason.strip():
                 raise SchemaError(f"{xfail_path}.reason: must be non-empty")
 
 
 def _validate(data: dict) -> None:
+    """Handle _validate."""
     schema = data.get("$schema")
     if schema == _EVALS_V1:
         _validate_evals_v1(data)
@@ -290,15 +314,15 @@ def _validate(data: dict) -> None:
         raise SchemaError(
             f"root.$schema: expected `{_EVALS_V1}` (output evals) or "
             f"`{_TRIGGER_V1}` (trigger-evals.md), got {schema!r} — add "
-            "`\"$schema\"` as the first key"
+            '`"$schema"` as the first key'
         )
 
 
 def validate_path(path: Path) -> dict:
     """Load and validate an eval file, returning its parsed data.
 
-    Raises SchemaError on any schema deviation; lets JSONDecodeError propagate.
-    Used at pytest collection so a malformed eval file fails loudly and early.
+    Raises SchemaError on any schema deviation; lets JSONDecodeError propagate. Used at
+    pytest collection so a malformed eval file fails loudly and early.
     """
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):

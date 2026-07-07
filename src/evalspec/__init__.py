@@ -1,4 +1,4 @@
-"""evalspec — a pytest-native runner for coding-agent skill evals.
+"""Evalspec — a pytest-native runner for coding-agent skill evals.
 
 Discovers each skill's self-contained output evals (`evals/<slug>/prompt.md`) and
 `evals/trigger-evals.md`, runs each eval's `(eval × arm)` units as parametrized tests

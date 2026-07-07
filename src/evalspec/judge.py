@@ -1,4 +1,5 @@
-"""LLM-judge grading: build the facts-fed judge prompt, run it via the agent's judge
+"""LLM-judge grading: build the facts-fed judge prompt, run it via the agent's judge.
+
 call, parse it.
 
 The judge reasons only from supplied evidence (assertion list, resulting file tree, file
@@ -24,6 +25,7 @@ def build_judge_prompt(
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
 ) -> str:
+    """Handle build_judge_prompt."""
     numbered = "\n".join(f"{i}. {a}" for i, a in enumerate(assertions, 1))
     files_block = "\n\n".join(
         f"### {name} (sha256={shas.get(name, 'n/a')})\n{content}"
@@ -47,7 +49,8 @@ def build_judge_prompt(
     # multi-line blocks in — an f-string here would force the blocks to column 0.
     template = textwrap.dedent(
         """\
-        Grade an agent task against assertions. Judge ONLY from the evidence below — do not assume work that is not shown.
+        Grade an agent task against assertions. Judge ONLY from the evidence below
+        — do not assume work that is not shown.
 
         ASSERTIONS:
         {numbered}
@@ -61,8 +64,11 @@ def build_judge_prompt(
         AGENT'S FINAL MESSAGE:
         {final_message}
 
-        For each assertion, decide pass/fail from the evidence and quote the specific evidence. Output ONLY a JSON object, no prose:
-        {{"assertions": [{{"text": "<assertion verbatim>", "passed": true, "evidence": "<quote>"}}]}}
+        For each assertion, decide pass/fail from the evidence and quote the specific evidence.
+        Output ONLY a JSON object, no prose:
+        {{"assertions": [
+          {{"text": "<assertion verbatim>", "passed": true, "evidence": "<quote>"}}
+        ]}}
         """
     )
     return template.format(
@@ -75,11 +81,11 @@ def build_judge_prompt(
     )
 
 
-def _balanced_objects(text: str):
+def _balanced_objects(text: str) -> object:
     """Yield each top-level `{...}` substring, respecting strings/escapes.
 
-    `find("{")`/`rfind("}")` breaks when the judge's prose contains stray braces
-    (e.g. it echoes a `{...}` placeholder before the real object): the slice then spans the
+    `find("{")`/`rfind("}")` breaks when the judge's prose contains stray braces (e.g.
+    it echoes a `{...}` placeholder before the real object): the slice then spans the
     wrong range. Scanning for balanced objects lets the caller try each candidate.
     """
     depth = 0
@@ -107,7 +113,8 @@ def _balanced_objects(text: str):
                 yield text[start : i + 1]
 
 
-def _coerce_passed(value) -> bool:
+def _coerce_passed(value: object) -> bool:
+    """Handle _coerce_passed."""
     # The judge should emit a JSON bool, but LLMs sometimes quote it ("false").
     # bool("false") is True, so handle strings explicitly rather than coercing.
     if isinstance(value, str):
@@ -116,6 +123,7 @@ def _coerce_passed(value) -> bool:
 
 
 def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
+    """Handle parse_judge_json."""
     # The judge often wraps its JSON in a ```json fence or adds prose. Try each
     # balanced {...} candidate and take the first that parses and carries assertions.
     data = None
@@ -133,29 +141,39 @@ def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
         "eval_id": eval_id,
         "arm": config,
         "assertions": [
-            {"text": a["text"], "passed": _coerce_passed(a["passed"]), "evidence": a.get("evidence", "")}
+            {
+                "text": a["text"],
+                "passed": _coerce_passed(a["passed"]),
+                "evidence": a.get("evidence", ""),
+            }
             for a in data["assertions"]
         ],
     }
 
 
 def grade_run(
-    assertions,
-    tree,
-    file_contents,
-    shas,
-    final_message,
-    eval_id,
-    config,
+    assertions: object,
+    tree: object,
+    file_contents: object,
+    shas: object,
+    final_message: object,
+    eval_id: object,
+    config: object,
     *,
-    agent,
-    model="sonnet",
-    timeout=300,
-    original_shas=None,
-    process_facts="",
+    agent: object,
+    model: object = "sonnet",
+    timeout: object = 300,
+    original_shas: object = None,
+    process_facts: object = "",
 ) -> dict:
+    """Handle grade_run."""
     prompt = build_judge_prompt(
-        assertions, tree, file_contents, shas, final_message, original_shas,
+        assertions,
+        tree,
+        file_contents,
+        shas,
+        final_message,
+        original_shas,
         process_facts=process_facts,
     )
     for attempt in (1, 2):

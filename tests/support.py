@@ -1,3 +1,5 @@
+"""Tests and helpers for evalspec."""
+
 from __future__ import annotations
 
 from tests.conftest import FakeExecOutput, FakeSandbox, seed_arm, seed_trigger

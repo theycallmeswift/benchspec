@@ -21,14 +21,17 @@ from evalspec.schema import SchemaError
 
 
 def _sha256(path: Path) -> str:
+    """Handle _sha256."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _text_sha(text: str) -> str:
+    """Handle _text_sha."""
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
 def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None) -> dict:
+    """Handle seed_room."""
     workdir.mkdir(parents=True, exist_ok=True)
     if fixture_dir is None:
         return {}
@@ -60,7 +63,7 @@ def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None)
 
 
 def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
-    """Render a `seed:` turn list into a transcript block prepended to the graded prompt, so it works on any agent without session injection."""
+    """Document the behavior."""
     if not seed:
         return ""
     lines = ["<transcript>"]
@@ -77,7 +80,8 @@ def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def gather_facts(workdir: Path, max_bytes: int = 20000):
+def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
+    """Handle gather_facts."""
     tree_lines, contents, shas = [], {}, {}
     for p in sorted(workdir.rglob("*")):
         rel = str(p.relative_to(workdir))
@@ -111,28 +115,19 @@ def gather_facts(workdir: Path, max_bytes: int = 20000):
 
 
 def sha_snapshot_script(dirs: list[str]) -> str:
-    """POSIX-sh that prints `sha256sum` lines (`<hex>  <abs-path>`) for every file under
-    `dirs`. Missing dirs are skipped. `parse_sha_stream` reverses this.
-
-    `find -L` follows symlinks: the agents bridge their load dir (e.g. ~/.claude/skills)
-    to a symlink at provision (bridge_skills_home_script), and a bare `find <symlink>`
-    start point does NOT descend through the link — it would yield zero files, silently
-    hiding every agent-authored skill from the judge. `-L` walks the link's target while
-    still reporting the symlink-prefixed path, so `parse_sha_stream`/`to_display_paths`
-    keep relabeling it `~/...`. The `[ -d "$d" ]` guard is `-L`-symmetric (it follows
-    links too), so a symlinked-but-present dir still passes.
-
-    Terminates with `; done; true` so the script's exit status can't ride on the loop's
-    last iteration: a `for` loop exits with its final iteration's status, so a missing
-    *last* dir would make `[ -d "$d" ] &&` short-circuit to exit 1 — which the caller reads
-    as a failed snapshot, not an empty one. `true` pins exit 0 regardless of dir presence."""
+    """Document the behavior."""
     quoted = " ".join(shlex.quote(d) for d in dirs)
-    return f'for d in {quoted}; do [ -d "$d" ] && find -L "$d" -type f -exec sha256sum {{}} + 2>/dev/null; done; true'
+    return (
+        f'for d in {quoted}; do [ -d "$d" ] && '
+        'find -L "$d" -type f -exec sha256sum {} + 2>/dev/null; done; true'
+    )
 
 
 def parse_sha_stream(stdout: str) -> dict[str, str]:
-    """Parse `sha_snapshot_script` stdout into {abs-path: sha}. `sha256sum` separates the
-    digest from the path with exactly two spaces."""
+    """Parse `sha_snapshot_script` stdout into {abs-path: sha}.
+
+    `sha256sum` separates the.     digest from the path with exactly two spaces.
+    """
     out: dict[str, str] = {}
     for line in stdout.splitlines():
         sha, sep, path = line.partition("  ")
@@ -142,7 +137,7 @@ def parse_sha_stream(stdout: str) -> dict[str, str]:
 
 
 def changed_paths(baseline_shas: dict[str, str], current_shas: dict[str, str]) -> list[str]:
-    """Paths the agent created or changed — sha new or differs from the staged baseline."""
+    """Document the behavior."""
     return [p for p, sha in current_shas.items() if baseline_shas.get(p) != sha]
 
 
@@ -152,9 +147,11 @@ _ARTIFACT_RE = re.compile("\x1e\x1eARTIFACT\x1e\x1e(.*?)\x1e\x1e\n")
 
 
 def read_files_script(paths: list[str]) -> str:
-    """POSIX-sh that prints each path in `paths` as an RS-framed record:
+    r"""POSIX-sh that prints each path in `paths` as an RS-framed record:.
+
     `\\x1e\\x1eARTIFACT\\x1e\\x1e<abs-path>\\x1e\\x1e\\n` then the file's exact bytes.
-    `parse_artifact_stream` reverses this. Pass only the changed paths `changed_paths` found."""
+    `parse_artifact_stream` reverses this. Pass only the changed paths `changed_paths` found.
+    """
     body = "".join(
         f"printf '\\036\\036ARTIFACT\\036\\036%s\\036\\036\\n' {shlex.quote(p)}; "
         f"cat {shlex.quote(p)} 2>/dev/null; "
@@ -170,25 +167,27 @@ def parse_artifact_stream(stdout: str) -> dict[str, str]:
     # first header is discarded.
     out: dict[str, str] = {}
     it = iter(parts[1:])
-    for path, content in zip(it, it):
+    for path, content in zip(it, it, strict=False):
         out[path] = content
     return out
 
 
 def to_display_paths(mapping: dict[str, str], guest_home: str) -> dict[str, str]:
-    """Rewrite absolute guest paths to `~/...` so the judge can tell skills-dir artifacts
-    from workdir files at a glance."""
+    """Document the behavior."""
     home = guest_home.rstrip("/")
     out: dict[str, str] = {}
     for path, content in mapping.items():
-        out["~" + path[len(home):] if path.startswith(home + "/") else path] = content
+        out["~" + path[len(home) :] if path.startswith(home + "/") else path] = content
     return out
 
 
-def merge_facts(tree: str, contents: dict, shas: dict, extra: dict[str, str],
-                max_bytes: int = 20000):
-    """Append `extra` ({display-path: content}) to a `gather_facts` triple, so captured
-    artifacts grade alongside the workdir tree."""
+def merge_facts(
+    tree: str, contents: dict, shas: dict, extra: dict[str, str], max_bytes: int = 20000
+) -> object:
+    """Append `extra` ({display-path: content}) to a `gather_facts` triple, so captured.
+
+    artifacts grade alongside the workdir tree.
+    """
     tree_lines = [ln for ln in tree.split("\n") if ln] if tree else []
     contents, shas = dict(contents), dict(shas)
     for path in sorted(extra):

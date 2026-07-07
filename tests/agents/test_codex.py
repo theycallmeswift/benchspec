@@ -1,3 +1,5 @@
+"""Tests and helpers for evalspec."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,26 +16,35 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _text(name: str) -> str:
+    """Handle _text."""
     return (FIXTURES / name).read_text()
 
 
 def _lines(name: str) -> list[str]:
+    """Handle _lines."""
     return _text(name).splitlines()
 
 
 def _agent(auth_env: str = "CODEX_API_KEY", auth_json_path: str = "") -> CodexAgent:
+    """Handle _agent."""
     return CodexAgent(
-        auth_value="sk-test", auth_env=auth_env, version="latest",
+        auth_value="sk-test",
+        auth_env=auth_env,
+        version="latest",
         auth_json_path=auth_json_path,
     )
 
 
-def _capture_secret(monkeypatch) -> dict:
+def _capture_secret(monkeypatch: object) -> dict:
+    """Handle _capture_secret."""
     captured = {}
 
     class DummySecret:
+        """Represent DummySecret."""
+
         @staticmethod
-        def env(env_var, *, value, allow_hosts):
+        def env(env_var: object, *, value: object, allow_hosts: object) -> str:
+            """Handle env."""
             captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
             return "secret"
 
@@ -43,38 +54,55 @@ def _capture_secret(monkeypatch) -> dict:
     return captured
 
 
-def test_build_command_shape_for_exec_json():
+def test_build_command_shape_for_exec_json() -> None:
+    """Test the expected behavior."""
     cmd = _agent().build_command(
-        "do the thing", plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
+        "do the thing",
+        plugin_dir=None,
+        model="gpt-5.4",
+        effort="medium",
+        resume_session_id=None,
+        detect_skill=None,
     )
 
     assert cmd == [
         CodexAgent.CODEX_BIN,
         "exec",
         "--json",
-        "-m", "gpt-5.4",
-        "-C", "/root",
+        "-m",
+        "gpt-5.4",
+        "-C",
+        "/root",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
         "do the thing",
     ]
 
 
-def test_build_command_places_harness_args_before_prompt():
+def test_build_command_places_harness_args_before_prompt() -> None:
+    """Test the expected behavior."""
     cmd = _agent().build_command(
-        "prompt", plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
+        "prompt",
+        plugin_dir=None,
+        model="gpt-5.4",
+        effort="medium",
+        resume_session_id=None,
+        detect_skill=None,
         harness_args=["--color", "never"],
     )
 
     assert cmd[-3:] == ["--color", "never", "prompt"]
 
 
-def test_build_command_ignores_plugin_and_resume_until_supported():
+def test_build_command_ignores_plugin_and_resume_until_supported() -> None:
+    """Test the expected behavior."""
     cmd = _agent().build_command(
-        "prompt", plugin_dir="/plugin", model="gpt-5.4", effort="high",
-        resume_session_id="thread-1", detect_skill="archive",
+        "prompt",
+        plugin_dir="/plugin",
+        model="gpt-5.4",
+        effort="high",
+        resume_session_id="thread-1",
+        detect_skill="archive",
     )
 
     assert "/plugin" not in cmd
@@ -118,16 +146,22 @@ def test_build_command_ignores_plugin_and_resume_until_supported():
         "review",
     ],
 )
-def test_build_command_rejects_reserved_harness_args(arg):
+def test_build_command_rejects_reserved_harness_args(arg: object) -> None:
+    """Test the expected behavior."""
     with pytest.raises(ValueError, match="reserved.*Codex"):
         _agent().build_command(
-            "prompt", plugin_dir=None, model="gpt-5.4", effort="medium",
-            resume_session_id=None, detect_skill=None,
+            "prompt",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
             harness_args=[arg],
         )
 
 
-def test_guest_env_carries_home_codex_home_tz_and_pinned_version():
+def test_guest_env_carries_home_codex_home_tz_and_pinned_version() -> None:
+    """Test the expected behavior."""
     env = CodexAgent(version="0.142.3").guest_env()
 
     assert env == {
@@ -138,7 +172,8 @@ def test_guest_env_carries_home_codex_home_tz_and_pinned_version():
     }
 
 
-def test_guest_env_omits_credentials():
+def test_guest_env_omits_credentials() -> None:
+    """Test the expected behavior."""
     env = CodexAgent(auth_value="secret").guest_env()
 
     assert "CODEX_API_KEY" not in env
@@ -146,7 +181,8 @@ def test_guest_env_omits_credentials():
     assert "secret" not in env.values()
 
 
-def test_from_env_prefers_api_key(monkeypatch):
+def test_from_env_prefers_api_key(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     captured = _capture_secret(monkeypatch)
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -160,7 +196,8 @@ def test_from_env_prefers_api_key(monkeypatch):
     assert agent.version() == "0.142.3"
 
 
-def test_from_env_falls_back_to_access_token(monkeypatch):
+def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     captured = _capture_secret(monkeypatch)
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -172,12 +209,17 @@ def test_from_env_falls_back_to_access_token(monkeypatch):
     assert captured["value"] == "token"
 
 
-def test_from_env_reads_auth_json_path(monkeypatch, tmp_path):
+def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) -> None:
+    """Test the expected behavior."""
     auth = tmp_path / "auth.json"
-    auth.write_text(json.dumps({
-        "auth_mode": "chatgpt",
-        "tokens": {"access_token": "cached-token"},
-    }))
+    auth.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {"access_token": "cached-token"},
+            }
+        )
+    )
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("CODEX_AUTH_JSON_PATH", str(auth))
@@ -188,7 +230,8 @@ def test_from_env_reads_auth_json_path(monkeypatch, tmp_path):
     assert agent.secrets() == []
 
 
-def test_credential_error_message_when_no_credentials_set(monkeypatch):
+def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("CODEX_AUTH_JSON_PATH", raising=False)
@@ -201,18 +244,26 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch):
     assert "CODEX_ACCESS_TOKEN" in msg
 
 
-def test_credential_error_none_when_api_key_set(monkeypatch):
+def test_credential_error_none_when_api_key_set(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
 
     assert CodexAgent.credential_error() is None
 
 
-def test_credential_error_none_when_auth_json_path_is_valid(monkeypatch, tmp_path):
+def test_credential_error_none_when_auth_json_path_is_valid(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Test the expected behavior."""
     auth = tmp_path / "auth.json"
-    auth.write_text(json.dumps({
-        "auth_mode": "chatgpt",
-        "tokens": {"access_token": "cached-token"},
-    }))
+    auth.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {"access_token": "cached-token"},
+            }
+        )
+    )
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("CODEX_AUTH_JSON_PATH", str(auth))
@@ -220,7 +271,8 @@ def test_credential_error_none_when_auth_json_path_is_valid(monkeypatch, tmp_pat
     assert CodexAgent.credential_error() is None
 
 
-def test_secrets_scopes_api_key_to_openai_host(monkeypatch):
+def test_secrets_scopes_api_key_to_openai_host(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     captured = _capture_secret(monkeypatch)
 
     secs = CodexAgent(auth_value="api-key", auth_env="CODEX_API_KEY").secrets()
@@ -233,7 +285,8 @@ def test_secrets_scopes_api_key_to_openai_host(monkeypatch):
     }
 
 
-def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch):
+def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     captured = _capture_secret(monkeypatch)
 
     CodexAgent(auth_value="token", auth_env="CODEX_ACCESS_TOKEN").secrets()
@@ -243,28 +296,35 @@ def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch):
     assert "auth.openai.com" in captured["allow_hosts"]
 
 
-def test_secrets_empty_when_auth_json_path_is_used():
+def test_secrets_empty_when_auth_json_path_is_used() -> None:
+    """Test the expected behavior."""
     assert CodexAgent(auth_json_path="/host/auth.json").secrets() == []
 
 
-def test_codex_skill_load_dir_is_agents_path():
+def test_codex_skill_load_dir_is_agents_path() -> None:
+    """Test the expected behavior."""
     assert CodexAgent.skill_load_dir == "/root/.codex/skills"
 
 
-def test_codex_artifact_dirs_excludes_runtime_managed_skills():
+def test_codex_artifact_dirs_excludes_runtime_managed_skills() -> None:
+    """Test the expected behavior."""
     assert _agent().artifact_dirs() == []
 
 
-def test_codex_bridge_script_symlinks_fixed_home():
+def test_codex_bridge_script_symlinks_fixed_home() -> None:
+    """Test the expected behavior."""
     script = _agent().bridge_skills_home_script()
 
     assert "/home/evalspec/skills" in script
     assert "/root/.codex/skills" in script
 
 
-def test_codex_cell_env_carries_evalspec_vars():
+def test_codex_cell_env_carries_evalspec_vars() -> None:
+    """Test the expected behavior."""
     env = CodexAgent(version="0.142.3").cell_env(
-        arm="trial", model="gpt-5.4", eval_set="codex-smoke",
+        arm="trial",
+        model="gpt-5.4",
+        eval_set="codex-smoke",
     )
 
     assert env["EVALSPEC_ARM"] == "trial"
@@ -273,65 +333,86 @@ def test_codex_cell_env_carries_evalspec_vars():
     assert env["EVALSPEC_SET"] == "codex-smoke"
 
 
-def test_detect_dispatch_matches_skill_invocation_item():
-    line = json.dumps({
-        "type": "item.started",
-        "item": {"type": "skill_invocation", "name": "knowledge-base:archive"},
-    })
+def test_detect_dispatch_matches_skill_invocation_item() -> None:
+    """Test the expected behavior."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {"type": "skill_invocation", "name": "knowledge-base:archive"},
+        }
+    )
 
     assert _agent().detect_dispatch(line, "archive") is True
 
 
-def test_detect_dispatch_early_stops_on_any_skill():
-    line = json.dumps({
-        "type": "item.started",
-        "item": {"type": "skill_invocation", "name": "bootstrap"},
-    })
+def test_detect_dispatch_early_stops_on_any_skill() -> None:
+    """Test the expected behavior."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {"type": "skill_invocation", "name": "bootstrap"},
+        }
+    )
 
     assert _agent().detect_dispatch(line, "archive") is True
 
 
-def test_codex_detect_fired_false_for_other_skill_when_dispatch_detects_any_skill():
-    line = json.dumps({
-        "type": "item.started",
-        "item": {"type": "skill_invocation", "name": "bootstrap"},
-    })
+def test_codex_detect_fired_false_for_other_skill_when_dispatch_detects_any_skill() -> None:
+    """Test the expected behavior."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {"type": "skill_invocation", "name": "bootstrap"},
+        }
+    )
 
     assert _agent().detect_fired([line], "archive") is False
 
 
-def test_detect_dispatch_false_for_other_tool():
-    line = json.dumps({
-        "type": "item.started",
-        "item": {"type": "command_execution", "command": "ls"},
-    })
+def test_detect_dispatch_false_for_other_tool() -> None:
+    """Test the expected behavior."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {"type": "command_execution", "command": "ls"},
+        }
+    )
 
     assert _agent().detect_dispatch(line, "archive") is False
 
 
-def test_codex_detect_fired_true_on_our_skill():
+def test_codex_detect_fired_true_on_our_skill() -> None:
+    """Test the expected behavior."""
     assert _agent().detect_fired(_lines("codex_route_fired.jsonl"), "archive") is True
 
 
-def test_codex_detect_fired_false_on_other_tool():
+def test_codex_detect_fired_false_on_other_tool() -> None:
+    """Test the expected behavior."""
     assert _agent().detect_fired(_lines("codex_route_nofire.jsonl"), "archive") is False
 
 
-def test_codex_streamed_activity_true_when_turn_began():
+def test_codex_streamed_activity_true_when_turn_began() -> None:
+    """Test the expected behavior."""
     assert _agent().streamed_activity(_lines("codex_route_nofire.jsonl")) is True
 
 
-def test_codex_streamed_activity_false_on_startup_only():
+def test_codex_streamed_activity_false_on_startup_only() -> None:
+    """Test the expected behavior."""
     assert _agent().streamed_activity(['{"type":"thread.started","thread_id":"t"}']) is False
 
 
-def test_codex_streamed_activity_false_on_empty_or_invalid_lines():
+def test_codex_streamed_activity_false_on_empty_or_invalid_lines() -> None:
+    """Test the expected behavior."""
     assert _agent().streamed_activity(["", "not json"]) is False
 
 
-def test_parse_codex_jsonl_populates_run_result():
+def test_parse_codex_jsonl_populates_run_result() -> None:
+    """Test the expected behavior."""
     res = parse_codex_jsonl(
-        _text("codex_parse_success.jsonl"), "e1", "trial", detect_skill="archive",
+        _text("codex_parse_success.jsonl"),
+        "e1",
+        "trial",
+        detect_skill="archive",
     )
 
     assert res.result_text == "Thinking...\n\nDone."
@@ -345,7 +426,8 @@ def test_parse_codex_jsonl_populates_run_result():
     assert res.fired is True
 
 
-def test_parse_codex_jsonl_carries_raw_stdout():
+def test_parse_codex_jsonl_carries_raw_stdout() -> None:
+    """Test the expected behavior."""
     raw = _text("codex_parse_success.jsonl")
 
     res = parse_codex_jsonl(raw, "e1", "trial", detect_skill="archive")
@@ -353,50 +435,82 @@ def test_parse_codex_jsonl_carries_raw_stdout():
     assert res.raw == raw
 
 
-def test_parse_codex_jsonl_keeps_all_agent_messages():
-    stream = "\n".join([
-        json.dumps({"type": "item.completed",
-                    "item": {"type": "agent_message", "text": "one"}}),
-        json.dumps({"type": "item.completed",
-                    "item": {"type": "agent_message", "text": "two"}}),
-        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
-    ])
+def test_parse_codex_jsonl_keeps_all_agent_messages() -> None:
+    """Test the expected behavior."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "one"},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "two"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
+        ]
+    )
 
     res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
 
     assert res.result_text == "one\n\ntwo"
 
 
-def test_parse_codex_jsonl_tool_only_run_not_errored_when_turn_completed():
+def test_parse_codex_jsonl_tool_only_run_not_errored_when_turn_completed() -> None:
+    """Test the expected behavior."""
     res = parse_codex_jsonl(
-        _text("codex_parse_tool_only.jsonl"), "e1", "trial", detect_skill="archive",
+        _text("codex_parse_tool_only.jsonl"),
+        "e1",
+        "trial",
+        detect_skill="archive",
     )
 
     assert res.is_error is False
     assert "command_execution" in res.result_text
 
 
-def test_parse_codex_jsonl_explicit_error_event_sets_is_error():
+def test_parse_codex_jsonl_explicit_error_event_sets_is_error() -> None:
+    """Test the expected behavior."""
     res = parse_codex_jsonl(
-        _text("codex_parse_error.jsonl"), "e1", "trial", detect_skill="archive",
+        _text("codex_parse_error.jsonl"),
+        "e1",
+        "trial",
+        detect_skill="archive",
     )
 
     assert res.is_error is True
     assert "auth failed" in res.result_text
 
 
-def test_parse_codex_jsonl_carries_normalized_trajectory():
+def test_parse_codex_jsonl_carries_normalized_trajectory() -> None:
+    """Test the expected behavior."""
     res = parse_codex_jsonl(
-        _text("codex_parse_success.jsonl"), "e1", "trial", detect_skill="archive",
+        _text("codex_parse_success.jsonl"),
+        "e1",
+        "trial",
+        detect_skill="archive",
     )
 
-    assert {"kind": "tool_call", "id": "i1", "name": "Skill",
-            "arguments": {"skill": "archive"}} in res.trajectory
-    assert {"kind": "tool_call", "id": "i2", "name": "command_execution",
-            "arguments": {"command": "ls"}} in res.trajectory
+    assert {
+        "kind": "tool_call",
+        "id": "i1",
+        "name": "Skill",
+        "arguments": {"skill": "archive"},
+    } in res.trajectory
+    assert {
+        "kind": "tool_call",
+        "id": "i2",
+        "name": "command_execution",
+        "arguments": {"command": "ls"},
+    } in res.trajectory
 
 
-def test_provision_runs_install_script():
+def test_provision_runs_install_script() -> None:
+    """Test the expected behavior."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().provision(sb))
@@ -412,14 +526,16 @@ def test_provision_runs_install_script():
     assert kw["env"]["CODEX_HOME"] == "/root/.codex"
 
 
-def test_provision_raises_on_failure():
+def test_provision_raises_on_failure() -> None:
+    """Test the expected behavior."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
 
     with pytest.raises(RuntimeError, match="codex provision failed"):
         asyncio.run(_agent().provision(sb))
 
 
-def test_stage_project_assets_copies_skills_into_codex_discovery_dir():
+def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
+    """Test the expected behavior."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().stage_project_assets(sb, "/project"))
@@ -433,16 +549,28 @@ def test_stage_project_assets_copies_skills_into_codex_discovery_dir():
     assert kw["env"]["HOME"] == "/root"
 
 
-def test_invoke_success_parses_codex_jsonl_and_closes_stdin():
-    sb = FakeSandbox(exec_outputs=[
-        FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_success.jsonl")),
-    ])
+def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
+    """Test the expected behavior."""
+    sb = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_success.jsonl")),
+        ]
+    )
 
-    res = asyncio.run(_agent().invoke(
-        sb, "do it", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill="archive",
-    ))
+    res = asyncio.run(
+        _agent().invoke(
+            sb,
+            "do it",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill="archive",
+        )
+    )
 
     kind, cmd, args, kw = sb.calls[0]
     assert kind == "exec"
@@ -455,17 +583,29 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin():
     assert res.fired is True
 
 
-def test_invoke_extra_env_overrides_guest_env():
-    sb = FakeSandbox(exec_outputs=[
-        FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
-    ])
+def test_invoke_extra_env_overrides_guest_env() -> None:
+    """Test the expected behavior."""
+    sb = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
+        ]
+    )
 
-    asyncio.run(_agent().invoke(
-        sb, "do it", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
-        extra_env={"TZ": "America/Los_Angeles", "EXTRA": "1"},
-    ))
+    asyncio.run(
+        _agent().invoke(
+            sb,
+            "do it",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+            extra_env={"TZ": "America/Los_Angeles", "EXTRA": "1"},
+        )
+    )
 
     _, _, _, kw = sb.calls[0]
     assert kw["env"]["TZ"] == "America/Los_Angeles"
@@ -473,45 +613,79 @@ def test_invoke_extra_env_overrides_guest_env():
     assert kw["env"]["HOME"] == "/root"
 
 
-def test_invoke_nonzero_exit_is_error():
+def test_invoke_nonzero_exit_is_error() -> None:
+    """Test the expected behavior."""
     sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
-    res = asyncio.run(_agent().invoke(
-        sb, "p", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
-    ))
+    res = asyncio.run(
+        _agent().invoke(
+            sb,
+            "p",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
 
     assert res.is_error is True
     assert "bad" in res.result_text
 
 
-def test_invoke_threads_harness_args_into_build_command():
-    sb = FakeSandbox(exec_outputs=[
-        FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
-    ])
+def test_invoke_threads_harness_args_into_build_command() -> None:
+    """Test the expected behavior."""
+    sb = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
+        ]
+    )
 
-    asyncio.run(_agent().invoke(
-        sb, "do the thing", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
-        harness_args=["--color", "never"],
-    ))
+    asyncio.run(
+        _agent().invoke(
+            sb,
+            "do the thing",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+            harness_args=["--color", "never"],
+        )
+    )
 
     _, _, args, _ = sb.calls[0]
     assert args[-3:] == ["--color", "never", "do the thing"]
 
 
-def test_invoke_copies_mounted_auth_json_before_codex_exec():
-    sb = FakeSandbox(exec_outputs=[
-        FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
-    ])
+def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
+    """Test the expected behavior."""
+    sb = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
+        ]
+    )
 
-    asyncio.run(_agent(auth_json_path="/host/auth.json").invoke(
-        sb, "do the thing", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
-    ))
+    asyncio.run(
+        _agent(auth_json_path="/host/auth.json").invoke(
+            sb,
+            "do the thing",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
 
     auth_call, exec_call = sb.calls
     assert auth_call[0] == "shell"
@@ -520,28 +694,41 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec():
     assert exec_call[0] == "exec"
 
 
-def test_invoke_returns_error_when_auth_json_copy_fails():
+def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
+    """Test the expected behavior."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="copy failed"))
 
-    res = asyncio.run(_agent(auth_json_path="/host/auth.json").invoke(
-        sb, "do the thing", eval_id="e1", config="trial", workdir="/workspace",
-        plugin_dir=None, model="gpt-5.4", effort="medium",
-        resume_session_id=None, detect_skill=None,
-    ))
+    res = asyncio.run(
+        _agent(auth_json_path="/host/auth.json").invoke(
+            sb,
+            "do the thing",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
 
     assert res.is_error is True
     assert "copy failed" in res.result_text
 
 
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
+def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
+    """Handle _fake_proc."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_judge_delegates_to_host_claude(monkeypatch):
+def test_judge_delegates_to_host_claude(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     payload = json.dumps({"result": "ok", "is_error": False})
     captured = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: object, **kw: object) -> object:
+        """Handle fake_run."""
         captured["cmd"] = cmd
         captured["kw"] = kw
         return _fake_proc(stdout=payload)

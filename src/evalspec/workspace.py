@@ -19,19 +19,21 @@ _ENV_ITERATION = "EVALSPEC_ITERATION"
 
 
 def workspace_parent(repo_root: Path) -> Path:
+    """Handle workspace_parent."""
     return repo_root / "tmp"
 
 
 def evals_root(repo_root: Path) -> Path:
+    """Handle evals_root."""
     return workspace_parent(repo_root) / "evals"
 
 
 def next_iteration_name(repo_root: Path) -> str:
     """Return the next global `iteration_NN` name under `tmp/evals/`.
 
-    One run shares one N across every skill it touches. Computed once on the
-    controller — never per worker — so the increment can't race. Padded to 2
-    digits; widens naturally past 99.
+    One run shares one N across every skill it touches. Computed once on the controller
+    — never per worker — so the increment can't race. Padded to 2 digits; widens
+    naturally past 99.
     """
     existing: list[int] = []
     root = evals_root(repo_root)
@@ -46,17 +48,21 @@ def next_iteration_name(repo_root: Path) -> str:
 
 
 def set_current_iteration(name: str) -> None:
+    """Handle set_current_iteration."""
     os.environ[_ENV_ITERATION] = name
 
 
 def current_iteration() -> str:
+    """Handle current_iteration."""
     return os.environ[_ENV_ITERATION]
 
 
 def current_iteration_or_none() -> str | None:
-    """Like `current_iteration` but returns None instead of raising when the handle
-    is unset. Use at call sites that want a no-op when the iteration lifecycle
-    never started (e.g. the terminal summary on a collection-only run)."""
+    """Like `current_iteration` but returns None instead of raising when the handle.
+
+    is unset. Use at call sites that want a no-op when the iteration lifecycle never
+    started (e.g. the terminal summary on a collection-only run).
+    """
     return os.environ.get(_ENV_ITERATION)
 
 
@@ -76,8 +82,10 @@ def skill_dir(repo_root: Path, skill: str) -> Path:
 
 
 def arm_dir(repo_root: Path, skill: str, eval_id: str, arm: str, sample: int) -> Path:
+    """Handle arm_dir."""
     return skill_dir(repo_root, skill) / f"eval-{eval_id}" / arm / f"sample-{sample}"
 
 
-def trigger_dir(repo_root: Path, skill: str, slug, sample: int) -> Path:
+def trigger_dir(repo_root: Path, skill: str, slug: object, sample: int) -> Path:
+    """Handle trigger_dir."""
     return skill_dir(repo_root, skill) / f"trigger-{slug}" / f"sample-{sample}"

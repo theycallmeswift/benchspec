@@ -1,3 +1,5 @@
+"""Tests and helpers for evalspec."""
+
 from evalspec.room import (
     changed_paths,
     gather_facts,
@@ -15,7 +17,8 @@ from evalspec.room import (
 # ---------------------------------------------------------------------------
 
 
-def test_seed_room_copies_fixture_and_records_shas(tmp_path):
+def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
+    """Test the expected behavior."""
     fixture = tmp_path / "fixture"
     (fixture / "0. Inbox").mkdir(parents=True)
     (fixture / "0. Inbox" / "a.md").write_text("hello")
@@ -28,14 +31,18 @@ def test_seed_room_copies_fixture_and_records_shas(tmp_path):
     assert len(shas["0. Inbox/a.md"]) == 64  # sha256 hex
 
 
-def test_seed_room_no_fixture_creates_empty_vault(tmp_path):
+def test_seed_room_no_fixture_creates_empty_vault(tmp_path: object) -> None:
+    """Test the expected behavior."""
     vault = tmp_path / "room" / "vault"
     shas = seed_room(None, vault)
     assert vault.is_dir()
     assert shas == {}
 
 
-def test_seed_room_substitutes_today_in_path_names_and_content(tmp_path):
+def test_seed_room_substitutes_today_in_path_names_and_content(
+    tmp_path: object,
+) -> None:
+    """Test the expected behavior."""
     fixture = tmp_path / "fixture"
     dated_dir = fixture / "Sources" / "{TODAY}"
     dated_dir.mkdir(parents=True)
@@ -57,6 +64,7 @@ def test_seed_room_substitutes_today_in_path_names_and_content(tmp_path):
     article_rel = "Sources/2099-07-04/article.md"
     assert article_rel in shas
     import hashlib
+
     expected_sha = hashlib.sha256(
         (vault / "Sources" / "2099-07-04" / "article.md").read_bytes()
     ).hexdigest()
@@ -68,7 +76,8 @@ def test_seed_room_substitutes_today_in_path_names_and_content(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_gather_facts_returns_tree_contents_and_shas(tmp_path):
+def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
+    """Test the expected behavior."""
     (tmp_path / "0. Inbox").mkdir()
     (tmp_path / "0. Inbox" / "a.md").write_text("hello")
 
@@ -83,25 +92,28 @@ def test_gather_facts_returns_tree_contents_and_shas(tmp_path):
 # artifact capture (skills dir outside the workdir mount)
 # ---------------------------------------------------------------------------
 
-def _stream(*pairs):
+
+def _stream(*pairs: object) -> object:
     """Build a read_files-script stdout from (path, content) pairs."""
     return "".join(f"\x1e\x1eARTIFACT\x1e\x1e{p}\x1e\x1e\n{c}" for p, c in pairs)
 
 
-def _sha_lines(*pairs):
+def _sha_lines(*pairs: object) -> object:
     """Build sha256sum stdout (`<hex>  <path>`) from (path, sha) pairs."""
     return "".join(f"{sha}  {p}\n" for p, sha in pairs)
 
 
-def test_sha_snapshot_script_lists_each_dir_and_skips_missing():
+def test_sha_snapshot_script_lists_each_dir_and_skips_missing() -> None:
+    """Test the expected behavior."""
     script = sha_snapshot_script(["/root/.claude/skills", "/root/.config/opencode/skills"])
     assert "/root/.claude/skills" in script
     assert "/root/.config/opencode/skills" in script
-    assert '[ -d "$d" ]' in script   # guards missing dirs
-    assert "sha256sum" in script     # hashes, doesn't cat
+    assert '[ -d "$d" ]' in script  # guards missing dirs
+    assert "sha256sum" in script  # hashes, doesn't cat
 
 
-def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path):
+def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: object) -> None:
+    """Test the expected behavior."""
     # A `for` loop exits with its last iteration's status, so a missing LAST dir makes
     # `[ -d "$d" ] &&` short-circuit to exit 1 — which the caller would read as a failed
     # snapshot and dump the staged tree as "authored". The `; done; true` terminator pins
@@ -115,7 +127,10 @@ def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path):
     assert proc.returncode == 0
 
 
-def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(tmp_path):
+def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
+    tmp_path: object,
+) -> None:
+    """Test the expected behavior."""
     # The skills-home bridge replaces the agent's load dir with a SYMLINK to the fixed
     # skills home (bridge_skills_home_script). A bare `find <symlink> -type f` start point
     # does not descend through the link, so an agent-authored skill would be invisible to
@@ -144,63 +159,78 @@ def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(tmp_path):
     assert str(load_dir / "authored" / "evals" / "case.json") in shas
 
 
-def test_parse_sha_stream_splits_digest_from_path():
-    shas = parse_sha_stream(_sha_lines(
-        ("/root/.claude/skills/commit/SKILL.md", "a" * 64),
-        ("/root/.claude/skills/commit/evals/evals.json", "b" * 64),
-    ))
+def test_parse_sha_stream_splits_digest_from_path() -> None:
+    """Test the expected behavior."""
+    shas = parse_sha_stream(
+        _sha_lines(
+            ("/root/.claude/skills/commit/SKILL.md", "a" * 64),
+            ("/root/.claude/skills/commit/evals/evals.json", "b" * 64),
+        )
+    )
     assert shas["/root/.claude/skills/commit/SKILL.md"] == "a" * 64
     assert shas["/root/.claude/skills/commit/evals/evals.json"] == "b" * 64
 
 
-def test_parse_sha_stream_ignores_blank_lines():
+def test_parse_sha_stream_ignores_blank_lines() -> None:
+    """Test the expected behavior."""
     assert parse_sha_stream("\n\n") == {}
 
 
-def test_changed_paths_returns_new_and_modified_drops_unchanged():
+def test_changed_paths_returns_new_and_modified_drops_unchanged() -> None:
+    """Test the expected behavior."""
     baseline = {"/skills/staged/SKILL.md": "aaa", "/skills/edited/SKILL.md": "bbb"}
     current = {
-        "/skills/staged/SKILL.md": "aaa",   # unchanged staged input → drop
-        "/skills/edited/SKILL.md": "ZZZ",   # sha changed → keep
-        "/skills/new/SKILL.md": "ccc",      # new → keep
+        "/skills/staged/SKILL.md": "aaa",  # unchanged staged input → drop
+        "/skills/edited/SKILL.md": "ZZZ",  # sha changed → keep
+        "/skills/new/SKILL.md": "ccc",  # new → keep
     }
     assert set(changed_paths(baseline, current)) == {
-        "/skills/edited/SKILL.md", "/skills/new/SKILL.md",
+        "/skills/edited/SKILL.md",
+        "/skills/new/SKILL.md",
     }
 
 
-def test_read_files_script_quotes_each_path_and_is_noop_when_empty():
+def test_read_files_script_quotes_each_path_and_is_noop_when_empty() -> None:
+    """Test the expected behavior."""
     script = read_files_script(["/root/.claude/skills/commit/SKILL.md"])
     assert "/root/.claude/skills/commit/SKILL.md" in script
     assert "cat" in script
     assert read_files_script([]) == "true"  # no paths → harmless no-op, no shell work
 
 
-def test_parse_artifact_stream_roundtrips_paths_and_contents():
-    out = parse_artifact_stream(_stream(
-        ("/root/.claude/skills/commit/SKILL.md", "---\nname: commit\n---\nbody\n"),
-        ("/root/.claude/skills/commit/evals/evals.json", '{"id": "x"}'),
-    ))
+def test_parse_artifact_stream_roundtrips_paths_and_contents() -> None:
+    """Test the expected behavior."""
+    out = parse_artifact_stream(
+        _stream(
+            ("/root/.claude/skills/commit/SKILL.md", "---\nname: commit\n---\nbody\n"),
+            ("/root/.claude/skills/commit/evals/evals.json", '{"id": "x"}'),
+        )
+    )
     assert out["/root/.claude/skills/commit/SKILL.md"] == "---\nname: commit\n---\nbody\n"
     assert out["/root/.claude/skills/commit/evals/evals.json"] == '{"id": "x"}'
 
 
-def test_parse_artifact_stream_preserves_content_with_newlines_and_no_trailing_newline():
+def test_parse_artifact_stream_preserves_content_with_newlines_and_no_trailing_newline() -> None:
+    """Test the expected behavior."""
     # A file whose content ends WITHOUT a newline must not bleed into the next record,
     # and embedded newlines are kept verbatim.
-    out = parse_artifact_stream(_stream(
-        ("/a/SKILL.md", "line1\nline2"),   # no trailing newline
-        ("/b/SKILL.md", "second"),
-    ))
+    out = parse_artifact_stream(
+        _stream(
+            ("/a/SKILL.md", "line1\nline2"),  # no trailing newline
+            ("/b/SKILL.md", "second"),
+        )
+    )
     assert out["/a/SKILL.md"] == "line1\nline2"
     assert out["/b/SKILL.md"] == "second"
 
 
-def test_parse_artifact_stream_empty_is_empty():
+def test_parse_artifact_stream_empty_is_empty() -> None:
+    """Test the expected behavior."""
     assert parse_artifact_stream("") == {}
 
 
-def test_to_display_paths_rewrites_home_prefix():
+def test_to_display_paths_rewrites_home_prefix() -> None:
+    """Test the expected behavior."""
     disp = to_display_paths(
         {"/root/.claude/skills/commit/SKILL.md": "x", "/other/abs.md": "y"},
         guest_home="/root",
@@ -209,10 +239,14 @@ def test_to_display_paths_rewrites_home_prefix():
     assert disp["/other/abs.md"] == "y"  # outside home → left absolute
 
 
-def test_merge_facts_appends_artifacts_to_tree_and_contents():
+def test_merge_facts_appends_artifacts_to_tree_and_contents() -> None:
+    """Test the expected behavior."""
     tree, contents, shas = "out.md", {"out.md": "workdir file"}, {"out.md": "deadbeef"}
     mtree, mcontents, mshas = merge_facts(
-        tree, contents, shas, {"~/.claude/skills/commit/SKILL.md": "the skill"},
+        tree,
+        contents,
+        shas,
+        {"~/.claude/skills/commit/SKILL.md": "the skill"},
     )
     assert "out.md" in mtree
     assert "~/.claude/skills/commit/SKILL.md" in mtree
@@ -222,7 +256,8 @@ def test_merge_facts_appends_artifacts_to_tree_and_contents():
     assert mcontents["out.md"] == "workdir file"
 
 
-def test_merge_facts_truncates_oversized_artifact():
+def test_merge_facts_truncates_oversized_artifact() -> None:
+    """Test the expected behavior."""
     big = "x" * 50
     _, contents, _ = merge_facts("", {}, {}, {"~/skills/big/SKILL.md": big}, max_bytes=10)
     assert contents["~/skills/big/SKILL.md"].startswith("x" * 10)

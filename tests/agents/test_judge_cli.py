@@ -1,5 +1,8 @@
+"""Tests and helpers for evalspec."""
+
 import json
 import subprocess
+from typing import NoReturn
 
 import pytest
 
@@ -7,22 +10,28 @@ from evalspec.agents import judge_cli
 from evalspec.agents.judge_cli import run_host_judge
 
 
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
+def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
+    """Handle _fake_proc."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_run_host_judge_returns_stdout_on_healthy_run(monkeypatch):
+def test_run_host_judge_returns_stdout_on_healthy_run(monkeypatch: object) -> None:
+    """Test the expected behavior."""
     payload = json.dumps({"result": '{"assertions": []}', "is_error": False})
     monkeypatch.setattr(judge_cli.subprocess, "run", lambda *a, **k: _fake_proc(stdout=payload))
 
     assert run_host_judge("prompt", model="sonnet") == payload
 
 
-def test_run_host_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch):
+def test_run_host_judge_raises_runtimeerror_on_nonzero_exit(
+    monkeypatch: object,
+) -> None:
+    """Test the expected behavior."""
     # A crashed/exited host CLI must surface as RuntimeError (caught upstream as
     # arm-level errored), not be laundered into fake JUDGE ERROR assertions.
     monkeypatch.setattr(
-        judge_cli.subprocess, "run",
+        judge_cli.subprocess,
+        "run",
         lambda *a, **k: _fake_proc(returncode=1, stderr="connection reset"),
     )
 
@@ -30,7 +39,10 @@ def test_run_host_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch):
         run_host_judge("prompt", model="sonnet")
 
 
-def test_run_host_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch):
+def test_run_host_judge_raises_runtimeerror_on_is_error_envelope(
+    monkeypatch: object,
+) -> None:
+    """Test the expected behavior."""
     # `claude -p` reports auth/rate-limit/quota failures with returncode=0 but
     # is_error=true in the JSON envelope; surface the real cause as RuntimeError.
     payload = json.dumps({"result": "Not logged in · Please run /login", "is_error": True})
@@ -40,11 +52,16 @@ def test_run_host_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch):
         run_host_judge("prompt", model="sonnet")
 
 
-def test_run_host_judge_raises_runtimeerror_when_binary_missing(monkeypatch):
+def test_run_host_judge_raises_runtimeerror_when_binary_missing(
+    monkeypatch: object,
+) -> None:
+    """Test the expected behavior."""
+
     # A1: a missing host `claude` (FileNotFoundError from subprocess) must normalize to
     # RuntimeError so the arm is marked errored — not caught as OSError and counted as an
     # honest 0% pass rate. Reachable via EVALSPEC_AGENT=opencode on a host without claude.
-    def boom(*a, **k):
+    def boom(*a: object, **k: object) -> NoReturn:
+        """Handle boom."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
     monkeypatch.setattr(judge_cli.subprocess, "run", boom)

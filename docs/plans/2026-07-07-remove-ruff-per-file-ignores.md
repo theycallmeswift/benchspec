@@ -4,17 +4,18 @@
 
 **Goal:** Remove Ruff file-scoped ignores from `pyproject.toml` while keeping the canonical Ruff lint command green.
 
-**Architecture:** Keep PR #8's selected Ruff families, but move existing baseline debt out of `[tool.ruff.lint.per-file-ignores]` into a single documented `ignore` list. This preserves a no-file-exceptions lint contract and avoids a broad, behavior-neutral rewrite of thousands of existing docstring, annotation, and line-length findings.
+**Architecture:** Keep PR #8's selected Ruff families enforced globally and clean the existing findings that required per-file exceptions. Set a documented project-wide 100-column line length, then remove `[tool.ruff.lint.per-file-ignores]` entirely.
 
 **Tech Stack:** Python, Ruff, uv, Makefile.
 
 ---
 
-### Task 1: Replace File-Scoped Ruff Ignores
+### Task 1: Clean Ruff Baseline and Remove File-Scoped Ignores
 
 **Files:**
 - Modify: `pyproject.toml`
-- Test: `pyproject.toml`
+- Modify: Python files under `src/`, `tests/`, and `evals/`
+- Test: Ruff configuration and project test suite
 
 - [ ] **Step 1: Verify the current per-file baseline fails when disabled**
 
@@ -26,51 +27,41 @@ uv run ruff check . --config 'lint.per-file-ignores={}'
 
 Expected: FAIL with existing baseline findings such as `ANN001`, `ANN201`, `D103`, and `E501`.
 
-- [ ] **Step 2: Replace `[tool.ruff.lint.per-file-ignores]` with rule-level ignores**
+- [ ] **Step 2: Clean the current baseline findings**
 
-Edit `pyproject.toml` so `[tool.ruff.lint]` contains this list immediately after `select`:
+Apply mechanical fixes for the rule families currently listed in `[tool.ruff.lint.per-file-ignores]`:
 
-```toml
-ignore = [
-    "ANN001", # Existing baseline: missing argument annotations.
-    "ANN002", # Existing baseline: missing *args annotations.
-    "ANN003", # Existing baseline: missing **kwargs annotations.
-    "ANN201", # Existing baseline: missing public function return annotations.
-    "ANN202", # Existing baseline: missing private function return annotations.
-    "ANN204", # Existing baseline: missing special-method return annotations.
-    "ANN205", # Existing baseline: missing staticmethod return annotations.
-    "ANN401", # Existing baseline: dynamically typed Any annotations.
-    "B905",   # Existing baseline: zip calls without explicit strict mode.
-    "D100",   # Existing baseline: missing module docstrings in tests.
-    "D101",   # Existing baseline: missing class docstrings.
-    "D102",   # Existing baseline: missing method docstrings.
-    "D103",   # Existing baseline: missing function docstrings.
-    "D104",   # Existing baseline: missing package docstrings.
-    "D105",   # Existing baseline: missing magic-method docstrings.
-    "D107",   # Existing baseline: missing __init__ docstrings.
-    "D205",   # Existing baseline: missing blank line after docstring summary.
-    "D209",   # Existing baseline: closing triple quotes not on their own line.
-    "D301",   # Existing baseline: raw strings needed for backslashes.
-    "E501",   # Existing baseline: lines over 88 columns.
-    "PT011",  # Existing baseline: broad pytest.raises matches.
-    "PT018",  # Existing baseline: compound assertions in tests.
-]
+```bash
+uv run ruff check . --config 'lint.per-file-ignores={}' --fix --unsafe-fixes
+uv run ruff format src tests evals
 ```
 
-Remove the entire `[tool.ruff.lint.per-file-ignores]` table.
+Expected: Ruff fixes what it can automatically; remaining diagnostics are addressed directly.
 
-- [ ] **Step 3: Verify Ruff has no per-file ignores and still passes**
+- [ ] **Step 3: Set a project-wide line length and remove per-file ignores**
+
+Edit `pyproject.toml`:
+
+```toml
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+```
+
+Remove the entire `[tool.ruff.lint.per-file-ignores]` table. Do not add a global `ignore` list and do not narrow `select`.
+
+- [ ] **Step 4: Verify Ruff has no per-file ignores and still passes**
 
 Run:
 
 ```bash
-rg -n "per-file-ignores|\\[tool\\.ruff\\.lint\\.per-file-ignores\\]" pyproject.toml
+! rg -n "per-file-ignores|\\[tool\\.ruff\\.lint\\.per-file-ignores\\]" pyproject.toml
 uv run ruff check .
 ```
 
-Expected: `rg` finds no per-file ignore table and Ruff prints `All checks passed!`.
+Expected: `rg` exits `1` because it finds no per-file ignore table, and Ruff prints `All checks passed!`.
 
-- [ ] **Step 4: Run the project verification commands**
+- [ ] **Step 5: Run the project verification commands**
 
 Run:
 
@@ -81,11 +72,11 @@ make lint
 
 Expected: test suite passes and Ruff prints `All checks passed!`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 Run:
 
 ```bash
-git add pyproject.toml docs/plans/2026-07-07-remove-ruff-per-file-ignores.md
+git add pyproject.toml docs/plans/2026-07-07-remove-ruff-per-file-ignores.md src tests evals
 git commit -m "chore: remove ruff per-file ignores"
 ```

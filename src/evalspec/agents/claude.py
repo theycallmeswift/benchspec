@@ -1,8 +1,8 @@
 """Claude Code implementation of the `CodingAgent` interface.
 
 Provisions the Claude Code CLI into a microVM (the cached snapshot step), injects the
-Anthropic credential as a host-substituted secret, builds the headless `claude -p` command,
-and parses its output through the shared helpers in `runner.py`.
+Anthropic credential as a host-substituted secret, builds the headless `claude -p`
+command, and parses its output through the shared helpers in `runner.py`.
 """
 
 from __future__ import annotations
@@ -37,31 +37,40 @@ _RESERVED_HARNESS_ARGS = {
     "--no-session-persistence",
 }
 _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("--")}
-_RESERVED_HARNESS_SHORT_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")}
+_RESERVED_HARNESS_SHORT_FLAGS = {
+    arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
+}
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
+    """Handle _validate_harness_args."""
     if harness_args is None:
         return []
     for arg in harness_args:
-        if arg in _RESERVED_HARNESS_ARGS or any(
-            arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS
-        ) or any(arg.startswith(flag) and len(arg) > len(flag) for flag in _RESERVED_HARNESS_SHORT_FLAGS):
+        if (
+            arg in _RESERVED_HARNESS_ARGS
+            or any(arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS)
+            or any(
+                arg.startswith(flag) and len(arg) > len(flag)
+                for flag in _RESERVED_HARNESS_SHORT_FLAGS
+            )
+        ):
             raise ValueError(f"reserved harness arg for Claude Code: {arg}")
     return harness_args
 
 
-def _validate_plugin_dir_sources(plugin_dir, harness_args: list[str] | None) -> None:
+def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | None) -> None:
+    """Handle _validate_plugin_dir_sources."""
     if plugin_dir is None or harness_args is None:
         return
     for arg in harness_args:
         if arg == "--plugin-dir" or arg.startswith("--plugin-dir="):
-            raise ValueError(
-                "plugin_dir cannot be combined with harness_args --plugin-dir"
-            )
+            raise ValueError("plugin_dir cannot be combined with harness_args --plugin-dir")
 
 
 class ClaudeCodeAgent(BaseAgent):
+    """Represent ClaudeCodeAgent."""
+
     id = "claude-code"
     CLAUDE_BIN = "/root/.local/bin/claude"
     guest_home = "/root"
@@ -76,15 +85,21 @@ class ClaudeCodeAgent(BaseAgent):
         "curl -fsSL https://claude.ai/install.sh | bash"
     )
 
-    def __init__(self, auth_value: str = "", *, auth_env: str = "ANTHROPIC_API_KEY",
-                 version: str = "latest"):
+    def __init__(
+        self: object,
+        auth_value: str = "",
+        *,
+        auth_env: str = "ANTHROPIC_API_KEY",
+        version: str = "latest",
+    ) -> None:
+        """Initialize the instance."""
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
 
     @classmethod
-    def from_env(cls) -> ClaudeCodeAgent:
-        """Build the agent from the host env: pinned version + the preferred credential."""
+    def from_env(cls: object) -> ClaudeCodeAgent:
+        """Document the behavior."""
         version = os.environ.get("EVALSPEC_CLAUDE_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
@@ -94,7 +109,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     @staticmethod
     def credential_error() -> str | None:
-        """None if a usable credential is set, else a remediation message for preflight."""
+        """Document the behavior."""
         if any(os.environ.get(v) for v in AUTH_ENV_VARS):
             return None
         return (
@@ -102,17 +117,20 @@ class ClaudeCodeAgent(BaseAgent):
             "or ANTHROPIC_API_KEY"
         )
 
-    def version(self) -> str:
+    def version(self: object) -> str:
+        """Handle version."""
         return self._version
 
-    def artifact_dirs(self) -> list[str]:
+    def artifact_dirs(self: object) -> list[str]:
+        """Handle artifact_dirs."""
         # Claude Code auto-loads (and scaffolds) skills under $HOME/.claude/skills — outside
         # the workdir mount, so a skill the agent writes here is invisible to the judge
         # unless the session snapshots it. The staged skills sit here too; the session's
         # baseline diff drops them, leaving only what the agent authored.
         return [f"{self.guest_home}/.claude/skills"]
 
-    def guest_env(self) -> dict:
+    def guest_env(self: object) -> dict:
+        """Handle guest_env."""
         # IS_SANDBOX=1 lets claude run bypassPermissions as root (the guest is root); the
         # microVM is the real containment boundary. The credential rides as a substituted
         # secret (see secrets()), never entering the guest as a plain value. TZ=UTC pins the
@@ -120,32 +138,48 @@ class ClaudeCodeAgent(BaseAgent):
         # writes matches the date the assertions were substituted with.
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
 
-    def secrets(self) -> list:
+    def secrets(self: object) -> list:
+        """Handle secrets."""
         from microsandbox import Secret
 
         return [
             Secret.env(
-                self._auth_env, value=self._auth_value,
+                self._auth_env,
+                value=self._auth_value,
                 allow_hosts=["api.anthropic.com"],
             )
         ]
 
     def build_command(
-        self, prompt, *, plugin_dir, model, effort, resume_session_id, detect_skill,
+        self: object,
+        prompt: object,
+        *,
+        plugin_dir: object,
+        model: object,
+        effort: object,
+        resume_session_id: object,
+        detect_skill: object,
         harness_args: list[str] | None = None,
     ) -> list[str]:
+        """Handle build_command."""
         # Always stream-json so both arms capture a trajectory (the baseline too); detect_skill
         # gates fired-detection downstream, not the format.
         # bypassPermissions (not acceptEdits): the microVM is the containment boundary,
         # so the agent runs with full autonomy — no host-side --allowedTools workaround needed.
         _validate_plugin_dir_sources(plugin_dir, harness_args)
         cmd = [
-            self.CLAUDE_BIN, "-p", prompt,
-            "--output-format", "stream-json",
+            self.CLAUDE_BIN,
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
             "--verbose",
-            "--permission-mode", "bypassPermissions",
-            "--model", model,
-            "--effort", effort,
+            "--permission-mode",
+            "bypassPermissions",
+            "--model",
+            model,
+            "--effort",
+            effort,
         ]
         if resume_session_id:
             cmd += ["--resume", resume_session_id]
@@ -154,14 +188,16 @@ class ClaudeCodeAgent(BaseAgent):
         cmd += _validate_harness_args(harness_args)
         return cmd
 
-    async def provision(self, sb) -> None:
+    async def provision(self: object, sb: object) -> None:
+        """Handle provision."""
         res = await sb.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
         if res.exit_code != 0:
             raise RuntimeError(
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sb, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+        """Handle stage_project_assets."""
         # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
         # the project's local skills there for a clean per-run tree. The agent-neutral
         # name covers other agents that stage more than just .claude/skills.
@@ -172,49 +208,77 @@ class ClaudeCodeAgent(BaseAgent):
             env={"HOME": self.guest_home},
         )
 
-    def judge(self, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Grade via the host's `claude -p` (NOT in the sandbox); see run_host_judge
-        for the host-vs-VM asymmetry and the RuntimeError-on-infra-failure contract."""
+    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
+        """Grade via the host's `claude -p` (NOT in the sandbox); see run_host_judge.
+
+        for the host-vs-VM asymmetry and the RuntimeError-on-infra-failure contract.
+        """
         return run_host_judge(prompt, model=model, timeout=timeout)
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """True if the stream-json line shows a skill dispatch in Claude Code's event
+    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+        """True if the stream-json line shows a skill dispatch in Claude Code's event.
+
         shape: a `Skill` tool_use, or a tool_use whose name is `skill_name` (the
         namespaced-tool fallback). Delegates to the shared `dispatches_skill` helper
         so the event-shape match lives in one place and `trigger.py` / `sandbox.py`
-        stay agent-agnostic."""
+        stay agent-agnostic.
+        """
         return dispatches_skill(line, skill_name)
 
-    def detect_fired(self, lines, skill_name: str) -> bool:
-        """Tally whether OUR skill fired across the routing stream. Delegates to the
-        shared Claude-shape helper so the event-shape match lives in one place."""
+    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+        """Tally whether OUR skill fired across the routing stream.
+
+        Delegates to the.         shared Claude-shape helper so the event-shape match
+        lives in one place.
+        """
         return detect_skill_fired(lines, skill_name)
 
-    def streamed_activity(self, lines) -> bool:
-        """True if the model began a turn (an `assistant` event), distinguishing a
-        clean non-fire from a retryable launch stall. Delegates to the shared helper."""
+    def streamed_activity(self: object, lines: object) -> bool:
+        """True if the model began a turn (an `assistant` event), distinguishing a.
+
+        clean non-fire from a retryable launch stall. Delegates to the shared helper.
+        """
         return streamed_activity(lines)
 
     async def invoke(
-        self, sb, prompt, *, eval_id, config, workdir, plugin_dir, model, effort,
-        resume_session_id, detect_skill, harness_args: list[str] | None = None,
+        self: object,
+        sb: object,
+        prompt: object,
+        *,
+        eval_id: object,
+        config: object,
+        workdir: object,
+        plugin_dir: object,
+        model: object,
+        effort: object,
+        resume_session_id: object,
+        detect_skill: object,
+        harness_args: list[str] | None = None,
         extra_env: dict | None = None,
         timeout: int = 600,
     ) -> RunResult:
+        """Handle invoke."""
         from microsandbox.errors import MicrosandboxError
 
         cmd = self.build_command(
-            prompt, plugin_dir=plugin_dir, model=model, effort=effort,
-            resume_session_id=resume_session_id, detect_skill=detect_skill,
+            prompt,
+            plugin_dir=plugin_dir,
+            model=model,
+            effort=effort,
+            resume_session_id=resume_session_id,
+            detect_skill=detect_skill,
             harness_args=harness_args,
         )
         try:
             res = await sb.exec(
                 # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
                 # guest_env(), arm env winning.
-                cmd[0], cmd[1:], cwd=workdir,
+                cmd[0],
+                cmd[1:],
+                cwd=workdir,
                 env={**self.guest_env(), **(extra_env or {})},
-                timeout=timeout, stdin=b"",
+                timeout=timeout,
+                stdin=b"",
             )
         except (MicrosandboxError, asyncio.TimeoutError, OSError) as e:
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,

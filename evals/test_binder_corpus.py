@@ -1,11 +1,12 @@
 """Live labeled-corpus eval for the Haiku binder: the false-positive gate.
 
-Samples the real Haiku binder over the gold-labeled corpus and enforces the one hard gate —
-a punt-labeled assertion must never bind to a checker. One pytest item per draw, so the run
-shows live per-item progress and a leak names the exact draw; `make evals:binder` shards the
-draws across xdist workers and the `binder_corpus` marker keeps it out of `make test` (it
-costs money and needs a Claude credential). Corpus-wide stats (infra-error guard,
-retention/over-punt/mismatch) are aggregated in conftest.py from the per-draw records.
+Samples the real Haiku binder over the gold-labeled corpus and enforces the one hard
+gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
+so the run shows live per-item progress and a leak names the exact draw; `make
+evals:binder` shards the draws across xdist workers and the `binder_corpus` marker keeps
+it out of `make test` (it costs money and needs a Claude credential). Corpus-wide stats
+(infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
+per-draw records.
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ SAMPLES = int(os.environ.get("EVALSPEC_BINDER_SAMPLES", "5"))
 _ERROR = object()
 
 
-def _samples_for(entry):
+def _samples_for(entry: object) -> object:
+    """Handle _samples_for."""
     # Heavy floor only where a false-positive can occur: persistence (the documented leak) and
     # skill_invoked (a punt on an activation assertion is unrecoverable). A zero-tolerance gate
     # needs enough draws on these that "0 observed" is meaningful.
@@ -35,7 +37,8 @@ def _samples_for(entry):
     return max(SAMPLES, 20) if heavy else SAMPLES
 
 
-def _bind_resilient(text):
+def _bind_resilient(text: object) -> object:
+    """Handle _bind_resilient."""
     # Retry one transient infra failure, then give up with _ERROR — a timed-out/crashed call
     # must not masquerade as a punt. Only infra exceptions are caught, so no logic bug hides.
     for _ in range(2):
@@ -46,7 +49,8 @@ def _bind_resilient(text):
     return _ERROR
 
 
-def _draws():
+def _draws() -> object:
+    """Handle _draws."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -54,7 +58,8 @@ def _draws():
     ]
 
 
-def _field_expectation_draws():
+def _field_expectation_draws() -> object:
+    """Handle _field_expectation_draws."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -64,7 +69,8 @@ def _field_expectation_draws():
 
 
 @pytest.mark.parametrize("entry", _draws())
-def test_binder_corpus_blocks_punt_leaks(entry, record):
+def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
+    """Test the expected behavior."""
     b = _bind_resilient(entry["text"])
 
     record(
@@ -73,7 +79,9 @@ def test_binder_corpus_blocks_punt_leaks(entry, record):
             "cohort": entry["cohort"],
             "expect_checker": entry.get("expect_checker"),
             "expect": entry.get("expect"),
-            "actual": {k: b.get(k) for k in entry.get("expect", {})} if isinstance(b, dict) else None,
+            "actual": {k: b.get(k) for k in entry.get("expect", {})}
+            if isinstance(b, dict)
+            else None,
             "result": "error" if b is _ERROR else "punt" if b is None else "bound",
             "checker": b.get("checker") if isinstance(b, dict) else None,
         }
@@ -89,7 +97,8 @@ def test_binder_corpus_blocks_punt_leaks(entry, record):
 
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
-def test_binder_corpus_preserves_expected_checker_fields(entry):
+def test_binder_corpus_preserves_expected_checker_fields(entry: object) -> None:
+    """Test the expected behavior."""
     b = _bind_resilient(entry["text"])
 
     if b is _ERROR:
