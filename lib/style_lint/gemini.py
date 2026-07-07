@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import urllib.request
 
+from lib.style_lint.types import GeminiResponse, UsageMetadata
+
 GEMINI_TIMEOUT_SECONDS = 30.0
 
 
@@ -14,7 +16,7 @@ def call_gemini(
     api_key: str,
     model: str,
     timeout: float = GEMINI_TIMEOUT_SECONDS,
-) -> str:
+) -> GeminiResponse:
     """Call Gemini REST API and return the model text response.
 
     Args:
@@ -24,7 +26,7 @@ def call_gemini(
         timeout: Request timeout in seconds.
 
     Returns:
-        Concatenated text parts from the first candidate.
+        Concatenated text parts from the first candidate plus usage metadata.
 
     Raises:
         ValueError: If Gemini returns an unexpected payload shape.
@@ -86,4 +88,25 @@ def call_gemini(
     if not texts:
         raise ValueError("Gemini response did not include text content")
 
-    return "".join(texts)
+    return GeminiResponse(text="".join(texts), usage=_usage_metadata(payload))
+
+
+def _usage_metadata(payload: dict[str, object]) -> UsageMetadata:
+    """Parse Gemini usage metadata when present."""
+    raw_usage = payload.get("usageMetadata")
+    if not isinstance(raw_usage, dict):
+        return UsageMetadata(requests=1)
+
+    return UsageMetadata(
+        requests=1,
+        prompt_tokens=_usage_int(raw_usage.get("promptTokenCount")),
+        output_tokens=_usage_int(raw_usage.get("candidatesTokenCount")),
+        total_tokens=_usage_int(raw_usage.get("totalTokenCount")),
+    )
+
+
+def _usage_int(value: object) -> int:
+    """Return non-boolean integer usage values."""
+    if type(value) is int:
+        return value
+    return 0

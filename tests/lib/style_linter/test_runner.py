@@ -100,6 +100,54 @@ def test_run_advisory_lint_batches_detector_calls(
     assert len(seen_prompts) == 2
 
 
+def test_run_advisory_lint_aggregates_usage_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Aggregate model usage across detector calls."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+
+    def _call_gemini(**_kwargs: object) -> object:
+        return framework.GeminiResponse(
+            text=json.dumps({"findings": []}),
+            usage=framework.UsageMetadata(
+                requests=1,
+                prompt_tokens=10,
+                output_tokens=2,
+                total_tokens=12,
+            ),
+        )
+
+    monkeypatch.setattr(framework, "call_gemini", _call_gemini)
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+            policy_instructions="Use the repository style guide.",
+            api_key="test-key",
+            model="gemini-test",
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
+
+    assert result.usage == framework.UsageMetadata(
+        requests=2,
+        prompt_tokens=20,
+        output_tokens=4,
+        total_tokens=24,
+    )
+
+
 def test_run_advisory_lint_drops_invalid_individual_findings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
