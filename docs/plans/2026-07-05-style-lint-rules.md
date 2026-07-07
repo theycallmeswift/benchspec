@@ -236,7 +236,7 @@ Required behavior:
 - print findings as `path:line:col: rule-id message`;
 - return `0` even when findings exist;
 - catch Gemini transport errors, malformed JSON, unknown rule IDs, and malformed finding references; print one warning line and return `0` because `make lint:custom` is advisory;
-- accept `--model`, `--verify-findings`, `--verify-model`, and optional path arguments.
+- accept `--model`, `--verify-findings`, `--verify-model`, `--changed-from`, and optional path arguments.
 
 - [ ] **Step 6: Add repository-specific CLI**
 
