@@ -41,7 +41,7 @@ _SUMMARY_LINES = pytest.StashKey[list]()
 
 
 def pytest_addoption(parser: object) -> None:
-    """Handle the pytest hook."""
+    """Register evalspec command-line options with pytest."""
     group = parser.getgroup("evalspec", "skill-eval runner")
     group.addoption(
         "--evalspec-model",
@@ -161,7 +161,7 @@ def pytest_addoption(parser: object) -> None:
 
 @pytest.fixture
 def sample_index(request: object) -> int:
-    """Handle sample_index."""
+    """Return the current repeated-sample index for pytest-xdist."""
     # pytest-repeat parametrizes each test with a hidden `__pytest_repeat_step_number`
     # param (0..N-1). Without --count, the param is absent — default to 0 so single-sample
     # runs still shard cleanly under sample-0/. Lives on the plugin (not cases.py) so user
@@ -173,7 +173,7 @@ def sample_index(request: object) -> int:
 
 
 def _parse_env_pairs(pairs: list) -> dict:
-    """Handle _parse_env_pairs."""
+    """Parse KEY=VALUE environment overrides from CLI options."""
     out = {}
     for p in pairs:
         if "=" not in p:
@@ -246,7 +246,7 @@ def resolved_run_set(config: object) -> Set:
 
 
 def pytest_configure(config: object) -> None:
-    """Handle the pytest hook."""
+    """Configure pytest state for evalspec collection."""
     load_dotenv()
     config.addinivalue_line(
         "markers", "evalspec: skill-eval cases run via `make evals` (not `make test`)"
@@ -281,14 +281,14 @@ def pytest_configure(config: object) -> None:
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node: object) -> None:
-    """Handle the pytest hook."""
+    """Pass evalspec configuration into xdist worker nodes."""
     # xdist controller → worker: hand the chosen iteration name through workerinput,
     # which execnet serializes to the worker before its own pytest_configure runs.
     node.workerinput["evalspec_iteration"] = workspace.current_iteration()
 
 
 def _git_commit(repo_root: Path) -> str | None:
-    """Handle _git_commit."""
+    """Provide the git commit helper."""
     # The repo under test isn't guaranteed to be a git repo (vaults often aren't);
     # a null commit beats a crashed run.
     try:
@@ -337,7 +337,7 @@ def _write_manifest(
     repo_root: Path,
     run_set: Set | None,
 ) -> None:
-    """Document the behavior."""
+    """Write the run manifest artifact for a pytest session."""
     agent_version = token_split = None
     try:
         agent = make_agent()
@@ -380,7 +380,7 @@ def _write_manifest(
 
 
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
-    """Handle the pytest hook."""
+    """Aggregate binder corpus records after the pytest session."""
     # Controller-only, and only when a run actually produced artifacts (a
     # --collect-only run never creates skills_root). Runs before
     # pytest_terminal_summary (plain impls fire inside TerminalReporter's
@@ -465,7 +465,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
 
 
 def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config: object) -> None:
-    """Handle the pytest hook."""
+    """Print binder corpus summary lines in pytest output."""
     lines = config.stash.get(_SUMMARY_LINES, [])
     if not lines:
         return
@@ -475,7 +475,7 @@ def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config
 
 
 def pytest_generate_tests(metafunc: object) -> None:
-    """Handle the pytest hook."""
+    """Parametrize pytest items from discovered evalspec cases."""
     fixtures = metafunc.fixturenames
     if "eval_arm" in fixtures:
         # One eval set per run — uniform columns across every skill (resolved once, not

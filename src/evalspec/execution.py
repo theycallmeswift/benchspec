@@ -38,7 +38,7 @@ JUDGE_MODEL = "sonnet"
 
 @dataclass
 class ArmOutcome:
-    """Represent ArmOutcome."""
+    """Store arm outcome data."""
 
     grading: dict  # {"eval_id", "skill", "arm", "sample", "assertions": [...]}
     errored: bool  # the agent run errored
@@ -68,7 +68,7 @@ class _ArmRun:
 
 
 def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> dict:
-    """Handle _turn_transcript."""
+    """Render seeded turns and the prompt into an agent transcript."""
     record = {
         "turn": 1,
         "prompt": prompt,
@@ -151,7 +151,7 @@ def _grade_mixed(
     pre_run_shas: object,
     process_facts: object = "",
 ) -> object:
-    """Document the behavior."""
+    """Grade bound assertions locally and punt the rest to the judge."""
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
     bind_cache: dict[str, dict | None] = {}
@@ -214,7 +214,7 @@ async def _run_arm_turns(
     eval_set: object = "",
     harness_args: object = None,
 ) -> _ArmRun:
-    """Handle _run_arm_turns."""
+    """Execute every prompt turn for one eval arm."""
     # The whole VM lifecycle (boot → run → teardown) runs in ONE asyncio.run: the microVM
     # is bound to the loop it was created in. Grading runs afterward, on the host.
     run_acc = _ArmRun()
@@ -285,7 +285,7 @@ def run_eval_arm(
     grade: object = grade_run,
     bind: object = binder.bind,
 ) -> ArmOutcome:
-    """Handle run_eval_arm."""
+    """Run all cases for one eval arm and write result artifacts."""
     eval_id = eval_case.eval_id
     # Every downstream sink keys on the arm NAME string (artifact paths, grading["arm"],
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.

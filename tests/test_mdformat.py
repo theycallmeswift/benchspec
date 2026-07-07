@@ -10,14 +10,14 @@ from evalspec import mdformat, schema
 
 
 def _write(tmp_path: object, name: object, body: object) -> object:
-    """Handle _write."""
+    """Build the write test fixture."""
     f = tmp_path / name
     f.write_text(textwrap.dedent(body), encoding="utf-8")
     return f
 
 
 def _write_slug(tmp_path: object, slug: object, body: object) -> object:
-    """Handle _write_slug."""
+    """Write slug."""
     slug_dir = tmp_path / slug
     slug_dir.mkdir(parents=True, exist_ok=True)
     (slug_dir / "prompt.md").write_text(textwrap.dedent(body), encoding="utf-8")
@@ -25,7 +25,7 @@ def _write_slug(tmp_path: object, slug: object, body: object) -> object:
 
 
 def test_parse_eval_md_minimal(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md minimal."""
     p = _write_slug(
         tmp_path,
         "single-article",
@@ -64,7 +64,7 @@ def test_parse_eval_md_minimal(tmp_path: object) -> None:
 
 
 def test_parse_eval_md_with_seed(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md with seed."""
     p = _write_slug(
         tmp_path,
         "catch-all-pose",
@@ -95,7 +95,7 @@ def test_parse_eval_md_with_seed(tmp_path: object) -> None:
 
 
 def test_parse_eval_md_malformed_seed_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md malformed seed rejected."""
     # A bare parse_eval_md call must validate seed itself, not defer to load_suite_dir.
     p = _write_slug(
         tmp_path,
@@ -120,7 +120,7 @@ def test_parse_eval_md_malformed_seed_rejected(tmp_path: object) -> None:
 
 
 def test_parse_eval_md_unknown_frontmatter_key_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md unknown frontmatter key rejected."""
     p = _write_slug(
         tmp_path,
         "a",
@@ -143,7 +143,7 @@ def test_parse_eval_md_unknown_frontmatter_key_rejected(tmp_path: object) -> Non
 
 
 def test_parse_eval_md_missing_prompt_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md missing prompt rejected."""
     p = _write_slug(
         tmp_path,
         "a",
@@ -162,7 +162,7 @@ def test_parse_eval_md_missing_prompt_rejected(tmp_path: object) -> None:
 
 
 def test_parse_eval_md_missing_assertions_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse eval md missing assertions rejected."""
     p = _write_slug(
         tmp_path,
         "a",
@@ -181,7 +181,7 @@ def test_parse_eval_md_missing_assertions_rejected(tmp_path: object) -> None:
 
 
 def test_continuation_lines_are_hard_errors(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify continuation lines are hard errors."""
     p = _write_slug(
         tmp_path,
         "bad",
@@ -205,7 +205,7 @@ def test_continuation_lines_are_hard_errors(tmp_path: object) -> None:
 
 
 def test_unknown_heading_is_a_hard_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify unknown heading is a hard error."""
     p = _write_slug(
         tmp_path,
         "bad",
@@ -228,7 +228,7 @@ def test_unknown_heading_is_a_hard_error(tmp_path: object) -> None:
 
 
 def test_plain_bullet_is_a_hard_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify plain bullet is a hard error."""
     p = _write_slug(
         tmp_path,
         "bad",
@@ -251,7 +251,7 @@ def test_plain_bullet_is_a_hard_error(tmp_path: object) -> None:
 
 
 def test_bad_yaml_frontmatter_is_loud(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify bad yaml frontmatter is loud."""
     p = _write_slug(
         tmp_path,
         "bad",
@@ -274,7 +274,7 @@ def test_bad_yaml_frontmatter_is_loud(tmp_path: object) -> None:
 
 
 def test_load_suite_dir_assembles(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify load suite dir assembles."""
     evals = tmp_path / "evals"
     _write_slug(evals, "one", "---\n{}\n---\n\n## Prompt\n\np1\n\n## Assertions\n\n- [ ] a1\n")
     _write_slug(evals, "two", "---\n{}\n---\n\n## Prompt\n\np2\n\n## Assertions\n\n- [ ] a2\n")
@@ -287,7 +287,7 @@ def test_load_suite_dir_assembles(tmp_path: object) -> None:
 
 
 def test_load_suite_dir_rejects_dir_without_prompt(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify load suite dir rejects dir without prompt."""
     # A top-level dir under evals/ with no prompt.md is a half-authored or misnamed
     # eval — fail loud rather than silently collect zero cases for it.
     evals = tmp_path / "evals"
@@ -299,7 +299,7 @@ def test_load_suite_dir_rejects_dir_without_prompt(tmp_path: object) -> None:
 
 
 def test_load_suite_dir_skips_dunder_tooling_dirs(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify load suite dir skips dunder tooling dirs."""
     evals = tmp_path / "evals"
     _write_slug(evals, "real", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n")
     (evals / "__pycache__").mkdir()
@@ -310,7 +310,7 @@ def test_load_suite_dir_skips_dunder_tooling_dirs(tmp_path: object) -> None:
 
 
 def test_load_suite_dir_ignores_per_eval_fixtures_dir(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify load suite dir ignores per eval fixtures dir."""
     # A slug's own fixtures/ lives one level down (evals/<slug>/fixtures), so it is
     # never iterated as a suite-level dir and never mistaken for an eval.
     evals = tmp_path / "evals"
@@ -323,14 +323,14 @@ def test_load_suite_dir_ignores_per_eval_fixtures_dir(tmp_path: object) -> None:
 
 
 def test_mdformat_error_is_a_schema_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify mdformat error is a schema error."""
     # discovery's error prefixing catches schema.SchemaError; Markdown structure
     # errors must ride the same channel.
     assert issubclass(mdformat.MdFormatError, schema.SchemaError)
 
 
 def test_empty_assertions_section_is_an_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify empty assertions section is an error."""
     p = _write_slug(
         tmp_path,
         "empty-assertions",
@@ -351,7 +351,7 @@ def test_empty_assertions_section_is_an_error(tmp_path: object) -> None:
 
 
 def test_stray_h3_outside_assertions_is_an_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify stray h3 outside assertions is an error."""
     p = _write_slug(
         tmp_path,
         "stray-h3",
@@ -378,7 +378,7 @@ def test_stray_h3_outside_assertions_is_an_error(tmp_path: object) -> None:
 
 
 def test_h3_before_any_h2_is_an_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify h3 before any h2 is an error."""
     # An H3 that appears before the first H2 (last_h2 is None) must still raise
     # the same "outside an ## Assertions" error — not silently pass or crash.
     p = _write_slug(
@@ -407,7 +407,7 @@ def test_h3_before_any_h2_is_an_error(tmp_path: object) -> None:
 
 
 def test_h3_groups_under_assertions_still_parse(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify h3 groups under assertions still parse."""
     p = _write_slug(
         tmp_path,
         "grouped",
@@ -434,7 +434,7 @@ def test_h3_groups_under_assertions_still_parse(tmp_path: object) -> None:
 
 
 def test_parse_trigger_basic_grid(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger basic grid."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -477,7 +477,7 @@ def test_parse_trigger_basic_grid(tmp_path: object) -> None:
 
 
 def test_parse_trigger_xfail_subbullet_and_continuation(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger xfail subbullet and continuation."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -499,7 +499,7 @@ def test_parse_trigger_xfail_subbullet_and_continuation(tmp_path: object) -> Non
 
 
 def test_parse_trigger_query_with_colon_keeps_remainder(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger query with colon keeps remainder."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -515,7 +515,7 @@ def test_parse_trigger_query_with_colon_keeps_remainder(tmp_path: object) -> Non
 
 
 def test_parse_trigger_missing_colon_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger missing colon rejected."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -532,7 +532,7 @@ def test_parse_trigger_missing_colon_rejected(tmp_path: object) -> None:
 
 
 def test_parse_trigger_xfail_before_query_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger xfail before query rejected."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -549,7 +549,7 @@ def test_parse_trigger_xfail_before_query_rejected(tmp_path: object) -> None:
 
 
 def test_parse_trigger_unknown_section_rejected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger unknown section rejected."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -566,7 +566,7 @@ def test_parse_trigger_unknown_section_rejected(tmp_path: object) -> None:
 
 
 def test_parse_trigger_duplicate_slug_rejected_via_schema(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parse trigger duplicate slug rejected via schema."""
     p = _write(
         tmp_path,
         "trigger-evals.md",
@@ -585,7 +585,7 @@ def test_parse_trigger_duplicate_slug_rejected_via_schema(tmp_path: object) -> N
 
 
 def test_parent_child_flattens_to_children(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parent child flattens to children."""
     p = _write_slug(
         tmp_path,
         "scaffolded",
@@ -615,7 +615,7 @@ def test_parent_child_flattens_to_children(tmp_path: object) -> None:
 
 
 def test_mixed_childless_and_parent_items_keep_document_order(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify mixed childless and parent items keep document order."""
     p = _write_slug(
         tmp_path,
         "mixed",
@@ -647,7 +647,7 @@ def test_mixed_childless_and_parent_items_keep_document_order(tmp_path: object) 
 
 
 def test_flat_list_parses_unchanged(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify flat list parses unchanged."""
     # Back-compat: a flat (un-nested) list parses exactly as before.
     p = _write_slug(
         tmp_path,
@@ -677,7 +677,7 @@ def test_flat_list_parses_unchanged(tmp_path: object) -> None:
 
 
 def test_grandchild_is_a_hard_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify grandchild is a hard error."""
     p = _write_slug(
         tmp_path,
         "deep",
@@ -702,7 +702,7 @@ def test_grandchild_is_a_hard_error(tmp_path: object) -> None:
 
 
 def test_ragged_child_indent_is_a_hard_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify ragged child indent is a hard error."""
     p = _write_slug(
         tmp_path,
         "ragged",
@@ -727,7 +727,7 @@ def test_ragged_child_indent_is_a_hard_error(tmp_path: object) -> None:
 
 
 def test_child_without_parent_is_a_hard_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify child without parent is a hard error."""
     p = _write_slug(
         tmp_path,
         "orphan",
@@ -750,7 +750,7 @@ def test_child_without_parent_is_a_hard_error(tmp_path: object) -> None:
 
 
 def test_children_cannot_cross_h3_boundary(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify children cannot cross h3 boundary."""
     # The H2-body parent stays childless; the H3's indented line is then an orphan
     # (hence the "no parent" error, not silent cross-section adoption).
     p = _write_slug(
@@ -779,7 +779,7 @@ def test_children_cannot_cross_h3_boundary(tmp_path: object) -> None:
 
 
 def test_parent_child_decomposes_within_h3_group(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify parent child decomposes within h3 group."""
     # The only claimed-but-otherwise-untested capability: decomposition inside a
     # ### group, not just the H2 body.
     p = _write_slug(

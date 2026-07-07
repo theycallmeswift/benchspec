@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for trigger."""
 
 import json
 from typing import NoReturn
@@ -17,7 +17,7 @@ from evalspec.trigger import (
 
 
 def _no_sleep(*_args: object) -> None:
-    """Handle _no_sleep."""
+    """Build the no sleep test fixture."""
     return None
 
 
@@ -39,7 +39,7 @@ def _skill_line(skill_value: str) -> str:
 
 
 def _named_tool_line(name: str) -> str:
-    """Test the expected behavior."""
+    """Build the named tool line test fixture."""
     return json.dumps(
         {
             "type": "assistant",
@@ -53,19 +53,19 @@ def _named_tool_line(name: str) -> str:
 
 
 def test_detect_skill_fired_namespaced_matches_bare_name() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill fired namespaced matches bare name."""
     # Real shape: input.skill == "knowledge-base:bootstrap", query "bootstrap"
     assert detect_skill_fired([_skill_line("knowledge-base:bootstrap")], "bootstrap") is True
 
 
 def test_detect_skill_fired_bare_skill_name() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill fired bare skill name."""
     # input.skill == "bootstrap", query "bootstrap"
     assert detect_skill_fired([_skill_line("bootstrap")], "bootstrap") is True
 
 
 def test_detect_skill_no_fire_text_block_only() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill no fire text block only."""
     # Assistant message with only a text block — no tool_use
     event = {
         "type": "assistant",
@@ -75,25 +75,25 @@ def test_detect_skill_no_fire_text_block_only() -> None:
 
 
 def test_detect_skill_no_fire_different_skill() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill no fire different skill."""
     # Guards against substring bugs: "archive" must not match query "bootstrap"
     assert detect_skill_fired([_skill_line("knowledge-base:archive")], "bootstrap") is False
 
 
 def test_detect_skill_fires_through_malformed_and_blank_lines() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill fires through malformed and blank lines."""
     # Malformed JSON and blank lines are skipped, not fatal — a real fire still registers.
     lines = ["not json", "", "  ", _skill_line("knowledge-base:bootstrap")]
     assert detect_skill_fired(lines, "bootstrap") is True
 
 
 def test_detect_skill_malformed_and_blank_lines_alone_do_not_fire() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill malformed and blank lines alone do not fire."""
     assert detect_skill_fired(["not json", "", "  "], "bootstrap") is False
 
 
 def test_detect_skill_no_match_returns_false_on_empty() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill no match returns false on empty."""
     assert detect_skill_fired([], "bootstrap") is False
 
 
@@ -131,13 +131,13 @@ def _malformed_shape_lines() -> object:
 
 
 def test_detect_skill_fires_after_malformed_shapes() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill fires after malformed shapes."""
     lines = _malformed_shape_lines() + [_skill_line("knowledge-base:bootstrap")]
     assert detect_skill_fired(lines, "bootstrap") is True
 
 
 def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
-    """Test the expected behavior."""
+    """Verify detect skill malformed shapes alone do not crash or fire."""
     assert detect_skill_fired(_malformed_shape_lines(), "bootstrap") is False
 
 
@@ -147,7 +147,7 @@ def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
 
 
 def _route_seq(*per_pass_lines: object) -> object:
-    """Handle _route_seq."""
+    """Route seq."""
     it = iter(per_pass_lines)
 
     def route(
@@ -157,14 +157,14 @@ def _route_seq(*per_pass_lines: object) -> object:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         return next(it)
 
     return route
 
 
 def test_count_fires_counts_each_firing_pass() -> None:
-    """Test the expected behavior."""
+    """Verify count fires counts each firing pass."""
     fire = [_skill_line("knowledge-base:bootstrap")]
     miss = ["{}"]
     route = _route_seq(fire, miss, fire)  # fires 2 of 3
@@ -172,21 +172,21 @@ def test_count_fires_counts_each_firing_pass() -> None:
 
 
 def test_count_fires_zero_when_never_fires() -> None:
-    """Test the expected behavior."""
+    """Verify count fires zero when never fires."""
     miss = ["{}"]
     route = _route_seq(miss, miss, miss)
     assert count_fires("q", "bootstrap", "/plugin", "sonnet", route=route) == 0
 
 
 def test_count_fires_respects_passes_argument() -> None:
-    """Test the expected behavior."""
+    """Verify count fires respects passes argument."""
     fire = [_skill_line("bootstrap")]
     route = _route_seq(fire, fire)
     assert count_fires("q", "bootstrap", "/plugin", "sonnet", passes=2, route=route) == 2
 
 
 def test_count_fires_default_timeout_is_20() -> None:
-    """Test the expected behavior."""
+    """Verify count fires default timeout is 20."""
     # Routing is a snap decision; the budget is tight. A query that hasn't routed
     # within 20s is treated as a non-fire by _route_once, not waited out for minutes.
     seen = {}
@@ -198,7 +198,7 @@ def test_count_fires_default_timeout_is_20() -> None:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         seen["timeout"] = timeout
         return ["{}"]
 
@@ -207,7 +207,7 @@ def test_count_fires_default_timeout_is_20() -> None:
 
 
 def test_count_fires_passes_effort_and_skill_name_to_route() -> None:
-    """Test the expected behavior."""
+    """Verify count fires passes effort and skill name to route."""
     # count_fires threads the effort level and the skill name through to the router,
     # so _route_once can set --effort and mirror the early-stop on our skill.
     seen = {}
@@ -219,7 +219,7 @@ def test_count_fires_passes_effort_and_skill_name_to_route() -> None:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         seen.update(kwargs)
         return ["{}"]
 
@@ -238,7 +238,7 @@ def test_count_fires_passes_effort_and_skill_name_to_route() -> None:
 
 
 def test_count_fires_retries_transient_routing_error() -> None:
-    """Test the expected behavior."""
+    """Verify count fires retries transient routing error."""
     # A failed routing call (rate limit, timeout) must not be miscounted as a
     # non-fire: it retries, and a subsequent success is counted normally.
     fire = [_skill_line("bootstrap")]
@@ -251,7 +251,7 @@ def test_count_fires_retries_transient_routing_error() -> None:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         calls.append(1)
         if len(calls) == 1:
             raise RoutingError("transient rate limit")
@@ -272,7 +272,7 @@ def test_count_fires_retries_transient_routing_error() -> None:
 
 
 def test_count_fires_raises_when_routing_keeps_failing() -> None:
-    """Test the expected behavior."""
+    """Verify count fires raises for when routing keeps failing."""
 
     # A persistent routing failure propagates as an error rather than silently
     # counting as the skill not firing (a false negative).
@@ -283,7 +283,7 @@ def test_count_fires_raises_when_routing_keeps_failing() -> None:
         timeout: object,
         **kwargs: object,
     ) -> NoReturn:
-        """Handle route."""
+        """Route."""
         raise RoutingError("persistent failure")
 
     with pytest.raises(RoutingError):
@@ -305,31 +305,31 @@ def test_count_fires_raises_when_routing_keeps_failing() -> None:
 
 
 def test_fire_threshold_majority_ignores_should_trigger() -> None:
-    """Test the expected behavior."""
+    """Verify fire threshold majority ignores should trigger."""
     assert fire_threshold("majority", True, 3) == 2
     assert fire_threshold("majority", False, 3) == 2
 
 
 def test_fire_threshold_best_of_is_one() -> None:
-    """Test the expected behavior."""
+    """Verify fire threshold best of is one."""
     assert fire_threshold("best-of", True, 3) == 1
     assert fire_threshold("best-of", False, 3) == 1
 
 
 def test_fire_threshold_asymmetric_lenient_positive_robust_negative() -> None:
-    """Test the expected behavior."""
+    """Verify fire threshold asymmetric lenient positive robust negative."""
     assert fire_threshold("asymmetric", True, 3) == 1  # should-trigger: any fire
     assert fire_threshold("asymmetric", False, 3) == 2  # should-not: majority
 
 
 def test_fire_threshold_unknown_mode_raises() -> None:
-    """Test the expected behavior."""
+    """Verify fire threshold unknown mode raises."""
     with pytest.raises(ValueError, match="unknown trigger mode"):
         fire_threshold("bogus", True, 3)
 
 
 def test_count_fires_threshold_1_stops_on_first_fire() -> None:
-    """Test the expected behavior."""
+    """Verify count fires threshold 1 stops on first fire."""
     # best-of / asymmetric-positive: one fire locks the outcome — no extra passes.
     calls = []
 
@@ -340,7 +340,7 @@ def test_count_fires_threshold_1_stops_on_first_fire() -> None:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         calls.append(1)
         return [_skill_line("bootstrap")]
 
@@ -350,7 +350,7 @@ def test_count_fires_threshold_1_stops_on_first_fire() -> None:
 
 
 def test_count_fires_threshold_2_stops_when_majority_unreachable() -> None:
-    """Test the expected behavior."""
+    """Verify count fires threshold 2 stops when majority unreachable."""
     # majority / asymmetric-negative: two misses lock not-fired before the 3rd pass.
     calls = []
 
@@ -361,7 +361,7 @@ def test_count_fires_threshold_2_stops_when_majority_unreachable() -> None:
         timeout: object,
         **kwargs: object,
     ) -> object:
-        """Handle route."""
+        """Route."""
         calls.append(1)
         return ["{}"]  # never fires
 
@@ -371,7 +371,7 @@ def test_count_fires_threshold_2_stops_when_majority_unreachable() -> None:
 
 
 def test_count_fires_on_pass_records_each_pass() -> None:
-    """Test the expected behavior."""
+    """Verify count fires on pass records each pass."""
     # on_pass fires once per routing pass, with (duration_ms, fired, fired_skill).
     seq = [[_skill_line("bootstrap")], ["{}"], [_skill_line("bootstrap")]]
     route = _route_seq(*seq)
@@ -400,7 +400,7 @@ def test_count_fires_on_pass_records_each_pass() -> None:
 
 
 def test_first_dispatched_skill_returns_skill_tool_value() -> None:
-    """Test the expected behavior."""
+    """Verify first dispatched skill returns skill tool value."""
     # `_skill_line(name)` emits a `Skill` tool_use with input={"skill": name}.
     assert (
         first_dispatched_skill([_skill_line("knowledge-base:archive")]) == "knowledge-base:archive"
@@ -408,13 +408,13 @@ def test_first_dispatched_skill_returns_skill_tool_value() -> None:
 
 
 def test_first_dispatched_skill_returns_first_of_several() -> None:
-    """Test the expected behavior."""
+    """Verify first dispatched skill returns first of several."""
     lines = [_skill_line("ingest"), _skill_line("archive")]
     assert first_dispatched_skill(lines) == "ingest"
 
 
 def test_first_dispatched_skill_none_when_no_skill() -> None:
-    """Test the expected behavior."""
+    """Verify first dispatched skill none when no skill."""
     text = json.dumps(
         {
             "type": "assistant",
@@ -429,7 +429,7 @@ def test_first_dispatched_skill_none_when_no_skill() -> None:
 
 
 def test_first_dispatched_skill_skips_malformed_lines() -> None:
-    """Test the expected behavior."""
+    """Verify first dispatched skill skips malformed lines."""
     lines = ["not json", "", _skill_line("bootstrap")]
     assert first_dispatched_skill(lines) == "bootstrap"
 
@@ -440,13 +440,13 @@ def test_first_dispatched_skill_skips_malformed_lines() -> None:
 
 
 def test_dispatches_skill_true_for_any_skill_tool_use() -> None:
-    """Test the expected behavior."""
+    """Verify dispatches skill true for any skill tool use."""
     assert dispatches_skill(_skill_line("writing-prompts")) is True
     assert dispatches_skill(_skill_line("knowledge-base:archive")) is True
 
 
 def test_dispatches_skill_false_for_non_skill_and_junk() -> None:
-    """Test the expected behavior."""
+    """Verify dispatches skill false for non skill and junk."""
     read = json.dumps(
         {
             "type": "assistant",
@@ -474,7 +474,7 @@ def test_dispatches_skill_false_for_non_skill_and_junk() -> None:
 
 
 def test_dispatches_skill_matches_our_skill_namespaced_fallback() -> None:
-    """Test the expected behavior."""
+    """Verify dispatches skill matches our skill namespaced fallback."""
     # Mirror detect_skill_fired's fallback: a tool_use whose name IS our skill counts
     # as a dispatch when skill_name is supplied — so the early-stop covers it too.
     line = _named_tool_line("writing-prompts")
@@ -488,16 +488,16 @@ def test_dispatches_skill_matches_our_skill_namespaced_fallback() -> None:
 
 
 def test_count_fires_uses_injected_detect_fired() -> None:
-    """Test the expected behavior."""
+    """Verify count fires uses injected detect fired."""
 
     # A detector that fires only on a sentinel line proves count_fires honors the
     # injected callable rather than the Claude-hardcoded default.
     def route(*a: object, **k: object) -> object:
-        """Handle route."""
+        """Route."""
         return ["FIRE"]
 
     def detect_fired(lines: object, skill_name: object) -> object:
-        """Handle detect_fired."""
+        """Detect fired."""
         return "FIRE" in lines
 
     n = count_fires(
@@ -519,7 +519,7 @@ def test_count_fires_uses_injected_detect_fired() -> None:
 
 
 def test_trigger_record_persists_verdict_and_query() -> None:
-    """Test the expected behavior."""
+    """Verify trigger record persists verdict and query."""
     from evalspec.trigger import trigger_record
 
     rec = trigger_record(
@@ -544,7 +544,7 @@ def test_trigger_record_persists_verdict_and_query() -> None:
 
 
 def test_trigger_record_passes_on_expected_nonfire() -> None:
-    """Test the expected behavior."""
+    """Verify trigger record passes on expected nonfire."""
     from evalspec.trigger import trigger_record
 
     rec = trigger_record(
@@ -569,7 +569,7 @@ def test_trigger_record_passes_on_expected_nonfire() -> None:
 
 
 def test_trigger_record_round_trips_fired_skill_in_per_pass() -> None:
-    """Test the expected behavior."""
+    """Verify trigger record round trips fired skill in per pass."""
     from evalspec.trigger import trigger_record
 
     query = {"slug": "ingest-article", "query": "q", "should_trigger": True}
@@ -585,7 +585,7 @@ def test_trigger_record_round_trips_fired_skill_in_per_pass() -> None:
 
 
 def test_trigger_record_carries_xfail_reason() -> None:
-    """Test the expected behavior."""
+    """Verify trigger record carries xfail reason."""
     from evalspec.trigger import trigger_record
 
     rec = trigger_record(
@@ -612,7 +612,7 @@ def test_trigger_record_carries_xfail_reason() -> None:
 
 
 def test_trigger_record_carries_slug_and_model() -> None:
-    """Test the expected behavior."""
+    """Verify trigger record carries slug and model."""
     from evalspec.trigger import trigger_record
 
     q = {"slug": "ingest-article", "query": "q", "should_trigger": True}
@@ -630,20 +630,20 @@ def test_trigger_record_carries_slug_and_model() -> None:
 
 
 def test_xfail_applies_when_model_is_a_listed_tier() -> None:
-    """Test the expected behavior."""
+    """Verify xfail applies when model is a listed tier."""
     xf = {"models": ["sonnet", "haiku"], "reason": "r"}
     assert xfail_applies(xf, "sonnet") is True
     assert xfail_applies(xf, "haiku") is True
 
 
 def test_xfail_does_not_apply_on_unlisted_tier() -> None:
-    """Test the expected behavior."""
+    """Verify xfail does not apply on unlisted tier."""
     # opus is not listed, so the gate stays strict on an opus run.
     assert xfail_applies({"models": ["sonnet"], "reason": "r"}, "opus") is False
 
 
 def test_xfail_applies_matches_provider_qualified_model_id() -> None:
-    """Test the expected behavior."""
+    """Verify xfail applies matches provider qualified model id."""
     # OpenCode-style ids embed the tier; a substring match still relaxes the gate.
     assert (
         xfail_applies({"models": ["sonnet"], "reason": "r"}, "anthropic/claude-sonnet-4-6") is True

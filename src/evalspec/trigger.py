@@ -54,7 +54,7 @@ def _tool_uses(line: str) -> object:
 
 
 def detect_skill_fired(stream_lines: object, skill_name: str) -> bool:
-    """Handle detect_skill_fired."""
+    """Return whether stream events show the requested skill firing."""
     for line in stream_lines:
         for block in _tool_uses(line):
             name = block.get("name")

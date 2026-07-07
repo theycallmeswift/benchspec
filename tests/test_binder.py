@@ -15,18 +15,18 @@ from evalspec.binder import _BINDING_PROMPT, bind
 
 
 def _host(reply: object) -> object:
-    """Handle _host."""
+    """Build the host test fixture."""
     # mimic the host-claude --output-format json envelope: {"result": "<model text>"}
     return lambda prompt, *, model, timeout=60: json.dumps({"result": reply})
 
 
 def _fail_host(*args: object, **kwargs: object) -> NoReturn:
-    """Handle _fail_host."""
+    """Build the fail host test fixture."""
     raise AssertionError("host binder should not be called")
 
 
 def test_bind_file_exists() -> None:
-    """Test the expected behavior."""
+    """Verify bind file exists."""
     spec = bind(
         "the file out.md exists",
         call_host=_host('{"checker":"file_exists","path":"out.md"}'),
@@ -36,7 +36,7 @@ def test_bind_file_exists() -> None:
 
 
 def test_bare_exists_hidden_template_path_binds_without_host_call() -> None:
-    """Test the expected behavior."""
+    """Verify bare exists hidden template path binds without host call."""
     spec = bind("./.meta/templates/entity-person.md exists", call_host=_fail_host)
 
     assert spec == {
@@ -47,7 +47,7 @@ def test_bare_exists_hidden_template_path_binds_without_host_call() -> None:
 
 
 def test_bare_exists_strips_quotes_without_losing_hidden_dot() -> None:
-    """Test the expected behavior."""
+    """Verify bare exists strips quotes without losing hidden dot."""
     spec = bind("'./.meta/templates/entity-person.md' exists", call_host=_fail_host)
 
     assert spec["checker"] == "file_exists"
@@ -55,7 +55,7 @@ def test_bare_exists_strips_quotes_without_losing_hidden_dot() -> None:
 
 
 def test_bare_exists_accepts_trailing_period_without_losing_hidden_dot() -> None:
-    """Test the expected behavior."""
+    """Verify bare exists accepts trailing period without losing hidden dot."""
     spec = bind("./.meta/templates/entity-person.md exists.", call_host=_fail_host)
 
     assert spec["checker"] == "file_exists"
@@ -63,7 +63,7 @@ def test_bare_exists_accepts_trailing_period_without_losing_hidden_dot() -> None
 
 
 def test_compound_hidden_path_assertion_punts() -> None:
-    """Test the expected behavior."""
+    """Verify compound hidden path assertion punts."""
     spec = bind(
         "./.meta/templates/entity-person.md exists and contains frontmatter",
         call_host=_host('{"punt":true,"reason":"compound"}'),
@@ -73,7 +73,7 @@ def test_compound_hidden_path_assertion_punts() -> None:
 
 
 def test_descriptive_exists_prose_preserves_model_bound_path() -> None:
-    """Test the expected behavior."""
+    """Verify descriptive exists prose preserves model bound path."""
     spec = bind(
         "The previously-missing ./.obsidian/ configuration now exists",
         call_host=_host('{"checker":"file_exists","path":"./.obsidian/"}'),
@@ -83,7 +83,7 @@ def test_descriptive_exists_prose_preserves_model_bound_path() -> None:
 
 
 def test_non_path_exists_prose_punts() -> None:
-    """Test the expected behavior."""
+    """Verify non path exists prose punts."""
     assert (
         bind(
             "the success message now exists",
@@ -94,7 +94,7 @@ def test_non_path_exists_prose_punts() -> None:
 
 
 def test_directory_created_path_shape_binds_without_host_call() -> None:
-    """Test the expected behavior."""
+    """Verify directory created path shape binds without host call."""
     spec = bind("the ./output/ directory was created", call_host=_fail_host)
 
     assert spec["checker"] == "file_exists"
@@ -102,7 +102,7 @@ def test_directory_created_path_shape_binds_without_host_call() -> None:
 
 
 def test_bind_skill_invoked() -> None:
-    """Test the expected behavior."""
+    """Verify bind skill invoked."""
     spec = bind(
         "Skill `ingest` invoked",
         call_host=_host('{"checker":"skill_invoked","skill":"ingest"}'),
@@ -112,42 +112,42 @@ def test_bind_skill_invoked() -> None:
 
 
 def test_punt_explicit() -> None:
-    """Test the expected behavior."""
+    """Verify punt explicit."""
     assert bind("the note reads well", call_host=_host('{"punt":true,"reason":"semantic"}')) is None
 
 
 def test_punt_on_garbage() -> None:
-    """Test the expected behavior."""
+    """Verify punt on garbage."""
     assert bind("x", call_host=_host("here you go: not json at all")) is None
 
 
 def test_punt_on_unknown_checker() -> None:
-    """Test the expected behavior."""
+    """Verify punt on unknown checker."""
     assert bind("x", call_host=_host('{"checker":"vibes","path":"a"}')) is None
 
 
 def test_punt_on_none_host_output() -> None:
-    """Test the expected behavior."""
+    """Verify punt on none host output."""
     # An abnormal host call yielding None must punt, not raise (never-raises contract).
     assert bind("x", call_host=lambda *a, **k: None) is None
 
 
 def test_punt_on_schema_invalid() -> None:  # glob_count needs exactly one of count/min
-    """Test the expected behavior."""
+    """Verify punt on schema invalid."""
     assert bind("x", call_host=_host('{"checker":"glob_count","glob":"*.md"}')) is None
 
 
 def test_parses_fenced_json() -> None:
-    """Test the expected behavior."""
+    """Verify parses fenced json."""
     spec = bind("x", call_host=_host('```json\n{"checker":"file_exists","path":"a.md"}\n```'))
     assert spec["checker"] == "file_exists"
 
 
 def test_infra_error_propagates() -> None:
-    """Test the expected behavior."""
+    """Verify infra error propagates."""
 
     def boom(prompt: object, *, model: object, timeout: object = 60) -> NoReturn:
-        """Handle boom."""
+        """Boom."""
         raise RuntimeError("not logged in")
 
     with pytest.raises(RuntimeError):
@@ -155,7 +155,7 @@ def test_infra_error_propagates() -> None:
 
 
 def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify returned spec is dispatchable."""
     # The bound spec must flow straight into the existing checker dispatch.
     from evalspec.checkers import run_assertion
 
@@ -168,7 +168,7 @@ def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
 
 
 def test_prompt_carries_load_bearing_pieces() -> None:
-    """Test the expected behavior."""
+    """Verify prompt carries load bearing pieces."""
     p = _BINDING_PROMPT.format(assertion="MY ASSERTION")
     assert "MY ASSERTION" in p
     for name in (

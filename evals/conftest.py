@@ -19,17 +19,17 @@ _RAN = pytest.StashKey[bool]()
 
 
 def _results_dir(config: object) -> object:
-    """Handle _results_dir."""
+    """Return the directory where binder corpus workers write result records."""
     return Path(config.rootpath) / "tmp" / "binder_results"
 
 
 def _is_controller(config: object) -> bool:
-    """Handle _is_controller."""
+    """Return whether pytest is running in the controller process."""
     return not hasattr(config, "workerinput")
 
 
 def _binder_selected(config: object) -> object:
-    """Handle _binder_selected."""
+    """Return whether this pytest run selected the binder corpus marker."""
     # The eval runs via exactly `-m binder_corpus`; `make test` and bare runs use
     # `-m 'not binder_corpus'`, so an exact match keeps the destructive clear off them.
     return (config.getoption("markexpr") or "").strip() == "binder_corpus"
@@ -37,14 +37,14 @@ def _binder_selected(config: object) -> object:
 
 @pytest.fixture
 def record(request: object) -> object:
-    """Handle record."""
+    """Return a worker-local callback for recording binder corpus draw results."""
     # Per-worker file: concurrent xdist workers must not share one append target.
     worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
     path = _results_dir(request.config) / f"results-{worker}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(rec: object) -> None:
-        """Handle write."""
+        """Append one JSON record to the worker result file."""
         with path.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
 
@@ -52,7 +52,7 @@ def record(request: object) -> object:
 
 
 def pytest_configure(config: object) -> None:
-    """Handle the pytest hook."""
+    """Configure pytest state for evalspec collection."""
     # Wipe a prior run's records before workers append. Controller-only and binder-only, so an
     # unrelated `make test` never deletes a live run's data. Runs before workers spawn.
     if not (_is_controller(config) and _binder_selected(config)):
@@ -66,12 +66,12 @@ def pytest_configure(config: object) -> None:
 
 
 def _rate(rows: object, hit: object) -> object:
-    """Handle _rate."""
+    """Compute the fraction of rows matching a predicate."""
     return sum(1 for r in rows if hit(r)) / len(rows) if rows else 0.0
 
 
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
-    """Handle the pytest hook."""
+    """Aggregate binder corpus records after the pytest session."""
     config = session.config
     if not (_is_controller(config) and config.stash.get(_RAN, False)):
         return
@@ -105,7 +105,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
 
 
 def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config: object) -> None:
-    """Handle the pytest hook."""
+    """Print binder corpus summary lines in pytest output."""
     lines = config.stash.get(_SUMMARY, [])
     if not lines:
         return

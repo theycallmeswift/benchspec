@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for opencode."""
 
 from __future__ import annotations
 
@@ -16,17 +16,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _lines(name: str) -> list[str]:
-    """Handle _lines."""
+    """Build the lines test fixture."""
     return (FIXTURES / name).read_text().splitlines()
 
 
 def _agent(auth_env: str = "ANTHROPIC_API_KEY") -> OpenCodeAgent:
-    """Handle _agent."""
+    """Build the agent test fixture."""
     return OpenCodeAgent(auth_value="sk-test", auth_env=auth_env, version="latest")
 
 
 def test_build_command_rejects_unqualified_model() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects unqualified model."""
     agent = OpenCodeAgent()
     with pytest.raises(ValueError, match="provider-qualified"):
         agent.build_command(
@@ -40,7 +40,7 @@ def test_build_command_rejects_unqualified_model() -> None:
 
 
 def test_build_command_accepts_qualified_model() -> None:
-    """Test the expected behavior."""
+    """Verify build command accepts qualified model."""
     agent = OpenCodeAgent()
     cmd = agent.build_command(
         "hi",
@@ -54,7 +54,7 @@ def test_build_command_accepts_qualified_model() -> None:
 
 
 def test_build_command_shape_and_effort_mapping() -> None:
-    """Test the expected behavior."""
+    """Verify build command shape and effort mapping."""
     cmd = _agent().build_command(
         "do the thing",
         plugin_dir=None,
@@ -74,7 +74,7 @@ def test_build_command_shape_and_effort_mapping() -> None:
 
 
 def test_build_command_effort_low_maps_to_fast_variant() -> None:
-    """Test the expected behavior."""
+    """Verify build command effort low maps to fast variant."""
     cmd = _agent().build_command(
         "q",
         plugin_dir=None,
@@ -88,7 +88,7 @@ def test_build_command_effort_low_maps_to_fast_variant() -> None:
 
 
 def test_build_command_effort_high_maps_to_thorough_variant() -> None:
-    """Test the expected behavior."""
+    """Verify build command effort high maps to thorough variant."""
     cmd = _agent().build_command(
         "q",
         plugin_dir=None,
@@ -102,7 +102,7 @@ def test_build_command_effort_high_maps_to_thorough_variant() -> None:
 
 
 def test_build_command_ignores_plugin_and_resume() -> None:
-    """Test the expected behavior."""
+    """Verify build command ignores plugin and resume."""
     # OpenCode v1 has no plugin-dir or resume equivalents; the args are accepted for
     # protocol parity but must not leak into the command line.
     cmd = _agent().build_command(
@@ -121,7 +121,7 @@ def test_build_command_ignores_plugin_and_resume() -> None:
 
 
 def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch matches skill dispatcher with input name."""
     # Primary OpenCode shape: `skill` tool dispatcher with `state.input.name`. This
     # is what fires when the agent uses OpenCode's native `skill` tool to load a
     # discovered skill from ~/.config/opencode/skills/<name>/SKILL.md.
@@ -151,7 +151,7 @@ def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
 
 
 def test_detect_dispatch_matches_tool_use_by_part_tool_fallback() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch matches tool use by part tool fallback."""
     # Fallback shape: tool name IS the skill name (some agents register skills
     # directly as tools instead of going through a dispatcher).
     a = _agent()
@@ -164,7 +164,7 @@ def test_detect_dispatch_matches_tool_use_by_part_tool_fallback() -> None:
 
 
 def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch early stops on different skill dispatcher."""
     # A DIFFERENT skill's dispatcher is now an intended any-skill early-stop: routing
     # is decided, so don't wait out the turn. The our-skill distinction no longer
     # lives here — it lives in detect_fired, which stays strict (see the dedicated
@@ -184,14 +184,14 @@ def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
 
 
 def test_detect_dispatch_false_for_other_tool_names() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch false for other tool names."""
     read = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "bash"}})
 
     assert _agent().detect_dispatch(read, "archive") is False
 
 
 def test_detect_dispatch_false_for_non_json_input() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch false for non json input."""
     a = _agent()
 
     assert a.detect_dispatch("not json", "archive") is False
@@ -199,7 +199,7 @@ def test_detect_dispatch_false_for_non_json_input() -> None:
 
 
 def test_detect_dispatch_false_when_skill_name_none() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch false when skill name none."""
     # No skill_name → nothing to match against; explicitly False (no generic Skill
     # dispatcher in OpenCode today).
     skill_line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
@@ -208,7 +208,7 @@ def test_detect_dispatch_false_when_skill_name_none() -> None:
 
 
 def test_detect_dispatch_early_stops_on_any_skill() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch early stops on any skill."""
     agent = OpenCodeAgent()
     other = json.dumps(
         {
@@ -227,31 +227,31 @@ def test_detect_dispatch_early_stops_on_any_skill() -> None:
 
 
 def test_opencode_detect_fired_true_on_our_skill() -> None:
-    """Test the expected behavior."""
+    """Verify opencode detect fired true on our skill."""
     agent = OpenCodeAgent()
     assert agent.detect_fired(_lines("opencode_route_fired.jsonl"), "archive") is True
 
 
 def test_opencode_detect_fired_false_on_different_tool() -> None:
-    """Test the expected behavior."""
+    """Verify opencode detect fired false on different tool."""
     agent = OpenCodeAgent()
     assert agent.detect_fired(_lines("opencode_route_nofire.jsonl"), "archive") is False
 
 
 def test_opencode_streamed_activity_true_when_turn_began() -> None:
-    """Test the expected behavior."""
+    """Verify opencode streamed activity true when turn began."""
     agent = OpenCodeAgent()
     assert agent.streamed_activity(_lines("opencode_route_nofire.jsonl")) is True
 
 
 def test_opencode_streamed_activity_false_on_no_events() -> None:
-    """Test the expected behavior."""
+    """Verify opencode streamed activity false on no events."""
     agent = OpenCodeAgent()
     assert agent.streamed_activity(["", "not json", "  "]) is False
 
 
 def test_parse_opencode_jsonl_populates_run_result() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl populates run result."""
     # OpenCode emits step_start / text / tool_use / step_finish events, no
     # terminal `result` event. The result body concatenates the non-empty
     # text.part.text events; totals come from step_finish.part.tokens.total. fired=True
@@ -308,7 +308,7 @@ def test_parse_opencode_jsonl_populates_run_result() -> None:
 
 
 def test_parse_opencode_jsonl_sums_tokens_across_step_finishes() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl sums tokens across step finishes."""
     stream = "\n".join(
         [
             json.dumps({"type": "text", "timestamp": 1, "part": {"type": "text", "text": "hi"}}),
@@ -335,7 +335,7 @@ def test_parse_opencode_jsonl_sums_tokens_across_step_finishes() -> None:
 
 
 def test_parse_keeps_all_text_when_multiple() -> None:
-    """Test the expected behavior."""
+    """Verify parse keeps all text when multiple."""
     # All text events are accumulated for the judge — mid-run narration is joined
     # with the final agent message rather than overwritten by it.
     stream = "\n".join(
@@ -353,7 +353,7 @@ def test_parse_keeps_all_text_when_multiple() -> None:
 
 
 def test_parse_keeps_all_text_events_not_just_last() -> None:
-    """Test the expected behavior."""
+    """Verify parse keeps all text events not just last."""
     stream = "\n".join(
         [
             json.dumps(
@@ -380,7 +380,7 @@ def test_parse_keeps_all_text_events_not_just_last() -> None:
 
 
 def test_parse_opencode_jsonl_no_tokens_marks_errored() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl no tokens marks errored."""
     # No step_finish events at all (zero tokens) ⇒ the agent never made an API
     # call. Launch/auth failure shape.
     stream = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "Read"}})
@@ -393,7 +393,7 @@ def test_parse_opencode_jsonl_no_tokens_marks_errored() -> None:
 
 
 def test_parse_opencode_jsonl_tool_only_run_not_errored_when_tokens_present() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl tool only run not errored when tokens present."""
     # Some models (e.g., Gemini Flash) execute tools and exit without a wrap-up
     # text. Token count > 0 proves the agent made API calls — not an error.
     stream = "\n".join(
@@ -421,7 +421,7 @@ def test_parse_opencode_jsonl_tool_only_run_not_errored_when_tokens_present() ->
 
 
 def test_parse_opencode_jsonl_no_text_event_never_leaks_raw_stdout() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl no text event never leaks raw stdout."""
     # Regression: a real Gemini archive run did the task via tools with no wrap-up
     # text, and the old `result_text or stdout[-2000:]` fallback sliced into binary
     # framing in the stream — poisoning prose-grading assertions. The fallback must
@@ -450,7 +450,7 @@ def test_parse_opencode_jsonl_no_text_event_never_leaks_raw_stdout() -> None:
 
 
 def test_parse_opencode_jsonl_skip_detect_when_no_skill() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl skip detect when no skill."""
     # detect_skill=None: `fired` stays False even when matching tool events stream by.
     stream = "\n".join(
         [
@@ -466,15 +466,15 @@ def test_parse_opencode_jsonl_skip_detect_when_no_skill() -> None:
 
 
 def test_secrets_scopes_to_provider_host(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify secrets scopes to provider host."""
     captured = {}
 
     class FakeSecret:
-        """Represent FakeSecret."""
+        """Provide a fake secret for tests."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
             return ("secret", env_var)
 
@@ -494,15 +494,15 @@ def test_secrets_scopes_to_provider_host(monkeypatch: object) -> None:
 def test_secrets_anthropic_fallback_scopes_to_anthropic_host(
     monkeypatch: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify secrets anthropic fallback scopes to anthropic host."""
     captured = {}
 
     class FakeSecret:
-        """Represent FakeSecret."""
+        """Provide a fake secret for tests."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
             return ("secret", env_var)
 
@@ -518,18 +518,18 @@ def test_secrets_anthropic_fallback_scopes_to_anthropic_host(
 def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host(
     monkeypatch: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify secrets gemini remaps to sdk env name and scopes to google host."""
     # OpenCode is built on the Vercel AI SDK, whose Google provider reads
     # GOOGLE_GENERATIVE_AI_API_KEY (not GEMINI_API_KEY). Accept the friendlier
     # GEMINI_API_KEY on the host and inject under the SDK's name in the guest.
     captured = {}
 
     class FakeSecret:
-        """Represent FakeSecret."""
+        """Provide a fake secret for tests."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
             return ("secret", env_var)
 
@@ -546,16 +546,16 @@ def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host(
 def test_secrets_google_generative_ai_passthrough_unchanged(
     monkeypatch: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify secrets google generative ai passthrough unchanged."""
     # The SDK's native env var name passes through unchanged.
     captured = {}
 
     class FakeSecret:
-        """Represent FakeSecret."""
+        """Provide a fake secret for tests."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
             return ("secret", env_var)
 
@@ -570,7 +570,7 @@ def test_secrets_google_generative_ai_passthrough_unchanged(
 
 
 def test_guest_env_carries_home_tz_and_pinned_version() -> None:
-    """Test the expected behavior."""
+    """Verify guest env carries home tz and pinned version."""
     env = OpenCodeAgent(version="0.4.2").guest_env()
     assert env["HOME"] == OpenCodeAgent.guest_home
     assert env["TZ"] == "UTC"
@@ -580,7 +580,7 @@ def test_guest_env_carries_home_tz_and_pinned_version() -> None:
 
 
 def test_from_env_env_var_beats_pyproject(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env env var beats pyproject."""
     monkeypatch.setenv("EVALSPEC_OPENCODE_VERSION", "1.2.3")
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
 
@@ -591,7 +591,7 @@ def test_from_env_env_var_beats_pyproject(monkeypatch: object) -> None:
 
 
 def test_from_env_falls_back_to_anthropic_credential(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env falls back to anthropic credential."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     agent = OpenCodeAgent.from_env()
@@ -599,7 +599,7 @@ def test_from_env_falls_back_to_anthropic_credential(monkeypatch: object) -> Non
 
 
 def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify credential error message when no credentials set."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -608,7 +608,7 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -
 
 
 def test_credential_error_none_when_anthropic_key_set(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify credential error none when anthropic key set."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
 
@@ -616,7 +616,7 @@ def test_credential_error_none_when_anthropic_key_set(monkeypatch: object) -> No
 
 
 def test_provision_runs_install_script() -> None:
-    """Test the expected behavior."""
+    """Verify provision runs install script."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().provision(sb))
@@ -628,21 +628,21 @@ def test_provision_runs_install_script() -> None:
 
 
 def test_secrets_raises_on_unmapped_auth_env() -> None:
-    """Test the expected behavior."""
+    """Verify secrets raises for on unmapped auth env."""
     agent = OpenCodeAgent(auth_value="x", auth_env="NEWPROVIDER_KEY")
     with pytest.raises(KeyError):
         agent.secrets()
 
 
 def test_provision_raises_on_failure() -> None:
-    """Test the expected behavior."""
+    """Verify provision raises for on failure."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
         asyncio.run(_agent().provision(sb))
 
 
 def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> None:
-    """Test the expected behavior."""
+    """Verify stage project assets copies skills into opencode discovery dir."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().stage_project_assets(sb, "/project"))
@@ -662,12 +662,12 @@ def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> Non
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Handle _fake_proc."""
+    """Provide the fake proc test helper."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
 def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge raises for runtimeerror on nonzero exit."""
     # OpenCode delegates judging to the host `claude` CLI; a crashed CLI must
     # surface as RuntimeError (caught upstream as arm-level errored), not as
     # fake JUDGE ERROR assertions. Same masking trap as ClaudeCodeAgent.judge.
@@ -682,7 +682,7 @@ def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
 
 
 def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge raises for runtimeerror on is error envelope."""
     # `claude -p` wraps auth/rate-limit/quota errors in a 0-exit envelope with
     # is_error=true. Without surfacing as RuntimeError, the message gets laundered
     # into parse_judge_json and the arm reports fake "JUDGE ERROR" gradings.
@@ -698,14 +698,14 @@ def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> 
 
 
 def test_provision_script_verifies_warmed_db() -> None:
-    """Test the expected behavior."""
+    """Verify provision script verifies warmed db."""
     assert "opencode.db" in OpenCodeAgent.PROVISION_SCRIPT
     # the warm step must be followed by an existence check, not just fire-and-forget
     assert "test -f /root/.local/share/opencode/opencode.db" in OpenCodeAgent.PROVISION_SCRIPT
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify invoke nonzero exit is error."""
     sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
     res = asyncio.run(
@@ -728,7 +728,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
 
 def test_build_command_places_harness_args_before_prompt() -> None:
-    """Test the expected behavior."""
+    """Verify build command places harness args before prompt."""
     cmd = _agent().build_command(
         "do the thing",
         plugin_dir=None,
@@ -743,7 +743,7 @@ def test_build_command_places_harness_args_before_prompt() -> None:
 
 
 def test_build_command_allows_pass_through_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command allows pass through equals form."""
     cmd = _agent().build_command(
         "do the thing",
         plugin_dir=None,
@@ -758,7 +758,7 @@ def test_build_command_allows_pass_through_equals_form() -> None:
 
 
 def test_build_command_rejects_reserved_harness_args() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved harness args."""
     with pytest.raises(ValueError, match="reserved.*-m"):
         _agent().build_command(
             "do the thing",
@@ -772,7 +772,7 @@ def test_build_command_rejects_reserved_harness_args() -> None:
 
 
 def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved harness arg equals form."""
     with pytest.raises(ValueError, match="reserved.*--variant"):
         _agent().build_command(
             "do the thing",
@@ -786,7 +786,7 @@ def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
 
 
 def test_build_command_rejects_attached_model_short_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects attached model short flag."""
     with pytest.raises(ValueError, match="reserved.*-m"):
         _agent().build_command(
             "do the thing",
@@ -800,7 +800,7 @@ def test_build_command_rejects_attached_model_short_flag() -> None:
 
 
 def test_build_command_rejects_reserved_continue_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved continue flag."""
     with pytest.raises(ValueError, match="reserved.*--continue"):
         _agent().build_command(
             "do the thing",
@@ -814,7 +814,7 @@ def test_build_command_rejects_reserved_continue_flag() -> None:
 
 
 def test_build_command_rejects_reserved_continue_short_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved continue short flag."""
     with pytest.raises(ValueError, match="reserved.*-c"):
         _agent().build_command(
             "do the thing",
@@ -828,7 +828,7 @@ def test_build_command_rejects_reserved_continue_short_flag() -> None:
 
 
 def test_build_command_rejects_reserved_session_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved session flag."""
     with pytest.raises(ValueError, match="reserved.*--session"):
         _agent().build_command(
             "do the thing",
@@ -842,7 +842,7 @@ def test_build_command_rejects_reserved_session_flag() -> None:
 
 
 def test_build_command_rejects_reserved_session_short_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved session short flag."""
     with pytest.raises(ValueError, match="reserved.*-s"):
         _agent().build_command(
             "do the thing",
@@ -856,7 +856,7 @@ def test_build_command_rejects_reserved_session_short_flag() -> None:
 
 
 def test_build_command_rejects_reserved_session_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved session equals form."""
     with pytest.raises(ValueError, match="reserved.*--session"):
         _agent().build_command(
             "do the thing",
@@ -870,7 +870,7 @@ def test_build_command_rejects_reserved_session_equals_form() -> None:
 
 
 def test_build_command_rejects_reserved_command_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved command flag."""
     with pytest.raises(ValueError, match="reserved.*--command"):
         _agent().build_command(
             "do the thing",
@@ -884,7 +884,7 @@ def test_build_command_rejects_reserved_command_flag() -> None:
 
 
 def test_build_command_rejects_reserved_prompt_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved prompt flag."""
     with pytest.raises(ValueError, match="reserved.*--prompt"):
         _agent().build_command(
             "do the thing",
@@ -898,7 +898,7 @@ def test_build_command_rejects_reserved_prompt_flag() -> None:
 
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
-    """Test the expected behavior."""
+    """Verify invoke threads harness args into build command."""
     sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text="")])
 
     asyncio.run(
@@ -922,7 +922,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
 
 
 def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl carries raw stdout."""
     # OpenCode's parser must also keep the full stream so the artifact is agent-agnostic.
     stream = "\n".join(
         [
@@ -951,7 +951,7 @@ def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
 
 
 def test_parse_opencode_jsonl_carries_normalized_trajectory() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl carries normalized trajectory."""
     # OpenCode bundles a tool use into ONE completed tool_use event (no separate
     # result frame) -> tool_call events only. A `skill` dispatch is normalized to the
     # canonical Skill shape so the shared consumers stay agent-agnostic.
@@ -1001,7 +1001,7 @@ def test_parse_opencode_jsonl_carries_normalized_trajectory() -> None:
 
 
 def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl trajectory feeds shared consumers."""
     # The normalized trajectory must work with the agent-agnostic helpers, so the
     # judge process-facts payoff covers OpenCode evals too.
     from evalspec.trajectory import render_process_facts, skills_dispatched
@@ -1023,7 +1023,7 @@ def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
 
 
 def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl trajectory empty without tool uses."""
     stream = json.dumps(
         {"type": "step_finish", "part": {"type": "step-finish", "tokens": {"total": 5}}}
     )
@@ -1032,7 +1032,7 @@ def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
 
 
 def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify opencode fired and skills dispatched agree on name."""
     from evalspec.trajectory import skills_dispatched
 
     line = json.dumps(
@@ -1051,7 +1051,7 @@ def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: object) ->
 
 
 def test_opencode_non_completed_skill_neither_fires_nor_trajectories() -> None:
-    """Test the expected behavior."""
+    """Verify opencode non completed skill neither fires nor trajectories."""
     # A skill dispatch seen only in a non-completed frame is dropped by the
     # trajectory's completed-frame gate; `fired` must honor the same gate so the two
     # stay consistent (no fired=True with an empty process-facts trajectory).
@@ -1083,7 +1083,7 @@ def test_opencode_non_completed_skill_neither_fires_nor_trajectories() -> None:
 
 
 def test_parse_opencode_jsonl_skips_non_completed_tool_frames() -> None:
-    """Test the expected behavior."""
+    """Verify parse opencode jsonl skips non completed tool frames."""
     stream = "\n".join(
         [
             json.dumps(
@@ -1119,13 +1119,13 @@ def test_parse_opencode_jsonl_skips_non_completed_tool_frames() -> None:
 
 
 def test_opencode_skill_load_dir_is_config_path() -> None:
-    """Test the expected behavior."""
+    """Verify opencode skill load dir is config path."""
     a = OpenCodeAgent()
     assert a.skill_load_dir == f"{a.guest_home}/.config/opencode/skills"
 
 
 def test_opencode_bridge_script_symlinks_fixed_home() -> None:
-    """Test the expected behavior."""
+    """Verify opencode bridge script symlinks fixed home."""
     from evalspec.agents.base import FIXED_SKILLS_HOME
 
     s = OpenCodeAgent().bridge_skills_home_script()
@@ -1136,7 +1136,7 @@ def test_opencode_bridge_script_symlinks_fixed_home() -> None:
 
 
 def test_opencode_cell_env_carries_evalspec_vars() -> None:
-    """Test the expected behavior."""
+    """Verify opencode cell env carries evalspec vars."""
     env = OpenCodeAgent(version="1.2.3").cell_env(
         arm="trial", model="google/gemini-3.5-flash", eval_set="default"
     )
@@ -1149,7 +1149,7 @@ def test_opencode_cell_env_carries_evalspec_vars() -> None:
 
 
 def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
-    """Test the expected behavior."""
+    """Verify opencode invoke extra env overrides guest env."""
     # A per-arm env reaches the agent's exec env, merged over guest_env().
     stream = json.dumps(
         {

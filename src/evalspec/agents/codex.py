@@ -56,7 +56,7 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
-    """Handle _validate_harness_args."""
+    """Validate harness argument strings from configuration."""
     if harness_args is None:
         return []
     for arg in harness_args:
@@ -73,7 +73,7 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
 
 
 def _auth_json_from_env() -> str | None:
-    """Handle _auth_json_from_env."""
+    """Read Codex auth JSON from environment variables."""
     path = os.environ.get("CODEX_AUTH_JSON_PATH")
     if not path:
         return None
@@ -93,7 +93,7 @@ def _auth_json_from_env() -> str | None:
 
 
 class CodexAgent(BaseAgent):
-    """Represent CodexAgent."""
+    """Store codex agent data."""
 
     id = "codex"
     CODEX_BIN = "/usr/local/bin/codex"
@@ -124,7 +124,7 @@ class CodexAgent(BaseAgent):
 
     @classmethod
     def from_env(cls: object) -> CodexAgent:
-        """Handle from_env."""
+        """Build an agent instance from host environment settings."""
         version = os.environ.get("EVALSPEC_CODEX_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
@@ -137,7 +137,7 @@ class CodexAgent(BaseAgent):
 
     @staticmethod
     def credential_error() -> str | None:
-        """Handle credential_error."""
+        """Return a credential preflight error message when credentials are missing."""
         if any(os.environ.get(v) for v in AUTH_ENV_VARS):
             return None
         if _auth_json_from_env():
@@ -147,22 +147,22 @@ class CodexAgent(BaseAgent):
         )
 
     def version(self: object) -> str:
-        """Handle version."""
+        """Return the agent CLI version string."""
         return self._version
 
     def artifact_dirs(self: object) -> list[str]:
-        """Handle artifact_dirs."""
+        """Return guest directories that may contain agent-authored artifacts."""
         # Codex populates CODEX_HOME/skills with runtime-managed `.system` skills during
         # execution. Those are not agent-authored artifacts, and some are not UTF-8-safe
         # for evalspec's artifact reader, so Codex reports workdir outputs only.
         return []
 
     def auth_json_path(self: object) -> str:
-        """Handle auth_json_path."""
+        """Auth json path."""
         return self._auth_json_path
 
     def guest_env(self: object) -> dict:
-        """Handle guest_env."""
+        """Return environment variables passed to guest agent commands."""
         return {
             "HOME": self.guest_home,
             "CODEX_HOME": f"{self.guest_home}/.codex",
@@ -171,7 +171,7 @@ class CodexAgent(BaseAgent):
         }
 
     def secrets(self: object) -> list:
-        """Handle secrets."""
+        """Return secret values that must be redacted from logs."""
         from microsandbox import Secret
 
         if self._auth_json_path:
@@ -196,7 +196,7 @@ class CodexAgent(BaseAgent):
         harness_args: list[str] | None = None,
         workdir: str | None = None,
     ) -> list[str]:
-        """Handle build_command."""
+        """Build the guest command used to invoke the agent."""
         # plugin_dir/resume_session_id/effort/detect_skill are accepted for protocol
         # parity. Codex exec has no stable evalspec-owned equivalents for them yet.
         cd = workdir or self.guest_home
@@ -215,7 +215,7 @@ class CodexAgent(BaseAgent):
         ]
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
-        """Handle detect_dispatch."""
+        """Return whether one stream line shows a skill dispatch."""
         text = line.strip()
         if not text:
             return False
@@ -226,7 +226,7 @@ class CodexAgent(BaseAgent):
         return _item_dispatches_any_skill(_event_item(event), skill_name)
 
     def detect_fired(self: object, lines: object, skill_name: str) -> bool:
-        """Handle detect_fired."""
+        """Return whether stream lines show the expected skill firing."""
         for line in lines:
             text = line.strip()
             if not text:
@@ -240,7 +240,7 @@ class CodexAgent(BaseAgent):
         return False
 
     async def _write_auth_json(self: object, sb: object) -> None:
-        """Handle _write_auth_json."""
+        """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
             return
         res = await sb.shell(
@@ -255,7 +255,7 @@ class CodexAgent(BaseAgent):
             )
 
     def streamed_activity(self: object, lines: object) -> bool:
-        """Handle streamed_activity."""
+        """Return whether streamed output shows meaningful agent activity."""
         activity_events = {
             "turn.started",
             "item.started",
@@ -275,7 +275,7 @@ class CodexAgent(BaseAgent):
         return False
 
     async def provision(self: object, sb: object) -> None:
-        """Handle provision."""
+        """Install the agent CLI and credentials inside the guest."""
         res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
@@ -283,7 +283,7 @@ class CodexAgent(BaseAgent):
             )
 
     async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
-        """Handle stage_project_assets."""
+        """Copy project-local assets needed by the guest agent."""
         await self._write_auth_json(sb)
         dest = self.skill_load_dir
         await sb.shell(
@@ -312,7 +312,7 @@ class CodexAgent(BaseAgent):
         extra_env: dict | None = None,
         timeout: int = 600,
     ) -> RunResult:
-        """Handle invoke."""
+        """Run one prompt through the agent inside the guest."""
         from microsandbox.errors import MicrosandboxError
 
         cmd = self.build_command(
@@ -342,23 +342,23 @@ class CodexAgent(BaseAgent):
         return parse_codex_jsonl(res.stdout_text, eval_id, config, detect_skill)
 
     def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Handle judge."""
+        """Run the agent-backed judge prompt and return raw output."""
         return run_host_judge(prompt, model=model, timeout=timeout)
 
 
 def _event_item(event: dict) -> dict:
-    """Handle _event_item."""
+    """Return the Codex event item payload when present."""
     item = event.get("item") if isinstance(event, dict) else None
     return item if isinstance(item, dict) else {}
 
 
 def _skill_name_matches(actual: str, expected: str) -> bool:
-    """Handle _skill_name_matches."""
+    """Return whether a skill value names the expected skill."""
     return actual == expected or actual.endswith(f":{expected}")
 
 
 def _skill_dispatch_name(item: dict) -> str | None:
-    """Handle _skill_dispatch_name."""
+    """Extract the dispatched skill name from a Codex event item."""
     item_type = item.get("type")
     if item_type == "skill_invocation":
         name = item.get("name") or item.get("skill")
@@ -375,13 +375,13 @@ def _skill_dispatch_name(item: dict) -> str | None:
 
 
 def _item_dispatches_skill(item: dict, skill_name: str) -> bool:
-    """Handle _item_dispatches_skill."""
+    """Return whether a Codex item dispatches the expected skill."""
     name = _skill_dispatch_name(item)
     return isinstance(name, str) and _skill_name_matches(name, skill_name)
 
 
 def _item_dispatches_any_skill(item: dict, skill_name: str | None) -> bool:
-    """Handle _item_dispatches_any_skill."""
+    """Return whether a Codex item dispatches any skill."""
     name = _skill_dispatch_name(item)
     if name is None:
         return False
@@ -391,7 +391,7 @@ def _item_dispatches_any_skill(item: dict, skill_name: str | None) -> bool:
 
 
 def _timestamp_ms(value: object) -> int | None:
-    """Handle _timestamp_ms."""
+    """Convert a timestamp value to milliseconds when possible."""
     if isinstance(value, int):
         return value
     if isinstance(value, float):
@@ -406,12 +406,12 @@ def _timestamp_ms(value: object) -> int | None:
 
 
 def _debug_tail(events: list[dict]) -> str:
-    """Handle _debug_tail."""
+    """Format the trailing Codex events for diagnostics."""
     return json.dumps(events[-3:]) if events else ""
 
 
 def _usage_int(usage: dict, *names: str) -> int:
-    """Handle _usage_int."""
+    """Return an integer usage field from a Codex result object."""
     total = 0
     for name in names:
         value = usage.get(name)
@@ -421,7 +421,7 @@ def _usage_int(usage: dict, *names: str) -> int:
 
 
 def _codex_trajectory(events: list[dict]) -> list[dict]:
-    """Handle _codex_trajectory."""
+    """Convert Codex event items into evalspec trajectory facts."""
     traj: list[dict] = []
     for event in events:
         if event.get("type") != "item.completed":
@@ -481,7 +481,7 @@ def parse_codex_jsonl(
     config: str,
     detect_skill: str | None,
 ) -> RunResult:
-    """Handle parse_codex_jsonl."""
+    """Parse codex jsonl."""
     events = list(iter_events(stdout))
     session_id = ""
     text_parts: list[str] = []

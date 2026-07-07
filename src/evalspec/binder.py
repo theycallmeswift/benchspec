@@ -1,4 +1,4 @@
-"""Document the behavior."""
+"""Bind prose assertions to deterministic checker specs when safe."""
 
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def bind(
 
 
 def _clean_bare_exists_path(raw: str) -> str:
-    """Handle _clean_bare_exists_path."""
+    """Normalize a bare existence assertion path for binding."""
     path = raw.strip()
     if len(path) >= 2 and path[0] == path[-1] and path[0] in {"'", '"', "`"}:
         path = path[1:-1].strip()
@@ -172,7 +172,7 @@ def _clean_bare_exists_path(raw: str) -> str:
 
 
 def _bind_bare_exists(assertion_text: str) -> dict | None:
-    """Handle _bind_bare_exists."""
+    """Bind a simple file-existence assertion to a checker spec."""
     text = assertion_text.strip()
     if _COMPOUND_AFTER_EXISTS_RE.search(text):
         return None
@@ -191,7 +191,7 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
 
 
 def _parse_binding(raw: str) -> dict | None:
-    """Document the behavior."""
+    """Parse a model binder response into a checker spec or punt."""
     if not isinstance(raw, str):
         return None  # non-string host output (e.g. None on an abnormal call) → punt
     try:

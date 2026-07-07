@@ -19,12 +19,12 @@ _ENV_ITERATION = "EVALSPEC_ITERATION"
 
 
 def workspace_parent(repo_root: Path) -> Path:
-    """Handle workspace_parent."""
+    """Return the parent directory that holds eval run artifacts."""
     return repo_root / "tmp"
 
 
 def evals_root(repo_root: Path) -> Path:
-    """Handle evals_root."""
+    """Return the root directory for eval iteration artifacts."""
     return workspace_parent(repo_root) / "evals"
 
 
@@ -48,12 +48,12 @@ def next_iteration_name(repo_root: Path) -> str:
 
 
 def set_current_iteration(name: str) -> None:
-    """Handle set_current_iteration."""
+    """Store the active eval iteration in the process environment."""
     os.environ[_ENV_ITERATION] = name
 
 
 def current_iteration() -> str:
-    """Handle current_iteration."""
+    """Return the active eval iteration name."""
     return os.environ[_ENV_ITERATION]
 
 
@@ -82,10 +82,10 @@ def skill_dir(repo_root: Path, skill: str) -> Path:
 
 
 def arm_dir(repo_root: Path, skill: str, eval_id: str, arm: str, sample: int) -> Path:
-    """Handle arm_dir."""
+    """Return the artifact directory for one eval arm sample."""
     return skill_dir(repo_root, skill) / f"eval-{eval_id}" / arm / f"sample-{sample}"
 
 
 def trigger_dir(repo_root: Path, skill: str, slug: object, sample: int) -> Path:
-    """Handle trigger_dir."""
+    """Return the artifact directory for one trigger sample."""
     return skill_dir(repo_root, skill) / f"trigger-{slug}" / f"sample-{sample}"

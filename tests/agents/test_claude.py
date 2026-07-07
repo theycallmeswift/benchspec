@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for claude."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ from tests.support import FakeExecOutput, FakeSandbox
 
 
 def _agent() -> object:
-    """Handle _agent."""
+    """Build the agent test fixture."""
     return ClaudeCodeAgent(auth_value="sk-test", version="latest")
 
 
 def test_build_command_always_streams_even_without_detect() -> None:
-    """Test the expected behavior."""
+    """Verify build command always streams even without detect."""
     # Both arms stream, so the baseline captures a trajectory too.
     cmd = _agent().build_command(
         "do the thing",
@@ -43,7 +43,7 @@ def test_build_command_always_streams_even_without_detect() -> None:
 
 
 def test_build_command_stream_when_detect() -> None:
-    """Test the expected behavior."""
+    """Verify build command stream when detect."""
     cmd = _agent().build_command(
         "q",
         plugin_dir="/plugin",
@@ -59,7 +59,7 @@ def test_build_command_stream_when_detect() -> None:
 
 
 def test_build_command_stream_with_resume_and_plugin() -> None:
-    """Test the expected behavior."""
+    """Verify build command stream with resume and plugin."""
     cmd = _agent().build_command(
         "p",
         plugin_dir="/plugin",
@@ -76,7 +76,7 @@ def test_build_command_stream_with_resume_and_plugin() -> None:
 
 
 def test_build_command_appends_harness_args() -> None:
-    """Test the expected behavior."""
+    """Verify build command appends harness args."""
     cmd = _agent().build_command(
         "q",
         plugin_dir=None,
@@ -91,7 +91,7 @@ def test_build_command_appends_harness_args() -> None:
 
 
 def test_build_command_rejects_harness_plugin_dir_when_first_class_plugin_dir_set() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects harness plugin dir when first class plugin dir set."""
     with pytest.raises(ValueError, match="plugin_dir"):
         _agent().build_command(
             "q",
@@ -107,7 +107,7 @@ def test_build_command_rejects_harness_plugin_dir_when_first_class_plugin_dir_se
 def test_build_command_rejects_harness_plugin_dir_equals_form_when_first_class_plugin_dir_set() -> (
     None
 ):
-    """Test the expected behavior."""
+    """Verify build command rejects harness plugin dir equals form when first class."""
     with pytest.raises(ValueError, match="plugin_dir"):
         _agent().build_command(
             "q",
@@ -121,7 +121,7 @@ def test_build_command_rejects_harness_plugin_dir_equals_form_when_first_class_p
 
 
 def test_build_command_allows_pass_through_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command allows pass through equals form."""
     cmd = _agent().build_command(
         "q",
         plugin_dir=None,
@@ -136,7 +136,7 @@ def test_build_command_allows_pass_through_equals_form() -> None:
 
 
 def test_build_command_rejects_reserved_harness_args() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved harness args."""
     with pytest.raises(ValueError, match="reserved.*--model"):
         _agent().build_command(
             "q",
@@ -150,7 +150,7 @@ def test_build_command_rejects_reserved_harness_args() -> None:
 
 
 def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved harness arg equals form."""
     with pytest.raises(ValueError, match="reserved.*--model"):
         _agent().build_command(
             "q",
@@ -164,7 +164,7 @@ def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
 
 
 def test_build_command_rejects_reserved_permission_mode_exact_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved permission mode exact form."""
     with pytest.raises(ValueError, match="reserved.*--permission-mode"):
         _agent().build_command(
             "q",
@@ -178,7 +178,7 @@ def test_build_command_rejects_reserved_permission_mode_exact_form() -> None:
 
 
 def test_build_command_rejects_reserved_permission_mode_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved permission mode equals form."""
     with pytest.raises(ValueError, match="reserved.*--permission-mode"):
         _agent().build_command(
             "q",
@@ -192,7 +192,7 @@ def test_build_command_rejects_reserved_permission_mode_equals_form() -> None:
 
 
 def test_build_command_rejects_attached_prompt_short_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects attached prompt short flag."""
     with pytest.raises(ValueError, match="reserved.*-p"):
         _agent().build_command(
             "q",
@@ -206,7 +206,7 @@ def test_build_command_rejects_attached_prompt_short_flag() -> None:
 
 
 def test_build_command_rejects_reserved_print_long_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved print long flag."""
     with pytest.raises(ValueError, match="reserved.*--print"):
         _agent().build_command(
             "q",
@@ -220,7 +220,7 @@ def test_build_command_rejects_reserved_print_long_flag() -> None:
 
 
 def test_build_command_rejects_reserved_resume_short_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved resume short flag."""
     with pytest.raises(ValueError, match="reserved.*-r"):
         _agent().build_command(
             "q",
@@ -234,7 +234,7 @@ def test_build_command_rejects_reserved_resume_short_flag() -> None:
 
 
 def test_build_command_rejects_reserved_continue_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved continue flag."""
     with pytest.raises(ValueError, match="reserved.*--continue"):
         _agent().build_command(
             "q",
@@ -248,7 +248,7 @@ def test_build_command_rejects_reserved_continue_flag() -> None:
 
 
 def test_build_command_rejects_reserved_session_id_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved session id flag."""
     with pytest.raises(ValueError, match="reserved.*--session-id"):
         _agent().build_command(
             "q",
@@ -262,7 +262,7 @@ def test_build_command_rejects_reserved_session_id_flag() -> None:
 
 
 def test_build_command_rejects_reserved_session_id_equals_form() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved session id equals form."""
     with pytest.raises(ValueError, match="reserved.*--session-id"):
         _agent().build_command(
             "q",
@@ -276,7 +276,7 @@ def test_build_command_rejects_reserved_session_id_equals_form() -> None:
 
 
 def test_build_command_rejects_reserved_no_session_persistence_flag() -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved no session persistence flag."""
     with pytest.raises(ValueError, match="reserved.*--no-session-persistence"):
         _agent().build_command(
             "q",
@@ -290,7 +290,7 @@ def test_build_command_rejects_reserved_no_session_persistence_flag() -> None:
 
 
 def test_provision_runs_install_script() -> None:
-    """Test the expected behavior."""
+    """Verify provision runs install script."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
     asyncio.run(_agent().provision(sb))
     kind, script, _ = sb.calls[0]
@@ -299,14 +299,14 @@ def test_provision_runs_install_script() -> None:
 
 
 def test_provision_raises_on_failure() -> None:
-    """Test the expected behavior."""
+    """Verify provision raises for on failure."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
         asyncio.run(_agent().provision(sb))
 
 
 def test_invoke_baseline_parses_stream_result() -> None:
-    """Test the expected behavior."""
+    """Verify invoke baseline parses stream result."""
     # detect_skill=None still streams; parse_stream_run reads the result event and
     # captures raw, leaving fired False.
     payload = json.dumps(
@@ -347,7 +347,7 @@ def test_invoke_baseline_parses_stream_result() -> None:
 
 
 def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
-    """Test the expected behavior."""
+    """Verify invoke closes stdin to avoid cli wait."""
     # claude -p waits ~3s on an open stdin pipe; pass an empty stdin (immediate EOF) so the
     # CLI proceeds at once instead of racing ("no stdin data received in 3s").
     payload = json.dumps(
@@ -379,7 +379,7 @@ def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
 
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
-    """Test the expected behavior."""
+    """Verify invoke threads harness args into build command."""
     payload = json.dumps(
         {
             "type": "result",
@@ -412,7 +412,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify invoke nonzero exit is error."""
     sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
     res = asyncio.run(
         _agent().invoke(
@@ -433,15 +433,15 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
 
 def test_secrets_uses_configured_auth_env(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify secrets uses configured auth env."""
     captured = {}
 
     class FakeSecret:
-        """Represent FakeSecret."""
+        """Provide a fake secret for tests."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
             return ("secret", env_var)
 
@@ -459,21 +459,21 @@ def test_secrets_uses_configured_auth_env(monkeypatch: object) -> None:
 
 
 def test_guest_env_carries_home_and_sandbox_flag() -> None:
-    """Test the expected behavior."""
+    """Verify guest env carries home and sandbox flag."""
     env = _agent().guest_env()
     assert env["HOME"] == ClaudeCodeAgent.guest_home
     assert env["IS_SANDBOX"] == "1"  # lets claude run bypassPermissions as root in the VM
 
 
 def test_guest_env_pins_utc_timezone() -> None:
-    """Test the expected behavior."""
+    """Verify guest env pins utc timezone."""
     # The host substitutes {TODAY} as a UTC date; the agent's in-VM `date` must
     # agree or dated-path assertions fail spuriously, so the guest clock is UTC.
     assert _agent().guest_env()["TZ"] == "UTC"
 
 
 def test_stage_project_assets_copies_project_skills_into_guest_home() -> None:
-    """Test the expected behavior."""
+    """Verify stage project assets copies project skills into guest home."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
     asyncio.run(_agent().stage_project_assets(sb, "/project"))
     kind, script, _ = sb.calls[0]
@@ -483,7 +483,7 @@ def test_stage_project_assets_copies_project_skills_into_guest_home() -> None:
 
 
 def test_from_env_prefers_oauth_token(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env prefers oauth token."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     agent = ClaudeCodeAgent.from_env()
@@ -492,7 +492,7 @@ def test_from_env_prefers_oauth_token(monkeypatch: object) -> None:
 
 
 def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env falls back to api key."""
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     monkeypatch.setenv("EVALSPEC_CLAUDE_VERSION", "9.9")
@@ -502,12 +502,12 @@ def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Handle _fake_proc."""
+    """Provide the fake proc test helper."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
 def test_judge_returns_stdout_on_healthy_run(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge returns stdout on healthy run."""
     payload = json.dumps({"result": '{"assertions": []}', "is_error": False})
     monkeypatch.setattr(
         subprocess,
@@ -521,7 +521,7 @@ def test_judge_returns_stdout_on_healthy_run(monkeypatch: object) -> None:
 
 
 def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge raises for runtimeerror on nonzero exit."""
     # A crashed/exited host CLI must not be laundered into fake JUDGE ERROR assertions.
     # grade_run intentionally does NOT catch RuntimeError so the failure surfaces as
     # arm-level errored=True via run_eval_arm's try/except.
@@ -536,7 +536,7 @@ def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
 
 
 def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge raises for runtimeerror on is error envelope."""
     # `claude -p` reports auth/rate-limit/quota failures with returncode=0 but
     # is_error=true in the JSON envelope. Surface the real cause as RuntimeError;
     # without this, the auth message gets laundered into parse_judge_json and the
@@ -558,7 +558,7 @@ def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> 
 
 
 def test_credential_error_set_vs_unset(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify credential error set vs unset."""
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert "credential" in ClaudeCodeAgent.credential_error()
@@ -567,7 +567,7 @@ def test_credential_error_set_vs_unset(monkeypatch: object) -> None:
 
 
 def _skill_line(skill: str) -> str:
-    """Handle _skill_line."""
+    """Build the skill line test fixture."""
     return json.dumps(
         {
             "type": "assistant",
@@ -579,21 +579,21 @@ def _skill_line(skill: str) -> str:
 
 
 def test_claude_detect_fired_delegates_to_trigger_helper() -> None:
-    """Test the expected behavior."""
+    """Verify claude detect fired delegates to trigger helper."""
     agent = ClaudeCodeAgent()
     assert agent.detect_fired([_skill_line("knowledge-base:archive")], "archive") is True
     assert agent.detect_fired([_skill_line("bootstrap")], "archive") is False
 
 
 def test_claude_streamed_activity_true_on_assistant_event() -> None:
-    """Test the expected behavior."""
+    """Verify claude streamed activity true on assistant event."""
     agent = ClaudeCodeAgent()
     assert agent.streamed_activity([json.dumps({"type": "assistant", "message": {}})]) is True
     assert agent.streamed_activity([json.dumps({"type": "system"})]) is False
 
 
 def test_wrong_shape_json_object_does_not_raise_uncaught() -> None:
-    """Test the expected behavior."""
+    """Verify wrong shape json object does not raise uncaught."""
     # A valid-but-wrong-shape JSON *object* (the only malformed shape `claude -p
     # --output-format json` can realistically emit — it always wraps output in an object
     # envelope) must not raise outside claude.py's narrow `(JSONDecodeError, TypeError)`
@@ -609,12 +609,12 @@ def test_wrong_shape_json_object_does_not_raise_uncaught() -> None:
 
 
 def test_claude_skill_load_dir() -> None:
-    """Test the expected behavior."""
+    """Verify claude skill load dir."""
     assert ClaudeCodeAgent().skill_load_dir == "/root/.claude/skills"
 
 
 def test_claude_bridge_script_symlinks_fixed_home() -> None:
-    """Test the expected behavior."""
+    """Verify claude bridge script symlinks fixed home."""
     from evalspec.agents.base import FIXED_SKILLS_HOME
 
     s = ClaudeCodeAgent().bridge_skills_home_script()
@@ -625,7 +625,7 @@ def test_claude_bridge_script_symlinks_fixed_home() -> None:
 
 
 def test_claude_cell_env_carries_evalspec_vars() -> None:
-    """Test the expected behavior."""
+    """Verify claude cell env carries evalspec vars."""
     env = ClaudeCodeAgent().cell_env(arm="trial", model="opus", eval_set="popular-harnesses")
 
     assert env["EVALSPEC_ARM"] == "trial"
@@ -636,7 +636,7 @@ def test_claude_cell_env_carries_evalspec_vars() -> None:
 
 
 def test_claude_invoke_extra_env_overrides_guest_env() -> None:
-    """Test the expected behavior."""
+    """Verify claude invoke extra env overrides guest env."""
     # A per-arm leaky env (the OpenRouter case) must reach the agent's exec env,
     # merged over guest_env().
     payload = json.dumps(

@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for report."""
 
 import json
 
@@ -9,7 +9,7 @@ from tests.support import seed_arm, seed_trigger
 
 
 def test_redact_env_masks_secrets_keeps_urls() -> None:
-    """Test the expected behavior."""
+    """Verify redact env masks secrets keeps urls."""
     out = report.redact_env(
         {
             "ANTHROPIC_BASE_URL": "https://o",
@@ -24,7 +24,7 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
 
 
 def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark baseline and arm meta."""
     seed_arm(tmp_path, "x", "baseline", passes=1, total=2)
     seed_arm(tmp_path, "x", "trial", passes=2, total=2)
 
@@ -60,7 +60,7 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
 
 
 def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark arm meta drives column order."""
     # arm_stats is discovered alphabetically; arm_meta's declared order wins so the
     # matrix columns follow the set, not the alphabet.
     seed_arm(tmp_path, "x", "zeta", passes=1, total=2)
@@ -77,7 +77,7 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
 
 
 def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify format markdown renders matrix table."""
     seed_arm(tmp_path, "x", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path, "x", "trial", passes=2, total=2)  # 100% → +50pp
 
@@ -103,7 +103,7 @@ def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
 
 
 def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify format markdown renders harness args."""
     seed_arm(tmp_path, "x", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
@@ -127,7 +127,7 @@ def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
 def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify format markdown quotes harness args with spaces and backticks."""
     seed_arm(tmp_path, "x", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
@@ -149,7 +149,7 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
 
 
 def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify format markdown omits empty harness args."""
     seed_arm(tmp_path, "x", "baseline", passes=2, total=2)
 
     bench = report.build_benchmark(
@@ -165,7 +165,7 @@ def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
 
 
 def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark computes pass rates."""
     it = tmp_path / "iteration-1"
     it.mkdir()
     seed_arm(it, "alpha", "trial", passes=2, total=2)  # 100%
@@ -186,7 +186,7 @@ def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
 
 
 def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark computes delta vs reference."""
     ed = tmp_path / "eval-x"
     seed_arm(tmp_path, "x", "baseline", passes=0, total=2)
     seed_arm(tmp_path, "x", "trial", passes=2, total=2)
@@ -200,7 +200,7 @@ def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
 
 
 def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark no reference absolute only."""
     seed_arm(tmp_path, "x", "trial-opus", passes=1, total=2)
     seed_arm(tmp_path, "x", "trial-sonnet", passes=2, total=2)
 
@@ -213,7 +213,7 @@ def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
 
 
 def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark drops reference absent from disk."""
     # A declared reference the run dropped (--skip-baseline / `baseline = false`) never
     # lands on disk: coerce reference to None and score the surviving arm absolutely,
     # instead of framing it against a baseline that never ran.
@@ -227,7 +227,7 @@ def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> N
 
 
 def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify build benchmark discovers arbitrary arm names."""
     # Arm names are arbitrary strings on disk, discovered by walking the eval dir's
     # subdirs — not pinned to a with_skill/without_skill literal.
     seed_arm(tmp_path, "x", "claude-opus", passes=2, total=2)
@@ -239,7 +239,7 @@ def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None
 
 
 def test_delta_noise_pp_generalized(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify delta noise pp generalized."""
     # The generalized delta_noise_pp(arm_a, arm_b) takes two arm-stat dicts and returns
     # a noise band in pp — assert it's computed (and non-negative), so the Δ-noise
     # rewrite away from the with_skill/without_skill literals is verified.
@@ -256,7 +256,7 @@ def test_delta_noise_pp_generalized(tmp_path: object) -> None:
 
 
 def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify errored arm excluded from stats."""
     # An errored sample (timeout/crash) is an infra failure, not a measurement — it
     # must not drag the mean pass rate / duration down.
     it = tmp_path / "iteration-1"
@@ -271,7 +271,7 @@ def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
 
 
 def test_write_benchmark_writes_files(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify write benchmark writes files."""
     it = tmp_path / "iteration-1"
     it.mkdir()
     seed_arm(it, "alpha", "trial", passes=1, total=2)
@@ -285,7 +285,7 @@ def test_write_benchmark_writes_files(tmp_path: object) -> None:
 
 
 def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify markdown headline shows delta vs reference."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
 
@@ -300,7 +300,7 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
 
 
 def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify markdown headline absolute when no reference."""
     seed_arm(tmp_path, "alpha", "trial-opus", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "trial-sonnet", passes=1, total=2)
 
@@ -314,7 +314,7 @@ def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
 
 
 def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify markdown headline reference only shows its rate."""
     # With the reference as the sole arm on disk, the headline shows its own rate.
     seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
 
@@ -326,7 +326,7 @@ def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> No
 
 
 def test_delta_line_reference_only_shows_its_rate(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify delta line reference only shows its rate."""
     bench = {
         "baseline": "baseline",
         "arms": {"baseline": {"pass_rate": 0.5}},
@@ -338,7 +338,7 @@ def test_delta_line_reference_only_shows_its_rate(tmp_path: object) -> None:
 
 
 def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify errored samples surface instead of vanishing."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2, sample=0)
     seed_arm(tmp_path, "alpha", "trial", passes=0, total=2, sample=1, errored=True)
 
@@ -351,7 +351,7 @@ def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
 
 
 def test_delta_line_shows_delta(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify delta line shows delta."""
     bench = {
         "baseline": "baseline",
         "arms": {
@@ -369,7 +369,7 @@ def test_delta_line_shows_delta(tmp_path: object) -> None:
 
 
 def test_delta_line_handles_missing_arm(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify delta line handles missing arm."""
     bench = {
         "baseline": "baseline",
         "arms": {
@@ -385,7 +385,7 @@ def test_delta_line_handles_missing_arm(tmp_path: object) -> None:
 
 
 def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify delta line absolute when no reference."""
     bench = {
         "baseline": None,
         "arms": {
@@ -402,7 +402,7 @@ def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:
 
 
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify multi sample stable zero stdev."""
     it = tmp_path / "iteration-1"
     it.mkdir()
     seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)  # 100%
@@ -424,7 +424,7 @@ def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
 
 
 def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify multi sample flaky nonzero stdev."""
     it = tmp_path / "iteration-1"
     it.mkdir()
     seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)  # 100%
@@ -449,7 +449,7 @@ def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
 
 
 def test_multi_sample_with_errored_sample_excluded(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify multi sample with errored sample excluded."""
     # One errored sample shouldn't drag the mean/stdev for the other.
     it = tmp_path / "iteration-1"
     it.mkdir()
@@ -467,7 +467,7 @@ def test_multi_sample_with_errored_sample_excluded(tmp_path: object) -> None:
 
 
 def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify sample dirs sorted numerically."""
     # sample-10 sorts before sample-2 lexicographically — the report must use a
     # numeric key for any user-visible ordering.
     it = tmp_path / "iteration-1"
@@ -483,7 +483,7 @@ def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
 
 
 def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify sample dirs skips non numeric siblings."""
     # A stray sibling whose suffix isn't a clean integer (e.g., a manual
     # `cp -r sample-0 sample-0bak`) must be skipped, not crash the int() parse.
     it = tmp_path / "iteration-1"
@@ -501,7 +501,7 @@ def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
 
 
 def test_trigger_rows_aggregate_per_query(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger rows aggregate per query."""
     seed_trigger(tmp_path, 1, should_trigger=True, fires=2)  # fired as expected
     seed_trigger(tmp_path, 2, should_trigger=False, fires=1)  # fired but shouldn't
 
@@ -521,7 +521,7 @@ def test_trigger_rows_aggregate_per_query(tmp_path: object) -> None:
 
 
 def test_benchmark_carries_format_version(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify benchmark carries format version."""
     seed_arm(tmp_path, "alpha", "trial", passes=1, total=1)
 
     bench = report.build_benchmark(tmp_path, label="x", baseline=None)
@@ -530,7 +530,7 @@ def test_benchmark_carries_format_version(tmp_path: object) -> None:
 
 
 def test_trigger_rows_read_persisted_verdict_and_query(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger rows read persisted verdict and query."""
     seed_trigger(tmp_path, 1, should_trigger=True, fires=2, query="archive this note")
     seed_trigger(tmp_path, 2, should_trigger=False, fires=1, query="what is PARA?")
 
@@ -544,7 +544,7 @@ def test_trigger_rows_read_persisted_verdict_and_query(tmp_path: object) -> None
 
 
 def test_trigger_md_table_escapes_pipes_and_truncates(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger md table escapes pipes and truncates."""
     seed_trigger(tmp_path, 1, should_trigger=True, fires=1, query="a | b " + "x" * 80)
 
     bench = report.build_benchmark(tmp_path, label="x", baseline=None)
@@ -555,7 +555,7 @@ def test_trigger_md_table_escapes_pipes_and_truncates(tmp_path: object) -> None:
 
 
 def test_trigger_xfail_marked_in_report(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail marked in report."""
     seed_trigger(
         tmp_path,
         3,
@@ -575,7 +575,7 @@ def test_trigger_xfail_marked_in_report(tmp_path: object) -> None:
 
 
 def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify index rows flatten evals and triggers."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path, "alpha", "trial", passes=0, total=2, sample=1, errored=True)
@@ -611,7 +611,7 @@ def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
 
 
 def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify index rows discover arbitrary arm names."""
     # index_rows iterates discovered arm names, not the retired _ARMS literal.
     seed_arm(tmp_path, "alpha", "claude-opus", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "opencode-sonnet", passes=1, total=2)
@@ -625,7 +625,7 @@ def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
 
 
 def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify noise band computed from arm stdevs."""
     for s, passes in enumerate((2, 0, 2)):  # trial: 100%, 0%, 100% → noisy
         seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=s)
     for s in range(3):
@@ -639,7 +639,7 @@ def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
 
 
 def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify noise band none for single sample."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
 
@@ -649,7 +649,7 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
 
 
 def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify within noise label in markdown and delta line."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
     for s, passes in enumerate((2, 0, 1)):
         seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=s)
@@ -664,7 +664,7 @@ def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None
 
 
 def test_as_expected_counts_xfail_miss_as_expected() -> None:
-    """Test the expected behavior."""
+    """Verify as expected counts xfail miss as expected."""
     # An xfail query that missed on its listed tier (the documented behavior) is "as expected".
     assert (
         report._as_expected(
@@ -693,14 +693,14 @@ def test_as_expected_counts_xfail_miss_as_expected() -> None:
 
 
 def _write_trigger_sample(skill_dir: object, slug: object, rec: object) -> None:
-    """Handle _write_trigger_sample."""
+    """Write trigger sample."""
     sd = skill_dir / f"trigger-{slug}" / "sample-0"
     sd.mkdir(parents=True)
     (sd / "timing.json").write_text(json.dumps(rec), encoding="utf-8")
 
 
 def test_as_expected_xfail_credited_only_on_listed_tier(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify as expected xfail credited only on listed tier."""
     # A documented sonnet miss, run on sonnet: missed but as-expected (green).
     on_tier = {
         "slug": "x",
@@ -720,7 +720,7 @@ def test_as_expected_xfail_credited_only_on_listed_tier(tmp_path: object) -> Non
 
 
 def test_trigger_rows_use_slug(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger rows use slug."""
     skill_dir = tmp_path / "ingest"
     _write_trigger_sample(
         skill_dir,
@@ -741,7 +741,7 @@ def test_trigger_rows_use_slug(tmp_path: object) -> None:
 
 
 def test_trigger_rows_counts_xfail_miss_as_expected(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify trigger rows counts xfail miss as expected."""
     # An xfail query whose sample missed (passed=False) must count as as_expected
     # in _trigger_rows. If the call site used t["passed"] instead of _as_expected(t)
     # this assertion would fail: as_expected would be 0, not 1.

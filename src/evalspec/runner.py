@@ -28,7 +28,7 @@ _PLACEHOLDER = re.compile(r"\{[A-Z_]+\}")
 
 @dataclass(frozen=True)
 class RunResult:
-    """Represent RunResult."""
+    """Store run result data."""
 
     eval_id: str
     config: str  # the arm name this run belongs to
@@ -67,7 +67,7 @@ def utc_today(now: datetime.datetime | None = None) -> str:
 
 
 def sum_tokens(usage: dict) -> int:
-    """Handle sum_tokens."""
+    """Sum token counts across agent run results."""
     return sum(int(usage.get(f, 0) or 0) for f in _TOKEN_FIELDS)
 
 
@@ -92,10 +92,10 @@ def substitute_prompt(prompt: str, today: str | None = None) -> str:
 
 
 def substitute_assertions(assertions: list, today: str) -> list:
-    """Document the behavior."""
+    """Apply date placeholders to assertions and reject unknown placeholders."""
 
     def _sub(a: object) -> object:
-        """Handle _sub."""
+        """Replace placeholders inside one assertion value."""
         if isinstance(a, str):
             return a.replace("{TODAY}", today)
         return {k: v.replace("{TODAY}", today) if isinstance(v, str) else v for k, v in a.items()}
@@ -118,7 +118,7 @@ def substitute_assertions(assertions: list, today: str) -> list:
 
 
 def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
-    """Handle parse_run_json."""
+    """Parse one agent run JSON record from stdout."""
     data = json.loads(raw)
     usage = data.get("usage", {})
     return RunResult(

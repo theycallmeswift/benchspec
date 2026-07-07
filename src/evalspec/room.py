@@ -21,17 +21,17 @@ from evalspec.schema import SchemaError
 
 
 def _sha256(path: Path) -> str:
-    """Handle _sha256."""
+    """Return the SHA-256 digest for a file."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _text_sha(text: str) -> str:
-    """Handle _text_sha."""
+    """Return the SHA-256 digest for text content."""
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
 def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None) -> dict:
-    """Handle seed_room."""
+    """Create the clean-room workdir and record its baseline facts."""
     workdir.mkdir(parents=True, exist_ok=True)
     if fixture_dir is None:
         return {}
@@ -63,7 +63,7 @@ def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None)
 
 
 def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
-    """Document the behavior."""
+    """Render seed turns into the transcript prefix for an agent prompt."""
     if not seed:
         return ""
     lines = ["<transcript>"]
@@ -81,7 +81,7 @@ def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
 
 
 def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
-    """Handle gather_facts."""
+    """Collect clean-room file facts for grading evidence."""
     tree_lines, contents, shas = [], {}, {}
     for p in sorted(workdir.rglob("*")):
         rel = str(p.relative_to(workdir))
@@ -115,7 +115,7 @@ def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
 
 
 def sha_snapshot_script(dirs: list[str]) -> str:
-    """Document the behavior."""
+    """Build a shell script that prints SHA-256 facts for artifact dirs."""
     quoted = " ".join(shlex.quote(d) for d in dirs)
     return (
         f'for d in {quoted}; do [ -d "$d" ] && '
@@ -137,7 +137,7 @@ def parse_sha_stream(stdout: str) -> dict[str, str]:
 
 
 def changed_paths(baseline_shas: dict[str, str], current_shas: dict[str, str]) -> list[str]:
-    """Document the behavior."""
+    """Return artifact paths whose SHA differs from the baseline."""
     return [p for p, sha in current_shas.items() if baseline_shas.get(p) != sha]
 
 
@@ -173,7 +173,7 @@ def parse_artifact_stream(stdout: str) -> dict[str, str]:
 
 
 def to_display_paths(mapping: dict[str, str], guest_home: str) -> dict[str, str]:
-    """Document the behavior."""
+    """Rewrite guest-home paths into display paths for judge evidence."""
     home = guest_home.rstrip("/")
     out: dict[str, str] = {}
     for path, content in mapping.items():

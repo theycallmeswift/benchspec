@@ -11,17 +11,17 @@ from evalspec.schema import SchemaError, _validate
 
 
 def _doc(evals: list[dict]) -> dict:
-    """Handle _doc."""
+    """Build the doc test fixture."""
     return {"$schema": "evalspec/v1", "evals": evals}
 
 
 def test_minimal_eval_ok() -> None:
-    """Test the expected behavior."""
+    """Verify minimal eval ok."""
     _validate(_doc([{"slug": "happy", "prompt": "do X", "assertions": ["X happened"]}]))
 
 
 def test_skill_name_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify skill name rejected."""
     with pytest.raises(SchemaError, match="unknown field"):
         _validate(
             {
@@ -33,7 +33,7 @@ def test_skill_name_rejected() -> None:
 
 
 def test_checks_key_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify checks key rejected."""
     with pytest.raises(SchemaError, match="unknown field"):
         _validate(
             _doc(
@@ -50,7 +50,7 @@ def test_checks_key_rejected() -> None:
 
 
 def test_seed_ok() -> None:
-    """Test the expected behavior."""
+    """Verify seed ok."""
     _validate(
         _doc(
             [
@@ -69,7 +69,7 @@ def test_seed_ok() -> None:
 
 
 def test_seed_missing_text_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify seed missing text rejected."""
     with pytest.raises(SchemaError, match="text"):
         _validate(
             _doc(
@@ -86,7 +86,7 @@ def test_seed_missing_text_rejected() -> None:
 
 
 def test_seed_extra_key_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify seed extra key rejected."""
     with pytest.raises(SchemaError, match="unknown field"):
         _validate(
             _doc(
@@ -103,7 +103,7 @@ def test_seed_extra_key_rejected() -> None:
 
 
 def test_assertions_must_be_strings() -> None:
-    """Test the expected behavior."""
+    """Verify assertions must be strings."""
     with pytest.raises(SchemaError):
         _validate(
             _doc(
@@ -119,13 +119,13 @@ def test_assertions_must_be_strings() -> None:
 
 
 def test_assertions_empty_string_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify assertions empty string rejected."""
     with pytest.raises(SchemaError, match="non-empty"):
         _validate(_doc([{"slug": "a", "prompt": "p", "assertions": ["  "]}]))
 
 
 def test_duplicate_slug_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify duplicate slug rejected."""
     with pytest.raises(SchemaError, match="duplicate"):
         _validate(
             _doc(
@@ -138,32 +138,32 @@ def test_duplicate_slug_rejected() -> None:
 
 
 def test_empty_evals_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify empty evals rejected."""
     with pytest.raises(SchemaError, match="non-empty"):
         _validate(_doc([]))
 
 
 def test_slug_must_be_kebab() -> None:
-    """Test the expected behavior."""
+    """Verify slug must be kebab."""
     with pytest.raises(SchemaError, match="not kebab-case"):
         _validate(_doc([{"slug": "Bad Slug", "prompt": "p", "assertions": ["x"]}]))
 
 
 def test_missing_prompt_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify missing prompt rejected."""
     with pytest.raises(SchemaError, match="prompt"):
         _validate(_doc([{"slug": "a", "assertions": ["x"]}]))
 
 
 def test_missing_assertions_shows_example() -> None:
-    """Test the expected behavior."""
+    """Verify missing assertions shows example."""
     with pytest.raises(SchemaError) as ei:
         _validate(_doc([{"slug": "a", "prompt": "p"}]))
     assert 'e.g. "assertions": ["a Resource page was created"]' in str(ei.value)
 
 
 def _trigger_doc(query_obj: dict) -> dict:
-    """Handle _trigger_doc."""
+    """Build the trigger doc test fixture."""
     return {
         "$schema": "evalspec-trigger/v1",
         "skill_name": "demo-skill",
@@ -172,7 +172,7 @@ def _trigger_doc(query_obj: dict) -> dict:
 
 
 def test_trigger_xfail_object_valid() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail object valid."""
     v._validate(
         _trigger_doc(
             {
@@ -189,7 +189,7 @@ def test_trigger_xfail_object_valid() -> None:
 
 
 def test_trigger_xfail_must_be_object() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail must be object."""
     with pytest.raises(v.SchemaError, match="xfail"):
         v._validate(
             _trigger_doc(
@@ -204,7 +204,7 @@ def test_trigger_xfail_must_be_object() -> None:
 
 
 def test_trigger_xfail_empty_models_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail empty models rejected."""
     with pytest.raises(v.SchemaError, match="models"):
         v._validate(
             _trigger_doc(
@@ -219,7 +219,7 @@ def test_trigger_xfail_empty_models_rejected() -> None:
 
 
 def test_trigger_xfail_unknown_tier_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail unknown tier rejected."""
     with pytest.raises(v.SchemaError, match="not in"):
         v._validate(
             _trigger_doc(
@@ -234,7 +234,7 @@ def test_trigger_xfail_unknown_tier_rejected() -> None:
 
 
 def test_trigger_xfail_empty_reason_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail empty reason rejected."""
     with pytest.raises(v.SchemaError, match="reason"):
         v._validate(
             _trigger_doc(
@@ -249,7 +249,7 @@ def test_trigger_xfail_empty_reason_rejected() -> None:
 
 
 def test_trigger_xfail_extra_key_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger xfail extra key rejected."""
     with pytest.raises(v.SchemaError, match="unknown field"):
         v._validate(
             _trigger_doc(
@@ -268,7 +268,7 @@ def test_trigger_xfail_extra_key_rejected() -> None:
 
 
 def test_trigger_slug_must_be_kebab() -> None:
-    """Test the expected behavior."""
+    """Verify trigger slug must be kebab."""
     with pytest.raises(v.SchemaError, match="slug"):
         v._validate(
             _trigger_doc(
@@ -282,7 +282,7 @@ def test_trigger_slug_must_be_kebab() -> None:
 
 
 def test_trigger_slug_duplicate_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger slug duplicate rejected."""
     doc = {
         "$schema": "evalspec-trigger/v1",
         "skill_name": "ingest",
@@ -296,7 +296,7 @@ def test_trigger_slug_duplicate_rejected() -> None:
 
 
 def test_trigger_int_id_now_rejected() -> None:
-    """Test the expected behavior."""
+    """Verify trigger int id now rejected."""
     with pytest.raises(v.SchemaError, match="slug"):
         v._validate(
             _trigger_doc(
@@ -310,7 +310,7 @@ def test_trigger_int_id_now_rejected() -> None:
 
 
 def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify validate path returns parsed data."""
     f = tmp_path / "evals.json"
     f.write_text(json.dumps(_doc([{"slug": "ok", "prompt": "p", "assertions": ["a"]}])))
 
@@ -320,7 +320,7 @@ def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
 
 
 def test_validate_path_raises_on_bad_schema(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify validate path raises for on bad schema."""
     f = tmp_path / "evals.json"
     f.write_text(json.dumps(_doc([{"slug": "Bad Slug", "prompt": "p", "assertions": ["a"]}])))
     with pytest.raises(v.SchemaError):
@@ -328,7 +328,7 @@ def test_validate_path_raises_on_bad_schema(tmp_path: object) -> None:
 
 
 def test_missing_schema_key_says_how_to_add_it() -> None:
-    """Test the expected behavior."""
+    """Verify missing schema key says how to add it."""
     with pytest.raises(v.SchemaError) as ei:
         v._validate({"evals": []})
     msg = str(ei.value)

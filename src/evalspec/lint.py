@@ -28,7 +28,7 @@ _ANCHORED = re.compile(r"(?<![\w.])\./")
 
 @dataclass(frozen=True)
 class Finding:
-    """Represent Finding."""
+    """Store one static eval-lint finding."""
 
     file: Path
     eval_id: str
@@ -67,7 +67,7 @@ def lint_assertion(text: str) -> list[tuple[str, str]]:
 
 
 def lint_repo(repo_root: Path, eval_roots: list[str] | None = None) -> list[Finding]:
-    """Handle lint_repo."""
+    """Lint discovered eval assertions for unjudgeable wording."""
     findings: list[Finding] = []
     for case in discovery.discover_eval_cases(repo_root, eval_roots):
         prompt_md = case.skill_dir / "evals" / case.slug / "prompt.md"

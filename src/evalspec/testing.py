@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class FakeExecOutput:
-    """Represent FakeExecOutput."""
+    """Provide a fake exec output for tests."""
 
     exit_code: int = 0
     stdout_text: str = ""
@@ -21,7 +21,7 @@ class FakeExecOutput:
 
     @property
     def success(self: object) -> bool:
-        """Handle success."""
+        """Create a fake successful exec output for tests."""
         return self.exit_code == 0
 
 
@@ -40,18 +40,18 @@ class FakeSandbox:
     stopped: bool = False
 
     async def shell(self: object, script: str, **kw: object) -> FakeExecOutput:
-        """Handle shell."""
+        """Record a fake shell command and return a canned output."""
         self.calls.append(("shell", script, kw))
         return self.shell_output
 
     async def exec(self: object, cmd: str, args: object = None, **kw: object) -> FakeExecOutput:
-        """Handle exec."""
+        """Record a fake exec command and return a canned output."""
         self.calls.append(("exec", cmd, args, kw))
         if self.exec_outputs:
             return self.exec_outputs.pop(0)
         return self.default_exec
 
     async def stop(self: object, timeout: object = None) -> None:
-        """Handle stop."""
+        """Mark the fake sandbox as stopped."""
         self.stopped = True
         return None

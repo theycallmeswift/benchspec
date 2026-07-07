@@ -42,7 +42,7 @@ def assertion_text(assertion: object) -> str:
 
 
 def derive_text(spec: dict) -> str:
-    """Handle derive_text."""
+    """Return checker text from an assertion or explicit checker field."""
     checker = spec["checker"]
     if checker == "file_exists":
         verb = "exists" if spec.get("should_exist", True) else "does not exist"
@@ -72,7 +72,7 @@ def _strip_anchor(raw: str) -> str:
 
 
 def _resolve(raw: str, workdir: Path) -> Path:
-    """Handle _resolve."""
+    """Resolve a checker path relative to the clean-room root."""
     path = (workdir / _strip_anchor(raw)).resolve()
     if not path.is_relative_to(workdir.resolve()):
         raise ValueError(f"checker path escapes the workdir: {raw!r}")
@@ -89,7 +89,7 @@ def _read_text(path: Path) -> str:
 
 
 def _frontmatter(path: Path) -> dict | None:
-    """Handle _frontmatter."""
+    """Parse YAML frontmatter from Markdown content."""
     lines = _read_text(path).split("\n")
     if not lines or lines[0].strip() != "---":
         return None
@@ -103,7 +103,7 @@ def _frontmatter(path: Path) -> dict | None:
 def _file_exists(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _file_exists."""
+    """Evaluate a file-exists checker against the clean-room root."""
     # exists(), not is_file(): file_exists verifies a path is present or absent
     # regardless of type, so "the folder X was created / no longer exists" is checkable.
     exists = _resolve(spec["path"], workdir).exists()
@@ -114,7 +114,7 @@ def _file_exists(
 def _glob_count(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _glob_count."""
+    """Evaluate a glob-count checker against the clean-room root."""
     # Same workdir boundary the path checkers enforce via _resolve: reject a `../`-bearing
     # or absolute glob up front with a clear error rather than silently returning zero matches.
     raw = spec["glob"]
@@ -132,7 +132,7 @@ def _glob_count(
 def _sha256_match(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _sha256_match."""
+    """Evaluate a SHA-256 checker against the clean-room root."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -165,7 +165,7 @@ def _yaml_scalar(text: str) -> object:
 def _frontmatter_has(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _frontmatter_has."""
+    """Evaluate a frontmatter key/value checker."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -186,7 +186,7 @@ def _frontmatter_has(
 def _regex(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _regex."""
+    """Evaluate a regex checker against file content."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -199,7 +199,7 @@ def _regex(
 def _skill_invoked(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Handle _skill_invoked."""
+    """Evaluate whether trajectory facts show a skill invocation."""
     # Exact-or-namespaced match: a skill may fire as `ingest` or `plugin:ingest`.
     target = spec["skill"]
     fired = context.fired_skills if context else ()

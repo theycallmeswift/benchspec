@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for codex."""
 
 from __future__ import annotations
 
@@ -16,17 +16,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _text(name: str) -> str:
-    """Handle _text."""
+    """Build the text test fixture."""
     return (FIXTURES / name).read_text()
 
 
 def _lines(name: str) -> list[str]:
-    """Handle _lines."""
+    """Build the lines test fixture."""
     return _text(name).splitlines()
 
 
 def _agent(auth_env: str = "CODEX_API_KEY", auth_json_path: str = "") -> CodexAgent:
-    """Handle _agent."""
+    """Build the agent test fixture."""
     return CodexAgent(
         auth_value="sk-test",
         auth_env=auth_env,
@@ -36,15 +36,15 @@ def _agent(auth_env: str = "CODEX_API_KEY", auth_json_path: str = "") -> CodexAg
 
 
 def _capture_secret(monkeypatch: object) -> dict:
-    """Handle _capture_secret."""
+    """Provide the capture secret test helper."""
     captured = {}
 
     class DummySecret:
-        """Represent DummySecret."""
+        """Store dummy secret data."""
 
         @staticmethod
         def env(env_var: object, *, value: object, allow_hosts: object) -> str:
-            """Handle env."""
+            """Env."""
             captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
             return "secret"
 
@@ -55,7 +55,7 @@ def _capture_secret(monkeypatch: object) -> dict:
 
 
 def test_build_command_shape_for_exec_json() -> None:
-    """Test the expected behavior."""
+    """Verify build command shape for exec json."""
     cmd = _agent().build_command(
         "do the thing",
         plugin_dir=None,
@@ -80,7 +80,7 @@ def test_build_command_shape_for_exec_json() -> None:
 
 
 def test_build_command_places_harness_args_before_prompt() -> None:
-    """Test the expected behavior."""
+    """Verify build command places harness args before prompt."""
     cmd = _agent().build_command(
         "prompt",
         plugin_dir=None,
@@ -95,7 +95,7 @@ def test_build_command_places_harness_args_before_prompt() -> None:
 
 
 def test_build_command_ignores_plugin_and_resume_until_supported() -> None:
-    """Test the expected behavior."""
+    """Verify build command ignores plugin and resume until supported."""
     cmd = _agent().build_command(
         "prompt",
         plugin_dir="/plugin",
@@ -147,7 +147,7 @@ def test_build_command_ignores_plugin_and_resume_until_supported() -> None:
     ],
 )
 def test_build_command_rejects_reserved_harness_args(arg: object) -> None:
-    """Test the expected behavior."""
+    """Verify build command rejects reserved harness args."""
     with pytest.raises(ValueError, match="reserved.*Codex"):
         _agent().build_command(
             "prompt",
@@ -161,7 +161,7 @@ def test_build_command_rejects_reserved_harness_args(arg: object) -> None:
 
 
 def test_guest_env_carries_home_codex_home_tz_and_pinned_version() -> None:
-    """Test the expected behavior."""
+    """Verify guest env carries home codex home tz and pinned version."""
     env = CodexAgent(version="0.142.3").guest_env()
 
     assert env == {
@@ -173,7 +173,7 @@ def test_guest_env_carries_home_codex_home_tz_and_pinned_version() -> None:
 
 
 def test_guest_env_omits_credentials() -> None:
-    """Test the expected behavior."""
+    """Verify guest env omits credentials."""
     env = CodexAgent(auth_value="secret").guest_env()
 
     assert "CODEX_API_KEY" not in env
@@ -182,7 +182,7 @@ def test_guest_env_omits_credentials() -> None:
 
 
 def test_from_env_prefers_api_key(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env prefers api key."""
     captured = _capture_secret(monkeypatch)
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -197,7 +197,7 @@ def test_from_env_prefers_api_key(monkeypatch: object) -> None:
 
 
 def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env falls back to access token."""
     captured = _capture_secret(monkeypatch)
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -210,7 +210,7 @@ def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
 
 
 def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify from env reads auth json path."""
     auth = tmp_path / "auth.json"
     auth.write_text(
         json.dumps(
@@ -231,7 +231,7 @@ def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) ->
 
 
 def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify credential error message when no credentials set."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("CODEX_AUTH_JSON_PATH", raising=False)
@@ -245,7 +245,7 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -
 
 
 def test_credential_error_none_when_api_key_set(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify credential error none when api key set."""
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
 
     assert CodexAgent.credential_error() is None
@@ -254,7 +254,7 @@ def test_credential_error_none_when_api_key_set(monkeypatch: object) -> None:
 def test_credential_error_none_when_auth_json_path_is_valid(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Test the expected behavior."""
+    """Verify credential error none when auth json path is valid."""
     auth = tmp_path / "auth.json"
     auth.write_text(
         json.dumps(
@@ -272,7 +272,7 @@ def test_credential_error_none_when_auth_json_path_is_valid(
 
 
 def test_secrets_scopes_api_key_to_openai_host(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify secrets scopes api key to openai host."""
     captured = _capture_secret(monkeypatch)
 
     secs = CodexAgent(auth_value="api-key", auth_env="CODEX_API_KEY").secrets()
@@ -286,7 +286,7 @@ def test_secrets_scopes_api_key_to_openai_host(monkeypatch: object) -> None:
 
 
 def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify secrets scopes access token to codex hosts."""
     captured = _capture_secret(monkeypatch)
 
     CodexAgent(auth_value="token", auth_env="CODEX_ACCESS_TOKEN").secrets()
@@ -297,22 +297,22 @@ def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch: object) -> None
 
 
 def test_secrets_empty_when_auth_json_path_is_used() -> None:
-    """Test the expected behavior."""
+    """Verify secrets empty when auth json path is used."""
     assert CodexAgent(auth_json_path="/host/auth.json").secrets() == []
 
 
 def test_codex_skill_load_dir_is_agents_path() -> None:
-    """Test the expected behavior."""
+    """Verify codex skill load dir is agents path."""
     assert CodexAgent.skill_load_dir == "/root/.codex/skills"
 
 
 def test_codex_artifact_dirs_excludes_runtime_managed_skills() -> None:
-    """Test the expected behavior."""
+    """Verify codex artifact dirs excludes runtime managed skills."""
     assert _agent().artifact_dirs() == []
 
 
 def test_codex_bridge_script_symlinks_fixed_home() -> None:
-    """Test the expected behavior."""
+    """Verify codex bridge script symlinks fixed home."""
     script = _agent().bridge_skills_home_script()
 
     assert "/home/evalspec/skills" in script
@@ -320,7 +320,7 @@ def test_codex_bridge_script_symlinks_fixed_home() -> None:
 
 
 def test_codex_cell_env_carries_evalspec_vars() -> None:
-    """Test the expected behavior."""
+    """Verify codex cell env carries evalspec vars."""
     env = CodexAgent(version="0.142.3").cell_env(
         arm="trial",
         model="gpt-5.4",
@@ -334,7 +334,7 @@ def test_codex_cell_env_carries_evalspec_vars() -> None:
 
 
 def test_detect_dispatch_matches_skill_invocation_item() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch matches skill invocation item."""
     line = json.dumps(
         {
             "type": "item.started",
@@ -346,7 +346,7 @@ def test_detect_dispatch_matches_skill_invocation_item() -> None:
 
 
 def test_detect_dispatch_early_stops_on_any_skill() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch early stops on any skill."""
     line = json.dumps(
         {
             "type": "item.started",
@@ -358,7 +358,7 @@ def test_detect_dispatch_early_stops_on_any_skill() -> None:
 
 
 def test_codex_detect_fired_false_for_other_skill_when_dispatch_detects_any_skill() -> None:
-    """Test the expected behavior."""
+    """Verify codex detect fired false for other skill when dispatch detects any skill."""
     line = json.dumps(
         {
             "type": "item.started",
@@ -370,7 +370,7 @@ def test_codex_detect_fired_false_for_other_skill_when_dispatch_detects_any_skil
 
 
 def test_detect_dispatch_false_for_other_tool() -> None:
-    """Test the expected behavior."""
+    """Verify detect dispatch false for other tool."""
     line = json.dumps(
         {
             "type": "item.started",
@@ -382,32 +382,32 @@ def test_detect_dispatch_false_for_other_tool() -> None:
 
 
 def test_codex_detect_fired_true_on_our_skill() -> None:
-    """Test the expected behavior."""
+    """Verify codex detect fired true on our skill."""
     assert _agent().detect_fired(_lines("codex_route_fired.jsonl"), "archive") is True
 
 
 def test_codex_detect_fired_false_on_other_tool() -> None:
-    """Test the expected behavior."""
+    """Verify codex detect fired false on other tool."""
     assert _agent().detect_fired(_lines("codex_route_nofire.jsonl"), "archive") is False
 
 
 def test_codex_streamed_activity_true_when_turn_began() -> None:
-    """Test the expected behavior."""
+    """Verify codex streamed activity true when turn began."""
     assert _agent().streamed_activity(_lines("codex_route_nofire.jsonl")) is True
 
 
 def test_codex_streamed_activity_false_on_startup_only() -> None:
-    """Test the expected behavior."""
+    """Verify codex streamed activity false on startup only."""
     assert _agent().streamed_activity(['{"type":"thread.started","thread_id":"t"}']) is False
 
 
 def test_codex_streamed_activity_false_on_empty_or_invalid_lines() -> None:
-    """Test the expected behavior."""
+    """Verify codex streamed activity false on empty or invalid lines."""
     assert _agent().streamed_activity(["", "not json"]) is False
 
 
 def test_parse_codex_jsonl_populates_run_result() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl populates run result."""
     res = parse_codex_jsonl(
         _text("codex_parse_success.jsonl"),
         "e1",
@@ -427,7 +427,7 @@ def test_parse_codex_jsonl_populates_run_result() -> None:
 
 
 def test_parse_codex_jsonl_carries_raw_stdout() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl carries raw stdout."""
     raw = _text("codex_parse_success.jsonl")
 
     res = parse_codex_jsonl(raw, "e1", "trial", detect_skill="archive")
@@ -436,7 +436,7 @@ def test_parse_codex_jsonl_carries_raw_stdout() -> None:
 
 
 def test_parse_codex_jsonl_keeps_all_agent_messages() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl keeps all agent messages."""
     stream = "\n".join(
         [
             json.dumps(
@@ -461,7 +461,7 @@ def test_parse_codex_jsonl_keeps_all_agent_messages() -> None:
 
 
 def test_parse_codex_jsonl_tool_only_run_not_errored_when_turn_completed() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl tool only run not errored when turn completed."""
     res = parse_codex_jsonl(
         _text("codex_parse_tool_only.jsonl"),
         "e1",
@@ -474,7 +474,7 @@ def test_parse_codex_jsonl_tool_only_run_not_errored_when_turn_completed() -> No
 
 
 def test_parse_codex_jsonl_explicit_error_event_sets_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl explicit error event sets is error."""
     res = parse_codex_jsonl(
         _text("codex_parse_error.jsonl"),
         "e1",
@@ -487,7 +487,7 @@ def test_parse_codex_jsonl_explicit_error_event_sets_is_error() -> None:
 
 
 def test_parse_codex_jsonl_carries_normalized_trajectory() -> None:
-    """Test the expected behavior."""
+    """Verify parse codex jsonl carries normalized trajectory."""
     res = parse_codex_jsonl(
         _text("codex_parse_success.jsonl"),
         "e1",
@@ -510,7 +510,7 @@ def test_parse_codex_jsonl_carries_normalized_trajectory() -> None:
 
 
 def test_provision_runs_install_script() -> None:
-    """Test the expected behavior."""
+    """Verify provision runs install script."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().provision(sb))
@@ -527,7 +527,7 @@ def test_provision_runs_install_script() -> None:
 
 
 def test_provision_raises_on_failure() -> None:
-    """Test the expected behavior."""
+    """Verify provision raises for on failure."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
 
     with pytest.raises(RuntimeError, match="codex provision failed"):
@@ -535,7 +535,7 @@ def test_provision_raises_on_failure() -> None:
 
 
 def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
-    """Test the expected behavior."""
+    """Verify stage project assets copies skills into codex discovery dir."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
     asyncio.run(_agent().stage_project_assets(sb, "/project"))
@@ -550,7 +550,7 @@ def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
 
 
 def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
-    """Test the expected behavior."""
+    """Verify invoke success parses codex jsonl and closes stdin."""
     sb = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_success.jsonl")),
@@ -584,7 +584,7 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
 
 
 def test_invoke_extra_env_overrides_guest_env() -> None:
-    """Test the expected behavior."""
+    """Verify invoke extra env overrides guest env."""
     sb = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
@@ -614,7 +614,7 @@ def test_invoke_extra_env_overrides_guest_env() -> None:
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify invoke nonzero exit is error."""
     sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
     res = asyncio.run(
@@ -637,7 +637,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
-    """Test the expected behavior."""
+    """Verify invoke threads harness args into build command."""
     sb = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
@@ -665,7 +665,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
 
 
 def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
-    """Test the expected behavior."""
+    """Verify invoke copies mounted auth json before codex exec."""
     sb = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
@@ -695,7 +695,7 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
 
 
 def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
-    """Test the expected behavior."""
+    """Verify invoke returns error when auth json copy fails."""
     sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="copy failed"))
 
     res = asyncio.run(
@@ -718,17 +718,17 @@ def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Handle _fake_proc."""
+    """Provide the fake proc test helper."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
 def test_judge_delegates_to_host_claude(monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge delegates to host claude."""
     payload = json.dumps({"result": "ok", "is_error": False})
     captured = {}
 
     def fake_run(cmd: object, **kw: object) -> object:
-        """Handle fake_run."""
+        """Fake run."""
         captured["cmd"] = cmd
         captured["kw"] = kw
         return _fake_proc(stdout=payload)
