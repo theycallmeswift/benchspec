@@ -219,6 +219,44 @@ def test_cli_run_filters_findings_to_changed_lines(
     assert "Old untouched finding." not in captured.out
 
 
+def test_cli_base_filters_run_to_changed_python_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    style_lint_cli: ModuleType,
+) -> None:
+    """Use --base to scope the run to changed Python files."""
+    source = (tmp_path / "sample.py").resolve()
+    changed_lines = {source: {2}}
+    run_call: dict[str, object] = {}
+
+    def fake_changed_lines_from_base(ref: str) -> dict[Path, set[int]]:
+        assert ref == "origin/dev"
+        return changed_lines
+
+    def fake_run(
+        paths: list[Path] | None,
+        **kwargs: object,
+    ) -> int:
+        run_call["paths"] = paths
+        run_call["changed_lines"] = kwargs["changed_lines"]
+        return 0
+
+    monkeypatch.setattr(
+        style_lint_cli,
+        "changed_lines_from_base",
+        fake_changed_lines_from_base,
+    )
+    monkeypatch.setattr(style_lint_cli, "run", fake_run)
+
+    exit_code = style_lint_cli.main(["--base", "origin/dev"])
+
+    assert exit_code == 0
+    assert run_call == {
+        "paths": [source],
+        "changed_lines": changed_lines,
+    }
+
+
 def test_changed_lines_from_unified_diff(style_lint_cli: ModuleType) -> None:
     """Parse added-line ranges from a zero-context unified diff."""
     diff_text = "\n".join(

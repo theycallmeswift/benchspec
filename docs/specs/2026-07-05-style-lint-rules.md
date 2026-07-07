@@ -99,7 +99,7 @@ docs/style/development.md
   - Expose a config-based library runner so callers do not have to manually sequence the framework functions.
   - Do not keep hand-rolled AST/token helper logic for subjective rule detection in the first rollout.
   - Diagnostics use `path:line:col: rule-id message`; default paths are `src`, `tests`, `evals`, `bin`, and `lib`, with optional path arguments for scoped runs.
-  - `--changed-from <ref>` limits output to findings on lines touched since the given git ref while still letting the model review full source context.
+  - `--base <ref>` limits output to findings on lines touched since the given git ref while still letting the model review full source context.
   - Exit zero by default even when findings exist because model-backed findings are advisory in the first rollout.
   - A future explicit strict flag may return nonzero for findings after the baseline and false-positive rate are understood.
 
@@ -132,7 +132,7 @@ docs/style/development.md
     ```
 
   - `bin/linters/style_lint.py` should also be directly runnable for scoped debugging, for example `uv run python bin/linters/style_lint.py src/evalspec/plugin.py`.
-  - Changeset-focused runs use `uv run python bin/linters/style_lint.py --changed-from origin/dev`.
+  - Changeset-focused runs use `uv run python bin/linters/style_lint.py --base origin/dev`.
 
 - **CI policy mirrors the fast blocking command.**
   - This repo does not currently contain `.github/` workflow files, so this spec does not require adding CI as part of the lint implementation.
