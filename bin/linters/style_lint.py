@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     """Run the style lint CLI."""
     parser = argparse.ArgumentParser(prog="style_lint")
     parser.add_argument("paths", nargs="*", type=Path)
-    parser.add_argument("--changed-from")
+    parser.add_argument("--base")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--verify-findings", action="store_true")
     parser.add_argument("--verify-model")
@@ -130,8 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     changed_lines = None
     paths = list(args.paths) or None
-    if args.changed_from is not None:
-        changed_lines = changed_lines_from_ref(args.changed_from)
+    if args.base is not None:
+        changed_lines = changed_lines_from_base(args.base)
         paths = sorted(changed_lines)
 
     return run(
@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
 
-def changed_lines_from_ref(ref: str) -> dict[Path, set[int]]:
+def changed_lines_from_base(ref: str) -> dict[Path, set[int]]:
     """Return changed Python lines between a git ref and the worktree."""
     diff = subprocess.run(
         ["git", "diff", "--unified=0", ref, "--", "*.py"],
