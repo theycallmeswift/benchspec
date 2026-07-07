@@ -75,7 +75,12 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
                 model=config.model,
             )
             findings.extend(
-                parse_findings(response, chunks=chunks, rules=config.rules)
+                parse_findings(
+                    response,
+                    chunks=chunks,
+                    rules=config.rules,
+                    drop_invalid=True,
+                )
             )
         if config.verify_findings:
             findings = verify_findings(

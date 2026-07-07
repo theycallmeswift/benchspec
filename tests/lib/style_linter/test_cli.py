@@ -123,6 +123,7 @@ def test_cli_run_prints_findings_and_stays_advisory(
                     "line": 1,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "x = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]
@@ -187,6 +188,7 @@ def test_cli_run_filters_findings_to_changed_lines(
                     "line": 1,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "old_name = 1",
                     "message": "Old untouched finding.",
                 },
                 {
@@ -194,6 +196,7 @@ def test_cli_run_filters_findings_to_changed_lines(
                     "line": 2,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "new_name = 2",
                     "message": "New touched finding.",
                 },
             ]
@@ -300,6 +303,7 @@ def test_cli_verify_findings_uses_verify_model_when_enabled(
                     "line": 1,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "x = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]
@@ -348,6 +352,7 @@ def test_cli_verify_findings_defaults_to_detector_model(
                     "line": 1,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "x = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]

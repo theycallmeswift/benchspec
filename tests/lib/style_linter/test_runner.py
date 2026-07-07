@@ -25,6 +25,7 @@ def test_run_advisory_lint_encapsulates_framework_call_order(
                     "line": 1,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "x = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]
@@ -97,3 +98,58 @@ def test_run_advisory_lint_batches_detector_calls(
 
     assert result.warning is None
     assert len(seen_prompts) == 2
+
+
+def test_run_advisory_lint_drops_invalid_individual_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Keep advisory runs useful when one model finding has bad evidence."""
+    source = tmp_path / "sample.py"
+    source.write_text("x = 1\n")
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "source": "",
+                    "message": "Bad empty evidence.",
+                },
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "source": "x = 1",
+                    "message": "Use a descriptive binding name.",
+                },
+            ]
+        }
+    )
+
+    monkeypatch.setattr(framework, "call_gemini", lambda **_kwargs: response)
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+            policy_instructions="Use the repository style guide.",
+            api_key="test-key",
+            model="gemini-test",
+        )
+    )
+
+    assert result.warning is None
+    assert result.diagnostics == [
+        f"{source.resolve()}:1:1: descriptive-names Use a descriptive binding name."
+    ]
