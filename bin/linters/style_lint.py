@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import sys
-import urllib.error
 from pathlib import Path
 from textwrap import dedent
 
@@ -18,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 style_lint = importlib.import_module("lib.style_lint")
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"))
+DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"), Path("bin"), Path("lib"))
 DEFAULT_CHUNK_LINES = 120
 
 RULES = [
@@ -50,14 +48,10 @@ RULES = [
     ),
 ]
 
-DETECTOR_INSTRUCTIONS = dedent("""\
-    You are reviewing Python source for evalspec's documented local style guide.
-    The relevant policy lives in docs/style/development.md.
-
-    Review the numbered source chunks and return advisory findings for only the
-    supplied rules. Prefer precise, high-confidence findings over exhaustive
-    guesses. Do not report imports, formatting, docstrings, or annotations that
-    Ruff already covers. Do not invent rules.
+POLICY_INSTRUCTIONS = dedent("""\
+    Apply evalspec's local Python style guide from docs/style/development.md.
+    Do not report imports, formatting, docstrings, or annotations that Ruff
+    already covers.
 """)
 
 
@@ -84,44 +78,23 @@ def run(
         print("skip: GEMINI_API_KEY is not set; advisory style lint is disabled")
         return 0
 
-    try:
-        targets = style_lint.collect_python_files(
-            paths,
+    result = style_lint.run_advisory_lint(
+        style_lint.StyleLintConfig(
+            paths=paths,
             default_paths=DEFAULT_PATHS,
-        )
-        chunks = style_lint.chunk_source_files(targets, max_lines=max_lines)
-        prompt = style_lint.build_detector_prompt(
-            chunks=chunks,
             rules=RULES,
-            instructions=DETECTOR_INSTRUCTIONS,
-        )
-        response = style_lint.call_gemini(
-            prompt=prompt,
+            policy_instructions=POLICY_INSTRUCTIONS,
             api_key=api_key,
             model=model,
+            verify_model=verify_model,
+            max_lines=max_lines,
         )
-        findings = style_lint.parse_findings(response, chunks=chunks, rules=RULES)
-        if verify_model is not None:
-            findings = style_lint.verify_findings(
-                findings=findings,
-                chunks=chunks,
-                rules=RULES,
-                instructions=DETECTOR_INSTRUCTIONS,
-                api_key=api_key,
-                model=verify_model,
-            )
-    except (
-        OSError,
-        TimeoutError,
-        UnicodeDecodeError,
-        urllib.error.URLError,
-        ValueError,
-        json.JSONDecodeError,
-    ) as error:
-        print(f"warning: advisory style lint skipped due to model error: {error}")
+    )
+    if result.warning is not None:
+        print(f"warning: {result.warning}")
         return 0
 
-    for line in style_lint.format_findings(findings):
+    for line in result.diagnostics:
         print(line)
 
     return 0

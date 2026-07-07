@@ -64,7 +64,9 @@ docs/style/development.md
   - Use `gemini-3.1-flash-lite` as the default detector model.
   - Require `GEMINI_API_KEY`; if it is missing, print a clear skip message and exit zero.
   - Keep reusable framework code under `lib/style_lint/`, not inside `src/evalspec/`, so it can later be extracted.
+  - Keep framework implementation in focused submodules; use `lib/style_lint/__init__.py` only for export control.
   - Keep evalspec-specific business logic in `bin/linters/style_lint.py`: default paths, rule definitions, model defaults, and prompt instructions.
+  - Keep the generic linter system prompt in `lib/style_lint/prompt.py`; keep evalspec policy instructions in `bin/linters/style_lint.py`.
   - Define rules in a list and inject them into one general prompt so future checks are additive:
 
     ```python
@@ -94,8 +96,9 @@ docs/style/development.md
 
   - Gemini receives numbered source chunks plus the rule list and decides which snippets violate the rules.
   - Deterministic framework code should stay limited to file collection, source chunking/numbered line formatting, Gemini transport, strict JSON/schema validation, optional verification, advisory error handling, and output formatting.
+  - Expose a config-based library runner so callers do not have to manually sequence the framework functions.
   - Do not keep hand-rolled AST/token helper logic for subjective rule detection in the first rollout.
-  - Diagnostics use `path:line:col: rule-id message`; default paths are `src`, `tests`, and `evals`, with optional path arguments for scoped runs.
+  - Diagnostics use `path:line:col: rule-id message`; default paths are `src`, `tests`, `evals`, `bin`, and `lib`, with optional path arguments for scoped runs.
   - Exit zero by default even when findings exist because model-backed findings are advisory in the first rollout.
   - A future explicit strict flag may return nonzero for findings after the baseline and false-positive rate are understood.
 
