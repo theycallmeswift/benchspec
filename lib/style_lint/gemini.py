@@ -38,7 +38,10 @@ def call_gemini(
     request_body = json.dumps(
         {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"},
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0,
+            },
         }
     ).encode("utf-8")
     request = urllib.request.Request(

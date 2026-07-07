@@ -71,6 +71,7 @@ def test_style_linter_reports_each_rule_finding(
                     "line": 1,
                     "column": 1,
                     "rule_id": rule_id,
+                    "source": source_text.splitlines()[0],
                     "message": message,
                 }
             ]

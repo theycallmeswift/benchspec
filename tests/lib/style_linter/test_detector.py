@@ -34,7 +34,35 @@ def test_build_detector_prompt_includes_rules_chunks_and_schema(
     assert "Review the numbered source chunks" in prompt
     assert "descriptive-names" in prompt
     assert "chunk_index" in prompt
+    assert "source" in prompt
     assert "1 | x = 1" in prompt
+
+
+def test_build_detector_prompt_limits_model_to_direct_rule_matches(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Constrain advisory findings to direct rule matches in executable code."""
+    source = tmp_path / "sample.py"
+    source.write_text('fixture = "x = 1\\n"\n')
+    chunks = framework.chunk_source_files([source], max_lines=80)
+
+    prompt = framework.build_detector_prompt(
+        chunks=chunks,
+        rules=[
+            framework.Rule(
+                id="descriptive-names",
+                description="Do not use single-letter bindings except `_`.",
+            )
+        ],
+        instructions="Use the repository style guide.",
+    )
+
+    assert "Ignore code examples and source text embedded inside strings" in prompt
+    assert "Report a finding only when the source directly violates" in prompt
+    assert (
+        "Do not report general code-quality advice under unrelated rule IDs" in prompt
+    )
 
 
 def test_parse_findings_rejects_unknown_rule_ids(
@@ -53,6 +81,7 @@ def test_parse_findings_rejects_unknown_rule_ids(
                     "line": 1,
                     "column": 1,
                     "rule_id": "unknown-rule",
+                    "source": "value = 1",
                     "message": "Bad rule.",
                 }
             ]
@@ -117,6 +146,7 @@ def test_parse_findings_defaults_missing_columns_to_one(
                     "chunk_index": 0,
                     "line": 1,
                     "rule_id": "descriptive-names",
+                    "source": "value = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]
@@ -137,6 +167,78 @@ def test_parse_findings_defaults_missing_columns_to_one(
     assert findings[0].column == 1
 
 
+def test_parse_findings_rejects_source_excerpts_absent_from_reported_line(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Reject findings whose evidence does not appear on the reported line."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    chunks = framework.chunk_source_files([source], max_lines=80)
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "source": "missing_name",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="source excerpt"):
+        framework.parse_findings(
+            response,
+            chunks=chunks,
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+        )
+
+
+def test_parse_findings_rejects_source_excerpts_inside_string_literals(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Reject fixture-code findings where evidence only appears in a string."""
+    source = tmp_path / "sample.py"
+    source.write_text('source.write_text("x = 1\\n")\n')
+    chunks = framework.chunk_source_files([source], max_lines=80)
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "source": "x = 1",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="string literal"):
+        framework.parse_findings(
+            response,
+            chunks=chunks,
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+        )
+
+
 def test_parse_findings_uses_line_start_when_line_is_absent(
     tmp_path: Path,
     framework: ModuleType,
@@ -153,6 +255,7 @@ def test_parse_findings_uses_line_start_when_line_is_absent(
                     "line_start": 2,
                     "line_end": 2,
                     "rule_id": "semantic-block-newlines",
+                    "source": "other = 2",
                     "message": "Use a blank line between semantic blocks.",
                 }
             ]
@@ -190,6 +293,7 @@ def test_parse_findings_rejects_lines_outside_referenced_chunk(
                     "line": 2,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "value = 1",
                     "message": "Bad reference.",
                 }
             ]
@@ -227,6 +331,7 @@ def test_parse_findings_recovers_adjacent_same_file_chunk_references(
                     "line": 127,
                     "column": 1,
                     "rule_id": "descriptive-names",
+                    "source": "value_127 = 1",
                     "message": "Use a descriptive binding name.",
                 }
             ]
