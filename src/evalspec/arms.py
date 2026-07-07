@@ -21,7 +21,7 @@ from evalspec.schema import SchemaError
 
 @dataclass(frozen=True)
 class Arm:
-    """Represent Arm."""
+    """Describe one runnable harness/model arm."""
 
     name: str
     harness: str
@@ -33,7 +33,7 @@ class Arm:
 
 @dataclass(frozen=True)
 class Set:
-    """Represent Set."""
+    """Describe one named eval set and its arms."""
 
     name: str
     arms: list[Arm]
@@ -42,7 +42,7 @@ class Set:
 
 @dataclass(frozen=True)
 class RawSet:
-    """Represent RawSet."""
+    """Store raw set data."""
 
     name: str
     defaults: dict
@@ -57,14 +57,14 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def _arm_name_from_model(model: str) -> str:
-    """Handle _arm_name_from_model."""
+    """Derive a stable arm name from a model identifier."""
     # Replace path-unsafe chars with `-`; arm names are single filesystem path segments
     # (artifact dirs and report discovery break when a `/` creates unexpected nesting).
     return _UNSAFE_NAME_CHARS.sub("-", model)
 
 
 def _validate_harness_args(where: str, value: object) -> list[str]:
-    """Handle _validate_harness_args."""
+    """Validate harness argument strings from configuration."""
     if not isinstance(value, list):
         raise SchemaError(f"{where}: `harness_args` must be a list")
     for i, item in enumerate(value):
@@ -74,7 +74,7 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
 
 
 def _validate_env_table(where: str, value: object) -> None:
-    """Handle _validate_env_table."""
+    """Validate environment variable overrides from configuration."""
     if not isinstance(value, dict):
         raise SchemaError(f"{where}: `env` must be a table")
     for key, item in value.items():
@@ -83,7 +83,7 @@ def _validate_env_table(where: str, value: object) -> None:
 
 
 def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
-    """Document the behavior."""
+    """Parse eval set definitions from pyproject configuration."""
     sets_table = table.get("sets")
     if not sets_table or not isinstance(sets_table, dict):
         raise SchemaError(
@@ -175,7 +175,7 @@ def expand_env(env: dict, environ: Mapping) -> dict:
 
 
 def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
-    """Handle _materialize_arm."""
+    """Build a concrete arm config from raw arm settings."""
     harness = raw.get("harness", defaults.get("harness"))
     if not harness:
         raise SchemaError(f"{where} arm `{name}`: no `harness` (no arm value, no set default)")

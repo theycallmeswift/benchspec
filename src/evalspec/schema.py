@@ -50,7 +50,7 @@ _KEBAB_HINT = "lowercase alphanumerics separated by hyphens, e.g. `happy-path`"
 
 
 class SchemaError(ValueError):
-    """Represent SchemaError."""
+    """Signal schema failures."""
 
     pass
 
@@ -62,7 +62,7 @@ def _require(
     path: str,
     example: str | None = None,
 ) -> object:
-    """Handle _require."""
+    """Return a required key after validating its type."""
     if key not in obj:
         hint = f" — e.g. {example}" if example else ""
         raise SchemaError(f"{path}: missing required field `{key}`{hint}")
@@ -78,7 +78,7 @@ def _require(
 
 
 def _optional(obj: object, key: str, expected_type: type | tuple[type, ...], path: str) -> object:
-    """Handle _optional."""
+    """Return an optional key after validating its type when present."""
     if key not in obj:
         return None
     val = obj[key]
@@ -93,14 +93,14 @@ def _optional(obj: object, key: str, expected_type: type | tuple[type, ...], pat
 
 
 def _reject_extra_keys(obj: dict, allowed: set[str], path: str) -> None:
-    """Handle _reject_extra_keys."""
+    """Reject schema objects containing undeclared keys."""
     extra = set(obj.keys()) - allowed
     if extra:
         raise SchemaError(f"{path}: unknown field(s) {sorted(extra)} (allowed: {sorted(allowed)})")
 
 
 def _validate_string_list(val: object, key_path: str) -> None:
-    """Handle _validate_string_list."""
+    """Validate a non-empty list of non-empty strings."""
     if not isinstance(val, list):
         raise SchemaError(f"{key_path}: expected list, got {type(val).__name__}")
     if not val:
@@ -113,7 +113,7 @@ def _validate_string_list(val: object, key_path: str) -> None:
 
 
 def _check_key_type(item: dict, key: str, path: str) -> None:
-    """Handle _check_key_type."""
+    """Validate one checker field against its expected type."""
     val = item[key]
     expected = _CHECKER_KEY_TYPES[key]
     # bool subclasses int: True as a count must not validate.
@@ -122,7 +122,7 @@ def _check_key_type(item: dict, key: str, path: str) -> None:
 
 
 def _validate_checker_obj(item: dict, path: str) -> None:
-    """Handle _validate_checker_obj."""
+    """Validate one explicit checker assertion object."""
     checker = _require(item, "checker", str, path)
     if checker not in _CHECKER_FIELDS:
         raise SchemaError(
@@ -153,7 +153,7 @@ def _validate_checker_obj(item: dict, path: str) -> None:
 
 
 def _validate_seed(seed: object, path: str) -> None:
-    """Handle _validate_seed."""
+    """Validate seed conversation turns."""
     if not isinstance(seed, list):
         raise SchemaError(f"{path}: expected list, got {type(seed).__name__}")
     for i, turn in enumerate(seed):
@@ -168,7 +168,7 @@ def _validate_seed(seed: object, path: str) -> None:
 
 
 def _validate_evals_v1(data: dict) -> None:
-    """Handle _validate_evals_v1."""
+    """Validate an evalspec/v1 output-eval document."""
     _reject_extra_keys(data, {"$schema", "evals"}, "root")
     evals = _require(
         data,
@@ -228,7 +228,7 @@ def _validate_evals_v1(data: dict) -> None:
 
 
 def _validate_trigger_v1(data: dict) -> None:
-    """Handle _validate_trigger_v1."""
+    """Validate an evalspec-trigger/v1 routing document."""
     allowed_top = {"$schema", "description", "skill_name", "queries"}
     _reject_extra_keys(data, allowed_top, "root")
 
@@ -304,7 +304,7 @@ def _validate_trigger_v1(data: dict) -> None:
 
 
 def _validate(data: dict) -> None:
-    """Handle _validate."""
+    """Provide the validate helper."""
     schema = data.get("$schema")
     if schema == _EVALS_V1:
         _validate_evals_v1(data)

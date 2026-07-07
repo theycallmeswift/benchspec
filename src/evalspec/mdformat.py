@@ -45,13 +45,13 @@ NON_EVAL_MD = frozenset({"trigger-evals.md"})
 
 
 class MdFormatError(schema.SchemaError):
-    """Represent MdFormatError."""
+    """Signal md format failures."""
 
     pass
 
 
 def _split_frontmatter(text: str, path: Path) -> tuple[dict, list[str]]:
-    """Handle _split_frontmatter."""
+    """Split Markdown frontmatter from the document body."""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         raise MdFormatError(f"{path}: must start with `---` frontmatter")
@@ -68,7 +68,7 @@ def _split_frontmatter(text: str, path: Path) -> tuple[dict, list[str]]:
 
 
 def _check_fm_keys(fm: dict, allowed: set[str], path: Path) -> None:
-    """Handle _check_fm_keys."""
+    """Validate frontmatter keys against the allowed set."""
     extra = set(fm) - allowed
     if extra:
         raise MdFormatError(
@@ -101,7 +101,7 @@ def _sections(body_lines: list[str], path: Path) -> list[tuple[int, str, list[st
 
 
 def _prose(content_lines: list[str]) -> str:
-    """Handle _prose."""
+    """Normalize parsed Markdown prose into assertion text."""
     return "\n".join(content_lines).strip()
 
 
@@ -121,7 +121,7 @@ def _checklist(content_lines: list[str], where: str, path: Path) -> list[str]:
     child_indent: int | None = None
 
     def flush() -> None:
-        """Handle flush."""
+        """Flush one pending Markdown assertion block into parsed output."""
         if parent is not None and not parent_has_children:
             items.append(parent)
 
@@ -183,7 +183,7 @@ def _collect_assertions(
 
 
 def parse_eval_md(path: Path) -> dict:
-    """Document the behavior."""
+    """Parse one eval prompt.md file into schema input."""
     fm, body_lines = _split_frontmatter(path.read_text(encoding="utf-8"), path)
     _check_fm_keys(fm, _EVAL_FM, path)
     result: dict = {"slug": path.parent.name}

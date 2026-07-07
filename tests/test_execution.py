@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for execution."""
 
 import contextlib
 import json
@@ -18,7 +18,7 @@ BASELINE = Arm("baseline", "claude-code", "opus")
 
 @pytest.fixture(autouse=True)
 def _no_real_vm(monkeypatch: object) -> None:
-    """Handle _no_real_vm."""
+    """Build the no real vm test fixture."""
     # run_eval_arm resolves a real agent + snapshot (which would build a microVM). Stub both
     # so unit tests never touch microsandbox; session_factory is faked separately per test.
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: None)
@@ -39,7 +39,7 @@ def _grade_all_pass(
     original_shas: object = None,
     process_facts: object = "",
 ) -> object:
-    """Handle _grade_all_pass."""
+    """Build the grade all pass test fixture."""
     return {
         "eval_id": eval_id,
         "arm": config,
@@ -48,12 +48,12 @@ def _grade_all_pass(
 
 
 def _punt_all(text: object) -> None:
-    """Handle _punt_all."""
+    """Build the punt all test fixture."""
     return None  # never bind — send every assertion to the judge
 
 
 def _case(tmp_path: object, eval_obj: object, skill: object = "myskill") -> object:
-    """Handle _case."""
+    """Build the case test fixture."""
     return EvalCase(skill_dir=tmp_path / "skills" / skill, eval=eval_obj)
 
 
@@ -63,11 +63,11 @@ def fake_session_factory(result: object) -> object:
 
     @contextlib.asynccontextmanager
     async def factory(**kwargs: object) -> object:
-        """Handle factory."""
+        """Factory."""
         calls.append(kwargs)
 
         async def run(prompt: object, *, resume_session_id: object, detect_skill: object) -> object:
-            """Handle run."""
+            """Run."""
             factory.prompts.append(prompt)
             factory.detects.append(detect_skill)
             return result
@@ -81,7 +81,7 @@ def fake_session_factory(result: object) -> object:
 
 
 def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify single turn writes artifacts and substitutes prompt."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -126,7 +126,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
 
 
 def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify today substituted in assertions before grading."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -162,7 +162,7 @@ def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> Non
 
 
 def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify bound checker keeps original assertion prose."""
     # A bound checker's grading entry must carry the author's prose, not the spec-derived
     # text() (e.g. "the file ./gone.md does not exist"), so grading.json stays faithful.
     workspace.set_current_iteration("iteration_01")
@@ -172,7 +172,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     ec = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": [prose]})
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         return {
             "checker": "file_exists",
             "path": "./gone.md",
@@ -204,7 +204,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
 
 
 def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify binder timeout punts to judge not errors."""
     # A binder host-subprocess timeout must degrade to a judge punt, not crash the cell.
     import subprocess
 
@@ -214,7 +214,7 @@ def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
     ec = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
 
     def bind(text: object) -> NoReturn:
-        """Handle bind."""
+        """Bind."""
         raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
 
     session_factory = fake_session_factory(
@@ -240,11 +240,11 @@ def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
 def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm trial grades activation true and judges semantic."""
     workspace.set_current_iteration("iteration_01")
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         if text == "Skill `ingest` invoked":
             return {
                 "type": "deterministic",
@@ -257,7 +257,7 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
     judged = []
 
     def grade(texts: object, *a: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         judged.append(list(texts))
         return {"assertions": [{"text": t, "passed": True, "evidence": "ok"} for t in texts]}
 
@@ -312,11 +312,11 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
 def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm baseline grades activation false and judges semantic."""
     workspace.set_current_iteration("iteration_01")
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         if text == "Skill `ingest` invoked":
             return {
                 "type": "deterministic",
@@ -329,7 +329,7 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     judged = []
 
     def grade(texts: object, *a: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         judged.append(list(texts))
         return {"assertions": [{"text": t, "passed": True, "evidence": "ok"} for t in texts]}
 
@@ -374,7 +374,7 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
 
 
 def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm no fired gate."""
     # A trial arm where the skill never fired must grade the activation assertion False,
     # not raise — there is no fired-gate that crashes the arm.
     workspace.set_current_iteration("iteration_01")
@@ -387,7 +387,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
     )
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
     outcome = run_eval_arm(
@@ -423,7 +423,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
 
 
 def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify baseline arm fired skills empty not errored."""
     # Baseline arm, skill absent: the trajectory reports nothing dispatched. The
     # skill_invoked assertion grades False off an EMPTY fired set, not off an error.
     workspace.set_current_iteration("iteration_01")
@@ -436,7 +436,7 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
     )
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
     outcome = run_eval_arm(
@@ -472,15 +472,15 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
 
 
 def _record_session_model(seen: object, name: object) -> object:
-    """Handle _record_session_model."""
+    """Build the record session model test fixture."""
 
     @contextlib.asynccontextmanager
     async def factory(**kwargs: object) -> object:
-        """Handle factory."""
+        """Factory."""
         seen[name] = kwargs["model"]
 
         async def run(prompt: object, *, resume_session_id: object, detect_skill: object) -> object:
-            """Handle run."""
+            """Run."""
             return RunResult("m", name, "out", 1, 1, False, session_id="s", fired=True)
 
         yield run
@@ -489,7 +489,7 @@ def _record_session_model(seen: object, name: object) -> object:
 
 
 def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm routes opus arm model."""
     # The recorded session model == arm.model, NOT a shared --evalspec-model fixture value.
     workspace.set_current_iteration("iteration_01")
     ec = _case(tmp_path, {"slug": "m", "prompt": "p", "assertions": ["a"]})
@@ -515,7 +515,7 @@ def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
 
 
 def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm routes sonnet arm model."""
     workspace.set_current_iteration("iteration_01")
     ec = _case(tmp_path, {"slug": "m", "prompt": "p", "assertions": ["a"]})
     seen = {}
@@ -540,14 +540,14 @@ def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
 
 
 def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm selects agent by arm harness."""
     # The agent is built from arm.harness, so a multi-harness set runs each column on its
     # own harness, not the single global EVALSPEC_AGENT.
     workspace.set_current_iteration("iteration_01")
     captured = {}
 
     def fake_make_agent(harness: object = None) -> None:
-        """Handle fake_make_agent."""
+        """Fake make agent."""
         captured["harness"] = harness
         return None
 
@@ -579,7 +579,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch
 def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     tmp_path: object, monkeypatch: object
 ) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm threads arm effort and expanded env."""
     # Effort and env reach the session from `arm`, not a shared fixture; env `$VAR` is
     # expanded against os.environ at exec time, and the resolved eval-set name threads through.
     workspace.set_current_iteration("iteration_01")
@@ -623,7 +623,7 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
 
 
 def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify run eval arm threads harness args."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -651,7 +651,7 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
 
 
 def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify artifact dir uses arm name string."""
     # The written workspace dir is eval-<id>/trial/sample-0 — the arm NAME, not an Arm(...)
     # repr. Guards the writer/reader desync with the report reader.
     workspace.set_current_iteration("iteration_01")
@@ -683,7 +683,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
 
 
 def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify seed block prepended to graded prompt."""
     # The one behavioral promise of seed:, verified end-to-end.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
@@ -726,7 +726,7 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
 
 
 def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify empty seed leaves prompt unchanged."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -753,7 +753,7 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
 
 
 def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify detect skill passed unconditionally."""
     # `fired` bookkeeping streams the skill name on every arm — detect_skill is the
     # suite's skill, not gated on a with_skill literal.
     workspace.set_current_iteration("iteration_01")
@@ -782,7 +782,7 @@ def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
 
 
 def test_errored_run_flags_outcome(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify errored run flags outcome."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -792,7 +792,7 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
     )
 
     def grade_fail(assertions: object, *a: object, **k: object) -> object:
-        """Handle grade_fail."""
+        """Grade fail."""
         return {"assertions": [{"text": x, "passed": False, "evidence": ""} for x in assertions]}
 
     outcome = run_eval_arm(
@@ -813,7 +813,7 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
 
 
 def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify failed assertions do not error the arm."""
     # A failed assertion is the recorded measurement, not a gate — outcome.errored stays
     # False so the report counts it as an honest 0%, not an excluded infra failure.
     workspace.set_current_iteration("iteration_01")
@@ -822,7 +822,7 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     ec = _case(tmp_path, {"slug": "fail", "prompt": "p", "assertions": ["a1", "a2"]})
 
     def grade_fail(assertions: object, *a: object, **k: object) -> object:
-        """Handle grade_fail."""
+        """Grade fail."""
         return {"assertions": [{"text": x, "passed": False, "evidence": "no"} for x in assertions]}
 
     outcome = run_eval_arm(
@@ -846,7 +846,7 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
 
 
 def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge pinned to claude regardless of task model."""
     # The judge always shells out to the host `claude` CLI, which only knows Claude-family
     # aliases. An arm model like `google/gemini-3.5-flash` must not reach the judge.
     from evalspec.execution import JUDGE_MODEL
@@ -858,7 +858,7 @@ def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> No
     seen_models = []
 
     def grade(assertions: object, *a: object, model: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         seen_models.append(model)
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
@@ -882,7 +882,7 @@ def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> No
 
 
 def test_judge_model_param_overrides_default(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge model param overrides default."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -890,7 +890,7 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
     seen_models = []
 
     def grade(assertions: object, *a: object, model: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         seen_models.append(model)
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
@@ -915,7 +915,7 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
 
 
 def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify judge runtimeerror marks arm errored."""
     # An infra-level judge failure raises RuntimeError; run_eval_arm surfaces it as
     # arm-level errored=True with the real cause in each assertion's evidence.
     workspace.set_current_iteration("iteration_01")
@@ -924,7 +924,7 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
     ec = _case(tmp_path, {"slug": "kappa", "prompt": "p", "assertions": ["a1", "a2"]})
 
     def grade_raises(*a: object, **k: object) -> NoReturn:
-        """Handle grade_raises."""
+        """Grade raises."""
         raise RuntimeError("host claude CLI returned is_error=true: Not logged in")
 
     outcome = run_eval_arm(
@@ -963,7 +963,7 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
 
 
 def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: object) -> None:
-    """Test the expected behavior."""
+    """Verify missing judge binary marks arm errored."""
     # The host `claude` CLI missing must surface as arm-level errored=True. Drives the REAL
     # grade_run + a real agent so the whole chain runs.
     from evalspec.agents.claude import ClaudeCodeAgent
@@ -976,7 +976,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
 
     def boom(*a: object, **k: object) -> NoReturn:
-        """Handle boom."""
+        """Boom."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
     monkeypatch.setattr("evalspec.agents.judge_cli.subprocess.run", boom)
@@ -1005,7 +1005,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
 
 
 def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify artifacts land under sample dir."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1035,7 +1035,7 @@ def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
 
 
 def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify session jsonl consolidated with turn delimiter."""
     # One session.jsonl for the arm, delimited by {"turn": 1}; the structured trajectory
     # regenerates from it.
     workspace.set_current_iteration("iteration_01")
@@ -1113,7 +1113,7 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
 
 
 def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify no session jsonl when no raw."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1143,7 +1143,7 @@ def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
 
 
 def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify run result artifacts merge into graded facts."""
     # Files the agent wrote outside the workdir mount ride on RunResult.artifacts and must
     # reach the judge's tree/contents.
     workspace.set_current_iteration("iteration_01")
@@ -1162,7 +1162,7 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
         *a: object,
         **k: object,
     ) -> object:
-        """Handle grade."""
+        """Grade."""
         seen["tree"], seen["contents"] = tree, contents
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
@@ -1201,7 +1201,7 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
 
 
 def test_process_facts_reach_the_judge(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify process facts reach the judge."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1233,7 +1233,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
         original_shas: object = None,
         process_facts: object = "",
     ) -> object:
-        """Handle grade."""
+        """Grade."""
         seen["process_facts"] = process_facts
         return {"assertions": [{"text": a, "passed": True, "evidence": "ok"} for a in assertions]}
 
@@ -1267,7 +1267,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
 
 
 def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify bind failure punts to judge not error."""
     # A transient bind() RuntimeError must degrade to semantic grading, never error the cell.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
@@ -1276,11 +1276,11 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
     judged = []
 
     def bind_raises(text: object) -> NoReturn:
-        """Handle bind_raises."""
+        """Bind raises."""
         raise RuntimeError("host claude hiccup")
 
     def grade(assertions: object, *a: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         judged.append(list(assertions))
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
@@ -1306,7 +1306,7 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
 
 
 def test_bind_caches_distinct_strings(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify bind caches distinct strings."""
     # A repeated assertion binds once — the binder is a per-assertion host call, so caching
     # bounds the new latency.
     workspace.set_current_iteration("iteration_01")
@@ -1324,7 +1324,7 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
     bind_calls = []
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         bind_calls.append(text)
         return {"type": "deterministic", "checker": "file_exists", "path": "out.md"}
 
@@ -1348,7 +1348,7 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
 
 
 def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify bound file exists check runs on workdir."""
     # A bound file_exists spec is checked on the host workdir; no judge call for it.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
@@ -1361,11 +1361,11 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
     judged = []
 
     def bind(text: object) -> object:
-        """Handle bind."""
+        """Bind."""
         return {"type": "deterministic", "checker": "file_exists", "path": "report.md"}
 
     def grade(assertions: object, *a: object, **k: object) -> object:
-        """Handle grade."""
+        """Grade."""
         judged.append(list(assertions))
         return {"assertions": []}
 
@@ -1393,7 +1393,7 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
 
 
 def test_timing_json_contains_token_split(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify timing json contains token split."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1433,7 +1433,7 @@ def test_timing_json_contains_token_split(tmp_path: object) -> None:
 
 
 def test_grading_is_self_describing(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify grading is self describing."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()

@@ -11,7 +11,7 @@ README = Path(__file__).resolve().parents[1] / "README.md"
 
 
 def _embedded_eval_block(md: str) -> str:
-    """Handle _embedded_eval_block."""
+    """Build the embedded eval block test fixture."""
     # The eval example is the fenced ```markdown block containing `## Assertions`.
     blocks = re.findall(r"```markdown\n(.*?)```", md, re.DOTALL)
     matches = [b for b in blocks if "## Assertions" in b]
@@ -20,7 +20,7 @@ def _embedded_eval_block(md: str) -> str:
 
 
 def test_readme_eval_example_parses(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify readme eval example parses."""
     block = _embedded_eval_block(README.read_text(encoding="utf-8"))
 
     eval_dir = tmp_path / "demo"

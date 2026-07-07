@@ -29,13 +29,13 @@ from evalspec.trigger import count_fires, fire_threshold, trigger_record
 
 @pytest.fixture
 def repo_root(request: object) -> Path:
-    """Handle repo_root."""
+    """Return the repository root selected for this pytest run."""
     return resolve_repo_root(request.config)
 
 
 @pytest.fixture
 def model(request: object) -> str:
-    """Handle model."""
+    """Return the default model selected for eval arms."""
     # `--evalspec-model` defaults to None; `or "sonnet"` keeps trigger routing on a
     # concrete model when the flag is unset, never `model=None`.
     return request.config.getoption("evalspec_model") or "sonnet"
@@ -43,7 +43,7 @@ def model(request: object) -> str:
 
 @pytest.fixture
 def eval_set_name(request: object) -> str:
-    """Handle eval_set_name."""
+    """Return the configured eval set name for this run."""
     # The raw `--evalspec-set` / `make evals SET=` value (empty on a default-set run, which
     # never sets the flag). Stamped into EVALSPEC_SET for setup.sh branching — it does NOT
     # carry the resolved default-set name.
@@ -52,19 +52,19 @@ def eval_set_name(request: object) -> str:
 
 @pytest.fixture
 def judge_model(request: object) -> str:
-    """Handle judge_model."""
+    """Return the model used for judge-graded assertions."""
     return request.config.getoption("evalspec_judge_model")
 
 
 @pytest.fixture
 def trigger_mode(request: object) -> str:
-    """Handle trigger_mode."""
+    """Return the trigger-routing threshold mode."""
     return request.config.getoption("evalspec_trigger_mode")
 
 
 @pytest.fixture
 def trigger_effort(request: object) -> str:
-    """Handle trigger_effort."""
+    """Return the agent reasoning effort used for trigger probes."""
     # Effort is per-harness now (trust + record): an invalid value surfaces from the agent
     # CLI, not a pre-validation gate against one agent's capability set.
     return request.config.getoption("evalspec_trigger_effort")
@@ -72,25 +72,25 @@ def trigger_effort(request: object) -> str:
 
 @pytest.fixture
 def trigger_timeout(request: object) -> int:
-    """Handle trigger_timeout."""
+    """Return the timeout for one trigger-routing probe."""
     return request.config.getoption("evalspec_trigger_timeout")
 
 
 @pytest.fixture
 def project_marker(request: object) -> str:
-    """Handle project_marker."""
+    """Return the pytest marker assigned to project eval cases."""
     return request.config.getoption("evalspec_project_marker")
 
 
 @pytest.fixture
 def today() -> str:
-    """Handle today."""
+    """Return the date string used for placeholder substitution."""
     return runner.utc_today()
 
 
 @pytest.fixture
 def clean_room() -> object:
-    """Handle clean_room."""
+    """Return the seeded clean-room workdir for a test case."""
     # tempfile defaults under the OS temp root — outside the project, so the baseline arm
     # cannot reach the project's docs/, skills/, or plugin.
     with tempfile.TemporaryDirectory(prefix="evalspec-") as room:
@@ -99,7 +99,7 @@ def clean_room() -> object:
 
 @pytest.fixture
 def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> object:
-    """Handle seeded_workdir."""
+    """Return the workdir prepared from eval fixtures."""
     eval_case, _arm = eval_arm
     workdir = clean_room / "workdir"
     pre_run_shas = seed_room(eval_case.fixtures_dir, workdir, today)
@@ -108,7 +108,7 @@ def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> objec
 
 @pytest.fixture(scope="session", autouse=True)
 def _sandbox_preflight() -> None:
-    """Handle _sandbox_preflight."""
+    """Return a sandbox preflight error message when sandboxing is unavailable."""
     sandbox.preflight()
 
 
@@ -123,7 +123,7 @@ def test_eval(
     judge_model: object,
     sample_index: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
     # eval root — /project/skills/<skill> or /project/.claude/skills/<skill>), so the
     # same repo_root is passed regardless of arm — no asymmetry here.
@@ -162,7 +162,7 @@ def test_trigger(
     project_marker: object,
     sample_index: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Run one trigger-routing case and record its verdict."""
     # Real routing: the skill runs in the full environment (plugin + local skills,
     # staged from repo_root) against its peers.
     # `--evalspec-trigger-mode` picks the fire threshold (majority / best-of /
@@ -181,7 +181,7 @@ def test_trigger(
         effort: object,
         skill_name: object,
     ) -> object:
-        """Handle route."""
+        """Run the trigger-routing callable for a case."""
         return sandbox.route_in_sandbox(
             query,
             repo_root,

@@ -65,7 +65,7 @@ def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) ->
 
 
 def _selected_agent_class() -> type:
-    """Handle _selected_agent_class."""
+    """Provide the selected agent class helper."""
     return _REGISTRY[resolve_agent_name()]
 
 

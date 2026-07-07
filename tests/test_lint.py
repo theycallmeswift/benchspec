@@ -10,18 +10,18 @@ from evalspec import lint
 
 
 def _rules(text: object) -> object:
-    """Handle _rules."""
+    """Build the rules test fixture."""
     return [f[0] for f in lint.lint_assertion(text)]
 
 
 def test_vague_adverb_flagged() -> None:
-    """Test the expected behavior."""
+    """Verify vague adverb flagged."""
     assert "vague-adverb" in _rules("the agent explicitly acknowledges the limit")
     assert "vague-adverb" not in _rules("the file names the limit: 50 items")
 
 
 def test_unseen_file_flagged() -> None:
-    """Test the expected behavior."""
+    """Verify unseen file flagged."""
     assert "unseen-file" in _rules("respects references/skill-conventions.md")
     # a bare workdir-relative path is not anchored — the judge can't tell it is a
     # workdir fact, so it warns
@@ -35,13 +35,13 @@ def test_unseen_file_flagged() -> None:
 
 
 def test_relative_claim_without_comparand_flagged() -> None:
-    """Test the expected behavior."""
+    """Verify relative claim without comparand flagged."""
     assert "relative-claim" in _rules("the summary is clearer and better organized")
     assert "relative-claim" not in _rules("the summary is shorter than the original capture")
 
 
 def test_existence_assertion_yields_no_findings() -> None:
-    """Test the expected behavior."""
+    """Verify existence assertion yields no findings."""
     # the leading `./` anchors it as a workdir fact, so `unseen-file` stands
     # down and nothing else matches.
     assert lint.lint_assertion("The file ./Greetings/Alice.md exists") == []
@@ -50,7 +50,7 @@ def test_existence_assertion_yields_no_findings() -> None:
 def _write_eval(
     tmp_path: object, assertions: object, *, skill: object = "demo", slug: object = "a"
 ) -> object:
-    """Handle _write_eval."""
+    """Write eval."""
     slug_dir = tmp_path / "skills" / skill / "evals" / slug
     slug_dir.mkdir(parents=True, exist_ok=True)
     body = "".join(f"- [ ] {a}\n" for a in assertions)
@@ -61,7 +61,7 @@ def _write_eval(
 
 
 def test_lint_repo_walks_suites(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify lint repo walks suites."""
     _write_eval(tmp_path, ["the agent properly handles the edge case"])
 
     findings = lint.lint_repo(tmp_path)
@@ -72,7 +72,7 @@ def test_lint_repo_walks_suites(tmp_path: object) -> None:
 
 
 def test_main_exit_codes(tmp_path: object, capsys: object) -> None:
-    """Test the expected behavior."""
+    """Verify main exit codes."""
     _write_eval(tmp_path, ["the output names the source file"])
     assert lint.run(tmp_path) == 0
 

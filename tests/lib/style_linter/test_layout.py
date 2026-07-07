@@ -32,7 +32,7 @@ def test_plan_file_lives_in_docs_plans(repo_root: Path) -> None:
 
 
 def test_agent_directory_structure_mentions_doc_buckets(repo_root: Path) -> None:
-    """Document canonical docs buckets for agents."""
+    """Verify agent instructions mention the canonical docs buckets."""
     agent_instructions = (repo_root / "AGENTS.md").read_text()
 
     assert "docs/{plans,specs,research}/" in agent_instructions

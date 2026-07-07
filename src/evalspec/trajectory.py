@@ -50,7 +50,7 @@ def iter_events(text: str) -> object:
 
 
 def _content_blocks(event: object) -> object:
-    """Handle _content_blocks."""
+    """Return message content blocks from a trajectory event."""
     message = event.get("message")
     if not isinstance(message, dict):
         return []

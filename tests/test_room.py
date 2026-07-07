@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for room."""
 
 from evalspec.room import (
     changed_paths,
@@ -18,7 +18,7 @@ from evalspec.room import (
 
 
 def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify seed room copies fixture and records shas."""
     fixture = tmp_path / "fixture"
     (fixture / "0. Inbox").mkdir(parents=True)
     (fixture / "0. Inbox" / "a.md").write_text("hello")
@@ -32,7 +32,7 @@ def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
 
 
 def test_seed_room_no_fixture_creates_empty_vault(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify seed room no fixture creates empty vault."""
     vault = tmp_path / "room" / "vault"
     shas = seed_room(None, vault)
     assert vault.is_dir()
@@ -42,7 +42,7 @@ def test_seed_room_no_fixture_creates_empty_vault(tmp_path: object) -> None:
 def test_seed_room_substitutes_today_in_path_names_and_content(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify seed room substitutes today in path names and content."""
     fixture = tmp_path / "fixture"
     dated_dir = fixture / "Sources" / "{TODAY}"
     dated_dir.mkdir(parents=True)
@@ -77,7 +77,7 @@ def test_seed_room_substitutes_today_in_path_names_and_content(
 
 
 def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify gather facts returns tree contents and shas."""
     (tmp_path / "0. Inbox").mkdir()
     (tmp_path / "0. Inbox" / "a.md").write_text("hello")
 
@@ -104,7 +104,7 @@ def _sha_lines(*pairs: object) -> object:
 
 
 def test_sha_snapshot_script_lists_each_dir_and_skips_missing() -> None:
-    """Test the expected behavior."""
+    """Verify sha snapshot script lists each dir and skips missing."""
     script = sha_snapshot_script(["/root/.claude/skills", "/root/.config/opencode/skills"])
     assert "/root/.claude/skills" in script
     assert "/root/.config/opencode/skills" in script
@@ -113,7 +113,7 @@ def test_sha_snapshot_script_lists_each_dir_and_skips_missing() -> None:
 
 
 def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify sha snapshot script exits zero when last dir missing."""
     # A `for` loop exits with its last iteration's status, so a missing LAST dir makes
     # `[ -d "$d" ] &&` short-circuit to exit 1 — which the caller would read as a failed
     # snapshot and dump the staged tree as "authored". The `; done; true` terminator pins
@@ -130,7 +130,7 @@ def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: object) 
 def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify sha snapshot script descends through a symlinked load dir."""
     # The skills-home bridge replaces the agent's load dir with a SYMLINK to the fixed
     # skills home (bridge_skills_home_script). A bare `find <symlink> -type f` start point
     # does not descend through the link, so an agent-authored skill would be invisible to
@@ -160,7 +160,7 @@ def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
 
 
 def test_parse_sha_stream_splits_digest_from_path() -> None:
-    """Test the expected behavior."""
+    """Verify parse sha stream splits digest from path."""
     shas = parse_sha_stream(
         _sha_lines(
             ("/root/.claude/skills/commit/SKILL.md", "a" * 64),
@@ -172,12 +172,12 @@ def test_parse_sha_stream_splits_digest_from_path() -> None:
 
 
 def test_parse_sha_stream_ignores_blank_lines() -> None:
-    """Test the expected behavior."""
+    """Verify parse sha stream ignores blank lines."""
     assert parse_sha_stream("\n\n") == {}
 
 
 def test_changed_paths_returns_new_and_modified_drops_unchanged() -> None:
-    """Test the expected behavior."""
+    """Verify changed paths returns new and modified drops unchanged."""
     baseline = {"/skills/staged/SKILL.md": "aaa", "/skills/edited/SKILL.md": "bbb"}
     current = {
         "/skills/staged/SKILL.md": "aaa",  # unchanged staged input → drop
@@ -191,7 +191,7 @@ def test_changed_paths_returns_new_and_modified_drops_unchanged() -> None:
 
 
 def test_read_files_script_quotes_each_path_and_is_noop_when_empty() -> None:
-    """Test the expected behavior."""
+    """Verify read files script quotes each path and is noop when empty."""
     script = read_files_script(["/root/.claude/skills/commit/SKILL.md"])
     assert "/root/.claude/skills/commit/SKILL.md" in script
     assert "cat" in script
@@ -199,7 +199,7 @@ def test_read_files_script_quotes_each_path_and_is_noop_when_empty() -> None:
 
 
 def test_parse_artifact_stream_roundtrips_paths_and_contents() -> None:
-    """Test the expected behavior."""
+    """Verify parse artifact stream roundtrips paths and contents."""
     out = parse_artifact_stream(
         _stream(
             ("/root/.claude/skills/commit/SKILL.md", "---\nname: commit\n---\nbody\n"),
@@ -211,7 +211,7 @@ def test_parse_artifact_stream_roundtrips_paths_and_contents() -> None:
 
 
 def test_parse_artifact_stream_preserves_content_with_newlines_and_no_trailing_newline() -> None:
-    """Test the expected behavior."""
+    """Verify parse artifact stream preserves content with newlines and no trailing."""
     # A file whose content ends WITHOUT a newline must not bleed into the next record,
     # and embedded newlines are kept verbatim.
     out = parse_artifact_stream(
@@ -225,12 +225,12 @@ def test_parse_artifact_stream_preserves_content_with_newlines_and_no_trailing_n
 
 
 def test_parse_artifact_stream_empty_is_empty() -> None:
-    """Test the expected behavior."""
+    """Verify parse artifact stream empty is empty."""
     assert parse_artifact_stream("") == {}
 
 
 def test_to_display_paths_rewrites_home_prefix() -> None:
-    """Test the expected behavior."""
+    """Verify to display paths rewrites home prefix."""
     disp = to_display_paths(
         {"/root/.claude/skills/commit/SKILL.md": "x", "/other/abs.md": "y"},
         guest_home="/root",
@@ -240,7 +240,7 @@ def test_to_display_paths_rewrites_home_prefix() -> None:
 
 
 def test_merge_facts_appends_artifacts_to_tree_and_contents() -> None:
-    """Test the expected behavior."""
+    """Verify merge facts appends artifacts to tree and contents."""
     tree, contents, shas = "out.md", {"out.md": "workdir file"}, {"out.md": "deadbeef"}
     mtree, mcontents, mshas = merge_facts(
         tree,
@@ -257,7 +257,7 @@ def test_merge_facts_appends_artifacts_to_tree_and_contents() -> None:
 
 
 def test_merge_facts_truncates_oversized_artifact() -> None:
-    """Test the expected behavior."""
+    """Verify merge facts truncates oversized artifact."""
     big = "x" * 50
     _, contents, _ = merge_facts("", {}, {}, {"~/skills/big/SKILL.md": big}, max_bytes=10)
     assert contents["~/skills/big/SKILL.md"].startswith("x" * 10)

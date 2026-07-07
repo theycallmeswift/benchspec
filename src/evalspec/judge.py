@@ -25,7 +25,7 @@ def build_judge_prompt(
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
 ) -> str:
-    """Handle build_judge_prompt."""
+    """Build the prompt sent to the judge model."""
     numbered = "\n".join(f"{i}. {a}" for i, a in enumerate(assertions, 1))
     files_block = "\n\n".join(
         f"### {name} (sha256={shas.get(name, 'n/a')})\n{content}"
@@ -114,7 +114,7 @@ def _balanced_objects(text: str) -> object:
 
 
 def _coerce_passed(value: object) -> bool:
-    """Handle _coerce_passed."""
+    """Normalize judge pass values to booleans."""
     # The judge should emit a JSON bool, but LLMs sometimes quote it ("false").
     # bool("false") is True, so handle strings explicitly rather than coercing.
     if isinstance(value, str):
@@ -123,7 +123,7 @@ def _coerce_passed(value: object) -> bool:
 
 
 def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
-    """Handle parse_judge_json."""
+    """Parse the judge model JSON response into grading data."""
     # The judge often wraps its JSON in a ```json fence or adds prose. Try each
     # balanced {...} candidate and take the first that parses and carries assertions.
     data = None
@@ -166,7 +166,7 @@ def grade_run(
     original_shas: object = None,
     process_facts: object = "",
 ) -> dict:
-    """Handle grade_run."""
+    """Grade one completed agent run against assertions."""
     prompt = build_judge_prompt(
         assertions,
         tree,

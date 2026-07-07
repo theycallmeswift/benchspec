@@ -12,7 +12,7 @@ from evalspec.checkers import GradeContext
 
 @pytest.fixture
 def workdir(tmp_path: object) -> object:
-    """Handle workdir."""
+    """Workdir."""
     (tmp_path / "Greetings").mkdir()
     (tmp_path / "Greetings" / "Alice.md").write_text("---\nstatus: archived\n---\nhi\n")
     (tmp_path / "Greetings" / "Bob.md").write_text("hello bob\n")
@@ -20,12 +20,12 @@ def workdir(tmp_path: object) -> object:
 
 
 def _run(spec: object, workdir: object, original_shas: object = None) -> object:
-    """Handle _run."""
+    """Build the run test fixture."""
     return checkers.run_assertion(spec, workdir, original_shas or {})
 
 
 def test_file_exists_pass_and_fail(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify file exists pass and fail."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -39,7 +39,7 @@ def test_file_exists_pass_and_fail(workdir: object) -> None:
 
 
 def test_file_exists_negated(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify file exists negated."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -50,13 +50,13 @@ def test_file_exists_negated(workdir: object) -> None:
 
 
 def test_file_exists_matches_a_directory(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify file exists matches a directory."""
     spec = {"type": "deterministic", "checker": "file_exists", "path": "Greetings"}
     assert _run(spec, workdir)["passed"] is True
 
 
 def test_file_exists_negated_fails_on_present_directory(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify file exists negated fails on present directory."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -67,7 +67,7 @@ def test_file_exists_negated_fails_on_present_directory(workdir: object) -> None
 
 
 def test_relative_anchor_is_stripped(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify relative anchor is stripped."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -77,7 +77,7 @@ def test_relative_anchor_is_stripped(workdir: object) -> None:
 
 
 def test_relative_anchor_preserves_hidden_path_component(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify relative anchor preserves hidden path component."""
     hidden = workdir / ".meta" / "templates"
     hidden.mkdir(parents=True)
     (hidden / "entity-person.md").write_text("template")
@@ -91,14 +91,14 @@ def test_relative_anchor_preserves_hidden_path_component(workdir: object) -> Non
 
 
 def test_path_escape_rejected(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify path escape rejected."""
     spec = {"type": "deterministic", "checker": "file_exists", "path": "../outside.md"}
     with pytest.raises(ValueError, match="escapes"):
         _run(spec, workdir)
 
 
 def test_glob_count_exact_and_min(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify glob count exact and min."""
     spec = {
         "type": "deterministic",
         "checker": "glob_count",
@@ -118,7 +118,7 @@ def test_glob_count_exact_and_min(workdir: object) -> None:
 
 
 def test_glob_count_rejects_escaping_pattern(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify glob count rejects escaping pattern."""
     spec = {
         "type": "deterministic",
         "checker": "glob_count",
@@ -130,7 +130,7 @@ def test_glob_count_rejects_escaping_pattern(workdir: object) -> None:
 
 
 def test_glob_count_rejects_absolute_pattern(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify glob count rejects absolute pattern."""
     spec = {
         "type": "deterministic",
         "checker": "glob_count",
@@ -142,7 +142,7 @@ def test_glob_count_rejects_absolute_pattern(workdir: object) -> None:
 
 
 def test_sha256_match_against_pre_run_original(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify sha256 match against pre run original."""
     content = (workdir / "Greetings" / "Bob.md").read_bytes()
     original_shas = {"0. Inbox/bob.md": hashlib.sha256(content).hexdigest()}
     spec = {
@@ -155,7 +155,7 @@ def test_sha256_match_against_pre_run_original(workdir: object) -> None:
 
 
 def test_sha256_match_original_key_is_anchor_stripped(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify sha256 match original key is anchor stripped."""
     # The pre-run SHA map is keyed by clean workdir-relative paths (no ./), but the
     # binder may emit `original` with a leading ./ — the lookup must canonicalize first.
     content = (workdir / "Greetings" / "Bob.md").read_bytes()
@@ -170,7 +170,7 @@ def test_sha256_match_original_key_is_anchor_stripped(workdir: object) -> None:
 
 
 def test_sha256_match_unknown_original_fails_loud(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify sha256 match unknown original fails loud."""
     spec = {
         "type": "deterministic",
         "checker": "sha256_match",
@@ -183,7 +183,7 @@ def test_sha256_match_unknown_original_fails_loud(workdir: object) -> None:
 
 
 def test_sha256_match_literal(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify sha256 match literal."""
     digest = hashlib.sha256((workdir / "Greetings" / "Bob.md").read_bytes()).hexdigest()
     spec = {
         "type": "deterministic",
@@ -195,7 +195,7 @@ def test_sha256_match_literal(workdir: object) -> None:
 
 
 def test_frontmatter_has_key_and_value(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter has key and value."""
     spec = {
         "type": "deterministic",
         "checker": "frontmatter_has",
@@ -216,7 +216,7 @@ def test_frontmatter_has_key_and_value(workdir: object) -> None:
 
 
 def test_frontmatter_missing_block_fails(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter missing block fails."""
     spec = {
         "type": "deterministic",
         "checker": "frontmatter_has",
@@ -229,7 +229,7 @@ def test_frontmatter_missing_block_fails(workdir: object) -> None:
 
 
 def test_regex_match_quotes_evidence(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify regex match quotes evidence."""
     (workdir / "log.md").write_text("## [2026-06-10T10:00] archive | My Note\n")
     spec = {
         "type": "deterministic",
@@ -243,7 +243,7 @@ def test_regex_match_quotes_evidence(workdir: object) -> None:
 
 
 def test_result_shape_matches_grading_entries(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify result shape matches grading entries."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -256,7 +256,7 @@ def test_result_shape_matches_grading_entries(workdir: object) -> None:
 
 
 def test_explicit_text_overrides_derived(workdir: object) -> None:
-    """Test the expected behavior."""
+    """Verify explicit text overrides derived."""
     spec = {
         "type": "deterministic",
         "checker": "file_exists",
@@ -278,7 +278,7 @@ def test_explicit_text_overrides_derived(workdir: object) -> None:
 def test_frontmatter_has_matches_typed_yaml_values(
     tmp_path: object, key: object, value: object, expected: object
 ) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter has matches typed yaml values."""
     (tmp_path / "n.md").write_text("---\npublished: true\ncount: 3\nstatus: archived\n---\nbody\n")
     spec = {
         "type": "deterministic",
@@ -292,7 +292,7 @@ def test_frontmatter_has_matches_typed_yaml_values(
 
 
 def test_frontmatter_has_date_scalar_matches_string_value(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter has date scalar matches string value."""
     # frontmatter `created: 2026-06-13` (a YAML date), author value "2026-06-13" → passes
     (tmp_path / "dated.md").write_text("---\ncreated: 2026-06-13\n---\nbody\n")
     spec = {
@@ -307,7 +307,7 @@ def test_frontmatter_has_date_scalar_matches_string_value(tmp_path: object) -> N
 
 
 def test_frontmatter_empty_string_value_does_not_match_null(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter empty string value does not match null."""
     # When the author writes `value: ""` (bare empty string), the field arrives in
     # Python as "". Before the fix, _yaml_scalar("") returned None and falsely matched
     # a null frontmatter value; it must fall back to the raw string "" and NOT match.
@@ -326,7 +326,7 @@ def test_frontmatter_empty_string_value_does_not_match_null(tmp_path: object) ->
 def test_frontmatter_empty_string_value_matches_explicit_empty(
     tmp_path: object,
 ) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter empty string value matches explicit empty."""
     # The same author value "" must match a key whose frontmatter value is an explicit
     # empty string.
     (tmp_path / "empty.md").write_text('---\nnote: ""\nnull_key:\n---\nbody\n')
@@ -342,7 +342,7 @@ def test_frontmatter_empty_string_value_matches_explicit_empty(
 
 
 def test_frontmatter_has_tolerates_utf8_bom(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify frontmatter has tolerates utf8 bom."""
     # A leading BOM must not hide the frontmatter block.
     (tmp_path / "bom.md").write_bytes(b"\xef\xbb\xbf---\nstatus: archived\n---\nbody\n")
     spec = {
@@ -356,7 +356,7 @@ def test_frontmatter_has_tolerates_utf8_bom(tmp_path: object) -> None:
 
 
 def test_regex_does_not_crash_on_non_utf8_bytes(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify regex does not crash on non utf8 bytes."""
     # latin-1 bytes that are invalid UTF-8 must grade, not raise.
     (tmp_path / "bin.md").write_bytes(b"caf\xe9 latin-1\n")
     spec = {
@@ -370,7 +370,7 @@ def test_regex_does_not_crash_on_non_utf8_bytes(tmp_path: object) -> None:
 
 
 def test_regex_tolerates_utf8_bom(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify regex tolerates utf8 bom."""
     # A leading BOM must not prevent a regex match on the first line.
     (tmp_path / "bom.md").write_bytes(b"\xef\xbb\xbf# Title\n")
     spec = {
@@ -383,7 +383,7 @@ def test_regex_tolerates_utf8_bom(tmp_path: object) -> None:
 
 
 def test_assertion_text_handles_all_shapes() -> None:
-    """Test the expected behavior."""
+    """Verify assertion text handles all shapes."""
     assert checkers.assertion_text("plain") == "plain"
     assert checkers.assertion_text({"type": "process", "text": "t"}) == "t"
     derived = checkers.assertion_text(
@@ -393,7 +393,7 @@ def test_assertion_text_handles_all_shapes() -> None:
 
 
 def test_skill_invoked_fired(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify skill invoked fired."""
     spec = {"checker": "skill_invoked", "skill": "ingest"}
     out = checkers.run_assertion(
         spec,
@@ -406,7 +406,7 @@ def test_skill_invoked_fired(tmp_path: object) -> None:
 
 
 def test_skill_invoked_exact(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify skill invoked exact."""
     out = checkers.run_assertion(
         {"checker": "skill_invoked", "skill": "ingest"},
         tmp_path,
@@ -417,7 +417,7 @@ def test_skill_invoked_exact(tmp_path: object) -> None:
 
 
 def test_skill_invoked_not_fired(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify skill invoked not fired."""
     out = checkers.run_assertion(
         {"checker": "skill_invoked", "skill": "ingest"},
         tmp_path,
@@ -428,7 +428,7 @@ def test_skill_invoked_not_fired(tmp_path: object) -> None:
 
 
 def test_skill_invoked_no_context_is_negative(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify skill invoked no context is negative."""
     # No runner wired fired_skills yet (inert path); absent context grades False, never crashes.
     out = checkers.run_assertion(
         {"checker": "skill_invoked", "skill": "ingest"}, tmp_path, {}, context=None
@@ -437,12 +437,12 @@ def test_skill_invoked_no_context_is_negative(tmp_path: object) -> None:
 
 
 def test_derive_text_skill_invoked_no_keyerror() -> None:
-    """Test the expected behavior."""
+    """Verify derive text skill invoked no keyerror."""
     assert "ingest" in checkers.derive_text({"checker": "skill_invoked", "skill": "ingest"})
 
 
 def test_existing_checker_ignores_context(tmp_path: object) -> None:
-    """Test the expected behavior."""
+    """Verify existing checker ignores context."""
     (tmp_path / "x.md").write_text("hi")
     out = checkers.run_assertion(
         {"checker": "file_exists", "path": "x.md"},

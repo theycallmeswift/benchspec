@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for support."""
 
 from __future__ import annotations
 

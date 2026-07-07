@@ -21,10 +21,10 @@ FIXED_SKILLS_HOME = "/home/evalspec/skills"
 
 
 class BaseAgent:
-    """Document the behavior."""
+    """Store base agent data."""
 
     def bridge_skills_home_script(self: object) -> str:
-        """Document the behavior."""
+        """Bridge skills home script."""
         d = self.skill_load_dir
         parent = d.rsplit("/", 1)[0]
         return (
@@ -64,7 +64,7 @@ class AgentCapabilities:
 
 @runtime_checkable
 class CodingAgent(Protocol):
-    """Represent CodingAgent."""
+    """Define the coding agent interface."""
 
     id: str  # snapshot-cache key + report label
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
@@ -72,23 +72,23 @@ class CodingAgent(Protocol):
     capabilities: AgentCapabilities
 
     def version(self: object) -> str:
-        """Handle version."""
+        """Return the agent CLI version string."""
         ...
 
     def bridge_skills_home_script(
         self: object,
     ) -> str:
-        """Handle bridge_skills_home_script."""
+        """Bridge skills home script."""
         ...
 
     def cell_env(self: object, *, arm: str, model: str, eval_set: str = "") -> dict:
-        """Handle cell_env."""
+        """Return per-cell environment variables for an arm run."""
         ...
 
     def artifact_dirs(
         self: object,
     ) -> list[str]:
-        """Handle artifact_dirs."""
+        """Return guest directories that may contain agent-authored artifacts."""
         ...
 
     #   artifacts (e.g. ~/.claude/skills). These live in the VM, NOT the workdir mount, so
@@ -96,11 +96,11 @@ class CodingAgent(Protocol):
     #   staged baseline) into the judge's facts. Each agent scaffolds skills differently, so
     #   each owns its answer; return [] for an agent that writes only to the workdir.
     def secrets(self: object) -> list:
-        """Handle secrets."""
+        """Return secret values that must be redacted from logs."""
         ...
 
     def guest_env(self: object) -> dict:
-        """Handle guest_env."""
+        """Return environment variables passed to guest agent commands."""
         ...
 
     def build_command(
@@ -114,15 +114,15 @@ class CodingAgent(Protocol):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
     ) -> list[str]:
-        """Handle build_command."""
+        """Build the guest command used to invoke the agent."""
         ...
 
     async def provision(self: object, sb: object) -> None:
-        """Handle provision."""
+        """Install the agent CLI and credentials inside the guest."""
         ...
 
     async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
-        """Handle stage_project_assets."""
+        """Copy project-local assets needed by the guest agent."""
         ...
 
     async def invoke(
@@ -141,21 +141,21 @@ class CodingAgent(Protocol):
         harness_args: list[str] | None = None,
         extra_env: dict | None = None,
     ) -> RunResult:
-        """Handle invoke."""
+        """Run one prompt through the agent inside the guest."""
         ...
 
     def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Handle judge."""
+        """Run the agent-backed judge prompt and return raw output."""
         ...
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
-        """Handle detect_dispatch."""
+        """Return whether one stream line shows a skill dispatch."""
         ...
 
     def detect_fired(self: object, lines: object, skill_name: str) -> bool:
-        """Handle detect_fired."""
+        """Return whether stream lines show the expected skill firing."""
         ...
 
     def streamed_activity(self: object, lines: object) -> bool:
-        """Handle streamed_activity."""
+        """Return whether streamed output shows meaningful agent activity."""
         ...

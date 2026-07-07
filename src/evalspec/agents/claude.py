@@ -43,7 +43,7 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
-    """Handle _validate_harness_args."""
+    """Validate harness argument strings from configuration."""
     if harness_args is None:
         return []
     for arg in harness_args:
@@ -60,7 +60,7 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
 
 
 def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | None) -> None:
-    """Handle _validate_plugin_dir_sources."""
+    """Validate plugin dir sources."""
     if plugin_dir is None or harness_args is None:
         return
     for arg in harness_args:
@@ -69,7 +69,7 @@ def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | N
 
 
 class ClaudeCodeAgent(BaseAgent):
-    """Represent ClaudeCodeAgent."""
+    """Store claude code agent data."""
 
     id = "claude-code"
     CLAUDE_BIN = "/root/.local/bin/claude"
@@ -99,7 +99,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     @classmethod
     def from_env(cls: object) -> ClaudeCodeAgent:
-        """Document the behavior."""
+        """Build an agent instance from host environment settings."""
         version = os.environ.get("EVALSPEC_CLAUDE_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
@@ -109,7 +109,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     @staticmethod
     def credential_error() -> str | None:
-        """Document the behavior."""
+        """Return a credential preflight error message when credentials are missing."""
         if any(os.environ.get(v) for v in AUTH_ENV_VARS):
             return None
         return (
@@ -118,11 +118,11 @@ class ClaudeCodeAgent(BaseAgent):
         )
 
     def version(self: object) -> str:
-        """Handle version."""
+        """Return the agent CLI version string."""
         return self._version
 
     def artifact_dirs(self: object) -> list[str]:
-        """Handle artifact_dirs."""
+        """Return guest directories that may contain agent-authored artifacts."""
         # Claude Code auto-loads (and scaffolds) skills under $HOME/.claude/skills — outside
         # the workdir mount, so a skill the agent writes here is invisible to the judge
         # unless the session snapshots it. The staged skills sit here too; the session's
@@ -130,7 +130,7 @@ class ClaudeCodeAgent(BaseAgent):
         return [f"{self.guest_home}/.claude/skills"]
 
     def guest_env(self: object) -> dict:
-        """Handle guest_env."""
+        """Return environment variables passed to guest agent commands."""
         # IS_SANDBOX=1 lets claude run bypassPermissions as root (the guest is root); the
         # microVM is the real containment boundary. The credential rides as a substituted
         # secret (see secrets()), never entering the guest as a plain value. TZ=UTC pins the
@@ -139,7 +139,7 @@ class ClaudeCodeAgent(BaseAgent):
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
 
     def secrets(self: object) -> list:
-        """Handle secrets."""
+        """Return secret values that must be redacted from logs."""
         from microsandbox import Secret
 
         return [
@@ -161,7 +161,7 @@ class ClaudeCodeAgent(BaseAgent):
         detect_skill: object,
         harness_args: list[str] | None = None,
     ) -> list[str]:
-        """Handle build_command."""
+        """Build the guest command used to invoke the agent."""
         # Always stream-json so both arms capture a trajectory (the baseline too); detect_skill
         # gates fired-detection downstream, not the format.
         # bypassPermissions (not acceptEdits): the microVM is the containment boundary,
@@ -189,7 +189,7 @@ class ClaudeCodeAgent(BaseAgent):
         return cmd
 
     async def provision(self: object, sb: object) -> None:
-        """Handle provision."""
+        """Install the agent CLI and credentials inside the guest."""
         res = await sb.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
         if res.exit_code != 0:
             raise RuntimeError(
@@ -197,7 +197,7 @@ class ClaudeCodeAgent(BaseAgent):
             )
 
     async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
-        """Handle stage_project_assets."""
+        """Copy project-local assets needed by the guest agent."""
         # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
         # the project's local skills there for a clean per-run tree. The agent-neutral
         # name covers other agents that stage more than just .claude/skills.
@@ -257,7 +257,7 @@ class ClaudeCodeAgent(BaseAgent):
         extra_env: dict | None = None,
         timeout: int = 600,
     ) -> RunResult:
-        """Handle invoke."""
+        """Run one prompt through the agent inside the guest."""
         from microsandbox.errors import MicrosandboxError
 
         cmd = self.build_command(

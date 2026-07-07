@@ -33,7 +33,7 @@ def redact_env(env: dict | None) -> dict:
 
 
 def _load_json(path: Path) -> dict | None:
-    """Handle _load_json."""
+    """Load one JSON artifact from disk."""
     if not path.exists():
         return None
     try:
@@ -43,7 +43,7 @@ def _load_json(path: Path) -> dict | None:
 
 
 def _sample_dirs(parent: Path) -> list[Path]:
-    """Handle _sample_dirs."""
+    """Return sample directories below an arm result directory."""
     # Numeric sort: sample-10 must come after sample-2, not before. isdigit filter
     # rejects sample-backup AND sample-1abc, so a stray sibling can't crash the write.
     return sorted(
@@ -57,14 +57,14 @@ def _sample_dirs(parent: Path) -> list[Path]:
 
 
 def _trigger_qdirs(root: Path) -> list[Path]:
-    """Handle _trigger_qdirs."""
+    """Return trigger-query result directories for one skill."""
     # `trigger-<slug>` query dirs, sorted by slug. Slugs are kebab strings, so a
     # plain name sort is stable and deterministic.
     return sorted((d for d in root.glob("trigger-*") if d.is_dir()), key=lambda d: d.name)
 
 
 def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
-    """Handle _arm_stats."""
+    """Compute aggregate pass-rate and token statistics for an arm."""
     per_eval: list[dict] = []
     pair_rates: list[float] = []  # one rate per (eval × sample) — the macro-mean unit
     durations: list[int] = []
@@ -158,7 +158,7 @@ def _as_expected(t: dict) -> bool:
 
 
 def _trigger_rows(eval_root: Path) -> list[dict]:
-    """Handle _trigger_rows."""
+    """Read trigger result records for report rendering."""
     rows: list[dict] = []
     for qdir in _trigger_qdirs(eval_root):
         samples = [t for sd in _sample_dirs(qdir) if (t := _load_json(sd / "timing.json"))]
@@ -233,7 +233,7 @@ def index_rows(skill_dir: Path, skill: str) -> list[dict]:
 
 
 def _pct(x: object) -> str:
-    """Handle _pct."""
+    """Format a numeric rate as a percentage string."""
     return "n/a" if x is None else f"{x:.0%}"
 
 
@@ -254,7 +254,7 @@ def delta_noise_pp(arm_a: dict, arm_b: dict) -> float | None:
 
 
 def _md_cell(text: str, limit: int = 48) -> str:
-    """Handle _md_cell."""
+    """Format a Markdown table cell with stable scalar rendering."""
     cell = text.replace("|", "\\|").replace("\n", " ")
     return cell if len(cell) <= limit else cell[: limit - 1] + "…"
 
@@ -341,7 +341,7 @@ def _matrix_table(benchmark: dict) -> list[str]:
 
 
 def _format_markdown(benchmark: dict) -> str:
-    """Handle _format_markdown."""
+    """Render benchmark results as a Markdown report."""
     arms = benchmark["arms"]
     lines = [f"# Benchmark — {benchmark['label']}", ""]
 
@@ -413,7 +413,7 @@ def _format_markdown(benchmark: dict) -> str:
 
 
 def _inline_code(value: str) -> str:
-    """Handle _inline_code."""
+    """Wrap text in Markdown code ticks without breaking embedded ticks."""
     longest_run = max((len(m.group(0)) for m in re.finditer(r"`+", value)), default=0)
     fence = "`" * (longest_run + 1)
     padding = " " if "`" in value else ""
@@ -427,7 +427,7 @@ def build_benchmark(
     baseline: str | None = None,
     arm_meta: dict | None = None,
 ) -> dict:
-    """Handle build_benchmark."""
+    """Build the machine-readable benchmark report object."""
     eval_dirs = sorted(d for d in eval_root.iterdir() if d.is_dir() and d.name.startswith("eval-"))
     # Arm names are arbitrary strings on disk: the per-eval subdirs ARE the arm names.
     # Require a graded sample before counting a dir as an arm, so a stray subdir
@@ -498,7 +498,7 @@ def write_benchmark(
     baseline: str | None = None,
     arm_meta: dict | None = None,
 ) -> dict:
-    """Handle write_benchmark."""
+    """Write benchmark JSON and Markdown report artifacts."""
     benchmark = build_benchmark(eval_root, label, baseline=baseline, arm_meta=arm_meta)
     (eval_root / "benchmark.json").write_text(json.dumps(benchmark, indent=2) + "\n")
     (eval_root / "benchmark.md").write_text(_format_markdown(benchmark))

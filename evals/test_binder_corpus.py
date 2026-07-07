@@ -29,7 +29,7 @@ _ERROR = object()
 
 
 def _samples_for(entry: object) -> object:
-    """Handle _samples_for."""
+    """Choose the sample count for a binder corpus entry."""
     # Heavy floor only where a false-positive can occur: persistence (the documented leak) and
     # skill_invoked (a punt on an activation assertion is unrecoverable). A zero-tolerance gate
     # needs enough draws on these that "0 observed" is meaningful.
@@ -38,7 +38,7 @@ def _samples_for(entry: object) -> object:
 
 
 def _bind_resilient(text: object) -> object:
-    """Handle _bind_resilient."""
+    """Bind one assertion with one retry for transient infra failures."""
     # Retry one transient infra failure, then give up with _ERROR — a timed-out/crashed call
     # must not masquerade as a punt. Only infra exceptions are caught, so no logic bug hides.
     for _ in range(2):
@@ -50,7 +50,7 @@ def _bind_resilient(text: object) -> object:
 
 
 def _draws() -> object:
-    """Handle _draws."""
+    """Build parametrized binder corpus leak-check draws."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -59,7 +59,7 @@ def _draws() -> object:
 
 
 def _field_expectation_draws() -> object:
-    """Handle _field_expectation_draws."""
+    """Build binder corpus draws with expected checker fields."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -70,7 +70,7 @@ def _field_expectation_draws() -> object:
 
 @pytest.mark.parametrize("entry", _draws())
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
-    """Test the expected behavior."""
+    """Verify binder corpus blocks punt leaks."""
     b = _bind_resilient(entry["text"])
 
     record(
@@ -98,7 +98,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
 def test_binder_corpus_preserves_expected_checker_fields(entry: object) -> None:
-    """Test the expected behavior."""
+    """Verify binder corpus preserves expected checker fields."""
     b = _bind_resilient(entry["text"])
 
     if b is _ERROR:

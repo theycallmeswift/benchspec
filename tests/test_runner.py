@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for runner."""
 
 import datetime
 import json
@@ -21,7 +21,7 @@ from evalspec.runner import (
 
 
 def test_utc_today_uses_utc_calendar_date_not_local() -> None:
-    """Test the expected behavior."""
+    """Verify utc today uses utc calendar date not local."""
     # Evening in a timezone behind UTC is already the next UTC day; the guest VM
     # (TZ=UTC) would write that next day, so the host date must be UTC too.
     evening_eastern = datetime.datetime(2026, 5, 28, 23, 30, tzinfo=ZoneInfo("America/New_York"))
@@ -29,7 +29,7 @@ def test_utc_today_uses_utc_calendar_date_not_local() -> None:
 
 
 def test_utc_today_passthrough_utc_instant() -> None:
-    """Test the expected behavior."""
+    """Verify utc today passthrough utc instant."""
     assert (
         utc_today(datetime.datetime(2026, 5, 29, 0, 1, tzinfo=datetime.timezone.utc))
         == "2026-05-29"
@@ -47,7 +47,7 @@ def test_utc_today_passthrough_utc_instant() -> None:
 
 
 def test_sum_tokens_adds_all_token_fields() -> None:
-    """Test the expected behavior."""
+    """Verify sum tokens adds all token fields."""
     usage = {
         "input_tokens": 100,
         "cache_creation_input_tokens": 20,
@@ -59,13 +59,13 @@ def test_sum_tokens_adds_all_token_fields() -> None:
 
 
 def test_sum_tokens_missing_fields_default_zero() -> None:
-    """Test the expected behavior."""
+    """Verify sum tokens missing fields default zero."""
     assert sum_tokens({"input_tokens": 10, "output_tokens": 5}) == 15
     assert sum_tokens({}) == 0
 
 
 def test_sum_tokens_none_guard() -> None:
-    """Test the expected behavior."""
+    """Verify sum tokens none guard."""
     assert sum_tokens({"input_tokens": None}) == 0
 
 
@@ -75,7 +75,7 @@ def test_sum_tokens_none_guard() -> None:
 
 
 def test_substitute_prompt_relative_paths_untouched() -> None:
-    """Test the expected behavior."""
+    """Verify substitute prompt relative paths untouched."""
     # Prompts now use cwd-relative `./` paths; there is no path placeholder to
     # substitute. A relative path passes through verbatim.
     out = substitute_prompt("Work in ./Greetings now.")
@@ -83,14 +83,14 @@ def test_substitute_prompt_relative_paths_untouched() -> None:
 
 
 def test_residual_placeholder_raises() -> None:
-    """Test the expected behavior."""
+    """Verify residual placeholder raises."""
     with pytest.raises(ValueError, match="WIKI_SPEC") as e:
         substitute_prompt("read {WIKI_SPEC} first; work in ./vault")
     assert "WIKI_SPEC" in str(e.value)
 
 
 def test_stray_legacy_path_placeholder_raises() -> None:
-    """Test the expected behavior."""
+    """Verify stray legacy path placeholder raises."""
     # The old absolute-path token no longer exists; a leftover trips the
     # residual-placeholder guard rather than reaching the agent verbatim.
     legacy = "{" + "OUTPUT" + "}"
@@ -99,13 +99,13 @@ def test_stray_legacy_path_placeholder_raises() -> None:
 
 
 def test_substitute_prompt_replaces_today() -> None:
-    """Test the expected behavior."""
+    """Verify substitute prompt replaces today."""
     out = substitute_prompt("today is {TODAY} in ./vault", today="2099-01-01")
     assert out == "today is 2099-01-01 in ./vault"
 
 
 def test_substitute_prompt_today_none_leaves_today_token() -> None:
-    """Test the expected behavior."""
+    """Verify substitute prompt today none leaves today token."""
     # When today is None, {TODAY} is not replaced — but if it stays it will
     # trigger the residual placeholder guard.
     with pytest.raises(ValueError, match="TODAY"):
@@ -113,7 +113,7 @@ def test_substitute_prompt_today_none_leaves_today_token() -> None:
 
 
 def test_substitute_prompt_today_none_no_token_still_works() -> None:
-    """Test the expected behavior."""
+    """Verify substitute prompt today none no token still works."""
     out = substitute_prompt("work in ./vault")
     assert out == "work in ./vault"
 
@@ -124,25 +124,25 @@ def test_substitute_prompt_today_none_no_token_still_works() -> None:
 
 
 def test_substitute_assertions_replaces_today() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions replaces today."""
     result = substitute_assertions(["{TODAY}/foo", "other"], "2099-06-15")
     assert result == ["2099-06-15/foo", "other"]
 
 
 def test_substitute_assertions_leaves_relative_paths_untouched() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions leaves relative paths untouched."""
     result = substitute_assertions(["./file", "{TODAY}/log"], "2099-06-15")
     assert result[0] == "./file"
     assert result[1] == "2099-06-15/log"
 
 
 def test_substitute_assertions_empty_list() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions empty list."""
     assert substitute_assertions([], "2099-06-15") == []
 
 
 def test_substitute_assertions_handles_typed_dicts() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions handles typed dicts."""
     out = substitute_assertions(
         [
             "log at {TODAY}.md",
@@ -161,13 +161,13 @@ def test_substitute_assertions_handles_typed_dicts() -> None:
 
 
 def test_substitute_assertions_rejects_residual_placeholder() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions rejects residual placeholder."""
     with pytest.raises(ValueError, match="TODAAY"):
         substitute_assertions(["the file at {TODAAY}.md exists"], "2099-01-01")
 
 
 def test_substitute_assertions_rejects_residual_placeholder_in_typed_value() -> None:
-    """Test the expected behavior."""
+    """Verify substitute assertions rejects residual placeholder in typed value."""
     with pytest.raises(ValueError, match="WIKI_SPEC"):
         substitute_assertions(
             [
@@ -187,7 +187,7 @@ def test_substitute_assertions_rejects_residual_placeholder_in_typed_value() -> 
 
 
 def test_parse_run_json_extracts_fields() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json extracts fields."""
     raw = (
         '{"type":"result","is_error":false,"duration_ms":8500,'
         '"result":"done","usage":{"input_tokens":100,"output_tokens":50}}'
@@ -202,14 +202,14 @@ def test_parse_run_json_extracts_fields() -> None:
 
 
 def test_parse_run_json_extracts_session_id() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json extracts session id."""
     raw = '{"is_error":false,"result":"ok","session_id":"sess-abc123","usage":{}}'
     r = parse_run_json(raw, eval_id="e1", config="with_skill")
     assert r.session_id == "sess-abc123"
 
 
 def test_parse_run_json_session_id_defaults_empty_when_absent() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json session id defaults empty when absent."""
     raw = '{"is_error":false,"result":"ok","usage":{}}'
     r = parse_run_json(raw, eval_id="e1", config="with_skill")
     assert r.session_id == ""
@@ -221,7 +221,7 @@ def test_parse_run_json_session_id_defaults_empty_when_absent() -> None:
 
 
 def _skill_event(skill_value: str) -> str:
-    """Handle _skill_event."""
+    """Build the skill event test fixture."""
     return json.dumps(
         {
             "type": "assistant",
@@ -239,12 +239,12 @@ def _skill_event(skill_value: str) -> str:
 
 
 def _result_event(**fields: object) -> str:
-    """Handle _result_event."""
+    """Build the result event test fixture."""
     return json.dumps({"type": "result", "is_error": False, **fields})
 
 
 def test_parse_stream_run_detects_fire_and_parses_result() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run detects fire and parses result."""
     stdout = "\n".join(
         [
             _skill_event("eval-myskill:myskill"),
@@ -266,7 +266,7 @@ def test_parse_stream_run_detects_fire_and_parses_result() -> None:
 
 
 def test_parse_stream_run_no_fire_when_skill_absent() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run no fire when skill absent."""
     stdout = "\n".join(
         [
             _skill_event("knowledge-base:archive"),  # a different skill
@@ -280,7 +280,7 @@ def test_parse_stream_run_no_fire_when_skill_absent() -> None:
 
 
 def test_parse_stream_run_baseline_skips_firing_but_keeps_raw_and_trajectory() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run baseline skips firing but keeps raw and trajectory."""
     # skill_name=None: a Skill dispatch in the stream must not set fired, but raw +
     # trajectory are still captured (both arms stream).
     stdout = "\n".join(
@@ -299,7 +299,7 @@ def test_parse_stream_run_baseline_skips_firing_but_keeps_raw_and_trajectory() -
 
 
 def test_parse_stream_run_missing_result_event_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run missing result event is error."""
     # Skill fired but the stream has no result event (truncated/crashed run):
     # fired is still reported, but the run is flagged errored.
     stdout = _skill_event("myskill")
@@ -309,7 +309,7 @@ def test_parse_stream_run_missing_result_event_is_error() -> None:
 
 
 def test_parse_stream_run_skips_blank_and_malformed_lines() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run skips blank and malformed lines."""
     stdout = "\n".join(
         [
             "",
@@ -325,7 +325,7 @@ def test_parse_stream_run_skips_blank_and_malformed_lines() -> None:
 
 
 def test_parse_stream_run_carries_raw_stdout() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run carries raw stdout."""
     # The full stream is kept so callers can persist it for debugging.
     stdout = "\n".join(
         [
@@ -340,7 +340,7 @@ def test_parse_stream_run_carries_raw_stdout() -> None:
 
 
 def test_parse_stream_run_carries_raw_on_missing_result_event() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run carries raw on missing result event."""
     # A truncated/crashed run (no terminal result event) is exactly when the raw
     # stream is most useful — keep it even on the errored return path.
     stdout = _skill_event("myskill")
@@ -350,7 +350,7 @@ def test_parse_stream_run_carries_raw_on_missing_result_event() -> None:
 
 
 def test_parse_run_json_leaves_raw_empty() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json leaves raw empty."""
     # The plain-json baseline path has no stream; raw stays empty.
     raw = '{"type":"result","is_error":false,"result":"done","usage":{}}'
     r = parse_run_json(raw, "e1", "without_skill")
@@ -358,7 +358,7 @@ def test_parse_run_json_leaves_raw_empty() -> None:
 
 
 def test_parse_run_json_breaks_out_cache_tokens_and_result_subtype() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json breaks out cache tokens and result subtype."""
     raw = (
         '{"type":"result","subtype":"success","is_error":false,"result":"done",'
         '"usage":{"input_tokens":100,"output_tokens":50,'
@@ -371,7 +371,7 @@ def test_parse_run_json_breaks_out_cache_tokens_and_result_subtype() -> None:
 
 
 def test_parse_run_json_metadata_defaults_when_absent() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json metadata defaults when absent."""
     r = parse_run_json('{"is_error":false,"result":"ok","usage":{}}', "e1", "without_skill")
     assert r.cache_read_tokens == 0
     assert r.cache_creation_tokens == 0
@@ -380,7 +380,7 @@ def test_parse_run_json_metadata_defaults_when_absent() -> None:
 
 
 def test_parse_stream_run_carries_structured_trajectory() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run carries structured trajectory."""
     tool_use = json.dumps(
         {
             "type": "assistant",
@@ -409,7 +409,7 @@ def test_parse_stream_run_carries_structured_trajectory() -> None:
 
 
 def test_parse_stream_run_carries_trajectory_on_missing_result_event() -> None:
-    """Test the expected behavior."""
+    """Verify parse stream run carries trajectory on missing result event."""
     stdout = json.dumps(
         {
             "type": "assistant",
@@ -431,7 +431,7 @@ def test_parse_stream_run_carries_trajectory_on_missing_result_event() -> None:
 
 
 def test_parse_run_json_captures_token_split() -> None:
-    """Test the expected behavior."""
+    """Verify parse run json captures token split."""
     raw = json.dumps(
         {
             "result": "done",

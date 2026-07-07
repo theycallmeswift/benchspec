@@ -10,7 +10,7 @@ from evalspec import lint
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Handle main."""
+    """Dispatch the evalspec command-line interface."""
     parser = argparse.ArgumentParser(prog="evalspec")
     sub = parser.add_subparsers(dest="command", required=True)
     lint_parser = sub.add_parser(

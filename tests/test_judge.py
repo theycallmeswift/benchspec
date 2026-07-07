@@ -1,4 +1,4 @@
-"""Tests and helpers for evalspec."""
+"""Tests for judge."""
 
 import json
 import subprocess
@@ -22,12 +22,12 @@ class FakeAgent:
     calls: list[dict] = None
 
     def __post_init__(self: object) -> object:
-        """Handle __post_init__."""
+        """Build the post init test fixture."""
         if self.calls is None:
             self.calls = []
 
     def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Handle judge."""
+        """Judge."""
         self.calls.append({"prompt": prompt, "model": model, "timeout": timeout})
         if self.raises is not None:
             raise self.raises
@@ -40,7 +40,7 @@ class FakeAgent:
 
 
 def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
-    """Test the expected behavior."""
+    """Verify judge prompt contains assertions facts and output contract."""
     p = build_judge_prompt(
         assertions=["the file X exists", "Y is byte-identical"],
         tree="vault/\n  a.md",
@@ -64,7 +64,7 @@ def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
 
 
 def test_judge_prompt_no_original_shas_omits_block() -> None:
-    """Test the expected behavior."""
+    """Verify judge prompt no original shas omits block."""
     p = build_judge_prompt(
         assertions=["the file X exists"],
         tree="vault/",
@@ -81,7 +81,7 @@ def test_judge_prompt_no_original_shas_omits_block() -> None:
 
 
 def test_parse_judge_json_builds_grading() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json builds grading."""
     raw = '{"assertions":[{"text":"a","passed":true,"evidence":"x"}]}'
     g = parse_judge_json(raw, eval_id="e1", config="without_skill")
     assert g["eval_id"] == "e1"
@@ -91,7 +91,7 @@ def test_parse_judge_json_builds_grading() -> None:
 
 
 def test_parse_judge_json_strips_markdown_fence() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json strips markdown fence."""
     # The judge wraps its JSON in a ```json fence in practice.
     raw = '```json\n{"assertions":[{"text":"a","passed":true,"evidence":"x"}]}\n```'
     g = parse_judge_json(raw, eval_id="e1", config="with_skill")
@@ -99,7 +99,7 @@ def test_parse_judge_json_strips_markdown_fence() -> None:
 
 
 def test_parse_judge_json_strips_prose_preamble() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json strips prose preamble."""
     raw = 'Here is my grading:\n{"assertions":[{"text":"a","passed":false,"evidence":"y"}]}\nDone.'
     g = parse_judge_json(raw, eval_id="e1", config="with_skill")
     assert g["assertions"][0]["passed"] is False
@@ -107,13 +107,13 @@ def test_parse_judge_json_strips_prose_preamble() -> None:
 
 
 def test_parse_judge_json_no_object_raises() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json no object raises."""
     with pytest.raises(ValueError, match="no JSON object"):
         parse_judge_json("no json here", eval_id="e1", config="with_skill")
 
 
 def test_parse_judge_json_ignores_prose_braces_before_object() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json ignores prose braces before object."""
     # Prose containing stray braces (e.g. echoing a {PLACEHOLDER}) must not derail the
     # extraction — the real assertions object is found regardless.
     raw = (
@@ -125,7 +125,7 @@ def test_parse_judge_json_ignores_prose_braces_before_object() -> None:
 
 
 def test_parse_judge_json_coerces_quoted_false_to_false() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json coerces quoted false to false."""
     # bool("false") is True in Python — a judge that quotes the value must not flip
     # a failing assertion to passed.
     raw = '{"assertions":[{"text":"a","passed":"false","evidence":"e"}]}'
@@ -134,7 +134,7 @@ def test_parse_judge_json_coerces_quoted_false_to_false() -> None:
 
 
 def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
-    """Test the expected behavior."""
+    """Verify parse judge json coerces quoted true to true."""
     raw = '{"assertions":[{"text":"a","passed":"true","evidence":"e"}]}'
     g = parse_judge_json(raw, eval_id="e1", config="with_skill")
     assert g["assertions"][0]["passed"] is True
@@ -146,7 +146,7 @@ def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
 
 
 def test_grade_run_timeout_records_error_not_raises() -> None:
-    """Test the expected behavior."""
+    """Verify grade run timeout records error not raises."""
     # A hung judge must be recorded as a graded error, not crash the whole arm.
     agent = FakeAgent(raises=subprocess.TimeoutExpired(cmd="claude", timeout=1))
 
@@ -157,7 +157,7 @@ def test_grade_run_timeout_records_error_not_raises() -> None:
 
 
 def test_grade_run_assertion_count_mismatch_is_error() -> None:
-    """Test the expected behavior."""
+    """Verify grade run assertion count mismatch is error."""
     # The judge drops an assertion → misaligned response treated as unparseable.
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "e"}]})
     agent = FakeAgent(stdout=json.dumps({"result": inner}))
@@ -168,7 +168,7 @@ def test_grade_run_assertion_count_mismatch_is_error() -> None:
 
 
 def test_grade_run_happy_path() -> None:
-    """Test the expected behavior."""
+    """Verify grade run happy path."""
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "ok"}]})
     agent = FakeAgent(stdout=json.dumps({"result": inner}))
     g = grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill", agent=agent)
@@ -176,7 +176,7 @@ def test_grade_run_happy_path() -> None:
 
 
 def test_grade_run_does_not_mask_judge_infra_error() -> None:
-    """Test the expected behavior."""
+    """Verify grade run does not mask judge infra error."""
     # An infra-level judge failure (missing host CLI, auth, rate limit) reaches
     # grade_run as RuntimeError from agent.judge (run_host_judge normalizes a missing
     # binary's FileNotFoundError to RuntimeError). grade_run must NOT catch it — no fake
@@ -188,7 +188,7 @@ def test_grade_run_does_not_mask_judge_infra_error() -> None:
 
 
 def test_grade_run_passes_model_and_timeout_to_agent() -> None:
-    """Test the expected behavior."""
+    """Verify grade run passes model and timeout to agent."""
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "ok"}]})
     agent = FakeAgent(stdout=json.dumps({"result": inner}))
 
@@ -210,7 +210,7 @@ def test_grade_run_passes_model_and_timeout_to_agent() -> None:
 
 
 def test_build_judge_prompt_injects_process_facts() -> None:
-    """Test the expected behavior."""
+    """Verify build judge prompt injects process facts."""
     prompt = build_judge_prompt(
         ["uses writing-prompts"],
         tree="x",
@@ -224,7 +224,7 @@ def test_build_judge_prompt_injects_process_facts() -> None:
 
 
 def test_build_judge_prompt_omits_process_section_when_empty() -> None:
-    """Test the expected behavior."""
+    """Verify build judge prompt omits process section when empty."""
     prompt = build_judge_prompt(
         ["a"],
         tree="x",
@@ -236,14 +236,14 @@ def test_build_judge_prompt_omits_process_section_when_empty() -> None:
 
 
 def test_grade_run_passes_process_facts_into_prompt() -> None:
-    """Test the expected behavior."""
+    """Verify grade run passes process facts into prompt."""
     captured = {}
 
     class _Agent:
-        """Represent _Agent."""
+        """Store agent data."""
 
         def judge(self: object, prompt: object, *, model: object, timeout: object = 300) -> object:
-            """Handle judge."""
+            """Judge."""
             captured["prompt"] = prompt
             return json.dumps(
                 {

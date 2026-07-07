@@ -68,7 +68,7 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
-    """Handle _validate_harness_args."""
+    """Validate harness argument strings from configuration."""
     if harness_args is None:
         return []
     for arg in harness_args:
@@ -181,7 +181,7 @@ _OPENCODE_CONFIG_JSON = (
 
 
 class OpenCodeAgent(BaseAgent):
-    """Represent OpenCodeAgent."""
+    """Store open code agent data."""
 
     id = "opencode"
     guest_home = "/root"
@@ -283,17 +283,17 @@ class OpenCodeAgent(BaseAgent):
 
     @staticmethod
     def credential_error() -> str | None:
-        """Document the behavior."""
+        """Return a credential preflight error message when credentials are missing."""
         if any(os.environ.get(v) for v in AUTH_ENV_VARS):
             return None
         return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 
     def version(self: object) -> str:
-        """Handle version."""
+        """Return the agent CLI version string."""
         return self._version
 
     def artifact_dirs(self: object) -> list[str]:
-        """Handle artifact_dirs."""
+        """Return guest directories that may contain agent-authored artifacts."""
         # OpenCode discovers (and the agent scaffolds) personal skills under
         # $HOME/.config/opencode/skills — outside the workdir mount. Snapshot it so a skill
         # the agent writes here reaches the judge; the staged skills drop out of the
@@ -301,7 +301,7 @@ class OpenCodeAgent(BaseAgent):
         return [f"{self.guest_home}/.config/opencode/skills"]
 
     def guest_env(self: object) -> dict:
-        """Handle guest_env."""
+        """Return environment variables passed to guest agent commands."""
         # HOME so OpenCode finds its config dir; TZ=UTC pins the guest clock to the
         # zone the host computes {TODAY} in. EVALSPEC_OPENCODE_VERSION feeds the
         # provision script's `npm i -g opencode-ai@${EVALSPEC_OPENCODE_VERSION}` at
@@ -313,7 +313,7 @@ class OpenCodeAgent(BaseAgent):
         }
 
     def secrets(self: object) -> list:
-        """Handle secrets."""
+        """Return secret values that must be redacted from logs."""
         from microsandbox import Secret
 
         allow_host = _PROVIDER_HOSTS[
@@ -335,7 +335,7 @@ class OpenCodeAgent(BaseAgent):
         detect_skill: object,
         harness_args: list[str] | None = None,
     ) -> list[str]:
-        """Handle build_command."""
+        """Build the guest command used to invoke the agent."""
         if "/" not in model:
             raise ValueError(
                 f"OpenCode needs a provider-qualified model (e.g. 'google/gemini-3.5-flash'), "
@@ -360,7 +360,7 @@ class OpenCodeAgent(BaseAgent):
         ]
 
     async def provision(self: object, sb: object) -> None:
-        """Handle provision."""
+        """Install the agent CLI and credentials inside the guest."""
         res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
@@ -368,7 +368,7 @@ class OpenCodeAgent(BaseAgent):
             )
 
     async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
-        """Handle stage_project_assets."""
+        """Copy project-local assets needed by the guest agent."""
         # OpenCode auto-discovers personal skills from $HOME/.config/opencode/skills/<skill>/
         # and project skills from <project>/.opencode/skills/<skill>/. Staging to the
         # personal location guarantees discovery regardless of the agent's cwd.
@@ -410,7 +410,7 @@ class OpenCodeAgent(BaseAgent):
         extra_env: dict | None = None,
         timeout: int = 600,
     ) -> RunResult:
-        """Handle invoke."""
+        """Run one prompt through the agent inside the guest."""
         from microsandbox.errors import MicrosandboxError
 
         cmd = self.build_command(

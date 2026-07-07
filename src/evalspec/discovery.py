@@ -20,58 +20,58 @@ from evalspec import mdformat, schema
 
 @dataclass
 class EvalCase:
-    """Represent EvalCase."""
+    """Store eval case data."""
 
     skill_dir: Path
     eval: dict  # one per-slug dict from load_suite_dir: {slug, prompt, assertions, seed?}
 
     @property
     def skill(self: object) -> str:
-        """Handle skill."""
+        """Return the skill name for this discovered case."""
         # The skill-dir name — the suite identity used for artifact paths, test ids,
         # and `[tool.evalspec.skills.<name>]` override matching.
         return self.skill_dir.name
 
     @property
     def slug(self: object) -> str:
-        """Handle slug."""
+        """Return the eval slug for this discovered case."""
         return self.eval["slug"]
 
     @property
     def eval_id(self: object) -> str:
-        """Handle eval_id."""
+        """Return the stable eval identifier used in reports."""
         return self.slug  # artifact paths read eval-<eval_id>/
 
     @property
     def param_id(self: object) -> str:
-        """Handle param_id."""
+        """Return the pytest parameter id for this case."""
         return f"{self.skill}-{self.slug}"
 
     @property
     def prompt(self: object) -> str:
-        """Handle prompt."""
+        """Return the prompt text for this discovered case."""
         return self.eval["prompt"]
 
     @property
     def assertions(self: object) -> list[str]:
-        """Handle assertions."""
+        """Return assertion text for this discovered case."""
         return self.eval["assertions"]
 
     @property
     def seed(self: object) -> list[dict]:
-        """Handle seed."""
+        """Return seed turns for this discovered case."""
         return self.eval.get("seed", [])
 
     @property
     def fixtures_dir(self: object) -> Path | None:
-        """Handle fixtures_dir."""
+        """Return the fixtures directory for this eval when present."""
         d = self.skill_dir / "evals" / self.slug / "fixtures"
         return d if d.is_dir() else None
 
 
 @dataclass
 class TriggerCase:
-    """Represent TriggerCase."""
+    """Store trigger case data."""
 
     skill_dir: Path
     repo_root: Path  # repo root staged for real routing (plugin + local skills)
@@ -80,12 +80,12 @@ class TriggerCase:
 
     @property
     def skill(self: object) -> str:
-        """Handle skill."""
+        """Return the skill name for this discovered case."""
         return self.skill_dir.name  # directory name — for artifact paths and test ids
 
     @property
     def param_id(self: object) -> str:
-        """Handle param_id."""
+        """Return the pytest parameter id for this case."""
         return f"{self.skill}-{self.query['slug']}"
 
 
@@ -118,7 +118,7 @@ def pyproject_table(repo_root: Path) -> dict:
 
 
 def _pyproject_eval_roots(repo_root: Path) -> list[str] | None:
-    """Handle _pyproject_eval_roots."""
+    """Read eval root paths from pyproject configuration."""
     roots = pyproject_table(repo_root).get("eval_roots")
     if roots is None:
         return None
@@ -158,11 +158,11 @@ class EnvConfig:
     script_path: str | None = None
 
     def __bool__(self: object) -> bool:
-        """Handle __bool__."""
+        """Return whether the preflight result contains an error."""
         return self.base_image is not None or bool(self.script)
 
     def digest(self: object) -> str:
-        """Handle digest."""
+        """Return a stable digest for environment snapshot caching."""
         if not self:
             return ""
         payload = (self.base_image or "").encode() + b"\0" + self.script
@@ -224,7 +224,7 @@ def _skill_dirs(repo_root: Path, eval_roots: list[str] | None = None) -> list[Pa
 
 
 def discover_eval_cases(repo_root: Path, eval_roots: list[str] | None = None) -> list[EvalCase]:
-    """Handle discover_eval_cases."""
+    """Discover Markdown-authored eval cases from configured roots."""
     cases: list[EvalCase] = []
     for skill_dir in _skill_dirs(repo_root, eval_roots):
         evals_dir = skill_dir / "evals"
@@ -256,7 +256,7 @@ def discover_eval_cases(repo_root: Path, eval_roots: list[str] | None = None) ->
 def discover_trigger_cases(
     repo_root: Path, eval_roots: list[str] | None = None
 ) -> list[TriggerCase]:
-    """Handle discover_trigger_cases."""
+    """Discover trigger-routing cases from configured roots."""
     cases: list[TriggerCase] = []
     for skill_dir in _skill_dirs(repo_root, eval_roots):
         evals_dir = skill_dir / "evals"

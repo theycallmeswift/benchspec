@@ -16,7 +16,7 @@ CORPUS_PATH = Path(__file__).resolve().parent / "binder_corpus.yaml"
 
 
 def _load_corpus(path: Path) -> list[dict]:
-    """Test the expected behavior."""
+    """Load corpus."""
     raw = yaml.safe_load(path.read_text())
     corpus = []
     for checker, texts in raw["binds"].items():
@@ -99,7 +99,7 @@ def test_entry_shapes() -> None:
 
 
 def test_no_persistence_entry_is_bind() -> None:
-    """Test the expected behavior."""
+    """Verify no persistence entry is bind."""
     persistence_entries = [e for e in CORPUS if e["cohort"] == "persistence"]
     assert persistence_entries, "Corpus must have at least some persistence entries"
     for e in persistence_entries:
@@ -128,7 +128,7 @@ def test_skill_invoked_binds_present() -> None:
 
 
 def test_has_persistence_and_semantic_punts() -> None:
-    """Test the expected behavior."""
+    """Verify has persistence and semantic punts."""
     punt_cohorts = {e["cohort"] for e in CORPUS if e["gold"] == "punt"}
     assert "persistence" in punt_cohorts, "Corpus must have persistence punt entries"
     assert "semantic" in punt_cohorts, "Corpus must have semantic punt entries"
@@ -142,7 +142,7 @@ def test_derive_text_safe_for_skill_invoked() -> None:
 
 
 def test_para_compound_punts_with_decomposed_children() -> None:
-    """Test the expected behavior."""
+    """Verify para compound punts with decomposed children."""
     flat_para = [e for e in CORPUS if "contains all seven numbered PARA directories" in e["text"]]
     para_children = [
         e
@@ -162,7 +162,7 @@ def test_para_compound_punts_with_decomposed_children() -> None:
 
 
 def test_index_compound_punts_with_decomposed_children() -> None:
-    """Test the expected behavior."""
+    """Verify index compound punts with decomposed children."""
     flat_index = [
         e
         for e in CORPUS
