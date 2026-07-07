@@ -61,6 +61,7 @@ def run(
     paths: list[Path] | None = None,
     *,
     model: str = DEFAULT_MODEL,
+    verify_findings: bool = False,
     verify_model: str | None = None,
     max_lines: int = DEFAULT_CHUNK_LINES,
 ) -> int:
@@ -69,7 +70,10 @@ def run(
     Args:
         paths: Optional source paths to lint.
         model: Gemini detector model.
-        verify_model: Optional Gemini model for second-pass verification.
+        verify_findings: Whether to run second-pass verification.
+        verify_model: Optional Gemini model for second-pass verification. The
+            detector model is used when verification is enabled without an
+            override.
         max_lines: Maximum source lines per model chunk.
 
     Returns:
@@ -88,6 +92,7 @@ def run(
             policy_instructions=POLICY_INSTRUCTIONS,
             api_key=api_key,
             model=model,
+            verify_findings=verify_findings,
             verify_model=verify_model,
             max_lines=max_lines,
         )
@@ -107,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="style_lint")
     parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--verify-findings", action="store_true")
     parser.add_argument("--verify-model")
     parser.add_argument("--max-lines", type=int, default=DEFAULT_CHUNK_LINES)
     args = parser.parse_args(argv)
@@ -114,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     return run(
         list(args.paths) or None,
         model=args.model,
+        verify_findings=args.verify_findings,
         verify_model=args.verify_model,
         max_lines=args.max_lines,
     )

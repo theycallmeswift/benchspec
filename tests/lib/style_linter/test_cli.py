@@ -6,16 +6,15 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from tests.lib.style_linter._helpers import cli, repo_root
 
-
-def test_cli_owns_repo_specific_rules_prompt_and_default_paths() -> None:
+def test_cli_owns_repo_specific_rules_prompt_and_default_paths(
+    style_lint_cli: ModuleType,
+) -> None:
     """Keep evalspec-specific lint policy in the repository script."""
-    style_lint_cli = cli()
-
     assert style_lint_cli.DEFAULT_PATHS == (
         Path("src"),
         Path("tests"),
@@ -36,10 +35,8 @@ def test_cli_owns_repo_specific_rules_prompt_and_default_paths() -> None:
     assert "Ruff" not in style_lint_cli.POLICY_INSTRUCTIONS
 
 
-def test_cli_rules_cover_semantic_block_newlines() -> None:
+def test_cli_rules_cover_semantic_block_newlines(style_lint_cli: ModuleType) -> None:
     """Keep readability spacing as caller-owned style policy."""
-    style_lint_cli = cli()
-
     rules = {rule.id: rule.description for rule in style_lint_cli.RULES}
 
     assert "semantic-block-newlines" in rules
@@ -49,9 +46,9 @@ def test_cli_rules_cover_semantic_block_newlines() -> None:
 def test_cli_run_skips_cleanly_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
 ) -> None:
     """Skip advisory lint cleanly when the Gemini API key is absent."""
-    style_lint_cli = cli()
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     exit_code = style_lint_cli.run()
@@ -65,13 +62,14 @@ def test_cli_run_skips_cleanly_without_gemini_api_key(
 
 def test_cli_script_runs_from_makefile_entry_path_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
+    repo_root: Path,
 ) -> None:
     """Support direct `python bin/linters/style_lint.py` execution."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     result = subprocess.run(
         [sys.executable, "bin/linters/style_lint.py"],
-        cwd=repo_root(),
+        cwd=repo_root,
         check=False,
         capture_output=True,
         text=True,
@@ -86,9 +84,9 @@ def test_cli_run_catches_malformed_model_output_and_stays_advisory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
 ) -> None:
     """Soft-fail model parse errors because custom lint is advisory."""
-    style_lint_cli = cli()
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n")
 
@@ -112,9 +110,9 @@ def test_cli_run_prints_findings_and_stays_advisory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
 ) -> None:
     """Print findings in path-line-column format without failing the command."""
-    style_lint_cli = cli()
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n")
     response = json.dumps(
@@ -147,13 +145,13 @@ def test_cli_run_prints_findings_and_stays_advisory(
     assert "Use a descriptive binding name." in captured.out
 
 
-def test_cli_verify_model_can_filter_findings_when_enabled(
+def test_cli_verify_findings_uses_verify_model_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
 ) -> None:
     """Allow optional second-pass verification to drop detector findings."""
-    style_lint_cli = cli()
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n")
     calls: list[str] = []
@@ -182,7 +180,11 @@ def test_cli_verify_model_can_filter_findings_when_enabled(
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(style_lint_cli.style_lint, "call_gemini", _call_gemini)
 
-    exit_code = style_lint_cli.run(paths=[source], verify_model="gemini-verifier")
+    exit_code = style_lint_cli.run(
+        paths=[source],
+        verify_findings=True,
+        verify_model="gemini-verifier",
+    )
 
     captured = capsys.readouterr()
 
@@ -191,12 +193,55 @@ def test_cli_verify_model_can_filter_findings_when_enabled(
     assert captured.out == ""
 
 
-def test_cli_verify_model_is_not_called_by_default(
+def test_cli_verify_findings_defaults_to_detector_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
 ) -> None:
-    """Keep stronger-model verification opt-in."""
-    style_lint_cli = cli()
+    """Use the detector model for verification when no override is provided."""
+    source = tmp_path / "sample.py"
+    source.write_text("x = 1\n")
+    calls: list[str] = []
+    detector_response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+    verifier_response = json.dumps({"keep_indexes": []})
+
+    def _call_gemini(**kwargs: object) -> str:
+        calls.append(str(kwargs["model"]))
+        if len(calls) == 2:
+            return verifier_response
+        return detector_response
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(style_lint_cli.style_lint, "call_gemini", _call_gemini)
+
+    exit_code = style_lint_cli.run(paths=[source], verify_findings=True)
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert calls == [style_lint_cli.DEFAULT_MODEL, style_lint_cli.DEFAULT_MODEL]
+    assert captured.out == ""
+
+
+def test_cli_verify_model_does_not_enable_verification_by_itself(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    style_lint_cli: ModuleType,
+) -> None:
+    """Require --verify-findings to run the second model call."""
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n")
     calls: list[str] = []
@@ -208,7 +253,11 @@ def test_cli_verify_model_is_not_called_by_default(
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(style_lint_cli.style_lint, "call_gemini", _call_gemini)
 
-    exit_code = style_lint_cli.run(paths=[source])
+    exit_code = style_lint_cli.run(
+        paths=[source],
+        verify_findings=False,
+        verify_model="gemini-verifier",
+    )
 
     assert exit_code == 0
     assert calls == [style_lint_cli.DEFAULT_MODEL]

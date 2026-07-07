@@ -104,7 +104,9 @@ docs/style/development.md
 
 - **Stronger-model verification is optional, not required.**
   - Do not require verification with a more powerful model in `make lint:custom`; the target should stay simple, relatively fast, and cheap.
-  - Provide an optional flag such as `--verify-model gemini-3.5-flash` for manual experiments or PR-review workflows that want confirmation.
+  - Provide an optional `--verify-findings` flag for manual experiments or
+    PR-review workflows that want confirmation. `--verify-model` only selects
+    the verification model; when omitted, verification uses the detector model.
   - Verification, when enabled, receives the original input plus Gemini 3.1 Flash Lite findings and may drop or amend findings before output.
   - Verification remains advisory and should not be required by local fast lint or required CI in the first rollout.
 

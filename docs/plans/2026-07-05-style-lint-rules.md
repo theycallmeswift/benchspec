@@ -122,8 +122,9 @@ def test_call_gemini_rejects_malformed_api_payload_shapes(monkeypatch): ...
 def test_cli_run_skips_cleanly_without_gemini_api_key(monkeypatch, capsys): ...
 def test_cli_run_catches_malformed_model_output_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
 def test_cli_run_prints_findings_and_stays_advisory(tmp_path, monkeypatch, capsys): ...
-def test_cli_verify_model_can_filter_findings_when_enabled(tmp_path, monkeypatch, capsys): ...
-def test_cli_verify_model_is_not_called_by_default(tmp_path, monkeypatch): ...
+def test_cli_verify_findings_uses_verify_model_when_enabled(tmp_path, monkeypatch, capsys): ...
+def test_cli_verify_findings_defaults_to_detector_model(tmp_path, monkeypatch, capsys): ...
+def test_cli_verify_model_does_not_enable_verification_by_itself(tmp_path, monkeypatch): ...
 ```
 
 Use inline `tmp_path` file writers. Monkeypatch the Gemini call function so tests never require network access or `GEMINI_API_KEY` except where intentionally checking the skip path.
@@ -228,14 +229,14 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult: ...
 
 The runner owns the ordered framework pipeline: collect files, chunk source, build the prompt with the framework default system prompt plus caller policy, call Gemini, parse findings, optionally verify findings, format diagnostics, and return warnings instead of raising advisory model errors.
 
-Implement `run(paths: list[Path] | None = None, *, model: str = DEFAULT_MODEL, verify_model: str | None = None) -> int` and `main(argv: list[str] | None = None) -> int`.
+Implement `run(paths: list[Path] | None = None, *, model: str = DEFAULT_MODEL, verify_findings: bool = False, verify_model: str | None = None) -> int` and `main(argv: list[str] | None = None) -> int`.
 
 Required behavior:
 - if `GEMINI_API_KEY` is absent, print a clear skip message and return `0`;
 - print findings as `path:line:col: rule-id message`;
 - return `0` even when findings exist;
 - catch Gemini transport errors, malformed JSON, unknown rule IDs, and malformed finding references; print one warning line and return `0` because `make lint:custom` is advisory;
-- accept `--model`, `--verify-model`, and optional path arguments.
+- accept `--model`, `--verify-findings`, `--verify-model`, and optional path arguments.
 
 - [ ] **Step 6: Add repository-specific CLI**
 
@@ -388,6 +389,6 @@ Skip this commit if there are no verification fixes.
 
 ## Self-Review
 
-- Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.1 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
+- Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.1 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification gate/model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
 - Placeholder scan: no `TBD`, `TODO`, vague "add tests", or undefined task dependencies remain.
 - Type consistency: `Rule`, `SourceChunk`, `Finding`, `collect_python_files`, `chunk_source_files`, `build_detector_prompt`, `parse_findings`, `verify_findings`, `format_findings`, `run`, and `main` names are consistent across tasks.

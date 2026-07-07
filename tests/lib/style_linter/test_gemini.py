@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import json
+from types import ModuleType
 
 import pytest
-
-from tests.lib.style_linter._helpers import framework
 
 
 def test_call_gemini_rejects_malformed_api_payload_shapes(
     monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
 ) -> None:
     """Reject partial Gemini payloads that omit the expected content shape."""
-    style_lint = framework()
 
     class _Response:
         """Minimal context manager response for urllib stubs."""
@@ -44,13 +43,13 @@ def test_call_gemini_rejects_malformed_api_payload_shapes(
 
     for payload in malformed_payloads:
         monkeypatch.setattr(
-            style_lint.urllib.request,
+            framework.urllib.request,
             "urlopen",
             lambda request, *, timeout, payload=payload: _Response(payload),
         )
 
         with pytest.raises(ValueError, match="Gemini response"):
-            style_lint.call_gemini(
+            framework.call_gemini(
                 prompt="{}",
                 api_key="test-key",
                 model="gemini-test",

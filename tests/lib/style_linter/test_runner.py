@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
-
-from tests.lib.style_linter._helpers import framework
 
 
 def test_run_advisory_lint_encapsulates_framework_call_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
 ) -> None:
     """Run the reusable lint pipeline from one config object."""
-    style_lint = framework()
     source = tmp_path / "sample.py"
     source.write_text("x = 1\n")
     response = json.dumps(
@@ -37,14 +36,14 @@ def test_run_advisory_lint_encapsulates_framework_call_order(
         calls.append(str(kwargs["model"]))
         return response
 
-    monkeypatch.setattr(style_lint, "call_gemini", _call_gemini)
+    monkeypatch.setattr(framework, "call_gemini", _call_gemini)
 
-    result = style_lint.run_advisory_lint(
-        style_lint.StyleLintConfig(
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
             paths=[source],
             default_paths=(Path("src"),),
             rules=[
-                style_lint.Rule(
+                framework.Rule(
                     id="descriptive-names",
                     description="Do not use single-letter bindings.",
                 )
