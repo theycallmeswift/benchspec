@@ -170,6 +170,80 @@ def test_cli_run_prints_no_findings_message(
     assert captured.out == "All checks passed!\n"
 
 
+def test_cli_run_filters_findings_to_changed_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Limit changeset output to diagnostics on touched lines."""
+    source = tmp_path / "sample.py"
+    source.write_text("old_name = 1\nnew_name = 2\n")
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "Old untouched finding.",
+                },
+                {
+                    "chunk_index": 0,
+                    "line": 2,
+                    "column": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "New touched finding.",
+                },
+            ]
+        }
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "call_gemini",
+        lambda **_kwargs: response,
+    )
+
+    exit_code = style_lint_cli.run(
+        paths=[source],
+        changed_lines={source.resolve(): {2}},
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "New touched finding." in captured.out
+    assert "Old untouched finding." not in captured.out
+
+
+def test_changed_lines_from_unified_diff(style_lint_cli: ModuleType) -> None:
+    """Parse added-line ranges from a zero-context unified diff."""
+    diff_text = "\n".join(
+        [
+            "diff --git a/sample.py b/sample.py",
+            "--- a/sample.py",
+            "+++ b/sample.py",
+            "@@ -1 +1,2 @@",
+            "-old_name = 1",
+            "+new_name = 1",
+            "+other_name = 2",
+            "diff --git a/docs/readme.md b/docs/readme.md",
+            "--- a/docs/readme.md",
+            "+++ b/docs/readme.md",
+            "@@ -1 +1 @@",
+            "-old",
+            "+new",
+        ]
+    )
+
+    changed_lines = style_lint_cli.changed_lines_from_unified_diff(diff_text)
+
+    assert changed_lines == {Path("sample.py").resolve(): {1, 2}}
+
+
 def test_cli_verify_findings_uses_verify_model_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

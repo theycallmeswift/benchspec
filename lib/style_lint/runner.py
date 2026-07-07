@@ -29,6 +29,7 @@ class StyleLintConfig:
     policy_instructions: str
     api_key: str
     model: str
+    changed_lines: dict[Path, set[int]] | None = None
     verify_findings: bool = False
     verify_model: str | None = None
     max_lines: int = 120
@@ -86,6 +87,11 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
                 model=config.verify_model or config.model,
                 system_prompt=config.system_prompt,
             )
+        if config.changed_lines is not None:
+            findings = _findings_on_changed_lines(
+                findings=findings,
+                changed_lines=config.changed_lines,
+            )
     except (
         OSError,
         TimeoutError,
@@ -110,6 +116,22 @@ def _call_gemini(**kwargs: object) -> str:
     """Call the package-level Gemini transport for easy test stubbing."""
     style_lint = importlib.import_module("lib.style_lint")
     return style_lint.call_gemini(**kwargs)
+
+
+def _findings_on_changed_lines(
+    *,
+    findings: list[Finding],
+    changed_lines: dict[Path, set[int]],
+) -> list[Finding]:
+    """Return findings whose source line was touched by a changeset."""
+    normalized_changes = {
+        path.resolve(): lines for path, lines in changed_lines.items() if lines
+    }
+    return [
+        finding
+        for finding in findings
+        if finding.line in normalized_changes.get(finding.path.resolve(), set())
+    ]
 
 
 def _chunk_batches(chunks: list[SourceChunk], *, size: int) -> list[list[SourceChunk]]:
