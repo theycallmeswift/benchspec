@@ -4,7 +4,7 @@
 
 **Goal:** Remove Ruff file-scoped ignores from `pyproject.toml` while keeping the canonical Ruff lint command green.
 
-**Architecture:** Keep PR #8's enforceable Ruff coverage, but remove baseline-heavy rule families from `select` until their existing findings are cleaned up. This preserves a no-file-exceptions lint contract without weakening selected rules for new files.
+**Architecture:** Keep PR #8's selected Ruff families, but move existing baseline debt out of `[tool.ruff.lint.per-file-ignores]` into a single documented `ignore` list. This preserves a no-file-exceptions lint contract and avoids a broad, behavior-neutral rewrite of thousands of existing docstring, annotation, and line-length findings.
 
 **Tech Stack:** Python, Ruff, uv, Makefile.
 
@@ -26,37 +26,49 @@ uv run ruff check . --config 'lint.per-file-ignores={}'
 
 Expected: FAIL with existing baseline findings such as `ANN001`, `ANN201`, `D103`, and `E501`.
 
-- [ ] **Step 2: Replace `[tool.ruff.lint.per-file-ignores]` with an enforceable rule subset**
+- [ ] **Step 2: Replace `[tool.ruff.lint.per-file-ignores]` with rule-level ignores**
 
-Edit `pyproject.toml` so `[tool.ruff.lint]` selects only rules that pass across the current repository without file-scoped exceptions:
+Edit `pyproject.toml` so `[tool.ruff.lint]` contains this list immediately after `select`:
 
 ```toml
-select = [
-    "E4",     # pycodestyle import/name errors that are clean today.
-    "E7",     # pycodestyle statement errors that are clean today.
-    "E9",     # pycodestyle runtime-adjacent syntax errors.
-    "F",      # Pyflakes: undefined names, unused imports, and invalid constructs.
-    "I",      # isort: stdlib, third-party, local import grouping and ordering.
-    "UP",     # pyupgrade: modern Python syntax for the supported version range.
-    "FA",     # flake8-future-annotations: require postponed annotations.
-    "TID",    # flake8-tidy-imports: absolute imports and banned import shapes.
-    "A",      # flake8-builtins: avoid shadowing Python builtins.
-    "RUF100", # Ruff: remove stale noqa suppressions while custom lint bans suppressions.
+ignore = [
+    "ANN001", # Existing baseline: missing argument annotations.
+    "ANN002", # Existing baseline: missing *args annotations.
+    "ANN003", # Existing baseline: missing **kwargs annotations.
+    "ANN201", # Existing baseline: missing public function return annotations.
+    "ANN202", # Existing baseline: missing private function return annotations.
+    "ANN204", # Existing baseline: missing special-method return annotations.
+    "ANN205", # Existing baseline: missing staticmethod return annotations.
+    "ANN401", # Existing baseline: dynamically typed Any annotations.
+    "B905",   # Existing baseline: zip calls without explicit strict mode.
+    "D100",   # Existing baseline: missing module docstrings in tests.
+    "D101",   # Existing baseline: missing class docstrings.
+    "D102",   # Existing baseline: missing method docstrings.
+    "D103",   # Existing baseline: missing function docstrings.
+    "D104",   # Existing baseline: missing package docstrings.
+    "D105",   # Existing baseline: missing magic-method docstrings.
+    "D107",   # Existing baseline: missing __init__ docstrings.
+    "D205",   # Existing baseline: missing blank line after docstring summary.
+    "D209",   # Existing baseline: closing triple quotes not on their own line.
+    "D301",   # Existing baseline: raw strings needed for backslashes.
+    "E501",   # Existing baseline: lines over 88 columns.
+    "PT011",  # Existing baseline: broad pytest.raises matches.
+    "PT018",  # Existing baseline: compound assertions in tests.
 ]
 ```
 
-Remove the entire `[tool.ruff.lint.per-file-ignores]` table. Do not add a global `ignore` list for the old baseline codes; unselected rule families should be reintroduced when their baseline debt is fixed.
+Remove the entire `[tool.ruff.lint.per-file-ignores]` table.
 
 - [ ] **Step 3: Verify Ruff has no per-file ignores and still passes**
 
 Run:
 
 ```bash
-! rg -n "per-file-ignores|\\[tool\\.ruff\\.lint\\.per-file-ignores\\]" pyproject.toml
+rg -n "per-file-ignores|\\[tool\\.ruff\\.lint\\.per-file-ignores\\]" pyproject.toml
 uv run ruff check .
 ```
 
-Expected: `rg` exits `1` because it finds no per-file ignore table, and Ruff prints `All checks passed!`.
+Expected: `rg` finds no per-file ignore table and Ruff prints `All checks passed!`.
 
 - [ ] **Step 4: Run the project verification commands**
 
