@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import ModuleType
 
 import pytest
-
-from tests.lib.style_linter._helpers import framework
 
 
 def test_collect_python_files_defaults_to_configured_roots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
 ) -> None:
     """Collect Python files from caller-provided default roots."""
-    style_lint = framework()
     src_file = tmp_path / "src/evalspec/example.py"
     src_file.parent.mkdir(parents=True, exist_ok=True)
     src_file.write_text("value = 1\n")
@@ -27,7 +26,7 @@ def test_collect_python_files_defaults_to_configured_roots(
 
     monkeypatch.chdir(tmp_path)
 
-    targets = style_lint.collect_python_files(
+    targets = framework.collect_python_files(
         None,
         default_paths=(Path("src"), Path("tests")),
     )
@@ -35,13 +34,15 @@ def test_collect_python_files_defaults_to_configured_roots(
     assert targets == [src_file.resolve(), tests_file.resolve()]
 
 
-def test_chunk_source_formats_numbered_source_lines(tmp_path: Path) -> None:
+def test_chunk_source_formats_numbered_source_lines(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
     """Format source chunks with stable source line numbers."""
-    style_lint = framework()
     source = tmp_path / "sample.py"
     source.write_text("one = 1\ntwo = 2\nthree = 3\n")
 
-    chunks = style_lint.chunk_source_files([source], max_lines=2)
+    chunks = framework.chunk_source_files([source], max_lines=2)
 
     assert [chunk.index for chunk in chunks] == [0, 1]
     assert chunks[0].line_start == 1

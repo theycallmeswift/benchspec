@@ -29,6 +29,7 @@ class StyleLintConfig:
     policy_instructions: str
     api_key: str
     model: str
+    verify_findings: bool = False
     verify_model: str | None = None
     max_lines: int = 120
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
@@ -70,14 +71,14 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             model=config.model,
         )
         findings = parse_findings(response, chunks=chunks, rules=config.rules)
-        if config.verify_model is not None:
+        if config.verify_findings:
             findings = verify_findings(
                 findings=findings,
                 chunks=chunks,
                 rules=config.rules,
                 instructions=config.policy_instructions,
                 api_key=config.api_key,
-                model=config.verify_model,
+                model=config.verify_model or config.model,
                 system_prompt=config.system_prompt,
             )
     except (
