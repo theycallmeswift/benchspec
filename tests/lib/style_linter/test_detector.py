@@ -102,6 +102,78 @@ def test_parse_findings_rejects_boolean_indexes_and_lines(
         )
 
 
+def test_parse_findings_defaults_missing_columns_to_one(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Keep otherwise valid model findings when the optional column is absent."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    chunks = framework.chunk_source_files([source], max_lines=80)
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line": 1,
+                    "rule_id": "descriptive-names",
+                    "message": "Use a descriptive binding name.",
+                }
+            ]
+        }
+    )
+
+    findings = framework.parse_findings(
+        response,
+        chunks=chunks,
+        rules=[
+            framework.Rule(
+                id="descriptive-names",
+                description="Do not use single-letter bindings.",
+            )
+        ],
+    )
+
+    assert findings[0].column == 1
+
+
+def test_parse_findings_uses_line_start_when_line_is_absent(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Keep model findings that use a line range instead of a single line."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\nother = 2\n")
+    chunks = framework.chunk_source_files([source], max_lines=80)
+    response = json.dumps(
+        {
+            "findings": [
+                {
+                    "chunk_index": 0,
+                    "line_start": 2,
+                    "line_end": 2,
+                    "rule_id": "semantic-block-newlines",
+                    "message": "Use a blank line between semantic blocks.",
+                }
+            ]
+        }
+    )
+
+    findings = framework.parse_findings(
+        response,
+        chunks=chunks,
+        rules=[
+            framework.Rule(
+                id="semantic-block-newlines",
+                description="Use blank lines to separate semantic blocks.",
+            )
+        ],
+    )
+
+    assert findings[0].line == 2
+    assert findings[0].column == 1
+
+
 def test_parse_findings_rejects_lines_outside_referenced_chunk(
     tmp_path: Path,
     framework: ModuleType,

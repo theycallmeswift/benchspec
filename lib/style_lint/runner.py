@@ -15,7 +15,7 @@ from lib.style_lint.detector import (
     parse_findings,
 )
 from lib.style_lint.source import chunk_source_files, collect_python_files
-from lib.style_lint.types import Finding, Rule
+from lib.style_lint.types import Finding, Rule, SourceChunk
 from lib.style_lint.verifier import verify_findings
 
 
@@ -32,6 +32,7 @@ class StyleLintConfig:
     verify_findings: bool = False
     verify_model: str | None = None
     max_lines: int = 120
+    chunk_batch_size: int = 8
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
 
@@ -59,18 +60,22 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             default_paths=config.default_paths,
         )
         chunks = chunk_source_files(targets, max_lines=config.max_lines)
-        prompt = build_detector_prompt(
-            chunks=chunks,
-            rules=config.rules,
-            instructions=config.policy_instructions,
-            system_prompt=config.system_prompt,
-        )
-        response = _call_gemini(
-            prompt=prompt,
-            api_key=config.api_key,
-            model=config.model,
-        )
-        findings = parse_findings(response, chunks=chunks, rules=config.rules)
+        findings: list[Finding] = []
+        for chunk_batch in _chunk_batches(chunks, size=config.chunk_batch_size):
+            prompt = build_detector_prompt(
+                chunks=chunk_batch,
+                rules=config.rules,
+                instructions=config.policy_instructions,
+                system_prompt=config.system_prompt,
+            )
+            response = _call_gemini(
+                prompt=prompt,
+                api_key=config.api_key,
+                model=config.model,
+            )
+            findings.extend(
+                parse_findings(response, chunks=chunks, rules=config.rules)
+            )
         if config.verify_findings:
             findings = verify_findings(
                 findings=findings,
@@ -105,3 +110,10 @@ def _call_gemini(**kwargs: object) -> str:
     """Call the package-level Gemini transport for easy test stubbing."""
     style_lint = importlib.import_module("lib.style_lint")
     return style_lint.call_gemini(**kwargs)
+
+
+def _chunk_batches(chunks: list[SourceChunk], *, size: int) -> list[list[SourceChunk]]:
+    """Split chunks into fixed-size batches."""
+    if size < 1:
+        raise ValueError("chunk_batch_size must be at least 1")
+    return [chunks[offset : offset + size] for offset in range(0, len(chunks), size)]
