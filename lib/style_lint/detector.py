@@ -110,8 +110,10 @@ def parse_findings(
 
         chunk_index = _strict_int(raw_finding.get("chunk_index"))
         line = _strict_int(raw_finding.get("line"))
-        column = _strict_int(raw_finding.get("column"))
-        if chunk_index is None or line is None or column is None:
+        if line is None:
+            line = _strict_int(raw_finding.get("line_start"))
+        column = _strict_int(raw_finding.get("column", 1))
+        if chunk_index is None or line is None:
             raise ValueError(f"Malformed finding reference: {raw_finding!r}")
 
         chunk = chunks_by_index.get(chunk_index)
