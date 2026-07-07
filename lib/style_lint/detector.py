@@ -118,9 +118,15 @@ def parse_findings(
         if chunk is None:
             raise ValueError(f"Malformed finding reference: {chunk_index!r}")
         if line < chunk.line_start or line > chunk.line_end:
-            raise ValueError(
-                f"Finding line {line} is outside chunk {chunk_index}"
+            chunk = _chunk_for_line_in_same_file(
+                chunks=chunks,
+                referenced_chunk=chunk,
+                line=line,
             )
+            if chunk is None:
+                raise ValueError(
+                    f"Finding line {line} is outside chunk {chunk_index}"
+                )
         if column < 1:
             raise ValueError(f"Malformed finding reference: {raw_finding!r}")
 
@@ -160,4 +166,20 @@ def _strict_int(value: object) -> int | None:
     """Return integer values while rejecting booleans."""
     if type(value) is int:
         return value
+    return None
+
+
+def _chunk_for_line_in_same_file(
+    *,
+    chunks: list[SourceChunk],
+    referenced_chunk: SourceChunk,
+    line: int,
+) -> SourceChunk | None:
+    """Return the same-file chunk containing a model-reported line."""
+    for chunk in chunks:
+        if (
+            chunk.path == referenced_chunk.path
+            and chunk.line_start <= line <= chunk.line_end
+        ):
+            return chunk
     return None

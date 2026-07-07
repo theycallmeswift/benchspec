@@ -102,7 +102,7 @@ def run(
         return 0
 
     if not result.diagnostics:
-        print("ok: no advisory style findings")
+        print("All checks passed!")
         return 0
 
     for line in result.diagnostics:
