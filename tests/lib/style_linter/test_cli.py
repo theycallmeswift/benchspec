@@ -145,6 +145,31 @@ def test_cli_run_prints_findings_and_stays_advisory(
     assert "Use a descriptive binding name." in captured.out
 
 
+def test_cli_run_prints_no_findings_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Confirm successful no-finding runs instead of staying silent."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "call_gemini",
+        lambda **_kwargs: json.dumps({"findings": []}),
+    )
+
+    exit_code = style_lint_cli.run(paths=[source])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == "ok: no advisory style findings\n"
+
+
 def test_cli_verify_findings_uses_verify_model_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -190,7 +215,7 @@ def test_cli_verify_findings_uses_verify_model_when_enabled(
 
     assert exit_code == 0
     assert calls == [style_lint_cli.DEFAULT_MODEL, "gemini-verifier"]
-    assert captured.out == ""
+    assert captured.out == "ok: no advisory style findings\n"
 
 
 def test_cli_verify_findings_defaults_to_detector_model(
@@ -233,7 +258,7 @@ def test_cli_verify_findings_defaults_to_detector_model(
 
     assert exit_code == 0
     assert calls == [style_lint_cli.DEFAULT_MODEL, style_lint_cli.DEFAULT_MODEL]
-    assert captured.out == ""
+    assert captured.out == "ok: no advisory style findings\n"
 
 
 def test_cli_verify_model_does_not_enable_verification_by_itself(

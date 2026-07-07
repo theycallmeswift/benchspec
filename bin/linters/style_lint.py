@@ -101,6 +101,10 @@ def run(
         print(f"warning: {result.warning}")
         return 0
 
+    if not result.diagnostics:
+        print("ok: no advisory style findings")
+        return 0
+
     for line in result.diagnostics:
         print(line)
 
