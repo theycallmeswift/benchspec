@@ -15,17 +15,25 @@ from lib.style_lint.runner import (
     run_advisory_lint,
 )
 from lib.style_lint.source import chunk_source_files, collect_python_files
-from lib.style_lint.types import Finding, Rule, SourceChunk
+from lib.style_lint.types import (
+    Finding,
+    GeminiResponse,
+    Rule,
+    SourceChunk,
+    UsageMetadata,
+)
 from lib.style_lint.verifier import verify_findings
 
 __all__ = [
     "DEFAULT_SYSTEM_PROMPT",
     "GEMINI_TIMEOUT_SECONDS",
     "Finding",
+    "GeminiResponse",
     "Rule",
     "SourceChunk",
     "StyleLintConfig",
     "StyleLintResult",
+    "UsageMetadata",
     "build_detector_prompt",
     "call_gemini",
     "chunk_source_files",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import urllib.error
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lib.style_lint.detector import (
@@ -15,7 +15,13 @@ from lib.style_lint.detector import (
     parse_findings,
 )
 from lib.style_lint.source import chunk_source_files, collect_python_files
-from lib.style_lint.types import Finding, Rule, SourceChunk
+from lib.style_lint.types import (
+    Finding,
+    GeminiResponse,
+    Rule,
+    SourceChunk,
+    UsageMetadata,
+)
 from lib.style_lint.verifier import verify_findings
 
 
@@ -44,6 +50,7 @@ class StyleLintResult:
     findings: list[Finding]
     diagnostics: list[str]
     warning: str | None = None
+    usage: UsageMetadata = field(default_factory=UsageMetadata)
 
 
 def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
@@ -62,6 +69,7 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         )
         chunks = chunk_source_files(targets, max_lines=config.max_lines)
         findings: list[Finding] = []
+        usage = UsageMetadata()
         for chunk_batch in _chunk_batches(chunks, size=config.chunk_batch_size):
             prompt = build_detector_prompt(
                 chunks=chunk_batch,
@@ -69,21 +77,24 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
                 instructions=config.policy_instructions,
                 system_prompt=config.system_prompt,
             )
-            response = _call_gemini(
-                prompt=prompt,
-                api_key=config.api_key,
-                model=config.model,
+            response = _response_parts(
+                _call_gemini(
+                    prompt=prompt,
+                    api_key=config.api_key,
+                    model=config.model,
+                )
             )
+            usage = _add_usage(usage, response.usage)
             findings.extend(
                 parse_findings(
-                    response,
+                    response.text,
                     chunks=chunks,
                     rules=config.rules,
                     drop_invalid=True,
                 )
             )
         if config.verify_findings:
-            findings = verify_findings(
+            verification = verify_findings(
                 findings=findings,
                 chunks=chunks,
                 rules=config.rules,
@@ -92,6 +103,8 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
                 model=config.verify_model or config.model,
                 system_prompt=config.system_prompt,
             )
+            findings = verification.findings
+            usage = _add_usage(usage, verification.usage)
         if config.changed_lines is not None:
             findings = _findings_on_changed_lines(
                 findings=findings,
@@ -114,13 +127,33 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     return StyleLintResult(
         findings=findings,
         diagnostics=format_findings(findings),
+        usage=usage,
     )
 
 
-def _call_gemini(**kwargs: object) -> str:
+def _call_gemini(**kwargs: object) -> object:
     """Call the package-level Gemini transport for easy test stubbing."""
     style_lint = importlib.import_module("lib.style_lint")
     return style_lint.call_gemini(**kwargs)
+
+
+def _response_parts(response: object) -> GeminiResponse:
+    """Normalize string stubs and real Gemini responses."""
+    if isinstance(response, GeminiResponse):
+        return response
+    if isinstance(response, str):
+        return GeminiResponse(text=response)
+    raise ValueError("Gemini response must be text or GeminiResponse")
+
+
+def _add_usage(left: UsageMetadata, right: UsageMetadata) -> UsageMetadata:
+    """Add two usage metadata values."""
+    return UsageMetadata(
+        requests=left.requests + right.requests,
+        prompt_tokens=left.prompt_tokens + right.prompt_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+        total_tokens=left.total_tokens + right.total_tokens,
+    )
 
 
 def _findings_on_changed_lines(

@@ -106,14 +106,17 @@ def run(
     )
     if result.warning is not None:
         print(f"warning: {result.warning}")
+        print_usage(result.usage)
         return 0
 
     if not result.diagnostics:
         print("All checks passed!")
+        print_usage(result.usage)
         return 0
 
     for line in result.diagnostics:
         print(line)
+    print_usage(result.usage)
 
     return 0
 
@@ -138,9 +141,24 @@ def main(argv: list[str] | None = None) -> int:
         paths,
         model=args.model,
         changed_lines=changed_lines,
-        verify_findings=args.verify_findings,
+        verify_findings=args.verify_findings or args.base is not None,
         verify_model=args.verify_model,
         max_lines=args.max_lines,
+    )
+
+
+def print_usage(usage: object) -> None:
+    """Print model usage metadata when real token counts are available."""
+    if not isinstance(usage, style_lint.UsageMetadata):
+        return
+    if usage.requests == 0:
+        return
+    print(
+        "usage: "
+        f"{usage.requests} requests, "
+        f"{usage.prompt_tokens} input tokens, "
+        f"{usage.output_tokens} output tokens, "
+        f"{usage.total_tokens} total tokens"
     )
 
 

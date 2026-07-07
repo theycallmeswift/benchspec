@@ -101,3 +101,52 @@ def test_call_gemini_uses_deterministic_generation_config(
         "responseMimeType": "application/json",
         "temperature": 0,
     }
+
+
+def test_call_gemini_returns_usage_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Expose Gemini usage metadata so callers can report token cost inputs."""
+
+    class _Response:
+        """Minimal context manager response for urllib stubs."""
+
+        def read(self) -> bytes:
+            """Return a valid Gemini payload with usage metadata."""
+            return json.dumps(
+                {
+                    "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+                    "usageMetadata": {
+                        "promptTokenCount": 11,
+                        "candidatesTokenCount": 7,
+                        "totalTokenCount": 18,
+                    },
+                }
+            ).encode("utf-8")
+
+        def __enter__(self) -> _Response:
+            """Enter the response context."""
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            """Exit the response context."""
+            return None
+
+    monkeypatch.setattr(
+        framework.urllib.request,
+        "urlopen",
+        lambda request, *, timeout: _Response(),
+    )
+
+    response = framework.call_gemini(
+        prompt="{}",
+        api_key="test-key",
+        model="gemini-test",
+        timeout=1.0,
+    )
+
+    assert response.text == "{}"
+    assert response.usage.prompt_tokens == 11
+    assert response.usage.output_tokens == 7
+    assert response.usage.total_tokens == 18

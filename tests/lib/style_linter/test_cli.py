@@ -171,6 +171,45 @@ def test_cli_run_prints_no_findings_message(
     assert captured.out == "All checks passed!\n"
 
 
+def test_cli_run_prints_usage_metadata_when_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Print token usage metadata after advisory results."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    result = style_lint_cli.style_lint.StyleLintResult(
+        findings=[],
+        diagnostics=[],
+        usage=style_lint_cli.style_lint.UsageMetadata(
+            requests=2,
+            prompt_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+        ),
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "run_advisory_lint",
+        lambda _config: result,
+    )
+
+    exit_code = style_lint_cli.run(paths=[source])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        "All checks passed!\n"
+        "usage: 2 requests, 100 input tokens, 20 output tokens, "
+        "120 total tokens\n"
+    )
+
+
 def test_cli_run_filters_findings_to_changed_lines(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -242,6 +281,7 @@ def test_cli_base_filters_run_to_changed_python_files(
     ) -> int:
         run_call["paths"] = paths
         run_call["changed_lines"] = kwargs["changed_lines"]
+        run_call["verify_findings"] = kwargs["verify_findings"]
         return 0
 
     monkeypatch.setattr(
@@ -257,6 +297,7 @@ def test_cli_base_filters_run_to_changed_python_files(
     assert run_call == {
         "paths": [source],
         "changed_lines": changed_lines,
+        "verify_findings": True,
     }
 
 
