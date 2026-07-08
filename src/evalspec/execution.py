@@ -38,16 +38,19 @@ JUDGE_MODEL = "sonnet"
 
 @dataclass
 class ArmOutcome:
-    grading: dict          # {"eval_id", "skill", "arm", "sample", "assertions": [...]}
-    errored: bool          # the agent run errored
+    """Store arm outcome data."""
+
+    grading: dict  # {"eval_id", "skill", "arm", "sample", "assertions": [...]}
+    errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
-    fired: bool = False     # informational: did the named skill get invoked this run?
+    fired: bool = False  # informational: did the named skill get invoked this run?
 
 
 @dataclass
 class _ArmRun:
     """Everything accumulated from running an arm in one VM session."""
+
     tree: str = ""
     contents: dict = field(default_factory=dict)
     shas: dict = field(default_factory=dict)
@@ -64,7 +67,8 @@ class _ArmRun:
     total_output_tokens: int = 0
 
 
-def _turn_transcript(*, prompt: str, result, tree: str, skill: str) -> dict:
+def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> dict:
+    """Render seeded turns and the prompt into an agent transcript."""
     record = {
         "turn": 1,
         "prompt": prompt,
@@ -84,32 +88,70 @@ def _turn_transcript(*, prompt: str, result, tree: str, skill: str) -> dict:
     return record
 
 
-def _grade_via_judge(*, assertions, tree, contents, shas, result_text, grade, agent,
-                     judge_model, eval_id, arm_name, pre_run_shas, process_facts=""):
+def _grade_via_judge(
+    *,
+    assertions: object,
+    tree: object,
+    contents: object,
+    shas: object,
+    result_text: object,
+    grade: object,
+    agent: object,
+    judge_model: object,
+    eval_id: object,
+    arm_name: object,
+    pre_run_shas: object,
+    process_facts: object = "",
+) -> object:
     """Judge-grade assertions; return (graded, judge_ms, judge_errored)."""
     t0 = time.perf_counter()
     judge_errored = False
     try:
         graded = grade(
-            assertions, tree, contents, shas, result_text, eval_id, arm_name,
-            agent=agent, model=judge_model, original_shas=pre_run_shas,
+            assertions,
+            tree,
+            contents,
+            shas,
+            result_text,
+            eval_id,
+            arm_name,
+            agent=agent,
+            model=judge_model,
+            original_shas=pre_run_shas,
             process_facts=process_facts,
         )
     except RuntimeError as e:
         # The judge CLI failed at the infra level (auth, rate limit, missing binary);
         # mark the arm errored so the benchmark drops it instead of scoring fake fails.
         judge_errored = True
-        graded = {"assertions": [
-            {"text": a, "passed": False, "evidence": f"JUDGE INFRA ERROR: {e}"}
-            for a in assertions
-        ]}
+        graded = {
+            "assertions": [
+                {"text": a, "passed": False, "evidence": f"JUDGE INFRA ERROR: {e}"}
+                for a in assertions
+            ]
+        }
     return graded, int((time.perf_counter() - t0) * 1000), judge_errored
 
 
-def _grade_mixed(*, assertions, tree, contents, shas, result_text, bind, grade, workdir,
-                 grade_context, agent, judge_model, eval_id, arm_name, pre_run_shas,
-                 process_facts=""):
-    """Grade each assertion on the host where a checker binds, else punt to the judge."""
+def _grade_mixed(
+    *,
+    assertions: object,
+    tree: object,
+    contents: object,
+    shas: object,
+    result_text: object,
+    bind: object,
+    grade: object,
+    workdir: object,
+    grade_context: object,
+    agent: object,
+    judge_model: object,
+    eval_id: object,
+    arm_name: object,
+    pre_run_shas: object,
+    process_facts: object = "",
+) -> object:
+    """Grade bound assertions locally and punt the rest to the judge."""
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
     bind_cache: dict[str, dict | None] = {}
@@ -134,36 +176,72 @@ def _grade_mixed(*, assertions, tree, contents, shas, result_text, bind, grade, 
 
     texts = [assertions[i] for i in judge_idx]
     graded, judge_ms, judge_errored = _grade_via_judge(
-        assertions=texts, tree=tree, contents=contents, shas=shas, result_text=result_text,
-        grade=grade, agent=agent, judge_model=judge_model, eval_id=eval_id,
-        arm_name=arm_name, pre_run_shas=pre_run_shas, process_facts=process_facts,
+        assertions=texts,
+        tree=tree,
+        contents=contents,
+        shas=shas,
+        result_text=result_text,
+        grade=grade,
+        agent=agent,
+        judge_model=judge_model,
+        eval_id=eval_id,
+        arm_name=arm_name,
+        pre_run_shas=pre_run_shas,
+        process_facts=process_facts,
     )
-    for i, entry in zip(judge_idx, graded["assertions"]):
+    for i, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[i] = entry
     return results, judge_ms, judge_errored
 
 
 async def _run_arm_turns(
-    session_factory, *, agent, snapshot, eval_id, arm_name, workdir, project,
-    model, effort, prompt, project_marker, skill, detect_skill,
-    arm_env=None, eval_set="", harness_args=None,
+    session_factory: object,
+    *,
+    agent: object,
+    snapshot: object,
+    eval_id: object,
+    arm_name: object,
+    workdir: object,
+    project: object,
+    model: object,
+    effort: object,
+    prompt: object,
+    project_marker: object,
+    skill: object,
+    detect_skill: object,
+    arm_env: object = None,
+    eval_set: object = "",
+    harness_args: object = None,
 ) -> _ArmRun:
+    """Execute every prompt turn for one eval arm."""
     # The whole VM lifecycle (boot → run → teardown) runs in ONE asyncio.run: the microVM
     # is bound to the loop it was created in. Grading runs afterward, on the host.
     run_acc = _ArmRun()
 
     async with session_factory(
-        agent=agent, snapshot=snapshot, eval_id=eval_id, config=arm_name,
-        host_workdir=workdir, host_repo_root=project, model=model, effort=effort,
-        skill=skill, arm=arm_name, project_marker=project_marker,
-        arm_env=arm_env, eval_set=eval_set, harness_args=harness_args,
+        agent=agent,
+        snapshot=snapshot,
+        eval_id=eval_id,
+        config=arm_name,
+        host_workdir=workdir,
+        host_repo_root=project,
+        model=model,
+        effort=effort,
+        skill=skill,
+        arm=arm_name,
+        project_marker=project_marker,
+        arm_env=arm_env,
+        eval_set=eval_set,
+        harness_args=harness_args,
     ) as run:
         # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
         # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
         # host side of the same mount.
         result = await run(
-            prompt, resume_session_id=None, detect_skill=detect_skill,
+            prompt,
+            resume_session_id=None,
+            detect_skill=detect_skill,
         )
 
         run_acc.total_duration_ms += result.duration_ms
@@ -182,7 +260,9 @@ async def _run_arm_turns(
         run_acc.tree, run_acc.contents, run_acc.shas = tree, contents, shas
         run_acc.result_text = result.result_text
         run_acc.trajectory = result.trajectory
-        run_acc.transcript.append(_turn_transcript(prompt=prompt, result=result, tree=tree, skill=skill))
+        run_acc.transcript.append(
+            _turn_transcript(prompt=prompt, result=result, tree=tree, skill=skill)
+        )
         run_acc.raw = result.raw
 
     return run_acc
@@ -201,10 +281,11 @@ def run_eval_arm(
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_model: str = JUDGE_MODEL,
-    session_factory=arm_session,
-    grade=grade_run,
-    bind=binder.bind,
+    session_factory: object = arm_session,
+    grade: object = grade_run,
+    bind: object = binder.bind,
 ) -> ArmOutcome:
+    """Run all cases for one eval arm and write result artifacts."""
     eval_id = eval_case.eval_id
     # Every downstream sink keys on the arm NAME string (artifact paths, grading["arm"],
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.
@@ -228,13 +309,23 @@ def run_eval_arm(
 
     arm_run = asyncio.run(
         _run_arm_turns(
-            session_factory, agent=agent, snapshot=snapshot, eval_id=eval_id,
-            arm_name=arm_name, workdir=workdir, project=project, model=arm.model,
-            effort=arm.effort, prompt=prompt, project_marker=project_marker,
-            skill=eval_case.skill, detect_skill=detect_skill,
+            session_factory,
+            agent=agent,
+            snapshot=snapshot,
+            eval_id=eval_id,
+            arm_name=arm_name,
+            workdir=workdir,
+            project=project,
+            model=arm.model,
+            effort=arm.effort,
+            prompt=prompt,
+            project_marker=project_marker,
+            skill=eval_case.skill,
+            detect_skill=detect_skill,
             # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
             # actually runs, never at collection (a deselected arm's secret is never read).
-            arm_env=expand_env(arm.env, os.environ), eval_set=eval_set,
+            arm_env=expand_env(arm.env, os.environ),
+            eval_set=eval_set,
             harness_args=arm.harness_args,
         )
     )
@@ -250,10 +341,18 @@ def run_eval_arm(
     # pre-run (above) so a date-bearing path checker grades against the real date.
     merged, judge_ms, judge_errored = _grade_mixed(
         assertions=graded_assertions,
-        tree=arm_run.tree, contents=arm_run.contents, shas=arm_run.shas,
+        tree=arm_run.tree,
+        contents=arm_run.contents,
+        shas=arm_run.shas,
         result_text=arm_run.result_text,
-        bind=bind, grade=grade, workdir=workdir, grade_context=grade_context,
-        agent=agent, judge_model=judge_model, eval_id=eval_id, arm_name=arm_name,
+        bind=bind,
+        grade=grade,
+        workdir=workdir,
+        grade_context=grade_context,
+        agent=agent,
+        judge_model=judge_model,
+        eval_id=eval_id,
+        arm_name=arm_name,
         pre_run_shas=pre_run_shas,
         process_facts=render_process_facts([arm_run.trajectory]),
     )
@@ -274,15 +373,18 @@ def run_eval_arm(
     # duration_ms = task time; judge_ms = grading time — separate so the benchmark can
     # decompose where the wall-clock goes (task vs judge).
     (run_dir / "timing.json").write_text(
-        json.dumps({
-            "duration_ms": arm_run.total_duration_ms,
-            "judge_ms": judge_ms,
-            "total_tokens": arm_run.total_tokens,
-            "cache_read_tokens": arm_run.total_cache_read,
-            "cache_creation_tokens": arm_run.total_cache_creation,
-            "input_tokens": arm_run.total_input_tokens,
-            "output_tokens": arm_run.total_output_tokens,
-        }) + "\n"
+        json.dumps(
+            {
+                "duration_ms": arm_run.total_duration_ms,
+                "judge_ms": judge_ms,
+                "total_tokens": arm_run.total_tokens,
+                "cache_read_tokens": arm_run.total_cache_read,
+                "cache_creation_tokens": arm_run.total_cache_creation,
+                "input_tokens": arm_run.total_input_tokens,
+                "output_tokens": arm_run.total_output_tokens,
+            }
+        )
+        + "\n"
     )
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
     (run_dir / "transcript.json").write_text(json.dumps(arm_run.transcript, indent=2) + "\n")
@@ -291,11 +393,12 @@ def run_eval_arm(
     # and is not persisted.
     if arm_run.raw:
         block = arm_run.raw if arm_run.raw.endswith("\n") else arm_run.raw + "\n"
-        (run_dir / "session.jsonl").write_text(
-            json.dumps({TURN_DELIM: 1}) + "\n" + block
-        )
+        (run_dir / "session.jsonl").write_text(json.dumps({TURN_DELIM: 1}) + "\n" + block)
     return ArmOutcome(
-        grading, errored, arm_run.total_duration_ms, arm_run.total_tokens,
+        grading,
+        errored,
+        arm_run.total_duration_ms,
+        arm_run.total_tokens,
         # `fired` is read back from the transcript, the one persisted home for the
         # per-turn `result.fired` — no redundant copy threaded through `_ArmRun`. An
         # errored arm can return before the single turn appends; treat an empty

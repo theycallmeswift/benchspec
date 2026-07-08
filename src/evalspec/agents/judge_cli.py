@@ -1,8 +1,8 @@
 """Shared host-`claude` judge call for agents that delegate grading to it.
 
 Both ClaudeCodeAgent and OpenCodeAgent shell out to `claude -p` on the host for grading
-so judging quality stays consistent across the matrix — task arms differ, grading
-should not. Centralizing the call (`run_host_judge`) and its failure check
+so judging quality stays consistent across the matrix — task arms differ, grading should
+not. Centralizing the call (`run_host_judge`) and its failure check
 (`raise_for_judge_cli_failure`) here means a third agent that also delegates can't
 reintroduce the masking bug by forgetting either.
 """
@@ -53,8 +53,7 @@ def raise_for_judge_cli_failure(proc: subprocess.CompletedProcess) -> None:
     if proc.returncode != 0:
         body = (proc.stderr or proc.stdout or "").strip()
         raise RuntimeError(
-            f"host claude CLI exited {proc.returncode}: "
-            f"{body[-1000:] or '(no output)'}"
+            f"host claude CLI exited {proc.returncode}: {body[-1000:] or '(no output)'}"
         )
     try:
         outer = json.loads(proc.stdout)

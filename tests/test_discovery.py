@@ -1,3 +1,5 @@
+"""Tests for discovery."""
+
 from pathlib import Path
 
 import pytest
@@ -19,7 +21,8 @@ def _trigger_md(skill_name: str, queries: list[str]) -> str:
     return "".join(lines)
 
 
-def _write_trigger_md(skill_dir: Path, queries: list[str], *, skill_name=None) -> Path:
+def _write_trigger_md(skill_dir: Path, queries: list[str], *, skill_name: object = None) -> Path:
+    """Write trigger md."""
     evals_dir = skill_dir / "evals"
     evals_dir.mkdir(parents=True, exist_ok=True)
     f = evals_dir / "trigger-evals.md"
@@ -28,20 +31,36 @@ def _write_trigger_md(skill_dir: Path, queries: list[str], *, skill_name=None) -
 
 
 class _FakeConfig:
-    def __init__(self, repo_root=None, rootpath=Path("/fallback/root")):
+    """Provide a fake config for tests."""
+
+    def __init__(
+        self: object,
+        repo_root: object = None,
+        rootpath: object = Path("/fallback/root"),
+    ) -> None:
+        """Initialize the instance."""
         self._repo_root = repo_root
         self.rootpath = rootpath
 
-    def getoption(self, name):
+    def getoption(self: object, name: object) -> object:
+        """Getoption."""
         return self._repo_root if name == "evalspec_repo_root" else None
 
 
-def _seed_slug_suite(tmp_path, skill="demo", evals=None, root="skills"):
-    """Write a suite of `evals/<slug>/prompt.md` dirs from {slug: (prompt, [assertions])}; returns its `evals/` dir."""
+def _seed_slug_suite(
+    tmp_path: object,
+    skill: object = "demo",
+    evals: object = None,
+    root: object = "skills",
+) -> object:
+    """Seed slug suite."""
     base = tmp_path / root / skill / "evals"
-    for slug, (prompt, assertions) in (evals or {
-        "alpha": ("do the thing", ["it did the thing"]),
-    }).items():
+    for slug, (prompt, assertions) in (
+        evals
+        or {
+            "alpha": ("do the thing", ["it did the thing"]),
+        }
+    ).items():
         d = base / slug
         d.mkdir(parents=True)
         lines = [f"- [ ] {a}" for a in assertions]
@@ -52,8 +71,11 @@ def _seed_slug_suite(tmp_path, skill="demo", evals=None, root="skills"):
     return base
 
 
-def _write_triggers(skill_dir: Path, queries: list[str], *, skill_name=None) -> Path:
-    """Write a trigger-evals.md. `queries` is a list of markdown bullet lines."""
+def _write_triggers(skill_dir: Path, queries: list[str], *, skill_name: object = None) -> Path:
+    """Write a trigger-evals.md.
+
+    `queries` is a list of markdown bullet lines.
+    """
     return _write_trigger_md(skill_dir, queries, skill_name=skill_name)
 
 
@@ -62,17 +84,22 @@ def _write_triggers(skill_dir: Path, queries: list[str], *, skill_name=None) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_repo_root_prefers_option(tmp_path):
+def test_resolve_repo_root_prefers_option(tmp_path: object) -> None:
+    """Verify resolve repo root prefers option."""
     cfg = _FakeConfig(repo_root=str(tmp_path))
     assert resolve_repo_root(cfg) == tmp_path.resolve()
 
 
-def test_resolve_repo_root_falls_back_to_project_root_env(tmp_path, monkeypatch):
+def test_resolve_repo_root_falls_back_to_project_root_env(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify resolve repo root falls back to project root env."""
     monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
     assert resolve_repo_root(_FakeConfig()) == tmp_path.resolve()
 
 
-def test_resolve_repo_root_falls_back_to_rootpath(monkeypatch):
+def test_resolve_repo_root_falls_back_to_rootpath(monkeypatch: object) -> None:
+    """Verify resolve repo root falls back to rootpath."""
     monkeypatch.delenv("PROJECT_ROOT", raising=False)
     cfg = _FakeConfig(rootpath=Path("/some/rootdir"))
     assert resolve_repo_root(cfg) == Path("/some/rootdir")
@@ -83,7 +110,9 @@ def test_resolve_repo_root_falls_back_to_rootpath(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _skill(tmp_path, name, slug, body, root="skills"):
+def _skill(
+    tmp_path: object, name: object, slug: object, body: object, root: object = "skills"
+) -> object:
     """Write one `<root>/<name>/evals/<slug>/prompt.md` with the given body."""
     d = tmp_path / root / name / "evals" / slug
     d.mkdir(parents=True)
@@ -91,9 +120,16 @@ def _skill(tmp_path, name, slug, body, root="skills"):
     return tmp_path
 
 
-def test_discover_eval_cases_self_contained(tmp_path):
-    _skill(tmp_path, "ingest", "single-article",
-           "---\n{}\n---\n\n## Prompt\n\nUse `ingest`.\n\n## Assertions\n\n- [ ] Skill `ingest` invoked\n")
+def test_discover_eval_cases_self_contained(tmp_path: object) -> None:
+    """Verify discover eval cases self contained."""
+    _skill(
+        tmp_path,
+        "ingest",
+        "single-article",
+        "---\n{}\n---\n\n"
+        "## Prompt\n\nUse `ingest`.\n\n"
+        "## Assertions\n\n- [ ] Skill `ingest` invoked\n",
+    )
 
     cases = discover_eval_cases(tmp_path)
 
@@ -109,10 +145,15 @@ def test_discover_eval_cases_self_contained(tmp_path):
     assert c.fixtures_dir is None
 
 
-def test_discover_eval_cases_seed_and_fixtures(tmp_path):
-    base = _skill(tmp_path, "archive", "clobber",
-                  "---\nseed:\n  - role: user\n    text: hi\n---\n\n"
-                  "## Prompt\n\nArchive ./x.\n\n## Assertions\n\n- [ ] it refused\n")
+def test_discover_eval_cases_seed_and_fixtures(tmp_path: object) -> None:
+    """Verify discover eval cases seed and fixtures."""
+    base = _skill(
+        tmp_path,
+        "archive",
+        "clobber",
+        "---\nseed:\n  - role: user\n    text: hi\n---\n\n"
+        "## Prompt\n\nArchive ./x.\n\n## Assertions\n\n- [ ] it refused\n",
+    )
     fx = base / "skills" / "archive" / "evals" / "clobber" / "fixtures"
     fx.mkdir()
     (fx / "x.md").write_text("body")
@@ -123,18 +164,26 @@ def test_discover_eval_cases_seed_and_fixtures(tmp_path):
     assert c.fixtures_dir == fx
 
 
-def test_discover_rejects_unknown_frontmatter_end_to_end(tmp_path):
+def test_discover_rejects_unknown_frontmatter_end_to_end(tmp_path: object) -> None:
+    """Verify discover rejects unknown frontmatter end to end."""
     # The mdformat → schema._validate → discovery seam: an unknown frontmatter key
     # must surface as an error through the whole chain, not pass silently. The body
     # is well-formed except for the unknown `id` key, so this isolates that guard.
-    _skill(tmp_path, "ingest", "bad",
-           "---\nid: bad\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n")
+    _skill(
+        tmp_path,
+        "ingest",
+        "bad",
+        "---\nid: bad\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n",
+    )
 
     with pytest.raises(MdFormatError):
         discover_eval_cases(tmp_path)
 
 
-def test_skill_with_only_triggers_still_discovers_no_eval_cases(tmp_path):
+def test_skill_with_only_triggers_still_discovers_no_eval_cases(
+    tmp_path: object,
+) -> None:
+    """Verify skill with only triggers still discovers no eval cases."""
     _write_trigger_md(
         tmp_path / "skills" / "demo",
         ["- my-query: q\n"],
@@ -144,7 +193,8 @@ def test_skill_with_only_triggers_still_discovers_no_eval_cases(tmp_path):
     assert len(discover_trigger_cases(tmp_path)) == 1
 
 
-def test_discover_rejects_legacy_flat_eval_file(tmp_path):
+def test_discover_rejects_legacy_flat_eval_file(tmp_path: object) -> None:
+    """Verify discover rejects legacy flat eval file."""
     # A suite with no slug dirs but a stray flat `*.md` (the retired legacy shape)
     # is half-migrated, not trigger-only: discovery must raise instead of silently
     # demoting it to "trigger-only" and dropping its coverage. trigger-evals.md is
@@ -157,12 +207,19 @@ def test_discover_rejects_legacy_flat_eval_file(tmp_path):
         discover_eval_cases(tmp_path)
 
 
-def test_discover_rejects_legacy_flat_eval_file_beside_slug_dirs(tmp_path):
+def test_discover_rejects_legacy_flat_eval_file_beside_slug_dirs(
+    tmp_path: object,
+) -> None:
+    """Verify discover rejects legacy flat eval file beside slug dirs."""
     # The dangerous case: a half-migrated suite where one slug dir IS converted but a
     # flat `*.md` lingers. load_suite_dir iterates only subdirs, so the flat file's
     # coverage drops silently unless the stray check runs even when a slug dir exists.
-    base = _skill(tmp_path, "archive", "converted",
-                  "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n")
+    base = _skill(
+        tmp_path,
+        "archive",
+        "converted",
+        "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n",
+    )
     evals = base / "skills" / "archive" / "evals"
     (evals / "old-eval.md").write_text("---\nid: old-eval\n---\n\n## Prompt\n\np\n")
 
@@ -170,11 +227,16 @@ def test_discover_rejects_legacy_flat_eval_file_beside_slug_dirs(tmp_path):
         discover_eval_cases(tmp_path)
 
 
-def test_discover_eval_cases_one_per_slug(tmp_path):
-    _seed_slug_suite(tmp_path, skill="myskill", evals={
-        "alpha": ("p", ["a"]),
-        "beta": ("t1", ["x"]),
-    })
+def test_discover_eval_cases_one_per_slug(tmp_path: object) -> None:
+    """Verify discover eval cases one per slug."""
+    _seed_slug_suite(
+        tmp_path,
+        skill="myskill",
+        evals={
+            "alpha": ("p", ["a"]),
+            "beta": ("t1", ["x"]),
+        },
+    )
 
     cases = discover_eval_cases(tmp_path)
 
@@ -183,25 +245,29 @@ def test_discover_eval_cases_one_per_slug(tmp_path):
     assert all(c.skill == "myskill" for c in cases)
 
 
-def test_discover_eval_cases_sorted_by_skill(tmp_path):
+def test_discover_eval_cases_sorted_by_skill(tmp_path: object) -> None:
+    """Verify discover eval cases sorted by skill."""
     _seed_slug_suite(tmp_path, skill="zebra", evals={"z": ("p", ["a"])})
     _seed_slug_suite(tmp_path, skill="alpha", evals={"a": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
     assert [c.skill for c in cases] == ["alpha", "zebra"]
 
 
-def test_discover_eval_cases_no_skills_root(tmp_path):
+def test_discover_eval_cases_no_skills_root(tmp_path: object) -> None:
+    """Verify discover eval cases no skills root."""
     assert discover_eval_cases(tmp_path) == []
 
 
-def test_discover_eval_cases_skips_skill_without_evals(tmp_path):
+def test_discover_eval_cases_skips_skill_without_evals(tmp_path: object) -> None:
+    """Verify discover eval cases skips skill without evals."""
     (tmp_path / "skills" / "bare").mkdir(parents=True)
     _seed_slug_suite(tmp_path, skill="real", evals={"r": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
     assert [c.skill for c in cases] == ["real"]
 
 
-def test_discover_eval_cases_raises_on_bad_schema(tmp_path):
+def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
+    """Verify discover eval cases raises for on bad schema."""
     # Malformed here = a bare `## Prompt` with no `## Assertions` section.
     bad = tmp_path / "skills" / "bad" / "evals" / "a" / "prompt.md"
     bad.parent.mkdir(parents=True)
@@ -218,7 +284,8 @@ def test_discover_eval_cases_raises_on_bad_schema(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_discover_trigger_cases_one_per_query(tmp_path):
+def test_discover_trigger_cases_one_per_query(tmp_path: object) -> None:
+    """Verify discover trigger cases one per query."""
     _write_triggers(
         tmp_path / "skills" / "myskill",
         [
@@ -232,7 +299,8 @@ def test_discover_trigger_cases_one_per_query(tmp_path):
     assert all(c.repo_root == tmp_path for c in cases)
 
 
-def test_discover_trigger_reads_markdown(tmp_path):
+def test_discover_trigger_reads_markdown(tmp_path: object) -> None:
+    """Verify discover trigger reads markdown."""
     evals = tmp_path / "skills" / "ingest" / "evals"
     evals.mkdir(parents=True)
     (evals / "trigger-evals.md").write_text(
@@ -251,16 +319,16 @@ def test_discover_trigger_reads_markdown(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _seed_md_under(root, skill, eval_id="e"):
+def _seed_md_under(root: object, skill: object, eval_id: object = "e") -> object:
+    """Seed md under."""
     d = root / skill / "evals" / eval_id
     d.mkdir(parents=True)
-    (d / "prompt.md").write_text(
-        "---\n{}\n---\n\n## Prompt\n\nx\n\n## Assertions\n\n- [ ] a\n"
-    )
+    (d / "prompt.md").write_text("---\n{}\n---\n\n## Prompt\n\nx\n\n## Assertions\n\n- [ ] a\n")
     return d
 
 
-def test_discover_eval_cases_finds_both_roots(tmp_path):
+def test_discover_eval_cases_finds_both_roots(tmp_path: object) -> None:
+    """Verify discover eval cases finds both roots."""
     _seed_md_under(tmp_path / "skills", "plug", "p")
     _seed_md_under(tmp_path / ".claude" / "skills", "loc", "l")
     cases = {c.skill: c for c in discover_eval_cases(tmp_path)}
@@ -268,18 +336,21 @@ def test_discover_eval_cases_finds_both_roots(tmp_path):
     assert cases["loc"].skill_dir == tmp_path / ".claude" / "skills" / "loc"
 
 
-def test_discover_eval_cases_local_only(tmp_path):
+def test_discover_eval_cases_local_only(tmp_path: object) -> None:
+    """Verify discover eval cases local only."""
     _seed_md_under(tmp_path / ".claude" / "skills", "loc", "l")
     assert [c.skill for c in discover_eval_cases(tmp_path)] == ["loc"]
 
 
-def test_discover_eval_cases_skips_local_skill_without_evals(tmp_path):
+def test_discover_eval_cases_skips_local_skill_without_evals(tmp_path: object) -> None:
+    """Verify discover eval cases skips local skill without evals."""
     (tmp_path / ".claude" / "skills" / "stub").mkdir(parents=True)
     _seed_md_under(tmp_path / ".claude" / "skills", "real", "r")
     assert [c.skill for c in discover_eval_cases(tmp_path)] == ["real"]
 
 
-def test_discover_trigger_cases_finds_both_roots(tmp_path):
+def test_discover_trigger_cases_finds_both_roots(tmp_path: object) -> None:
+    """Verify discover trigger cases finds both roots."""
     _write_triggers(
         tmp_path / "skills" / "plug",
         ["- some-query: q\n"],
@@ -293,7 +364,8 @@ def test_discover_trigger_cases_finds_both_roots(tmp_path):
     assert all(c.repo_root == tmp_path for c in cases.values())
 
 
-def test_discover_raises_on_duplicate_name_across_roots(tmp_path):
+def test_discover_raises_on_duplicate_name_across_roots(tmp_path: object) -> None:
+    """Verify discover raises for on duplicate name across roots."""
     _seed_md_under(tmp_path / "skills", "dup", "e")
     _seed_md_under(tmp_path / ".claude" / "skills", "dup", "e")
     with pytest.raises(schema.SchemaError, match="duplicate skill name 'dup'"):
@@ -305,7 +377,8 @@ def test_discover_raises_on_duplicate_name_across_roots(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_pyproject_table_reads_tool_evalspec(tmp_path):
+def test_pyproject_table_reads_tool_evalspec(tmp_path: object) -> None:
+    """Verify pyproject table reads tool evalspec."""
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\nagent = "opencode"\neval_roots = ["evals/skills"]\n'
     )
@@ -313,11 +386,13 @@ def test_pyproject_table_reads_tool_evalspec(tmp_path):
     assert table == {"agent": "opencode", "eval_roots": ["evals/skills"]}
 
 
-def test_pyproject_table_missing_file_is_empty(tmp_path):
+def test_pyproject_table_missing_file_is_empty(tmp_path: object) -> None:
+    """Verify pyproject table missing file is empty."""
     assert discovery.pyproject_table(tmp_path) == {}
 
 
-def test_output_and_trigger_evals_coexist(tmp_path):
+def test_output_and_trigger_evals_coexist(tmp_path: object) -> None:
+    """Verify output and trigger evals coexist."""
     # A skill dir with BOTH a valid output eval .md AND trigger-evals.md:
     # discover_eval_cases must not raise, must return the output eval case,
     # and must not include anything derived from trigger-evals.md.
@@ -345,11 +420,13 @@ def test_output_and_trigger_evals_coexist(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _write_pyproject(tmp_path, body: str):
+def _write_pyproject(tmp_path: object, body: str) -> None:
+    """Write pyproject."""
     (tmp_path / "pyproject.toml").write_text(f"[tool.evalspec]\n{body}", encoding="utf-8")
 
 
-def test_env_config_absent_is_falsy_and_empty_digest(tmp_path):
+def test_env_config_absent_is_falsy_and_empty_digest(tmp_path: object) -> None:
+    """Verify env config absent is falsy and empty digest."""
     cfg = resolve_environment_config(tmp_path)  # no pyproject.toml at all
     assert bool(cfg) is False
     assert cfg.base_image is None
@@ -357,7 +434,8 @@ def test_env_config_absent_is_falsy_and_empty_digest(tmp_path):
     assert cfg.digest() == ""
 
 
-def test_env_config_base_image_only(tmp_path):
+def test_env_config_base_image_only(tmp_path: object) -> None:
+    """Verify env config base image only."""
     _write_pyproject(tmp_path, 'base_image = "python:3.12-slim"\n')
     cfg = resolve_environment_config(tmp_path)
     assert bool(cfg) is True
@@ -366,7 +444,8 @@ def test_env_config_base_image_only(tmp_path):
     assert len(cfg.digest()) == 8
 
 
-def test_env_config_script_resolved_to_bytes(tmp_path):
+def test_env_config_script_resolved_to_bytes(tmp_path: object) -> None:
+    """Verify env config script resolved to bytes."""
     (tmp_path / "setup.sh").write_text("apt-get install -y jq\n", encoding="utf-8")
     _write_pyproject(tmp_path, 'environment_script = "setup.sh"\n')
     cfg = resolve_environment_config(tmp_path)
@@ -376,7 +455,8 @@ def test_env_config_script_resolved_to_bytes(tmp_path):
     assert len(cfg.digest()) == 8
 
 
-def test_env_config_digest_changes_with_script_bytes(tmp_path):
+def test_env_config_digest_changes_with_script_bytes(tmp_path: object) -> None:
+    """Verify env config digest changes with script bytes."""
     (tmp_path / "setup.sh").write_text("echo one\n", encoding="utf-8")
     _write_pyproject(tmp_path, 'environment_script = "setup.sh"\n')
     first = resolve_environment_config(tmp_path).digest()
@@ -385,7 +465,8 @@ def test_env_config_digest_changes_with_script_bytes(tmp_path):
     assert first != second
 
 
-def test_env_config_digest_ignores_script_path(tmp_path):
+def test_env_config_digest_ignores_script_path(tmp_path: object) -> None:
+    """Verify env config digest ignores script path."""
     # Same bytes under two different paths ⇒ same digest (path is not hashed).
     (tmp_path / "a.sh").write_text("echo same\n", encoding="utf-8")
     (tmp_path / "b.sh").write_text("echo same\n", encoding="utf-8")
@@ -396,25 +477,29 @@ def test_env_config_digest_ignores_script_path(tmp_path):
     assert da == db
 
 
-def test_env_config_base_image_wrong_type_raises(tmp_path):
+def test_env_config_base_image_wrong_type_raises(tmp_path: object) -> None:
+    """Verify env config base image wrong type raises."""
     _write_pyproject(tmp_path, "base_image = 7\n")
     with pytest.raises(schema.SchemaError, match="base_image"):
         resolve_environment_config(tmp_path)
 
 
-def test_env_config_base_image_empty_string_raises(tmp_path):
+def test_env_config_base_image_empty_string_raises(tmp_path: object) -> None:
+    """Verify env config base image empty string raises."""
     _write_pyproject(tmp_path, 'base_image = ""\n')
     with pytest.raises(schema.SchemaError, match="base_image"):
         resolve_environment_config(tmp_path)
 
 
-def test_env_config_environment_script_wrong_type_raises(tmp_path):
+def test_env_config_environment_script_wrong_type_raises(tmp_path: object) -> None:
+    """Verify env config environment script wrong type raises."""
     _write_pyproject(tmp_path, "environment_script = true\n")
     with pytest.raises(schema.SchemaError, match="environment_script"):
         resolve_environment_config(tmp_path)
 
 
-def test_env_config_environment_script_missing_file_raises(tmp_path):
+def test_env_config_environment_script_missing_file_raises(tmp_path: object) -> None:
+    """Verify env config environment script missing file raises."""
     _write_pyproject(tmp_path, 'environment_script = "nope.sh"\n')
     with pytest.raises(schema.SchemaError, match="file not found: nope.sh"):
         resolve_environment_config(tmp_path)

@@ -1,11 +1,12 @@
 """Live labeled-corpus eval for the Haiku binder: the false-positive gate.
 
-Samples the real Haiku binder over the gold-labeled corpus and enforces the one hard gate —
-a punt-labeled assertion must never bind to a checker. One pytest item per draw, so the run
-shows live per-item progress and a leak names the exact draw; `make evals:binder` shards the
-draws across xdist workers and the `binder_corpus` marker keeps it out of `make test` (it
-costs money and needs a Claude credential). Corpus-wide stats (infra-error guard,
-retention/over-punt/mismatch) are aggregated in conftest.py from the per-draw records.
+Samples the real Haiku binder over the gold-labeled corpus and enforces the one hard
+gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
+so the run shows live per-item progress and a leak names the exact draw; `make
+evals:binder` shards the draws across xdist workers and the `binder_corpus` marker keeps
+it out of `make test` (it costs money and needs a Claude credential). Corpus-wide stats
+(infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
+per-draw records.
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ SAMPLES = int(os.environ.get("EVALSPEC_BINDER_SAMPLES", "5"))
 _ERROR = object()
 
 
-def _samples_for(entry):
+def _samples_for(entry: object) -> object:
+    """Choose the sample count for a binder corpus entry."""
     # Heavy floor only where a false-positive can occur: persistence (the documented leak) and
     # skill_invoked (a punt on an activation assertion is unrecoverable). A zero-tolerance gate
     # needs enough draws on these that "0 observed" is meaningful.
@@ -35,7 +37,8 @@ def _samples_for(entry):
     return max(SAMPLES, 20) if heavy else SAMPLES
 
 
-def _bind_resilient(text):
+def _bind_resilient(text: object) -> object:
+    """Bind one assertion with one retry for transient infra failures."""
     # Retry one transient infra failure, then give up with _ERROR — a timed-out/crashed call
     # must not masquerade as a punt. Only infra exceptions are caught, so no logic bug hides.
     for _ in range(2):
@@ -46,7 +49,8 @@ def _bind_resilient(text):
     return _ERROR
 
 
-def _draws():
+def _draws() -> object:
+    """Build parametrized binder corpus leak-check draws."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -54,7 +58,8 @@ def _draws():
     ]
 
 
-def _field_expectation_draws():
+def _field_expectation_draws() -> object:
+    """Build binder corpus draws with expected checker fields."""
     return [
         pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
         for idx, e in enumerate(CORPUS)
@@ -64,8 +69,9 @@ def _field_expectation_draws():
 
 
 @pytest.mark.parametrize("entry", _draws())
-def test_binder_corpus_blocks_punt_leaks(entry, record):
-    b = _bind_resilient(entry["text"])
+def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
+    """Reject corpus examples where a punt expectation binds to a checker."""
+    binding = _bind_resilient(entry["text"])
 
     record(
         {
@@ -73,29 +79,32 @@ def test_binder_corpus_blocks_punt_leaks(entry, record):
             "cohort": entry["cohort"],
             "expect_checker": entry.get("expect_checker"),
             "expect": entry.get("expect"),
-            "actual": {k: b.get(k) for k in entry.get("expect", {})} if isinstance(b, dict) else None,
-            "result": "error" if b is _ERROR else "punt" if b is None else "bound",
-            "checker": b.get("checker") if isinstance(b, dict) else None,
+            "actual": {key: binding.get(key) for key in entry.get("expect", {})}
+            if isinstance(binding, dict)
+            else None,
+            "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
+            "checker": binding.get("checker") if isinstance(binding, dict) else None,
         }
     )
 
-    if b is _ERROR:
+    if binding is _ERROR:
         pytest.skip("infra failure after retry")
 
     if entry["gold"] == "punt":
-        assert not isinstance(b, dict), (
-            f"false-positive leak: {entry['text']!r} bound to {b.get('checker')!r}"
+        assert not isinstance(binding, dict), (
+            f"false-positive leak: {entry['text']!r} bound to {binding.get('checker')!r}"
         )
 
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
-def test_binder_corpus_preserves_expected_checker_fields(entry):
-    b = _bind_resilient(entry["text"])
+def test_binder_corpus_preserves_expected_checker_fields(entry: object) -> None:
+    """Ensure bound checker specs preserve expected fields from the corpus."""
+    binding = _bind_resilient(entry["text"])
 
-    if b is _ERROR:
+    if binding is _ERROR:
         pytest.skip("infra failure after retry")
 
-    assert isinstance(b, dict), f"expected bind for {entry['text']!r}, got punt"
-    assert all(b.get(k) == v for k, v in entry["expect"].items()), (
-        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {b!r}"
+    assert isinstance(binding, dict), f"expected bind for {entry['text']!r}, got punt"
+    assert all(binding.get(key) == value for key, value in entry["expect"].items()), (
+        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {binding!r}"
     )

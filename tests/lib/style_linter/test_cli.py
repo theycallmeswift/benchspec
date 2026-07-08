@@ -64,7 +64,7 @@ def test_cli_script_runs_from_makefile_entry_path_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
     repo_root: Path,
 ) -> None:
-    """Support direct `python bin/linters/style_lint.py` execution."""
+    """Verify the Makefile style-lint script path runs without a Gemini key."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     result = subprocess.run(

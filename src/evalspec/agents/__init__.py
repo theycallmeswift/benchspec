@@ -1,11 +1,11 @@
 """Coding agents for evalspec.
 
-`sandbox.py` talks only to the `CodingAgent` interface and to the factory/preflight helpers
-here — never to a concrete agent. The active agent is resolved via `resolve_agent_name`'s
-precedence chain (--evalspec-agent flag > EVALSPEC_AGENT env > [tool.evalspec] agent >
-claude-code default), with `EVALSPEC_AGENT` being the normalized handoff that `make_agent()`
-reads. Unknown values fail loudly. Adding a third agent is additive: implement the protocol,
-register it in `_REGISTRY`.
+`sandbox.py` talks only to the `CodingAgent` interface and to the factory/preflight
+helpers here — never to a concrete agent. The active agent is resolved via
+`resolve_agent_name`'s precedence chain (--evalspec-agent flag > EVALSPEC_AGENT env >
+[tool.evalspec] agent > claude-code default), with `EVALSPEC_AGENT` being the normalized
+handoff that `make_agent()` reads. Unknown values fail loudly. Adding a third agent is
+additive: implement the protocol, register it in `_REGISTRY`.
 """
 
 from __future__ import annotations
@@ -44,9 +44,11 @@ def known_harnesses() -> frozenset[str]:
 
 
 def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) -> str:
-    """The agent for this run: --evalspec-agent > EVALSPEC_AGENT > [tool.evalspec]
-    agent > claude-code. An unknown value fails naming the source it came from, so
-    a typo dies at startup with a fixable message instead of mid-run."""
+    """The agent for this run: --evalspec-agent > EVALSPEC_AGENT > [tool.evalspec].
+
+    agent > claude-code. An unknown value fails naming the source it came from, so a
+    typo dies at startup with a fixable message instead of mid-run.
+    """
     sources = (
         ("--evalspec-agent", flag),
         ("EVALSPEC_AGENT", os.environ.get("EVALSPEC_AGENT")),
@@ -63,6 +65,7 @@ def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) ->
 
 
 def _selected_agent_class() -> type:
+    """Provide the selected agent class helper."""
     return _REGISTRY[resolve_agent_name()]
 
 
@@ -70,9 +73,9 @@ def make_agent(harness: str | None = None) -> CodingAgent:
     """The coding agent for a run or a single arm.
 
     With no `harness`, reads the run-level agent from `EVALSPEC_AGENT` (the plugin
-    normalizes the precedence chain at configure time). With an explicit `harness`
-    (an arm's `harness`), builds THAT agent so one run's columns can span harnesses.
-    An unknown `harness` raises.
+    normalizes the precedence chain at configure time). With an explicit `harness` (an
+    arm's `harness`), builds THAT agent so one run's columns can span harnesses. An
+    unknown `harness` raises.
     """
     if harness is not None:
         if harness not in _REGISTRY:
@@ -84,6 +87,8 @@ def make_agent(harness: str | None = None) -> CodingAgent:
 
 
 def credential_preflight_error() -> str | None:
-    """None if a usable credential is configured for the selected agent, else a
-    remediation message for preflight."""
+    """None if a usable credential is configured for the selected agent, else a.
+
+    remediation message for preflight.
+    """
     return _selected_agent_class().credential_error()

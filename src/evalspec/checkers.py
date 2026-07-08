@@ -1,11 +1,12 @@
-"""Deterministic assertion checkers: zero-variance grading for mechanically
+"""Deterministic assertion checkers: zero-variance grading for mechanically.
+
 checkable facts, run on the host against the workdir before the judge.
 
 Each checker takes a schema-validated spec (see `schema._CHECKER_FIELDS`), the host
 workdir, and the pre-run SHA map, and returns a grading entry shaped exactly like a
-judge-graded one plus `"type": "deterministic"`. Checkers see the FINAL workspace
-state; {TODAY} is substituted upstream and a leading `./` anchor is stripped here
-(checker paths are workdir-relative on the host).
+judge-graded one plus `"type": "deterministic"`. Checkers see the FINAL workspace state;
+{TODAY} is substituted upstream and a leading `./` anchor is stripped here (checker
+paths are workdir-relative on the host).
 """
 
 from __future__ import annotations
@@ -21,20 +22,24 @@ import yaml
 
 @dataclass(frozen=True)
 class GradeContext:
-    """Process facts a deterministic checker needs beyond the workdir. Inert until a runner
-    wires fired_skills; absent context grades skill_invoked False, never crashes."""
+    """Process facts a deterministic checker needs beyond the workdir.
+
+    Inert until a runner wires `fired_skills`; absent context grades `skill_invoked` false
+    instead of crashing.
+    """
+
     fired_skills: tuple[str, ...] = ()
 
 
-def assertion_text(assertion) -> str:
-    """Display text for any assertion shape: plain string, typed object with text,
-    or a checker spec whose text derives from its fields."""
+def assertion_text(assertion: object) -> str:
+    """Display text for plain strings, typed assertion objects, or checker specs."""
     if isinstance(assertion, str):
         return assertion
     return assertion.get("text") or derive_text(assertion)
 
 
 def derive_text(spec: dict) -> str:
+    """Return checker text from an assertion or explicit checker field."""
     checker = spec["checker"]
     if checker == "file_exists":
         verb = "exists" if spec.get("should_exist", True) else "does not exist"
@@ -56,12 +61,15 @@ def derive_text(spec: dict) -> str:
 
 
 def _strip_anchor(raw: str) -> str:
-    """Strip a leading `./` workdir anchor (and any bare leading `/`) so a path
-    written `./9. Archive/x` resolves workdir-relative to `9. Archive/x`."""
+    """Strip a leading `./` workdir anchor (and any bare leading `/`) so a path.
+
+    written `./9. Archive/x` resolves workdir-relative to `9. Archive/x`.
+    """
     return raw.removeprefix("./").lstrip("/")
 
 
 def _resolve(raw: str, workdir: Path) -> Path:
+    """Resolve a checker path relative to the clean-room root."""
     path = (workdir / _strip_anchor(raw)).resolve()
     if not path.is_relative_to(workdir.resolve()):
         raise ValueError(f"checker path escapes the workdir: {raw!r}")
@@ -69,13 +77,16 @@ def _resolve(raw: str, workdir: Path) -> Path:
 
 
 def _read_text(path: Path) -> str:
-    """Read an agent-written output file leniently: a stray BOM or non-UTF-8 byte
-    must produce a graded failure, never crash the run. Decode replacing bad bytes
-    and drop a leading BOM."""
+    """Read an agent-written output file leniently: a stray BOM or non-UTF-8 byte.
+
+    must produce a graded failure, never crash the run. Decode replacing bad bytes and
+    drop a leading BOM.
+    """
     return path.read_bytes().decode("utf-8", "replace").lstrip("\ufeff")
 
 
 def _frontmatter(path: Path) -> dict | None:
+    """Parse YAML frontmatter from Markdown content."""
     lines = _read_text(path).split("\n")
     if not lines or lines[0].strip() != "---":
         return None
@@ -86,7 +97,10 @@ def _frontmatter(path: Path) -> dict | None:
     return None
 
 
-def _file_exists(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _file_exists(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate a file-exists checker against the clean-room root."""
     # exists(), not is_file(): file_exists verifies a path is present or absent
     # regardless of type, so "the folder X was created / no longer exists" is checkable.
     exists = _resolve(spec["path"], workdir).exists()
@@ -94,7 +108,10 @@ def _file_exists(spec: dict, workdir: Path, original_shas: dict, context=None) -
     return exists == want, f"{spec['path']} {'exists' if exists else 'absent'}"
 
 
-def _glob_count(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _glob_count(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate a glob-count checker against the clean-room root."""
     # Same workdir boundary the path checkers enforce via _resolve: reject a `../`-bearing
     # or absolute glob up front with a clear error rather than silently returning zero matches.
     raw = spec["glob"]
@@ -103,16 +120,16 @@ def _glob_count(spec: dict, workdir: Path, original_shas: dict, context=None) ->
     if raw.startswith("/") or ".." in Path(pat).parts:
         raise ValueError(f"checker glob escapes the workdir: {raw!r}")
     root = workdir.resolve()
-    n = sum(
-        1 for m in workdir.glob(pat)
-        if m.is_file() and m.resolve().is_relative_to(root)
-    )
+    n = sum(1 for m in workdir.glob(pat) if m.is_file() and m.resolve().is_relative_to(root))
     if "count" in spec:
         return n == spec["count"], f"{n} match(es), expected exactly {spec['count']}"
     return n >= spec["min"], f"{n} match(es), expected at least {spec['min']}"
 
 
-def _sha256_match(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _sha256_match(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate a SHA-256 checker against the clean-room root."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -126,12 +143,14 @@ def _sha256_match(spec: dict, workdir: Path, original_shas: dict, context=None) 
     return actual == expected, f"sha256 {actual[:12]}… vs expected {expected[:12]}…"
 
 
-def _yaml_scalar(text: str):
-    """Coerce an author's string expectation to the Python type YAML would produce
+def _yaml_scalar(text: str) -> object:
+    """Coerce an author's string expectation to the Python type YAML would produce.
+
     for the same literal, so a `value:` matches a typed frontmatter value
-    (bool/int/float/date). The frontmatter side is yaml.safe_loaded too, so both
-    sides normalize the same way and compare by value, not by repr. Non-scalar or
-    empty results (None, list, dict) fall back to the raw string."""
+    (bool/int/float/date). The frontmatter side is yaml.safe_loaded too, so both sides
+    normalize the same way and compare by value, not by repr. Non-scalar or empty
+    results (None, list, dict) fall back to the raw string.
+    """
     try:
         value = yaml.safe_load(text)
     except yaml.YAMLError:
@@ -140,7 +159,10 @@ def _yaml_scalar(text: str):
     return value if isinstance(value, scalars) else text
 
 
-def _frontmatter_has(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _frontmatter_has(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate a frontmatter key/value checker."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -158,7 +180,10 @@ def _frontmatter_has(spec: dict, workdir: Path, original_shas: dict, context=Non
     return True, f"`{key}` present" + (f" = {spec['value']!r}" if "value" in spec else "")
 
 
-def _regex(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _regex(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate a regex checker against file content."""
     path = _resolve(spec["path"], workdir)
     if not path.is_file():
         return False, f"{spec['path']} absent"
@@ -168,7 +193,10 @@ def _regex(spec: dict, workdir: Path, original_shas: dict, context=None) -> tupl
     return False, f"no match for /{spec['pattern']}/"
 
 
-def _skill_invoked(spec: dict, workdir: Path, original_shas: dict, context=None) -> tuple[bool, str]:
+def _skill_invoked(
+    spec: dict, workdir: Path, original_shas: dict, context: object = None
+) -> tuple[bool, str]:
+    """Evaluate whether trajectory facts show a skill invocation."""
     # Exact-or-namespaced match: a skill may fire as `ingest` or `plugin:ingest`.
     target = spec["skill"]
     fired = context.fired_skills if context else ()
@@ -186,9 +214,18 @@ _CHECKERS = {
 }
 
 
-def run_assertion(spec: dict, workdir: Path, original_shas: dict, *, context: GradeContext | None = None) -> dict:
-    """Grade one deterministic assertion. Returns a grading entry interchangeable
-    with a judge-graded one, evidence prefixed so artifacts show it never saw a judge."""
+def run_assertion(
+    spec: dict,
+    workdir: Path,
+    original_shas: dict,
+    *,
+    context: GradeContext | None = None,
+) -> dict:
+    """Grade one deterministic assertion.
+
+    Returns a grading entry interchangeable with a judge-graded one, with evidence prefixed
+    so artifacts show it never saw a judge.
+    """
     passed, evidence = _CHECKERS[spec["checker"]](spec, workdir, original_shas, context)
     return {
         "text": assertion_text(spec),

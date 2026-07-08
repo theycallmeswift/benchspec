@@ -7,12 +7,14 @@ import pytest
 from evalspec import agents
 
 
-def test_default_is_claude_code(monkeypatch):
+def test_default_is_claude_code(monkeypatch: object) -> None:
+    """Verify default is claude code."""
     monkeypatch.delenv("EVALSPEC_AGENT", raising=False)
     assert agents.resolve_agent_name() == "claude-code"
 
 
-def test_flag_beats_env_beats_pyproject(monkeypatch):
+def test_flag_beats_env_beats_pyproject(monkeypatch: object) -> None:
+    """Verify flag beats env beats pyproject."""
     monkeypatch.setenv("EVALSPEC_AGENT", "opencode")
     assert agents.resolve_agent_name(flag="claude-code", pyproject="opencode") == "claude-code"
     assert agents.resolve_agent_name(flag=None, pyproject="claude-code") == "opencode"
@@ -20,7 +22,8 @@ def test_flag_beats_env_beats_pyproject(monkeypatch):
     assert agents.resolve_agent_name(flag=None, pyproject="opencode") == "opencode"
 
 
-def test_known_harnesses_include_codex():
+def test_known_harnesses_include_codex() -> None:
+    """Verify known harnesses include codex."""
     assert "codex" in agents.known_harnesses()
 
 
@@ -31,7 +34,10 @@ def test_known_harnesses_include_codex():
         ({"pyproject": "not-a-harness"}, "[tool.evalspec] agent"),
     ],
 )
-def test_unknown_value_names_its_source(monkeypatch, kwargs, source):
+def test_unknown_value_names_its_source(
+    monkeypatch: object, kwargs: object, source: object
+) -> None:
+    """Verify unknown value names its source."""
     monkeypatch.delenv("EVALSPEC_AGENT", raising=False)
     with pytest.raises(RuntimeError) as ei:
         agents.resolve_agent_name(**kwargs)
@@ -39,7 +45,8 @@ def test_unknown_value_names_its_source(monkeypatch, kwargs, source):
     assert "claude-code" in str(ei.value)  # the valid set is listed
 
 
-def test_unknown_env_value_names_env(monkeypatch):
+def test_unknown_env_value_names_env(monkeypatch: object) -> None:
+    """Verify unknown env value names env."""
     monkeypatch.setenv("EVALSPEC_AGENT", "not-a-harness")
     with pytest.raises(RuntimeError, match="EVALSPEC_AGENT"):
         agents.resolve_agent_name()

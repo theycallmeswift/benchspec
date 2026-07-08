@@ -1,11 +1,4 @@
-"""microsandbox lifecycle for evalspec: preflight, snapshot build/cache, per-arm session.
-
-Replaces the host agent subprocess. The expensive provisioning step (install the agent
-CLI + deps) is captured once as a microsandbox snapshot and reused; each arm boots a fresh VM
-from it with the clean room bind-mounted. Everything agent-specific lives behind the
-`CodingAgent` interface (`evalspec.agents`); this module never names a concrete agent.
-microsandbox is async; this module bridges to the sync runner via a per-arm event loop.
-"""
+"""Manage microsandbox snapshots and per-arm eval sessions."""
 
 from __future__ import annotations
 
@@ -41,6 +34,7 @@ VM_MEMORY_MIB = 2048
 
 
 def snapshot_name(agent: CodingAgent, env: EnvConfig | None = None) -> str:
+    """Build the snapshot cache name for an agent and environment."""
     base = f"evalspec-{agent.id}-{agent.version()}"
     if env:
         return f"{base}-{env.digest()}"
@@ -48,10 +42,12 @@ def snapshot_name(agent: CodingAgent, env: EnvConfig | None = None) -> str:
 
 
 def snapshot_exists(name: str) -> bool:
+    """Return whether a named microsandbox snapshot exists on disk."""
     return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
 
 def _microsandbox_installed() -> bool:
+    """Return whether the microsandbox package can be imported."""
     try:
         import microsandbox
     except ImportError:
@@ -77,27 +73,28 @@ def preflight() -> None:
     if cred_err:
         errs.append(cred_err)
     if errs:
-        raise RuntimeError(
-            "evalspec sandbox preflight failed:\n  - " + "\n  - ".join(errs)
-        )
+        raise RuntimeError("evalspec sandbox preflight failed:\n  - " + "\n  - ".join(errs))
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path):
+def _file_lock(path: Path) -> object:
+    """Hold an exclusive filesystem lock for snapshot build coordination."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(path, "w")
+    lock_file = open(path, "w")
     try:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
         yield
     finally:
-        fcntl.flock(f, fcntl.LOCK_UN)
-        f.close()
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 
-async def _guest_shell(sb, agent, script: str) -> str | None:
+async def _guest_shell(sb: object, agent: object, script: str) -> str | None:
     """Run `script` in the guest, returning stdout on success or None on any failure.
+
     Capture is best-effort: a failed snapshot just means nothing extra to grade, never a
-    failed arm."""
+    failed arm.
+    """
     from microsandbox.errors import MicrosandboxError
 
     try:
@@ -107,15 +104,8 @@ async def _guest_shell(sb, agent, script: str) -> str | None:
     return res.stdout_text if res.exit_code == 0 else None
 
 
-async def _snapshot_artifact_shas(sb, agent) -> dict | None:
-    """Cheap per-turn snapshot: {abs-path: sha} for every file in the agent's artifact dirs
-    (e.g. ~/.claude/skills). Hashing keeps stdout to ~80 bytes/file so the snapshot doesn't
-    starve concurrent agent VMs; file BYTES are fetched separately, only for changed paths.
-
-    Returns `{}` for a genuinely-empty successful pass (no artifact dirs, or nothing staged)
-    but `None` when the snapshot shell FAILED — the two must not collapse together: an empty
-    baseline reads as "everything is newly authored" in `changed_paths`, so a failed snapshot
-    that returned `{}` would dump the whole staged-skills tree into the judge's facts."""
+async def _snapshot_artifact_shas(sb: object, agent: object) -> dict | None:
+    """Snapshot agent artifact paths to SHA-256 digests inside the VM."""
     dirs = agent.artifact_dirs()
     if not dirs:
         return {}
@@ -123,14 +113,16 @@ async def _snapshot_artifact_shas(sb, agent) -> dict | None:
     return None if out is None else parse_sha_stream(out)
 
 
-async def _read_authored(sb, agent, baseline_shas: dict | None) -> dict:
-    """Files the agent authored in its artifact dirs since `baseline_shas`, as
+async def _read_authored(sb: object, agent: object, baseline_shas: dict | None) -> dict:
+    """Files the agent authored in its artifact dirs since `baseline_shas`, as.
+
     {display-path: content}. Hashes first, then streams bytes for ONLY the changed/new
     paths — empty (no extra shell) when the agent wrote nothing there.
 
-    Captures nothing when either snapshot failed (baseline or the current pass is `None`):
-    a failed snapshot means "capture nothing this arm," never "everything is new" — which
-    would grade the staged (given) skills as if the agent authored them."""
+    Captures nothing when either snapshot failed (baseline or the current pass is
+    `None`): a failed snapshot means "capture nothing this arm," never "everything is
+    new" — which would grade the staged (given) skills as if the agent authored them.
+    """
     if baseline_shas is None:
         return {}
     current = await _snapshot_artifact_shas(sb, agent)
@@ -145,22 +137,26 @@ async def _read_authored(sb, agent, baseline_shas: dict | None) -> dict:
     return to_display_paths(parse_artifact_stream(out), agent.guest_home)
 
 
-async def _stop_quietly(sb) -> None:
-    """Best-effort VM teardown: swallow only runtime/OS errors so a teardown hiccup
-    never masks the real flow (and never leaks the microVM)."""
+async def _stop_quietly(sb: object) -> None:
+    """Best-effort VM teardown: swallow only runtime/OS errors so a teardown hiccup.
+
+    never masks the real flow (and never leaks the microVM).
+    """
     from microsandbox.errors import MicrosandboxError
 
     with contextlib.suppress(MicrosandboxError, asyncio.TimeoutError, OSError):
         await sb.stop()
 
 
-async def _run_environment_script(sb, agent, env: EnvConfig) -> None:
+async def _run_environment_script(sb: object, agent: object, env: EnvConfig) -> None:
     """Run the host's environment script after the agent provisions, before sealing.
-    Prepend `set -e` so the FIRST failing command aborts — a mid-script failure must
-    not seal a half-provisioned snapshot under a success hash. Plain `set -e` only:
-    the guest `/bin/sh` is dash, which rejects `pipefail`, and `-u` would fail valid
-    host scripts that reference unset vars. Fail loud: a nonzero exit raises, surfacing
-    the tail of stderr."""
+
+    Prepend `set -e` so the FIRST failing command aborts — a mid-script failure must not
+    seal a half-provisioned snapshot under a success hash. Plain `set -e` only: the
+    guest `/bin/sh` is dash, which rejects `pipefail`, and `-u` would fail valid host
+    scripts that reference unset vars. Fail loud: a nonzero exit raises, surfacing the
+    tail of stderr.
+    """
     if not env.script:
         return
     script = b"set -e\n" + env.script
@@ -171,8 +167,8 @@ async def _run_environment_script(sb, agent, env: EnvConfig) -> None:
         )
 
 
-async def _bridge_skills_home(sb, agent) -> None:
-    """Symlink the agent's load dir to the fixed skills home at provision time; a broken bridge fails the build so no snapshot seals skill-less."""
+async def _bridge_skills_home(sb: object, agent: object) -> None:
+    """Link the agent skill directory to the fixed skills-home path."""
     res = await sb.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
     if res.exit_code != 0:
         raise RuntimeError(
@@ -180,7 +176,8 @@ async def _bridge_skills_home(sb, agent) -> None:
         )
 
 
-async def _build_snapshot_async(agent, name: str, env: EnvConfig) -> None:
+async def _build_snapshot_async(agent: object, name: str, env: EnvConfig) -> None:
+    """Provision and seal the reusable microsandbox snapshot asynchronously."""
     from microsandbox import Sandbox, Snapshot
 
     base_image = env.base_image or BASE_IMAGE
@@ -201,11 +198,12 @@ async def _build_snapshot_async(agent, name: str, env: EnvConfig) -> None:
             await Sandbox.remove(build_name)
 
 
-def build_snapshot(agent, name: str, env: EnvConfig) -> None:
+def build_snapshot(agent: object, name: str, env: EnvConfig) -> None:
+    """Provision and seal the reusable microsandbox snapshot."""
     asyncio.run(_build_snapshot_async(agent, name, env))
 
 
-def ensure_snapshot(agent, *, repo_root) -> str:
+def ensure_snapshot(agent: object, *, repo_root: object) -> str:
     """Return the snapshot name, building it once (file-locked) if missing.
 
     Resolves the host's optional environment config from `repo_root` and folds it into
@@ -225,17 +223,20 @@ def ensure_snapshot(agent, *, repo_root) -> str:
 
 
 def _worker_tag() -> str:
+    """Return the pytest worker suffix used for per-worker snapshot names."""
     return os.environ.get("PYTEST_XDIST_WORKER", "main")
 
 
 def _sandbox_run_name(eval_id: str, config: str) -> str:
+    """Build a stable microsandbox run name for a snapshot or cell."""
     return f"eval-{eval_id}-{config}-{_worker_tag()}"
 
 
 DEFAULT_PROJECT_MARKER = ".claude-plugin/plugin.json"
 
 
-def _plugin_dir_for(host_repo_root, marker: str = DEFAULT_PROJECT_MARKER) -> str | None:
+def _plugin_dir_for(host_repo_root: object, marker: str = DEFAULT_PROJECT_MARKER) -> str | None:
+    """Resolve the plugin directory mounted for an eval run."""
     # --plugin-dir only when the project has the configured marker. Local skills reach the
     # guest by the trigger path's stage_project_assets (_create_trigger_sandbox); output
     # evals install per-cell via setup.sh instead.
@@ -246,12 +247,12 @@ def _plugin_dir_for(host_repo_root, marker: str = DEFAULT_PROJECT_MARKER) -> str
     return None
 
 
-def _agent_extra_volumes(agent, volume_cls) -> dict:
+def _agent_extra_volumes(agent: object, volume_cls: object) -> dict:
     """Optional agent-owned host files that must be visible in the guest.
 
     Codex can run against a ChatGPT subscription login by copying a host `auth.json`
-    into the guest before `codex exec`; the agent exposes that path without widening
-    the core CodingAgent protocol for agents that do not need file credentials.
+    into the guest before `codex exec`; the agent exposes that path without widening the
+    core CodingAgent protocol for agents that do not need file credentials.
     """
     path_getter = getattr(agent, "auth_json_path", None)
     if not callable(path_getter):
@@ -264,9 +265,17 @@ def _agent_extra_volumes(agent, volume_cls) -> dict:
     }
 
 
-async def run_setup_sh(sb, agent, *, skill: str, arm: str, model: str,
-                       eval_set: str = "", arm_env: dict | None = None) -> None:
-    """Run this cell's `<root>/<skill>/evals/setup.sh` with cwd at the skill's source dir; a non-zero exit aborts the cell loudly so it never degrades to skill-less."""
+async def run_setup_sh(
+    sb: object,
+    agent: object,
+    *,
+    skill: str,
+    arm: str,
+    model: str,
+    eval_set: str = "",
+    arm_env: dict | None = None,
+) -> None:
+    """Run an eval setup.sh script inside the arm sandbox when present."""
     env = {**agent.cell_env(arm=arm, model=model, eval_set=eval_set), **(arm_env or {})}
     # An absent setup.sh is a clean no-op; a present-but-failing one must propagate its
     # exit, so `if [ -f ]; then ...; fi` under `set -e` (never `... || true`, which masks
@@ -276,8 +285,10 @@ async def run_setup_sh(sb, agent, *, skill: str, arm: str, model: str,
     safe_skill = shlex.quote(skill)
     script = (
         "set -e\n"
-        'for root in skills .claude/skills; do\n'
-        f'  if [ -d "{PROJECT_MOUNT}/$root/"{safe_skill} ]; then cd "{PROJECT_MOUNT}/$root/"{safe_skill}; break; fi\n'
+        "for root in skills .claude/skills; do\n"
+        f'  if [ -d "{PROJECT_MOUNT}/$root/"{safe_skill} ]; then\n'
+        f'    cd "{PROJECT_MOUNT}/$root/"{safe_skill}; break\n'
+        "  fi\n"
         "done\n"
         "if [ -f ./evals/setup.sh ]; then bash ./evals/setup.sh; fi"
     )
@@ -289,7 +300,15 @@ async def run_setup_sh(sb, agent, *, skill: str, arm: str, model: str,
         )
 
 
-async def _create_sandbox(*, agent, snapshot, name, host_workdir, host_repo_root):
+async def _create_sandbox(
+    *,
+    agent: object,
+    snapshot: object,
+    name: object,
+    host_workdir: object,
+    host_repo_root: object,
+) -> object:
+    """Create a microsandbox instance from a snapshot."""
     from microsandbox import Sandbox, Volume
 
     # The project mounts read-only at /project for BOTH arms: per-cell setup.sh needs
@@ -302,27 +321,48 @@ async def _create_sandbox(*, agent, snapshot, name, host_workdir, host_repo_root
         volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)
     volumes.update(_agent_extra_volumes(agent, Volume))
     return await Sandbox.create(
-        name, snapshot=snapshot, volumes=volumes,
-        secrets=agent.secrets(), cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True,
+        name,
+        snapshot=snapshot,
+        volumes=volumes,
+        secrets=agent.secrets(),
+        cpus=VM_CPUS,
+        memory=VM_MEMORY_MIB,
+        replace=True,
     )
 
 
 class SandboxSession:
-    """Async context manager holding one microVM open across an arm's turns. `__aenter__`
-    boots the VM and returns a per-turn async `run`; `__aexit__` tears it down.
+    """Async context manager holding one microVM open across an arm's turns.
+
+    `__aenter__` boots the VM and returns a per-turn async `run`; `__aexit__` tears it
+    down.
 
     The whole lifecycle (create → turns → stop) MUST run inside a single `asyncio.run`:
-    microsandbox's `Sandbox` is bound to the event loop it was created in and raises
-    "no running event loop" if used from a separate loop activation. The snapshot is
+    microsandbox's `Sandbox` is bound to the event loop it was created in and raises "no
+    running event loop" if used from a separate loop activation. The snapshot is
     resolved by the caller *before* the `asyncio.run`, so building it (which itself uses
     `asyncio.run`) never nests inside a running loop.
     """
 
-    def __init__(self, *, agent, snapshot, eval_id, config, host_workdir, host_repo_root,
-                 model, effort, skill: str | None = None, arm: str | None = None,
-                 arm_env: dict | None = None, eval_set: str = "",
-                 project_marker: str = DEFAULT_PROJECT_MARKER,
-                 harness_args: list[str] | None = None):
+    def __init__(
+        self: object,
+        *,
+        agent: object,
+        snapshot: object,
+        eval_id: object,
+        config: object,
+        host_workdir: object,
+        host_repo_root: object,
+        model: object,
+        effort: object,
+        skill: str | None = None,
+        arm: str | None = None,
+        arm_env: dict | None = None,
+        eval_set: str = "",
+        project_marker: str = DEFAULT_PROJECT_MARKER,
+        harness_args: list[str] | None = None,
+    ) -> None:
+        """Initialize the instance."""
         self._agent = agent
         self._snapshot = snapshot
         self._eval_id = eval_id
@@ -347,11 +387,14 @@ class SandboxSession:
         self._arm = arm if arm is not None else config
         self._project_marker = project_marker
 
-    async def __aenter__(self):
+    async def __aenter__(self: object) -> object:
+        """Enter the arm session and capture baseline artifact state."""
         self._sb = await _create_sandbox(
-            agent=self._agent, snapshot=self._snapshot,
+            agent=self._agent,
+            snapshot=self._snapshot,
             name=_sandbox_run_name(self._eval_id, self._config),
-            host_workdir=self._host_workdir, host_repo_root=self._host_repo_root,
+            host_workdir=self._host_workdir,
+            host_repo_root=self._host_repo_root,
         )
         # Install the skill for this cell BEFORE the artifact baseline: the populated skills
         # home is the "before" the per-turn diff subtracts, so only agent-authored files
@@ -362,9 +405,13 @@ class SandboxSession:
         if self._skill is not None:
             try:
                 await run_setup_sh(
-                    self._sb, self._agent,
-                    skill=self._skill, arm=self._arm, model=self._model,
-                    eval_set=self._eval_set, arm_env=self._arm_env,
+                    self._sb,
+                    self._agent,
+                    skill=self._skill,
+                    arm=self._arm,
+                    model=self._model,
+                    eval_set=self._eval_set,
+                    arm_env=self._arm_env,
                 )
             except BaseException:
                 await _stop_quietly(self._sb)
@@ -372,12 +419,22 @@ class SandboxSession:
         self._artifact_base = await _snapshot_artifact_shas(self._sb, self._agent)
         return self._run
 
-    async def _run(self, prompt, *, resume_session_id, detect_skill):
+    async def _run(
+        self: object, prompt: object, *, resume_session_id: object, detect_skill: object
+    ) -> object:
+        """Provide the run helper."""
         result = await self._agent.invoke(
-            self._sb, prompt, eval_id=self._eval_id, config=self._config,
-            workdir=GUEST_WORKDIR, plugin_dir=None, model=self._model,
-            effort=self._effort, resume_session_id=resume_session_id,
-            detect_skill=detect_skill, extra_env=self._arm_env,
+            self._sb,
+            prompt,
+            eval_id=self._eval_id,
+            config=self._config,
+            workdir=GUEST_WORKDIR,
+            plugin_dir=None,
+            model=self._model,
+            effort=self._effort,
+            resume_session_id=resume_session_id,
+            detect_skill=detect_skill,
+            extra_env=self._arm_env,
             harness_args=self._harness_args,
         )
         # Capture skill artifacts the agent wrote outside the workdir mount: files new or
@@ -388,32 +445,63 @@ class SandboxSession:
             result = replace(result, artifacts=authored)
         return result
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self: object, *exc: object) -> object:
+        """Close the arm session and release sandbox resources."""
         await self._sb.stop()
 
 
-def arm_session(*, agent, snapshot, eval_id, config, host_workdir, host_repo_root,
-                model, effort, skill: str | None = None, arm: str | None = None,
-                arm_env: dict | None = None, eval_set: str = "",
-                project_marker: str = DEFAULT_PROJECT_MARKER,
-                harness_args: list[str] | None = None) -> SandboxSession:
+def arm_session(
+    *,
+    agent: object,
+    snapshot: object,
+    eval_id: object,
+    config: object,
+    host_workdir: object,
+    host_repo_root: object,
+    model: object,
+    effort: object,
+    skill: str | None = None,
+    arm: str | None = None,
+    arm_env: dict | None = None,
+    eval_set: str = "",
+    project_marker: str = DEFAULT_PROJECT_MARKER,
+    harness_args: list[str] | None = None,
+) -> SandboxSession:
+    """Open an async arm session around one sandboxed eval cell."""
     return SandboxSession(
-        agent=agent, snapshot=snapshot, eval_id=eval_id, config=config,
-        host_workdir=host_workdir, host_repo_root=host_repo_root, model=model, effort=effort,
-        skill=skill, arm=arm, arm_env=arm_env, eval_set=eval_set, project_marker=project_marker,
+        agent=agent,
+        snapshot=snapshot,
+        eval_id=eval_id,
+        config=config,
+        host_workdir=host_workdir,
+        host_repo_root=host_repo_root,
+        model=model,
+        effort=effort,
+        skill=skill,
+        arm=arm,
+        arm_env=arm_env,
+        eval_set=eval_set,
+        project_marker=project_marker,
         harness_args=harness_args,
     )
 
 
-async def _create_trigger_sandbox(*, agent, snapshot, name, host_repo_root):
+async def _create_trigger_sandbox(
+    *, agent: object, snapshot: object, name: object, host_repo_root: object
+) -> object:
+    """Create the sandbox used for trigger-routing probes."""
     from microsandbox import Sandbox, Volume
 
     volumes = {PROJECT_MOUNT: Volume.bind(str(host_repo_root), readonly=True)}
     volumes.update(_agent_extra_volumes(agent, Volume))
     sb = await Sandbox.create(
-        name, snapshot=snapshot,
+        name,
+        snapshot=snapshot,
         volumes=volumes,
-        secrets=agent.secrets(), cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True,
+        secrets=agent.secrets(),
+        cpus=VM_CPUS,
+        memory=VM_MEMORY_MIB,
+        replace=True,
     )
     try:
         await agent.stage_project_assets(sb, PROJECT_MOUNT)
@@ -423,24 +511,49 @@ async def _create_trigger_sandbox(*, agent, snapshot, name, host_repo_root):
     return sb
 
 
-def _trigger_command(agent, query, repo_root, model, effort, project_marker) -> list[str]:
+def _trigger_command(
+    agent: object,
+    query: object,
+    repo_root: object,
+    model: object,
+    effort: object,
+    project_marker: object,
+) -> list[str]:
+    """Build the command that asks an agent to route a trigger query."""
     plugin = _plugin_dir_for(repo_root, project_marker)
     # A non-None sentinel: per the protocol it requests a streamable format for routing.
     # Routing reads the streamed events (detect_fired), so it's never matched as a skill name.
     return agent.build_command(
-        query, plugin_dir=plugin, model=model, effort=effort,
-        resume_session_id=None, detect_skill="__route__",
+        query,
+        plugin_dir=plugin,
+        model=model,
+        effort=effort,
+        resume_session_id=None,
+        detect_skill="__route__",
     )
 
 
-async def _route_in_sandbox_async(query, repo_root, model, timeout, *, effort, skill_name,
-                                  agent, snapshot, project_marker=DEFAULT_PROJECT_MARKER):
+async def _route_in_sandbox_async(
+    query: object,
+    repo_root: object,
+    model: object,
+    timeout: object,
+    *,
+    effort: object,
+    skill_name: object,
+    agent: object,
+    snapshot: object,
+    project_marker: object = DEFAULT_PROJECT_MARKER,
+) -> object:
+    """Route in sandbox async."""
     # agent + snapshot are resolved by the SYNC wrapper before asyncio.run: building
     # a missing snapshot itself calls asyncio.run, which can't nest. Same constraint
     # as SandboxSession's __init__ → __aenter__ split.
     sb = await _create_trigger_sandbox(
-        agent=agent, snapshot=snapshot,
-        name=f"trigger-{_worker_tag()}", host_repo_root=repo_root,
+        agent=agent,
+        snapshot=snapshot,
+        name=f"trigger-{_worker_tag()}",
+        host_repo_root=repo_root,
     )
     lines: list[str] = []
     dispatched = False
@@ -448,7 +561,9 @@ async def _route_in_sandbox_async(query, repo_root, model, timeout, *, effort, s
     try:
         cmd = _trigger_command(agent, query, repo_root, model, effort, project_marker)
         handle = await sb.exec_stream(
-            cmd[0], cmd[1:], cwd=agent.guest_home,
+            cmd[0],
+            cmd[1:],
+            cwd=agent.guest_home,
             env=agent.guest_env(),  # HOME + IS_SANDBOX
             # Force EOF on stdin: opencode run blocks reading stdin forever otherwise
             # (microsandbox leaves the pipe open), binning routing against the timeout.
@@ -456,7 +571,8 @@ async def _route_in_sandbox_async(query, repo_root, model, timeout, *, effort, s
             stdin=b"",
         )
 
-        async def _drain():
+        async def _drain() -> None:
+            """Drain streamed exec events into output lines and exit state."""
             nonlocal dispatched, exit_code
             # exec_stream delivers stdout in arbitrary chunks that do NOT align to newlines,
             # and OpenCode's skill `tool_use` event embeds the full skill output (multi-KB),
@@ -511,16 +627,34 @@ async def _route_in_sandbox_async(query, repo_root, model, timeout, *, effort, s
     return lines
 
 
-def route_in_sandbox(query, repo_root, model, timeout, *, effort="low", skill_name=None,
-                     project_marker=DEFAULT_PROJECT_MARKER):
+def route_in_sandbox(
+    query: object,
+    repo_root: object,
+    model: object,
+    timeout: object,
+    *,
+    effort: object = "low",
+    skill_name: object = None,
+    project_marker: object = DEFAULT_PROJECT_MARKER,
+) -> object:
+    """Run trigger routing inside a sandbox and return the fire count."""
     # Resolve agent + snapshot up-front: a missing snapshot triggers build_snapshot
     # → asyncio.run, which can't nest inside the asyncio.run below.
     agent = make_agent()
     snapshot = ensure_snapshot(agent, repo_root=repo_root)
-    return asyncio.run(_route_in_sandbox_async(
-        query, repo_root, model, timeout, effort=effort, skill_name=skill_name,
-        agent=agent, snapshot=snapshot, project_marker=project_marker,
-    ))
+    return asyncio.run(
+        _route_in_sandbox_async(
+            query,
+            repo_root,
+            model,
+            timeout,
+            effort=effort,
+            skill_name=skill_name,
+            agent=agent,
+            snapshot=snapshot,
+            project_marker=project_marker,
+        )
+    )
 
 
 def cli_build() -> None:
@@ -538,14 +672,16 @@ def cli_build() -> None:
 
 
 def cli_clean(repo_root: Path) -> None:
-    """`make clean` helper: remove evalspec sandboxes + snapshots via the msb CLI,
-    plus the per-repo snapshot lock files under `<repo_root>/tmp/`.
+    """Remove evalspec sandboxes and snapshots via the msb CLI.
+
+    Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `make evals:build`.
     """
     import subprocess
 
-    def _msb(*args):
+    def _msb(*args: object) -> None:
+        """Provide the msb helper."""
         try:
             subprocess.run(["msb", *args], check=False)
         except FileNotFoundError:

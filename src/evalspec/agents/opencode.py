@@ -62,16 +62,24 @@ _RESERVED_HARNESS_ARGS = {
     "--prompt",
 }
 _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("--")}
-_RESERVED_HARNESS_SHORT_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")}
+_RESERVED_HARNESS_SHORT_FLAGS = {
+    arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
+}
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
+    """Validate harness argument strings from configuration."""
     if harness_args is None:
         return []
     for arg in harness_args:
-        if arg in _RESERVED_HARNESS_ARGS or any(
-            arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS
-        ) or any(arg.startswith(flag) and len(arg) > len(flag) for flag in _RESERVED_HARNESS_SHORT_FLAGS):
+        if (
+            arg in _RESERVED_HARNESS_ARGS
+            or any(arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS)
+            or any(
+                arg.startswith(flag) and len(arg) > len(flag)
+                for flag in _RESERVED_HARNESS_SHORT_FLAGS
+            )
+        ):
             raise ValueError(f"reserved harness arg for OpenCode: {arg}")
     return harness_args
 
@@ -173,6 +181,8 @@ _OPENCODE_CONFIG_JSON = (
 
 
 class OpenCodeAgent(BaseAgent):
+    """Store open code agent data."""
+
     id = "opencode"
     guest_home = "/root"
     skill_load_dir = "/root/.config/opencode/skills"
@@ -193,15 +203,15 @@ class OpenCodeAgent(BaseAgent):
         # `skill` tool is actually considered by models that wouldn't reach for
         # it unprompted (e.g. Gemini Flash).
         "mkdir -p /root/.config/opencode/plugins/evalspec-bootstrap && "
-        'cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<\'EOF_PKG\'\n'
+        "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
         + _BOOTSTRAP_PACKAGE_JSON
-        + '\nEOF_PKG\n'
-        'cat > /root/.config/opencode/plugins/evalspec-bootstrap/index.js <<\'EOF_JS\'\n'
+        + "\nEOF_PKG\n"
+        "cat > /root/.config/opencode/plugins/evalspec-bootstrap/index.js <<'EOF_JS'\n"
         + _BOOTSTRAP_PLUGIN_JS
-        + 'EOF_JS\n'
-        'cat > /root/.config/opencode/opencode.json <<\'EOF_CFG\'\n'
+        + "EOF_JS\n"
+        "cat > /root/.config/opencode/opencode.json <<'EOF_CFG'\n"
         + _OPENCODE_CONFIG_JSON
-        + '\nEOF_CFG\n'
+        + "\nEOF_CFG\n"
         # Warm OpenCode's one-time SQLite migration at snapshot-build time. On first
         # invocation OpenCode prints "Performing one time database migration..." and
         # creates ~/.local/share/opencode/opencode.db; deferred to a measured run
@@ -215,16 +225,24 @@ class OpenCodeAgent(BaseAgent):
         + "test -f /root/.local/share/opencode/opencode.db"
     )
 
-    def __init__(self, auth_value: str = "", *, auth_env: str = "ANTHROPIC_API_KEY",
-                 version: str = "latest"):
+    def __init__(
+        self: object,
+        auth_value: str = "",
+        *,
+        auth_env: str = "ANTHROPIC_API_KEY",
+        version: str = "latest",
+    ) -> None:
+        """Initialize the instance."""
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
 
     @classmethod
-    def from_env(cls) -> OpenCodeAgent:
-        """Build the agent from the host env: pinned version (env var > pyproject >
-        'latest') + the preferred credential."""
+    def from_env(cls: object) -> OpenCodeAgent:
+        """Build the agent from the host env: pinned version (env var > pyproject >.
+
+        'latest') + the preferred credential.
+        """
         version = (
             os.environ.get("EVALSPEC_OPENCODE_VERSION")
             or cls._pinned_version_from_pyproject()
@@ -241,8 +259,9 @@ class OpenCodeAgent(BaseAgent):
         """Read `[tool.evalspec] opencode_version` from pyproject.toml.
 
         Tries `$PROJECT_ROOT` first (same env var resolve_repo_root honors), then
-        `Path.cwd()` so direct `cli_build` invocations from the repo root still find
-        the pin. Returns None if the file is missing or the value isn't a string."""
+        `Path.cwd()` so direct `cli_build` invocations from the repo root still find the
+        pin. Returns None if the file is missing or the value isn't a string.
+        """
         if sys.version_info >= (3, 11):
             import tomllib
         else:
@@ -264,25 +283,25 @@ class OpenCodeAgent(BaseAgent):
 
     @staticmethod
     def credential_error() -> str | None:
-        """None if a usable credential is set, else a remediation message for preflight."""
+        """Return a credential preflight error message when credentials are missing."""
         if any(os.environ.get(v) for v in AUTH_ENV_VARS):
             return None
-        return (
-            "no OpenCode provider credential — set one of "
-            + ", ".join(AUTH_ENV_VARS)
-        )
+        return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 
-    def version(self) -> str:
+    def version(self: object) -> str:
+        """Return the agent CLI version string."""
         return self._version
 
-    def artifact_dirs(self) -> list[str]:
+    def artifact_dirs(self: object) -> list[str]:
+        """Return guest directories that may contain agent-authored artifacts."""
         # OpenCode discovers (and the agent scaffolds) personal skills under
         # $HOME/.config/opencode/skills — outside the workdir mount. Snapshot it so a skill
         # the agent writes here reaches the judge; the staged skills drop out of the
         # session's baseline diff, leaving only the agent's own work.
         return [f"{self.guest_home}/.config/opencode/skills"]
 
-    def guest_env(self) -> dict:
+    def guest_env(self: object) -> dict:
+        """Return environment variables passed to guest agent commands."""
         # HOME so OpenCode finds its config dir; TZ=UTC pins the guest clock to the
         # zone the host computes {TODAY} in. EVALSPEC_OPENCODE_VERSION feeds the
         # provision script's `npm i -g opencode-ai@${EVALSPEC_OPENCODE_VERSION}` at
@@ -293,19 +312,30 @@ class OpenCodeAgent(BaseAgent):
             "EVALSPEC_OPENCODE_VERSION": self._version,
         }
 
-    def secrets(self) -> list:
+    def secrets(self: object) -> list:
+        """Return secret values that must be redacted from logs."""
         from microsandbox import Secret
 
-        allow_host = _PROVIDER_HOSTS[self._auth_env]  # loud KeyError beats a silent wrong-host route
+        allow_host = _PROVIDER_HOSTS[
+            self._auth_env
+        ]  # loud KeyError beats a silent wrong-host route
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
         return [
             Secret.env(guest_env_name, value=self._auth_value, allow_hosts=[allow_host]),
         ]
 
     def build_command(
-        self, prompt, *, plugin_dir, model, effort, resume_session_id, detect_skill,
+        self: object,
+        prompt: object,
+        *,
+        plugin_dir: object,
+        model: object,
+        effort: object,
+        resume_session_id: object,
+        detect_skill: object,
         harness_args: list[str] | None = None,
     ) -> list[str]:
+        """Build the guest command used to invoke the agent."""
         if "/" not in model:
             raise ValueError(
                 f"OpenCode needs a provider-qualified model (e.g. 'google/gemini-3.5-flash'), "
@@ -317,22 +347,28 @@ class OpenCodeAgent(BaseAgent):
         # no equivalents.
         variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
-            self.OPENCODE_BIN, "run",
-            "--format", "json",
-            "--variant", variant,
-            "-m", model,
+            self.OPENCODE_BIN,
+            "run",
+            "--format",
+            "json",
+            "--variant",
+            variant,
+            "-m",
+            model,
             *_validate_harness_args(harness_args),
             prompt,
         ]
 
-    async def provision(self, sb) -> None:
+    async def provision(self: object, sb: object) -> None:
+        """Install the agent CLI and credentials inside the guest."""
         res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sb, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+        """Copy project-local assets needed by the guest agent."""
         # OpenCode auto-discovers personal skills from $HOME/.config/opencode/skills/<skill>/
         # and project skills from <project>/.opencode/skills/<skill>/. Staging to the
         # personal location guarantees discovery regardless of the agent's cwd.
@@ -350,30 +386,50 @@ class OpenCodeAgent(BaseAgent):
         dest = f"{self.guest_home}/.config/opencode/skills"
         await sb.shell(
             f"mkdir -p {dest} && "
-            f"for src in {project_mount}/skills {project_mount}/.opencode/skills {project_mount}/.claude/skills; do "
+            f"for src in {project_mount}/skills {project_mount}/.opencode/skills "
+            f"{project_mount}/.claude/skills; do "
             f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
             f"done",
             env=self.guest_env(),
         )
 
     async def invoke(
-        self, sb, prompt, *, eval_id, config, workdir, plugin_dir, model, effort,
-        resume_session_id, detect_skill, harness_args: list[str] | None = None,
+        self: object,
+        sb: object,
+        prompt: object,
+        *,
+        eval_id: object,
+        config: object,
+        workdir: object,
+        plugin_dir: object,
+        model: object,
+        effort: object,
+        resume_session_id: object,
+        detect_skill: object,
+        harness_args: list[str] | None = None,
         extra_env: dict | None = None,
         timeout: int = 600,
     ) -> RunResult:
+        """Run one prompt through the agent inside the guest."""
         from microsandbox.errors import MicrosandboxError
 
         cmd = self.build_command(
-            prompt, plugin_dir=plugin_dir, model=model, effort=effort,
-            resume_session_id=resume_session_id, detect_skill=detect_skill,
+            prompt,
+            plugin_dir=plugin_dir,
+            model=model,
+            effort=effort,
+            resume_session_id=resume_session_id,
+            detect_skill=detect_skill,
             harness_args=harness_args,
         )
         try:
             res = await sb.exec(
                 # Per-arm extra_env merges over guest_env(), arm env winning.
-                cmd[0], cmd[1:], cwd=workdir,
-                env={**self.guest_env(), **(extra_env or {})}, timeout=timeout,
+                cmd[0],
+                cmd[1:],
+                cwd=workdir,
+                env={**self.guest_env(), **(extra_env or {})},
+                timeout=timeout,
                 # Force EOF on stdin: `opencode run` blocks reading stdin forever
                 # without it (microsandbox's default leaves a pipe open), which
                 # bins the whole arm against the per-eval timeout for no work.
@@ -385,18 +441,23 @@ class OpenCodeAgent(BaseAgent):
             return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
         return parse_opencode_jsonl(res.stdout_text, eval_id, config, detect_skill)
 
-    def judge(self, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Delegate judging to the host's Claude CLI so grading quality stays
+    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
+        """Delegate judging to the host's Claude CLI so grading quality stays.
+
         consistent across the matrix — task arms differ; grading should not. See
         run_host_judge for the RuntimeError-on-infra-failure contract (a missing
-        `claude` on PATH included) that keeps an infra failure from being mistaken
-        for assertion failures."""
+        `claude` on PATH included) that keeps an infra failure from being mistaken for
+        assertion failures.
+        """
         return run_host_judge(prompt, model=model, timeout=timeout)
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """True if the line shows ANY skill being routed to (early-stop: routing is
-        decided, don't wait out the turn). The tally (detect_fired) re-checks for OUR
-        skill, so loosening here can't widen the fire count."""
+    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+        """Return true when a line shows any skill route.
+
+        Once routing is decided, the sandbox does not need to wait out the turn. The tally
+        (`detect_fired`) re-checks for the target skill, so loosening this detector cannot
+        widen the fire count.
+        """
         text = line.strip()
         if not text:
             return False
@@ -411,9 +472,12 @@ class OpenCodeAgent(BaseAgent):
             return False
         return _part_dispatches_any_skill(part, skill_name)
 
-    def detect_fired(self, lines, skill_name: str) -> bool:
-        """Tally whether OUR skill fired. Uses the strict `_tool_dispatches_skill`
-        matcher directly (NOT detect_dispatch, which now early-stops on any skill)."""
+    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+        """Return true when the target skill fired in the OpenCode stream.
+
+        Uses the strict `_tool_dispatches_skill` matcher directly (not `detect_dispatch`,
+        which now early-stops on any skill).
+        """
         for line in lines:
             text = line.strip()
             if not text:
@@ -429,10 +493,13 @@ class OpenCodeAgent(BaseAgent):
                 return True
         return False
 
-    def streamed_activity(self, lines) -> bool:
-        """True if the model began a turn. OpenCode emits step_start/text/tool_use/
-        step_finish (never Claude's `assistant`), so any of those proves the agent
-        worked — a budget timeout after one is a clean non-fire, not a launch stall."""
+    def streamed_activity(self: object, lines: object) -> bool:
+        """Return true when the OpenCode stream proves the model began a turn.
+
+        OpenCode emits step_start/text/tool_use/step_finish (never Claude's `assistant`),
+        so any of those proves the agent worked; a budget timeout after one is a clean
+        non-fire, not a launch stall.
+        """
         turn_events = {"step_start", "text", "tool_use", "step_finish"}
         for line in lines:
             text = line.strip()
@@ -448,9 +515,11 @@ class OpenCodeAgent(BaseAgent):
 
 
 def _skill_dispatch_name(part: dict) -> str | None:
-    """The skill targeted by a `skill` dispatcher tool_use (part.state.input.name),
-    or None if this isn't a skill dispatch. Single source for both fired-detection
-    and trajectory normalization so they can't drift."""
+    """Return the skill name from a `skill` dispatcher tool_use.
+
+    Returns None when this part is not a skill dispatch. This is the single source for both
+    fired-detection and trajectory normalization so they cannot drift.
+    """
     if part.get("tool") != "skill":
         return None
     state = part.get("state") if isinstance(part.get("state"), dict) else {}
@@ -466,7 +535,8 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
     - Primary: `part.tool == "skill"` (OpenCode's native skill dispatcher) with
       `part.state.input.name` matching the skill (exact or namespaced).
     - Fallback: `part.tool` itself is the skill name (some agents register skills
-      directly as tools instead of going through a dispatcher)."""
+      directly as tools instead of going through a dispatcher).
+    """
     name = _skill_dispatch_name(part)
     if name is not None and (name == skill_name or name.endswith(f":{skill_name}")):
         return True
@@ -475,9 +545,12 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
 
 
 def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
-    """True if this part routes to ANY skill (the `skill` dispatcher), or — as the
-    namespaced-tool fallback — OUR skill registered directly as a tool. Mirrors
-    Claude's `dispatches_skill`: early-stop on any route; the tally filters to ours."""
+    """Return true when a part routes to any skill.
+
+    Matches either the `skill` dispatcher or, as the namespaced-tool fallback, the target
+    skill registered directly as a tool. Mirrors Claude's `dispatches_skill`: early-stop on
+    any route; the tally filters to ours.
+    """
     tool = part.get("tool")
     if not isinstance(tool, str):
         return False
@@ -490,11 +563,12 @@ def _opencode_trajectory(events: list[dict]) -> list[dict]:
     """Canonical trajectory (schema: see evalspec.trajectory) from OpenCode events.
 
     OpenCode models a tool use as a single completed `tool_use` event (input under
-    part.state.input) with NO separate tool_result frame, so we emit tool_call
-    events only. A skill dispatch (part.tool == "skill", state.input.name) is
-    normalized to the canonical Skill shape (name="Skill", arguments={"skill": ...})
-    so skills_dispatched()/render_process_facts() stay agent-agnostic. OpenCode
-    exposes no per-call id we link against, so id is "" (there is no result to link)."""
+    part.state.input) with NO separate tool_result frame, so we emit tool_call events
+    only. A skill dispatch (part.tool == "skill", state.input.name) is normalized to the
+    canonical Skill shape (name="Skill", arguments={"skill": ...}) so
+    skills_dispatched()/render_process_facts() stay agent-agnostic. OpenCode exposes no
+    per-call id we link against, so id is "" (there is no result to link).
+    """
     traj: list[dict] = []
     for ev in events:
         if ev.get("type") != "tool_use":
@@ -509,34 +583,46 @@ def _opencode_trajectory(events: list[dict]) -> list[dict]:
         inp = state.get("input") if isinstance(state.get("input"), dict) else {}
         if tool == "skill":
             skill = _skill_dispatch_name(part)
-            traj.append({"kind": "tool_call", "id": "", "name": "Skill",
-                         "arguments": {"skill": skill} if skill else {}})
+            traj.append(
+                {
+                    "kind": "tool_call",
+                    "id": "",
+                    "name": "Skill",
+                    "arguments": {"skill": skill} if skill else {},
+                }
+            )
         else:
             traj.append({"kind": "tool_call", "id": "", "name": tool, "arguments": inp})
     return traj
 
 
 def _debug_tail(events: list[dict]) -> str:
-    """Last few parsed events re-serialized as JSON, for when the model emits no
-    final text. Always valid UTF-8 (unlike a raw stdout slice, which can land on
-    binary bytes); empty when there are no events to show."""
+    """Last few parsed events re-serialized as JSON, for when the model emits no.
+
+    final text. Always valid UTF-8 (unlike a raw stdout slice, which can land on binary
+    bytes); empty when there are no events to show.
+    """
     return json.dumps(events[-3:]) if events else ""
 
 
 def parse_opencode_jsonl(
-    stdout: str, eval_id: str, config: str, detect_skill: str | None,
+    stdout: str,
+    eval_id: str,
+    config: str,
+    detect_skill: str | None,
 ) -> RunResult:
     """Parse OpenCode's JSONL event stream into a RunResult.
 
-    OpenCode has no terminal `result` event the way Claude Code does — the agent
-    emits `step_start` / `text` / `tool_use` / `step_finish` events and exits.
-    The final agent message concatenates every non-empty `part.text` event (joined
-    with blank lines) so the judge sees mid-run narration, not just the wrap-up;
-    when none is present (a tool-only run), it falls back to a re-serialized tail
-    of parsed events (`_debug_tail`). Totals come from `step_finish.part.tokens.total`;
-    duration is the timestamp span. `errored` keys on zero tokens — proof the agent
-    never reached the wire — NOT on a missing text event (concise models routinely
-    finish via tool calls without a wrap-up message)."""
+    OpenCode has no terminal `result` event the way Claude Code does — the agent emits
+    `step_start` / `text` / `tool_use` / `step_finish` events and exits. The final agent
+    message concatenates every non-empty `part.text` event (joined with blank lines) so
+    the judge sees mid-run narration, not just the wrap-up; when none is present (a
+    tool-only run), it falls back to a re-serialized tail of parsed events
+    (`_debug_tail`). Totals come from `step_finish.part.tokens.total`; duration is the
+    timestamp span. `errored` keys on zero tokens — proof the agent never reached the
+    wire — NOT on a missing text event (concise models routinely finish via tool calls
+    without a wrap-up message).
+    """
     events = list(iter_events(stdout))
 
     text_parts: list[str] = []
@@ -578,7 +664,8 @@ def parse_opencode_jsonl(
 
     duration_ms = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else 0
     return RunResult(
-        eval_id=eval_id, config=config,
+        eval_id=eval_id,
+        config=config,
         # No text event isn't a failure — concise models (e.g. Gemini) often skip a wrap-up
         # when tool calls accomplished the goal, and the judge can still grade from the
         # workdir. Fall back to the last few PARSED events (re-serialized as JSON, always
