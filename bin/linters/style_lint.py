@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
 
@@ -69,6 +71,7 @@ def run(
     verify_findings: bool = False,
     verify_model: str | None = None,
     max_lines: int = DEFAULT_CHUNK_LINES,
+    verbose: bool = False,
 ) -> int:
     """Run evalspec advisory style lint and print findings.
 
@@ -81,12 +84,20 @@ def run(
             detector model is used when verification is enabled without an
             override.
         max_lines: Maximum source lines per model chunk.
+        verbose: Whether to print Ruff-style debug progress to stderr.
 
     Returns:
         Always returns zero because this linter is advisory.
     """
+    started_at = time.perf_counter()
+    verbose_log(verbose, f"Using paths: {format_paths(paths)}")
+    verbose_log(verbose, f"Using model: {model}")
+    if verify_findings:
+        verbose_log(verbose, f"Using verifier model: {verify_model or model}")
+
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
+        verbose_log(verbose, "GEMINI_API_KEY is not set")
         print("skip: GEMINI_API_KEY is not set; advisory style lint is disabled")
         return 0
 
@@ -104,6 +115,15 @@ def run(
             max_lines=max_lines,
         )
     )
+    elapsed = time.perf_counter() - started_at
+    verbose_log(
+        verbose,
+        (
+            f"Checked {result.files_checked} files across "
+            f"{result.chunks_checked} chunks in {elapsed:.3f}s"
+        ),
+    )
+
     if result.warning is not None:
         print(f"warning: {result.warning}")
         print_usage(result.usage)
@@ -130,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify-findings", action="store_true")
     parser.add_argument("--verify-model")
     parser.add_argument("--max-lines", type=int, default=DEFAULT_CHUNK_LINES)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     changed_lines = None
     paths = list(args.paths) or None
@@ -144,7 +165,23 @@ def main(argv: list[str] | None = None) -> int:
         verify_findings=args.verify_findings or args.base is not None,
         verify_model=args.verify_model,
         max_lines=args.max_lines,
+        verbose=args.verbose,
     )
+
+
+def verbose_log(enabled: bool, message: str) -> None:
+    """Print Ruff-style debug logging to stderr when enabled."""
+    if not enabled:
+        return
+    timestamp = datetime.now().strftime("%Y-%m-%d][%H:%M:%S")
+    print(f"[{timestamp}][style_lint][DEBUG] {message}", file=sys.stderr)
+
+
+def format_paths(paths: list[Path] | None) -> str:
+    """Format explicit or default CLI paths for debug output."""
+    if paths is None:
+        return ", ".join(str(path) for path in DEFAULT_PATHS)
+    return ", ".join(str(path) for path in paths)
 
 
 def print_usage(usage: object) -> None:
