@@ -23,7 +23,8 @@ from dotenv import load_dotenv
 import evalspec
 from evalspec import report, workspace
 from evalspec.agents import make_agent, resolve_agent_name
-from evalspec.arms import Set, parse_sets, resolve_set
+from evalspec.arms import Set as EvalSet
+from evalspec.arms import parse_sets, resolve_set
 from evalspec.discovery import (
     discover_eval_cases,
     discover_trigger_cases,
@@ -119,7 +120,7 @@ def pytest_addoption(parser: object) -> None:
         "--evalspec-eval-roots",
         default=None,
         help="comma-separated paths (relative to repo root) to scan for eval-bearing "
-        "skill dirs (default: skills,.claude/skills; also overridable via "
+        "skill dirs (default: skills, .claude/skills; also overridable via "
         "[tool.evalspec] eval_roots in pyproject.toml)",
     )
     group.addoption(
@@ -175,11 +176,11 @@ def sample_index(request: object) -> int:
 def _parse_env_pairs(pairs: list) -> dict:
     """Parse KEY=VALUE environment overrides from CLI options."""
     out = {}
-    for p in pairs:
-        if "=" not in p:
-            raise pytest.UsageError(f"--evalspec-env expects KEY=VAL, got {p!r}")
-        k, v = p.split("=", 1)
-        out[k] = v
+    for pair in pairs:
+        if "=" not in pair:
+            raise pytest.UsageError(f"--evalspec-env expects KEY=VAL, got {pair!r}")
+        key, value = pair.split("=", 1)
+        out[key] = value
     return out
 
 
@@ -218,7 +219,7 @@ def _layer_config_sets(table: dict, config_path: str | None) -> dict:
     return merged
 
 
-def resolved_run_set(config: object) -> Set:
+def resolved_run_set(config: object) -> EvalSet:
     """The single eval set this run uses — uniform columns across every skill.
 
     Layers `--evalspec-config` over pyproject, selects `--evalspec-set` (else default-
@@ -335,7 +336,7 @@ def _write_manifest(
     iteration_root: Path,
     iteration: str,
     repo_root: Path,
-    run_set: Set | None,
+    run_set: EvalSet | None,
 ) -> None:
     """Write the run manifest artifact for a pytest session."""
     agent_version = token_split = None
@@ -353,14 +354,14 @@ def _write_manifest(
         "set": run_set.name if run_set else None,
         "arms": [
             {
-                "name": a.name,
-                "harness": a.harness,
-                "model": a.model,
-                "effort": a.effort,
-                "env": report.redact_env(a.env),
-                "harness_args": a.harness_args,
+                "name": arm.name,
+                "harness": arm.harness,
+                "model": arm.model,
+                "effort": arm.effort,
+                "env": report.redact_env(arm.env),
+                "harness_args": arm.harness_args,
             }
-            for a in run_set.arms
+            for arm in run_set.arms
         ]
         if run_set
         else [],
@@ -402,10 +403,10 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     # resolving unconditionally would raise UsageError at finish for a config we tolerate.
     # None → manifest/report degrade.
     needs_set = any(
-        d.is_dir() and d.name.startswith("eval-")
-        for sd in skills_root.iterdir()
-        if sd.is_dir()
-        for d in sd.iterdir()
+        child_dir.is_dir() and child_dir.name.startswith("eval-")
+        for skill_dir in skills_root.iterdir()
+        if skill_dir.is_dir()
+        for child_dir in skill_dir.iterdir()
     )
     run_set = resolved_run_set(config) if needs_set else None
     _write_manifest(config, skills_root.parent, iteration, repo_root, run_set)
@@ -419,21 +420,22 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     baseline = run_set.baseline if run_set else None
     arm_meta = (
         {
-            a.name: {
-                "harness": a.harness,
-                "model": a.model,
-                "effort": a.effort,
-                "env": report.redact_env(a.env),
-                "harness_args": a.harness_args,
-            }
-            for a in run_set.arms
+                arm.name: {
+                    "harness": arm.harness,
+                    "model": arm.model,
+                    "effort": arm.effort,
+                    "env": report.redact_env(arm.env),
+                    "harness_args": arm.harness_args,
+                }
+                for arm in run_set.arms
         }
         if run_set
         else None
     )
-    for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
+    for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         if not any(
-            d.is_dir() and d.name.startswith(("eval-", "trigger-")) for d in skill_dir.iterdir()
+            child_dir.is_dir() and child_dir.name.startswith(("eval-", "trigger-"))
+            for child_dir in skill_dir.iterdir()
         ):
             continue
         skill = skill_dir.name

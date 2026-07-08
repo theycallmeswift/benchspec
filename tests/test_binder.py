@@ -1,7 +1,7 @@
 """Binder tests — all mocked, NO network.
 
-`call_host` is injected with recorded. host-claude envelopes so the binder's
-parse/validate/punt logic is exercised offline.
+`call_host` is injected with recorded host-Claude envelopes so the binder's parse, validate,
+and punt logic is exercised offline.
 """
 
 from __future__ import annotations

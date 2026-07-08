@@ -70,8 +70,8 @@ def _field_expectation_draws() -> object:
 
 @pytest.mark.parametrize("entry", _draws())
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
-    """Verify binder corpus blocks punt leaks."""
-    b = _bind_resilient(entry["text"])
+    """Reject corpus examples where a punt expectation binds to a checker."""
+    binding = _bind_resilient(entry["text"])
 
     record(
         {
@@ -79,32 +79,32 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
             "cohort": entry["cohort"],
             "expect_checker": entry.get("expect_checker"),
             "expect": entry.get("expect"),
-            "actual": {k: b.get(k) for k in entry.get("expect", {})}
-            if isinstance(b, dict)
+            "actual": {key: binding.get(key) for key in entry.get("expect", {})}
+            if isinstance(binding, dict)
             else None,
-            "result": "error" if b is _ERROR else "punt" if b is None else "bound",
-            "checker": b.get("checker") if isinstance(b, dict) else None,
+            "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
+            "checker": binding.get("checker") if isinstance(binding, dict) else None,
         }
     )
 
-    if b is _ERROR:
+    if binding is _ERROR:
         pytest.skip("infra failure after retry")
 
     if entry["gold"] == "punt":
-        assert not isinstance(b, dict), (
-            f"false-positive leak: {entry['text']!r} bound to {b.get('checker')!r}"
+        assert not isinstance(binding, dict), (
+            f"false-positive leak: {entry['text']!r} bound to {binding.get('checker')!r}"
         )
 
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
 def test_binder_corpus_preserves_expected_checker_fields(entry: object) -> None:
-    """Verify binder corpus preserves expected checker fields."""
-    b = _bind_resilient(entry["text"])
+    """Ensure bound checker specs preserve expected fields from the corpus."""
+    binding = _bind_resilient(entry["text"])
 
-    if b is _ERROR:
+    if binding is _ERROR:
         pytest.skip("infra failure after retry")
 
-    assert isinstance(b, dict), f"expected bind for {entry['text']!r}, got punt"
-    assert all(b.get(k) == v for k, v in entry["expect"].items()), (
-        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {b!r}"
+    assert isinstance(binding, dict), f"expected bind for {entry['text']!r}, got punt"
+    assert all(binding.get(key) == value for key, value in entry["expect"].items()), (
+        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {binding!r}"
     )

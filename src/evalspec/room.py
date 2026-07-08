@@ -126,7 +126,7 @@ def sha_snapshot_script(dirs: list[str]) -> str:
 def parse_sha_stream(stdout: str) -> dict[str, str]:
     """Parse `sha_snapshot_script` stdout into {abs-path: sha}.
 
-    `sha256sum` separates the.     digest from the path with exactly two spaces.
+    `sha256sum` separates the digest from the path with exactly two spaces.
     """
     out: dict[str, str] = {}
     for line in stdout.splitlines():

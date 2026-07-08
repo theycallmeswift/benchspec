@@ -60,11 +60,11 @@ def test_run_host_judge_raises_runtimeerror_when_binary_missing(
     # A1: a missing host `claude` (FileNotFoundError from subprocess) must normalize to
     # RuntimeError so the arm is marked errored — not caught as OSError and counted as an
     # honest 0% pass rate. Reachable via EVALSPEC_AGENT=opencode on a host without claude.
-    def boom(*a: object, **k: object) -> NoReturn:
-        """Boom."""
+    def raise_missing_binary(*command_args: object, **command_kwargs: object) -> NoReturn:
+        """Simulate the host judge binary missing from PATH."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
-    monkeypatch.setattr(judge_cli.subprocess, "run", boom)
+    monkeypatch.setattr(judge_cli.subprocess, "run", raise_missing_binary)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
         run_host_judge("prompt", model="sonnet")

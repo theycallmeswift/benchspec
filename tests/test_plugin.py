@@ -551,9 +551,9 @@ class _StubAgent:
 
 
 def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> object:
-    """Drive the post-run pipeline the way pytest does: sessionfinish builds the.
+    """Drive the post-run pipeline the way pytest does.
 
-    artifacts, terminal_summary only prints.
+    `sessionfinish` builds the artifacts; `terminal_summary` only prints them.
     """
     config = _FakeConfig(tmp_path)
     session = _FakeSession(config)

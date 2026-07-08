@@ -92,25 +92,25 @@ def _balanced_objects(text: str) -> object:
     start = None
     in_str = False
     esc = False
-    for i, ch in enumerate(text):
+    for index, char in enumerate(text):
         if in_str:
             if esc:
                 esc = False
-            elif ch == "\\":
+            elif char == "\\":
                 esc = True
-            elif ch == '"':
+            elif char == '"':
                 in_str = False
             continue
-        if ch == '"':
+        if char == '"':
             in_str = True
-        elif ch == "{":
+        elif char == "{":
             if depth == 0:
-                start = i
+                start = index
             depth += 1
-        elif ch == "}" and depth > 0:
+        elif char == "}" and depth > 0:
             depth -= 1
             if depth == 0 and start is not None:
-                yield text[start : i + 1]
+                yield text[start : index + 1]
 
 
 def _coerce_passed(value: object) -> bool:
@@ -142,11 +142,11 @@ def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
         "arm": config,
         "assertions": [
             {
-                "text": a["text"],
-                "passed": _coerce_passed(a["passed"]),
-                "evidence": a.get("evidence", ""),
+                "text": assertion["text"],
+                "passed": _coerce_passed(assertion["passed"]),
+                "evidence": assertion.get("evidence", ""),
             }
-            for a in data["assertions"]
+            for assertion in data["assertions"]
         ],
     }
 

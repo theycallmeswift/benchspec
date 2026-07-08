@@ -99,8 +99,8 @@ def first_dispatched_skill(stream_lines: object) -> str | None:
 def dispatches_skill(line: str, skill_name: str | None = None) -> bool:
     """True if the line shows a skill being routed to.
 
-    Routing is decided there, so the.     sandbox router stops rather than wait out the
-    skill's (possibly minutes-long) work.
+    Routing is decided there, so the sandbox router stops rather than wait out the skill's
+    possibly minutes-long work.
 
     Matches the two fire shapes `detect_skill_fired` recognizes: any `Skill` tool_use
     (the agent routed to *some* skill), and — when `skill_name` is given — a tool_use
@@ -179,9 +179,9 @@ def trigger_record(
 ) -> dict:
     """The persisted per-sample trigger artifact.
 
-    Carries the VERDICT (`fired`,.     `passed`) and the query text, not just the raw
-    counts — so a report or external     aggregator never has to reimplement the
-    threshold rule, and a failing query is     diagnosable from artifacts alone.
+    Carries the verdict (`fired`, `passed`) and the query text, not just the raw counts, so
+    reports and external aggregators never have to reimplement the threshold rule. A failing
+    query is diagnosable from artifacts alone.
     """
     fired = fires >= threshold
     record = {

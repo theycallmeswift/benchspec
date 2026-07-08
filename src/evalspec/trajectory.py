@@ -140,10 +140,10 @@ def skills_dispatched(trajectory: list[dict], skill_name: str | None = None) -> 
 
 
 def render_process_facts(trajectories: list[list[dict]], start: int = 1) -> str:
-    """Compact, judge-readable summary of what the agent DID across turns — the.
+    """Compact, judge-readable summary of hidden tool activity across turns.
 
-    tool calls and sub-skill dispatches a final-message judge can't see. Empty string
-    when no turn carried tool activity. Turns with no tool calls are omitted.
+    Includes tool calls and sub-skill dispatches a final-message judge cannot see. Empty
+    string when no turn carried tool activity. Turns with no tool calls are omitted.
     """
     lines: list[str] = []
     for i, traj in enumerate(trajectories, start):
@@ -196,9 +196,9 @@ def split_session(session_text: str) -> list[tuple[int, str]]:
 def _looks_like_opencode(events: list[dict]) -> bool:
     """Route a regenerated turn to the right extractor.
 
-    OpenCode events nest content.     under a top-level `part`; Claude events nest it
-    under `message`. session.jsonl     carries no agent marker, so we sniff the shape
-    from the events themselves.
+    OpenCode events nest content under a top-level `part`; Claude events nest it under
+    `message`. session.jsonl carries no agent marker, so we sniff the shape from the events
+    themselves.
     """
     for ev in events:
         if isinstance(ev.get("part"), dict):

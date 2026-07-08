@@ -94,19 +94,26 @@ def substitute_prompt(prompt: str, today: str | None = None) -> str:
 def substitute_assertions(assertions: list, today: str) -> list:
     """Apply date placeholders to assertions and reject unknown placeholders."""
 
-    def _sub(a: object) -> object:
+    def _sub(assertion: object) -> object:
         """Replace placeholders inside one assertion value."""
-        if isinstance(a, str):
-            return a.replace("{TODAY}", today)
-        return {k: v.replace("{TODAY}", today) if isinstance(v, str) else v for k, v in a.items()}
+        if isinstance(assertion, str):
+            return assertion.replace("{TODAY}", today)
+        return {
+            key: value.replace("{TODAY}", today) if isinstance(value, str) else value
+            for key, value in assertion.items()
+        }
 
-    result = [_sub(a) for a in assertions]
+    result = [_sub(assertion) for assertion in assertions]
     residual = sorted(
         {
-            m
-            for a in result
-            for s in ([a] if isinstance(a, str) else [v for v in a.values() if isinstance(v, str)])
-            for m in _PLACEHOLDER.findall(s)
+            placeholder
+            for assertion in result
+            for text in (
+                [assertion]
+                if isinstance(assertion, str)
+                else [value for value in assertion.values() if isinstance(value, str)]
+            )
+            for placeholder in _PLACEHOLDER.findall(text)
         }
     )
     if residual:
@@ -140,7 +147,7 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
 def parse_stream_run(stdout: str, eval_id: str, config: str, skill_name: str | None) -> RunResult:
     """Parse a `--output-format stream-json` run.
 
-    Every arm streams, so `raw` and the.     structured trajectory are always captured.
+    Every arm streams, so `raw` and the structured trajectory are always captured.
 
     `skill_name` gates fired-detection: the suite's skill is passed on every arm to
     report whether it was invoked (activation is graded symmetrically — a

@@ -232,22 +232,22 @@ def resolve_set(
         defaults["env"] = {**defaults.get("env", {}), **env}
 
     if models:
-        safe = [_arm_name_from_model(m) for m in models]
+        safe = [_arm_name_from_model(model) for model in models]
         used: set[str] = set()
         unique: list[str] = []
-        for n in safe:
-            candidate = n
+        for safe_name in safe:
+            candidate = safe_name
             suffix = 2
             while candidate in used:
-                candidate = f"{n}-{suffix}"
+                candidate = f"{safe_name}-{suffix}"
                 suffix += 1
             used.add(candidate)
             unique.append(candidate)
         arms = [
-            _materialize_arm(sn, {"name": sn, "model": m}, defaults, where)
-            for sn, m in zip(unique, models, strict=False)
+            _materialize_arm(safe_name, {"name": safe_name, "model": model}, defaults, where)
+            for safe_name, model in zip(unique, models, strict=False)
         ]
         return Set(rs.name, arms, baseline=unique[0])
 
-    arms = [_materialize_arm(a["name"], a, defaults, where) for a in rs.raw_arms]
+    arms = [_materialize_arm(raw_arm["name"], raw_arm, defaults, where) for raw_arm in rs.raw_arms]
     return Set(rs.name, arms, baseline=rs.baseline)

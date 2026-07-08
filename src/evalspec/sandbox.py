@@ -80,13 +80,13 @@ def preflight() -> None:
 def _file_lock(path: Path) -> object:
     """Hold an exclusive filesystem lock for snapshot build coordination."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(path, "w")
+    lock_file = open(path, "w")
     try:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
         yield
     finally:
-        fcntl.flock(f, fcntl.LOCK_UN)
-        f.close()
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 
 async def _guest_shell(sb: object, agent: object, script: str) -> str | None:
@@ -334,8 +334,8 @@ async def _create_sandbox(
 class SandboxSession:
     """Async context manager holding one microVM open across an arm's turns.
 
-    `__aenter__`.     boots the VM and returns a per-turn async `run`; `__aexit__` tears
-    it down.
+    `__aenter__` boots the VM and returns a per-turn async `run`; `__aexit__` tears it
+    down.
 
     The whole lifecycle (create → turns → stop) MUST run inside a single `asyncio.run`:
     microsandbox's `Sandbox` is bound to the event loop it was created in and raises "no
@@ -572,7 +572,7 @@ async def _route_in_sandbox_async(
         )
 
         async def _drain() -> None:
-            """Provide the drain helper."""
+            """Drain streamed exec events into output lines and exit state."""
             nonlocal dispatched, exit_code
             # exec_stream delivers stdout in arbitrary chunks that do NOT align to newlines,
             # and OpenCode's skill `tool_use` event embeds the full skill output (multi-KB),
@@ -672,9 +672,9 @@ def cli_build() -> None:
 
 
 def cli_clean(repo_root: Path) -> None:
-    """`make clean` helper: remove evalspec sandboxes + snapshots via the msb CLI,.
+    """Remove evalspec sandboxes and snapshots via the msb CLI.
 
-    plus the per-repo snapshot lock files under `<repo_root>/tmp/`.
+    Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `make evals:build`.
     """

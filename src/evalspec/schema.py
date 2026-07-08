@@ -156,15 +156,15 @@ def _validate_seed(seed: object, path: str) -> None:
     """Validate seed conversation turns."""
     if not isinstance(seed, list):
         raise SchemaError(f"{path}: expected list, got {type(seed).__name__}")
-    for i, turn in enumerate(seed):
-        tpath = f"{path}[{i}]"
+    for index, turn in enumerate(seed):
+        turn_path = f"{path}[{index}]"
         if not isinstance(turn, dict):
-            raise SchemaError(f"{tpath}: expected object, got {type(turn).__name__}")
-        _reject_extra_keys(turn, {"role", "text"}, tpath)
+            raise SchemaError(f"{turn_path}: expected object, got {type(turn).__name__}")
+        _reject_extra_keys(turn, {"role", "text"}, turn_path)
         for key in ("role", "text"):
-            val = _require(turn, key, str, tpath)
-            if not val.strip():
-                raise SchemaError(f"{tpath}.{key}: must be non-empty")
+            value = _require(turn, key, str, turn_path)
+            if not value.strip():
+                raise SchemaError(f"{turn_path}.{key}: must be non-empty")
 
 
 def _validate_evals_v1(data: dict) -> None:

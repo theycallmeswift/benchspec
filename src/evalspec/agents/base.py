@@ -53,8 +53,8 @@ class BaseAgent:
 class AgentCapabilities:
     """What the harness can honestly do with this agent.
 
-    Typed, not a dict:.     every field here has a consumer in the harness, and an
-    unknown field is a     type error rather than silently ignored documentation.
+    Typed, not a dict: every field here has a consumer in the harness, and an
+    unknown field is a type error rather than silently ignored documentation.
     """
 
     efforts: tuple[str, ...]  # values the agent's CLI accepts for the effort flag

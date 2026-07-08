@@ -94,7 +94,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
             assertions = grading.get("assertions", [])
             if not assertions:
                 continue
-            passed = sum(1 for a in assertions if a.get("passed"))
+            passed = sum(1 for assertion in assertions if assertion.get("passed"))
             sample_rates.append(passed / len(assertions))
             passed_total += passed
             total_total += len(assertions)
@@ -141,27 +141,30 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
     }
 
 
-def _as_expected(t: dict) -> bool:
+def _as_expected(timing: dict) -> bool:
     """Whether one trigger sample matches its documented expectation.
 
-    A tier-scoped.     `xfail` is a documented routing miss only on the tiers it lists:
-    on one of those     tiers a miss is a green xfail and an unexpected fire is an XPASS
-    — both non-failing     on the scoreboard (pytest surfaces XPASS separately). On any
-    other tier the query     is as-expected only when it passed (`fired ==
-    should_trigger`), matching the strict     gate. The sample carries its own run
-    `model`, so the scoreboard and the gate agree.
+    A tier-scoped `xfail` is a documented routing miss only on the tiers it lists:
+    on one of those tiers a miss is a green xfail and an unexpected fire is an XPASS,
+    both non-failing on the scoreboard. On any other tier the query is as-expected only
+    when it passed (`fired == should_trigger`), matching the strict gate. The sample
+    carries its own run `model`, so the scoreboard and the gate agree.
     """
-    xfail = t.get("xfail")
-    if xfail and xfail_applies(xfail, t.get("model", "")):
+    xfail = timing.get("xfail")
+    if xfail and xfail_applies(xfail, timing.get("model", "")):
         return True
-    return t["passed"]
+    return timing["passed"]
 
 
 def _trigger_rows(eval_root: Path) -> list[dict]:
     """Read trigger result records for report rendering."""
     rows: list[dict] = []
-    for qdir in _trigger_qdirs(eval_root):
-        samples = [t for sd in _sample_dirs(qdir) if (t := _load_json(sd / "timing.json"))]
+    for query_dir in _trigger_qdirs(eval_root):
+        samples = [
+            timing
+            for sample_dir in _sample_dirs(query_dir)
+            if (timing := _load_json(sample_dir / "timing.json"))
+        ]
         if not samples:
             continue
         expected = samples[0]["should_trigger"]
@@ -172,22 +175,27 @@ def _trigger_rows(eval_root: Path) -> list[dict]:
                 "should_trigger": expected,
                 "xfail": samples[0].get("xfail"),
                 "samples": len(samples),
-                "as_expected": sum(1 for t in samples if _as_expected(t)),
+                "as_expected": sum(1 for timing in samples if _as_expected(timing)),
             }
         )
     return rows
 
 
 def index_rows(skill_dir: Path, skill: str) -> list[dict]:
-    """Flat per-sample rows for the iteration-level index.jsonl — one line per.
+    """Flat per-sample rows for the iteration-level index.jsonl.
 
-    (eval × arm × sample) and (trigger query × sample). An aggregator reads these
+    Emits one line per eval sample and trigger-query sample. An aggregator reads these
     without tree-walking; everything here is also in the per-sample artifacts.
     """
     rows: list[dict] = []
-    eval_dirs = sorted(d for d in skill_dir.iterdir() if d.is_dir() and d.name.startswith("eval-"))
+    eval_dirs = sorted(
+        entry for entry in skill_dir.iterdir() if entry.is_dir() and entry.name.startswith("eval-")
+    )
     for eval_dir in eval_dirs:
-        for arm_dir in sorted((d for d in eval_dir.iterdir() if d.is_dir()), key=lambda d: d.name):
+        for arm_dir in sorted(
+            (entry for entry in eval_dir.iterdir() if entry.is_dir()),
+            key=lambda entry: entry.name,
+        ):
             for sample_dir in _sample_dirs(arm_dir):
                 grading = _load_json(sample_dir / "grading.json")
                 if grading is None:
@@ -202,7 +210,7 @@ def index_rows(skill_dir: Path, skill: str) -> list[dict]:
                         "arm": arm_dir.name,
                         "sample": int(sample_dir.name.removeprefix("sample-")),
                         "errored": bool(grading.get("errored")),
-                        "passed": sum(1 for a in assertions if a.get("passed")),
+                        "passed": sum(1 for assertion in assertions if assertion.get("passed")),
                         "total": len(assertions),
                         "duration_ms": timing.get("duration_ms"),
                         "judge_ms": timing.get("judge_ms"),
@@ -211,36 +219,38 @@ def index_rows(skill_dir: Path, skill: str) -> list[dict]:
                         "output_tokens": timing.get("output_tokens"),
                     }
                 )
-    for qdir in _trigger_qdirs(skill_dir):
-        for sample_dir in _sample_dirs(qdir):
-            t = _load_json(sample_dir / "timing.json")
-            if t is None:
+    for query_dir in _trigger_qdirs(skill_dir):
+        for sample_dir in _sample_dirs(query_dir):
+            timing = _load_json(sample_dir / "timing.json")
+            if timing is None:
                 continue
             rows.append(
                 {
                     "skill": skill,
                     "kind": "trigger",
-                    "slug": t["slug"],
+                    "slug": timing["slug"],
                     "sample": int(sample_dir.name.removeprefix("sample-")),
-                    "passed": t["passed"],
-                    "should_trigger": t["should_trigger"],
-                    "fires": t["fires"],
-                    "threshold": t["threshold"],
-                    "duration_ms": sum(p.get("ms", 0) for p in t.get("per_pass", [])),
+                    "passed": timing["passed"],
+                    "should_trigger": timing["should_trigger"],
+                    "fires": timing["fires"],
+                    "threshold": timing["threshold"],
+                    "duration_ms": sum(
+                        pass_record.get("ms", 0) for pass_record in timing.get("per_pass", [])
+                    ),
                 }
             )
     return rows
 
 
-def _pct(x: object) -> str:
+def _pct(value: object) -> str:
     """Format a numeric rate as a percentage string."""
-    return "n/a" if x is None else f"{x:.0%}"
+    return "n/a" if value is None else f"{value:.0%}"
 
 
 def delta_noise_pp(arm_a: dict, arm_b: dict) -> float | None:
-    """Sampling-noise band for the Δ between two arms, in percentage points: the.
+    """Sampling-noise band for the delta between two arms, in percentage points.
 
-    standard error of the difference of their per-sample pass rates. An approximation
+    Uses the standard error of the difference of their per-sample pass rates. An approximation
     (macro-mean over eval×sample pairs, not a paired test) — enough to keep a one-sample
     wiggle from reading as a win. None until both arms have ≥2 samples.
     """
@@ -268,7 +278,7 @@ def _headline_lines(benchmark: dict) -> list[str]:
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     if baseline is None:
-        scored = [f"{name} {_pct(s['pass_rate'])}" for name, s in arms.items()]
+        scored = [f"{name} {_pct(stats['pass_rate'])}" for name, stats in arms.items()]
         return [f"**Pass rates:** {' · '.join(scored)}"]
     ref_rate = arms.get(baseline, {}).get("pass_rate")
     lines = []
@@ -304,11 +314,11 @@ def _matrix_table(benchmark: dict) -> list[str]:
     names = ([baseline] if baseline in arms else []) + [n for n in arms if n != baseline]
     if not names:
         return []
-    headers = [f"{n} ({arms[n].get('harness') or '?'})" for n in names]
+    headers = [f"{name} ({arms[name].get('harness') or '?'})" for name in names]
     # Union of eval_ids across arms, stable.
     eval_ids: list[str] = []
-    for n in names:
-        for row in arms[n]["per_eval"]:
+    for name in names:
+        for row in arms[name]["per_eval"]:
             if row["eval_id"] not in eval_ids:
                 eval_ids.append(row["eval_id"])
     lines = [
@@ -397,16 +407,16 @@ def _format_markdown(benchmark: dict) -> str:
         lines.append("")
     trigger = benchmark.get("trigger") or []
     if trigger:
-        ok = sum(1 for r in trigger if r["as_expected"] == r["samples"])
+        ok = sum(1 for row in trigger if row["as_expected"] == row["samples"])
         lines += [f"## Trigger routing — {ok}/{len(trigger)} queries as expected", ""]
         lines.append("| Query | Text | Expected | As expected |")
         lines.append("|-------|------|----------|-------------|")
-        for r in trigger:
-            expected = "fire" if r["should_trigger"] else "no fire"
-            mark = " (xfail)" if r.get("xfail") else ""
+        for row in trigger:
+            expected = "fire" if row["should_trigger"] else "no fire"
+            mark = " (xfail)" if row.get("xfail") else ""
             lines.append(
-                f"| {r['slug']}{mark} | {_md_cell(r['query'])} "
-                f"| {expected} | {r['as_expected']}/{r['samples']} |"
+                f"| {row['slug']}{mark} | {_md_cell(row['query'])} "
+                f"| {expected} | {row['as_expected']}/{row['samples']} |"
             )
         lines.append("")
     return "\n".join(lines)
@@ -452,17 +462,17 @@ def build_benchmark(
     # on-disk stats — it's the run config, not anything derivable from the artifacts.
     meta = arm_meta or {}
     for name, stats in arm_stats.items():
-        m = meta.get(name, {})
-        stats["harness"] = m.get("harness")
-        stats["model"] = m.get("model")
-        stats["effort"] = m.get("effort")
-        stats["env"] = m.get("env", {})
-        stats["harness_args"] = m.get("harness_args", [])
+        metadata = meta.get(name, {})
+        stats["harness"] = metadata.get("harness")
+        stats["model"] = metadata.get("model")
+        stats["effort"] = metadata.get("effort")
+        stats["env"] = metadata.get("env", {})
+        stats["harness_args"] = metadata.get("harness_args", [])
     # arm_stats is built from sorted(arm_names); reorder to the SET-DECLARED order
     # (arm_meta preserves it) so matrix columns follow the set, not the alphabet.
     if meta:
-        arm_stats = {n: arm_stats[n] for n in meta if n in arm_stats} | {
-            n: s for n, s in arm_stats.items() if n not in meta
+        arm_stats = {name: arm_stats[name] for name in meta if name in arm_stats} | {
+            name: stats for name, stats in arm_stats.items() if name not in meta
         }
 
     # Δ is measured against the baseline arm — when one ran. Each non-baseline arm
@@ -478,7 +488,7 @@ def build_benchmark(
 
     # Observed --count N; per-eval `samples` may be smaller where samples errored.
     max_samples = max(
-        (row["samples"] for s in arm_stats.values() for row in s["per_eval"]),
+        (row["samples"] for stats in arm_stats.values() for row in stats["per_eval"]),
         default=0,
     )
     return {
@@ -514,7 +524,7 @@ def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
     baseline = benchmark.get("baseline")
     parts = []
     if baseline is None:
-        scored = [f"{name} {_pct(s.get('pass_rate'))}" for name, s in arms.items()]
+        scored = [f"{name} {_pct(stats.get('pass_rate'))}" for name, stats in arms.items()]
         if scored:
             parts.append(" · ".join(scored))
     else:
@@ -540,6 +550,6 @@ def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
             parts.append(f"{baseline} {_pct(ref_rate)}")
     trigger = benchmark.get("trigger") or []
     if trigger:
-        ok = sum(1 for r in trigger if r["as_expected"] == r["samples"])
+        ok = sum(1 for row in trigger if row["as_expected"] == row["samples"])
         parts.append(f"trigger {ok}/{len(trigger)}")
     return f"{skill}: " + "  |  ".join(parts) + f"  -> {benchmark_md}"

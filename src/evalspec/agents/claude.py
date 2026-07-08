@@ -228,8 +228,8 @@ class ClaudeCodeAgent(BaseAgent):
     def detect_fired(self: object, lines: object, skill_name: str) -> bool:
         """Tally whether OUR skill fired across the routing stream.
 
-        Delegates to the.         shared Claude-shape helper so the event-shape match
-        lives in one place.
+        Delegates to the shared Claude-shape helper so the event-shape match lives in one
+        place.
         """
         return detect_skill_fired(lines, skill_name)
 

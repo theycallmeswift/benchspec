@@ -24,18 +24,15 @@ import yaml
 class GradeContext:
     """Process facts a deterministic checker needs beyond the workdir.
 
-    Inert until a runner.     wires fired_skills; absent context grades skill_invoked
-    False, never crashes.
+    Inert until a runner wires `fired_skills`; absent context grades `skill_invoked` false
+    instead of crashing.
     """
 
     fired_skills: tuple[str, ...] = ()
 
 
 def assertion_text(assertion: object) -> str:
-    """Display text for any assertion shape: plain string, typed object with text,.
-
-    or a checker spec whose text derives from its fields.
-    """
+    """Display text for plain strings, typed assertion objects, or checker specs."""
     if isinstance(assertion, str):
         return assertion
     return assertion.get("text") or derive_text(assertion)
@@ -226,8 +223,8 @@ def run_assertion(
 ) -> dict:
     """Grade one deterministic assertion.
 
-    Returns a grading entry interchangeable.     with a judge-graded one, evidence
-    prefixed so artifacts show it never saw a judge.
+    Returns a grading entry interchangeable with a judge-graded one, with evidence prefixed
+    so artifacts show it never saw a judge.
     """
     passed, evidence = _CHECKERS[spec["checker"]](spec, workdir, original_shas, context)
     return {

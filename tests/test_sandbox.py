@@ -618,9 +618,9 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
 
 
 class _SetupShellSandbox:
-    """Records shell calls and returns one canned result, so a test can assert the.
+    """Record shell calls and return one canned result.
 
-    cwd/env/script a setup.sh run was issued under.
+    Tests use this to assert the cwd, environment, and script a setup.sh run used.
     """
 
     def __init__(self: object, exit_code: object = 0, stderr: object = "") -> None:

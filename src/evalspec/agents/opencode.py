@@ -452,10 +452,11 @@ class OpenCodeAgent(BaseAgent):
         return run_host_judge(prompt, model=model, timeout=timeout)
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
-        """True if the line shows ANY skill being routed to (early-stop: routing is.
+        """Return true when a line shows any skill route.
 
-        decided, don't wait out the turn). The tally (detect_fired) re-checks for OUR
-        skill, so loosening here can't widen the fire count.
+        Once routing is decided, the sandbox does not need to wait out the turn. The tally
+        (`detect_fired`) re-checks for the target skill, so loosening this detector cannot
+        widen the fire count.
         """
         text = line.strip()
         if not text:
@@ -472,10 +473,10 @@ class OpenCodeAgent(BaseAgent):
         return _part_dispatches_any_skill(part, skill_name)
 
     def detect_fired(self: object, lines: object, skill_name: str) -> bool:
-        """Tally whether OUR skill fired.
+        """Return true when the target skill fired in the OpenCode stream.
 
-        Uses the strict `_tool_dispatches_skill`.         matcher directly (NOT
-        detect_dispatch, which now early-stops on any skill).
+        Uses the strict `_tool_dispatches_skill` matcher directly (not `detect_dispatch`,
+        which now early-stops on any skill).
         """
         for line in lines:
             text = line.strip()
@@ -493,11 +494,11 @@ class OpenCodeAgent(BaseAgent):
         return False
 
     def streamed_activity(self: object, lines: object) -> bool:
-        """True if the model began a turn.
+        """Return true when the OpenCode stream proves the model began a turn.
 
-        OpenCode emits step_start/text/tool_use/.         step_finish (never Claude's
-        `assistant`), so any of those proves the agent         worked — a budget timeout
-        after one is a clean non-fire, not a launch stall.
+        OpenCode emits step_start/text/tool_use/step_finish (never Claude's `assistant`),
+        so any of those proves the agent worked; a budget timeout after one is a clean
+        non-fire, not a launch stall.
         """
         turn_events = {"step_start", "text", "tool_use", "step_finish"}
         for line in lines:
@@ -514,10 +515,10 @@ class OpenCodeAgent(BaseAgent):
 
 
 def _skill_dispatch_name(part: dict) -> str | None:
-    """The skill targeted by a `skill` dispatcher tool_use (part.state.input.name),.
+    """Return the skill name from a `skill` dispatcher tool_use.
 
-    or None if this isn't a skill dispatch. Single source for both fired-detection and
-    trajectory normalization so they can't drift.
+    Returns None when this part is not a skill dispatch. This is the single source for both
+    fired-detection and trajectory normalization so they cannot drift.
     """
     if part.get("tool") != "skill":
         return None
@@ -544,10 +545,11 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
 
 
 def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
-    """True if this part routes to ANY skill (the `skill` dispatcher), or — as the.
+    """Return true when a part routes to any skill.
 
-    namespaced-tool fallback — OUR skill registered directly as a tool. Mirrors Claude's
-    `dispatches_skill`: early-stop on any route; the tally filters to ours.
+    Matches either the `skill` dispatcher or, as the namespaced-tool fallback, the target
+    skill registered directly as a tool. Mirrors Claude's `dispatches_skill`: early-stop on
+    any route; the tally filters to ours.
     """
     tool = part.get("tool")
     if not isinstance(tool, str):

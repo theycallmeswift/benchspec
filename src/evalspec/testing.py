@@ -29,8 +29,8 @@ class FakeExecOutput:
 class FakeSandbox:
     """Records calls; returns canned outputs.
 
-    `exec_outputs` is consumed in order.     (one per exec call), falling back to
-    `default_exec` when exhausted.
+    `exec_outputs` is consumed in order, one per exec call, falling back to `default_exec`
+    when exhausted.
     """
 
     shell_output: FakeExecOutput = field(default_factory=FakeExecOutput)
