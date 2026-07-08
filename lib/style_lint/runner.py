@@ -51,6 +51,8 @@ class StyleLintResult:
     diagnostics: list[str]
     warning: str | None = None
     usage: UsageMetadata = field(default_factory=UsageMetadata)
+    files_checked: int = 0
+    chunks_checked: int = 0
 
 
 def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
@@ -122,12 +124,17 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             findings=[],
             diagnostics=[],
             warning=f"advisory style lint skipped due to model error: {error}",
+            usage=usage if "usage" in locals() else UsageMetadata(),
+            files_checked=len(targets) if "targets" in locals() else 0,
+            chunks_checked=len(chunks) if "chunks" in locals() else 0,
         )
 
     return StyleLintResult(
         findings=findings,
         diagnostics=format_findings(findings),
         usage=usage,
+        files_checked=len(targets),
+        chunks_checked=len(chunks),
     )
 
 

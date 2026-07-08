@@ -98,6 +98,8 @@ def test_run_advisory_lint_batches_detector_calls(
 
     assert result.warning is None
     assert len(seen_prompts) == 2
+    assert result.files_checked == 1
+    assert result.chunks_checked == 3
 
 
 def test_run_advisory_lint_aggregates_usage_metadata(

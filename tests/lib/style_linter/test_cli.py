@@ -171,6 +171,40 @@ def test_cli_run_prints_no_findings_message(
     assert captured.out == "All checks passed!\n"
 
 
+def test_cli_run_verbose_logs_progress_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Log Ruff-style debug progress without changing normal stdout."""
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n")
+    result = style_lint_cli.style_lint.StyleLintResult(
+        findings=[],
+        diagnostics=[],
+        files_checked=1,
+        chunks_checked=1,
+    )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "run_advisory_lint",
+        lambda _config: result,
+    )
+
+    exit_code = style_lint_cli.run(paths=[source], verbose=True)
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == "All checks passed!\n"
+    assert "[style_lint][DEBUG]" in captured.err
+    assert "Using paths: " in captured.err
+    assert "Checked 1 files across 1 chunks" in captured.err
+
+
 def test_cli_run_prints_usage_metadata_when_available(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -282,6 +316,7 @@ def test_cli_base_filters_run_to_changed_python_files(
         run_call["paths"] = paths
         run_call["changed_lines"] = kwargs["changed_lines"]
         run_call["verify_findings"] = kwargs["verify_findings"]
+        run_call["verbose"] = kwargs["verbose"]
         return 0
 
     monkeypatch.setattr(
@@ -291,13 +326,14 @@ def test_cli_base_filters_run_to_changed_python_files(
     )
     monkeypatch.setattr(style_lint_cli, "run", fake_run)
 
-    exit_code = style_lint_cli.main(["--base", "origin/dev"])
+    exit_code = style_lint_cli.main(["--base", "origin/dev", "--verbose"])
 
     assert exit_code == 0
     assert run_call == {
         "paths": [source],
         "changed_lines": changed_lines,
         "verify_findings": True,
+        "verbose": True,
     }
 
 
