@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
@@ -113,6 +114,7 @@ def run(
             verify_findings=verify_findings,
             verify_model=verify_model,
             max_lines=max_lines,
+            progress_callback=progress_logger(verbose),
         )
     )
     elapsed = time.perf_counter() - started_at
@@ -175,6 +177,21 @@ def verbose_log(enabled: bool, message: str) -> None:
         return
     timestamp = datetime.now().strftime("%Y-%m-%d][%H:%M:%S")
     print(f"[{timestamp}][style_lint][DEBUG] {message}", file=sys.stderr)
+
+
+def progress_logger(enabled: bool) -> Callable[[Path, int, int], None] | None:
+    """Return a verbose file progress callback when enabled."""
+    if not enabled:
+        return None
+
+    def log_file_progress(path: Path, current: int, total: int) -> None:
+        percent = 100 if total == 0 else round((current / total) * 100)
+        verbose_log(
+            True,
+            f"Checking file {current}/{total} ({percent}%): {path}",
+        )
+
+    return log_file_progress
 
 
 def format_paths(paths: list[Path] | None) -> str:

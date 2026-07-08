@@ -71,6 +71,7 @@ def test_run_advisory_lint_batches_detector_calls(
     source = tmp_path / "sample.py"
     source.write_text("one = 1\ntwo = 2\nthree = 3\n")
     seen_prompts: list[str] = []
+    progress_events: list[tuple[Path, int, int]] = []
 
     def _call_gemini(**kwargs: object) -> str:
         seen_prompts.append(str(kwargs["prompt"]))
@@ -93,11 +94,15 @@ def test_run_advisory_lint_batches_detector_calls(
             model="gemini-test",
             max_lines=1,
             chunk_batch_size=2,
+            progress_callback=lambda path, current, total: progress_events.append(
+                (path, current, total)
+            ),
         )
     )
 
     assert result.warning is None
     assert len(seen_prompts) == 2
+    assert progress_events == [(source.resolve(), 1, 1)]
     assert result.files_checked == 1
     assert result.chunks_checked == 3
 
