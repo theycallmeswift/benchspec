@@ -188,10 +188,15 @@ def test_cli_run_verbose_logs_progress_to_stderr(
     )
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def fake_run_advisory_lint(config: object) -> object:
+        config.progress_callback(source.resolve(), 1, 1)
+        return result
+
     monkeypatch.setattr(
         style_lint_cli.style_lint,
         "run_advisory_lint",
-        lambda _config: result,
+        fake_run_advisory_lint,
     )
 
     exit_code = style_lint_cli.run(paths=[source], verbose=True)
@@ -202,6 +207,7 @@ def test_cli_run_verbose_logs_progress_to_stderr(
     assert captured.out == "All checks passed!\n"
     assert "[style_lint][DEBUG]" in captured.err
     assert "Using paths: " in captured.err
+    assert f"Checking file 1/1 (100%): {source.resolve()}" in captured.err
     assert "Checked 1 files across 1 chunks" in captured.err
 
 

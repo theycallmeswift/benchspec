@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,6 +42,7 @@ class StyleLintConfig:
     max_lines: int = 120
     chunk_batch_size: int = 8
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    progress_callback: Callable[[Path, int, int], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,14 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         chunks = chunk_source_files(targets, max_lines=config.max_lines)
         findings: list[Finding] = []
         usage = UsageMetadata()
+        progressed_files: set[Path] = set()
         for chunk_batch in _chunk_batches(chunks, size=config.chunk_batch_size):
+            _emit_file_progress(
+                chunks=chunk_batch,
+                progressed_files=progressed_files,
+                total_files=len(targets),
+                progress_callback=config.progress_callback,
+            )
             prompt = build_detector_prompt(
                 chunks=chunk_batch,
                 rules=config.rules,
@@ -107,6 +116,7 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             )
             findings = verification.findings
             usage = _add_usage(usage, verification.usage)
+
         if config.changed_lines is not None:
             findings = _findings_on_changed_lines(
                 findings=findings,
@@ -161,6 +171,24 @@ def _add_usage(left: UsageMetadata, right: UsageMetadata) -> UsageMetadata:
         output_tokens=left.output_tokens + right.output_tokens,
         total_tokens=left.total_tokens + right.total_tokens,
     )
+
+
+def _emit_file_progress(
+    *,
+    chunks: list[SourceChunk],
+    progressed_files: set[Path],
+    total_files: int,
+    progress_callback: Callable[[Path, int, int], None] | None,
+) -> None:
+    """Notify when model work reaches a new source file."""
+    if progress_callback is None:
+        return
+
+    for chunk in chunks:
+        if chunk.path in progressed_files:
+            continue
+        progressed_files.add(chunk.path)
+        progress_callback(chunk.path, len(progressed_files), total_files)
 
 
 def _findings_on_changed_lines(
