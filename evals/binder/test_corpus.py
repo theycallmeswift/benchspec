@@ -1,10 +1,10 @@
-"""Live labeled-corpus eval for the Haiku binder: the false-positive gate.
+"""Live labeled-corpus eval for the Gemini binder: the false-positive gate.
 
-Samples the real Haiku binder over the gold-labeled corpus and enforces the one hard
+Samples the real Gemini binder over the gold-labeled corpus and enforces the one hard
 gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
 so the run shows live per-item progress and a leak names the exact draw; `make
 evals:binder` shards the draws across xdist workers and the `binder_corpus` marker keeps
-it out of `make test` (it costs money and needs a Claude credential). Corpus-wide stats
+it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). Corpus-wide stats
 (infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
 per-draw records.
 """
@@ -12,10 +12,9 @@ per-draw records.
 from __future__ import annotations
 
 import os
-import subprocess
 
 import pytest
-from test_binder_corpus_integrity import CORPUS
+from test_corpus_integrity import CORPUS
 
 from evalspec.binder import bind
 
@@ -38,13 +37,14 @@ def _samples_for(entry: object) -> object:
 
 
 def _bind_resilient(text: object) -> object:
-    """Bind one assertion with one retry for transient infra failures."""
-    # Retry one transient infra failure, then give up with _ERROR — a timed-out/crashed call
-    # must not masquerade as a punt. Only infra exceptions are caught, so no logic bug hides.
+    """Bind one assertion with one retry for a transient Gemini infra failure."""
+    # RuntimeError is the total normalization every _call_gemini failure funnels
+    # through except BinderAuthError (never caught — a bad key must fail the corpus
+    # session, not masquerade as one more "infra error" data point).
     for _ in range(2):
         try:
             return bind(text)
-        except (subprocess.TimeoutExpired, RuntimeError, OSError):
+        except RuntimeError:
             continue
     return _ERROR
 
