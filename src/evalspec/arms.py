@@ -65,9 +65,9 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
     """Validate harness argument strings from configuration."""
     if not isinstance(value, list):
         raise SchemaError(f"{where}: `harness_args` must be a list")
-    for i, item in enumerate(value):
+    for arg_index, item in enumerate(value):
         if not isinstance(item, str):
-            raise SchemaError(f"{where}: `harness_args[{i}]` must be a string")
+            raise SchemaError(f"{where}: `harness_args[{arg_index}]` must be a string")
     return value
 
 
@@ -97,7 +97,7 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         where = f"[tool.evalspec.sets.{set_name}]"
         if not isinstance(body, dict):
             raise SchemaError(f"{where}: expected a table")
-        defaults = {k: body[k] for k in _SET_DEFAULT_KEYS if k in body}
+        defaults = {key: body[key] for key in _SET_DEFAULT_KEYS if key in body}
         if "env" in defaults:
             _validate_env_table(f"{where}: set-level `env`", defaults["env"])
         if "harness_args" in defaults:
@@ -166,9 +166,9 @@ def expand_env(env: dict, environ: Mapping) -> dict:
     for key, val in env.items():
         if not isinstance(val, str):
             raise SchemaError(f"env `{key}` must be a string, got {type(val).__name__}")
-        m = _VAR.match(val)
-        if m:
-            name = m.group(1) or m.group(2)
+        match = _VAR.match(val)
+        if match:
+            name = match.group(1) or match.group(2)
             if name not in environ:
                 raise SchemaError(
                     f"env `{key}` references ${name}, which is unset in the environment"

@@ -106,15 +106,15 @@ import os from 'os';
 const SKILLS_DIR = path.join(os.homedir(), '.config/opencode/skills');
 
 const extractFrontmatter = (content) => {
-  const m = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!m) return {};
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
   const fm = {};
-  for (const line of m[1].split('\n')) {
-    const c = line.indexOf(':');
-    if (c > 0) {
-      const k = line.slice(0, c).trim();
-      const v = line.slice(c + 1).trim().replace(/^["']|["']$/g, '');
-      fm[k] = v;
+  for (const line of match[1].split('\n')) {
+    const separatorIndex = line.indexOf(':');
+    if (separatorIndex > 0) {
+      const key = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim().replace(/^["']|["']$/g, '');
+      fm[key] = value;
     }
   }
   return fm;
@@ -123,9 +123,9 @@ const extractFrontmatter = (content) => {
 const listSkills = () => {
   if (!fs.existsSync(SKILLS_DIR)) return [];
   return fs.readdirSync(SKILLS_DIR).flatMap((dir) => {
-    const f = path.join(SKILLS_DIR, dir, 'SKILL.md');
-    if (!fs.existsSync(f)) return [];
-    const fm = extractFrontmatter(fs.readFileSync(f, 'utf8'));
+    const skillPath = path.join(SKILLS_DIR, dir, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) return [];
+    const fm = extractFrontmatter(fs.readFileSync(skillPath, 'utf8'));
     return [{ name: fm.name || dir, description: fm.description || '' }];
   });
 };
@@ -139,7 +139,7 @@ const getBootstrap = () => {
     bootstrapCache = null;
     return null;
   }
-  const list = skills.map((s) => `- \`${s.name}\` — ${s.description}`).join('\n');
+  const list = skills.map((skill) => `- \`${skill.name}\` — ${skill.description}`).join('\n');
   bootstrapCache = `<EVALSPEC_SKILLS_AVAILABLE>
 You have access to the following user-installed skills via the \`skill\` tool:
 
@@ -157,23 +157,28 @@ export const EvalspecBootstrap = async () => ({
   // 'experimental.chat.messages.transform' — register both so this plugin
   // works across versions without coupling to one shape.
   'experimental.chat.system.transform': async (_input, output) => {
-    const b = getBootstrap();
-    if (!b || !Array.isArray(output.system)) return;
+    const bootstrap = getBootstrap();
+    if (!bootstrap || !Array.isArray(output.system)) return;
     if (output.system.some(
-      (s) => typeof s === 'string' && s.includes('EVALSPEC_SKILLS_AVAILABLE')
+      (systemMessage) => typeof systemMessage === 'string' &&
+        systemMessage.includes('EVALSPEC_SKILLS_AVAILABLE')
     )) return;
-    output.system.push(b);
+    output.system.push(bootstrap);
   },
   'experimental.chat.messages.transform': async (_input, output) => {
-    const b = getBootstrap();
-    if (!b || !output.messages || !output.messages.length) return;
-    const firstUser = output.messages.find((m) => m.info && m.info.role === 'user');
+    const bootstrap = getBootstrap();
+    if (!bootstrap || !output.messages || !output.messages.length) return;
+    const firstUser = output.messages.find((message) => (
+      message.info && message.info.role === 'user'
+    ));
     if (!firstUser || !firstUser.parts || !firstUser.parts.length) return;
     if (firstUser.parts.some(
-      (p) => p.type === 'text' && p.text && p.text.includes('EVALSPEC_SKILLS_AVAILABLE')
+      (part) => part.type === 'text' &&
+        part.text &&
+        part.text.includes('EVALSPEC_SKILLS_AVAILABLE')
     )) return;
     const ref = firstUser.parts[0];
-    firstUser.parts.unshift({ ...ref, type: 'text', text: b });
+    firstUser.parts.unshift({ ...ref, type: 'text', text: bootstrap });
   },
 });
 """
@@ -286,17 +291,17 @@ class OpenCodeAgent(BaseAgent):
         for pyproject in candidates:
             if not pyproject.is_file():
                 continue
-            with pyproject.open("rb") as f:
-                data = tomllib.load(f)
-            v = data.get("tool", {}).get("evalspec", {}).get("opencode_version")
-            if isinstance(v, str):
-                return v
+            with pyproject.open("rb") as pyproject_file:
+                data = tomllib.load(pyproject_file)
+            version = data.get("tool", {}).get("evalspec", {}).get("opencode_version")
+            if isinstance(version, str):
+                return version
         return None
 
     @staticmethod
     def credential_error() -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(v) for v in AUTH_ENV_VARS):
+        if any(os.environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
         return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 
@@ -421,8 +426,15 @@ class OpenCodeAgent(BaseAgent):
                 # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError) as e:
-            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
+        except (MicrosandboxError, asyncio.TimeoutError, OSError) as error:
+            return RunResult(
+                eval_id,
+                config,
+                f"<sandbox-error> {error}"[-2000:],
+                0,
+                0,
+                is_error=True,
+            )
         if res.exit_code != 0:
             return RunResult(eval_id, config, res.stderr[-2000:], 0, 0, is_error=True)
         return parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
@@ -549,10 +561,10 @@ def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
 def _opencode_trajectory(events: list[dict]) -> list[dict]:
     """Canonical trajectory from OpenCode events."""
     traj: list[dict] = []
-    for ev in events:
-        if ev.get("type") != "tool_use":
+    for event in events:
+        if event.get("type") != "tool_use":
             continue
-        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
         tool = part.get("tool")
         if not isinstance(tool, str):
             continue
@@ -600,28 +612,28 @@ def parse_opencode_jsonl(
     first_ts: int | None = None
     last_ts: int | None = None
 
-    for ev in events:
-        ts = ev.get("timestamp")
-        if isinstance(ts, int):
-            first_ts = ts if first_ts is None else min(first_ts, ts)
-            last_ts = ts if last_ts is None else max(last_ts, ts)
-        sid = ev.get("sessionID")
-        if isinstance(sid, str) and sid:
-            session_id = sid
+    for event in events:
+        timestamp = event.get("timestamp")
+        if isinstance(timestamp, int):
+            first_ts = timestamp if first_ts is None else min(first_ts, timestamp)
+            last_ts = timestamp if last_ts is None else max(last_ts, timestamp)
+        parsed_session_id = event.get("sessionID")
+        if isinstance(parsed_session_id, str) and parsed_session_id:
+            session_id = parsed_session_id
 
-        etype = ev.get("type")
-        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        event_type = event.get("type")
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
 
-        if etype == "step_finish":
+        if event_type == "step_finish":
             tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
-            t = tokens.get("total")
-            if isinstance(t, int):
-                total_tokens += t
-        elif etype == "text":
+            token_total = tokens.get("total")
+            if isinstance(token_total, int):
+                total_tokens += token_total
+        elif event_type == "text":
             text_value = part.get("text")
             if isinstance(text_value, str) and text_value.strip():
                 text_parts.append(text_value)
-        elif etype == "tool_use" and detect_skill:
+        elif event_type == "tool_use" and detect_skill:
             # Gate on completed frames so `fired` agrees with the process-facts trajectory.
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
 

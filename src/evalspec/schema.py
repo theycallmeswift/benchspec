@@ -70,7 +70,7 @@ def _require(
         expected_name = (
             expected_type.__name__
             if isinstance(expected_type, type)
-            else " | ".join(t.__name__ for t in expected_type)
+            else " | ".join(candidate_type.__name__ for candidate_type in expected_type)
         )
         raise SchemaError(f"{path}.{key}: expected {expected_name}, got {type(val).__name__}")
     return val
@@ -85,7 +85,7 @@ def _optional(obj: object, key: str, expected_type: type | tuple[type, ...], pat
         expected_name = (
             expected_type.__name__
             if isinstance(expected_type, type)
-            else " | ".join(t.__name__ for t in expected_type)
+            else " | ".join(candidate_type.__name__ for candidate_type in expected_type)
         )
         raise SchemaError(f"{path}.{key}: expected {expected_name}, got {type(val).__name__}")
     return val
@@ -104,11 +104,13 @@ def _validate_string_list(val: object, key_path: str) -> None:
         raise SchemaError(f"{key_path}: expected list, got {type(val).__name__}")
     if not val:
         raise SchemaError(f"{key_path}: must be non-empty")
-    for i, item in enumerate(val):
+    for item_index, item in enumerate(val):
         if not isinstance(item, str):
-            raise SchemaError(f"{key_path}[{i}]: expected string, got {type(item).__name__}")
+            raise SchemaError(
+                f"{key_path}[{item_index}]: expected string, got {type(item).__name__}"
+            )
         if not item.strip():
-            raise SchemaError(f"{key_path}[{i}]: must be non-empty")
+            raise SchemaError(f"{key_path}[{item_index}]: must be non-empty")
 
 
 def _check_key_type(item: dict, key: str, path: str) -> None:
@@ -144,8 +146,8 @@ def _validate_checker_obj(item: dict, path: str) -> None:
     if checker == "regex":
         try:
             re.compile(item["pattern"])
-        except re.error as e:
-            raise SchemaError(f"{path}.pattern: invalid regex: {e}") from e
+        except re.error as error:
+            raise SchemaError(f"{path}.pattern: invalid regex: {error}") from error
     text = _optional(item, "text", str, path)
     if text is not None and not text.strip():
         raise SchemaError(f"{path}.text: must be non-empty")
@@ -181,8 +183,8 @@ def _validate_evals_v1(data: dict) -> None:
 
     seen: set[str] = set()
     allowed_eval = {"slug", "seed", "prompt", "assertions"}
-    for i, item in enumerate(evals):
-        path = f"root.evals[{i}]"
+    for eval_index, item in enumerate(evals):
+        path = f"root.evals[{eval_index}]"
         if not isinstance(item, dict):
             raise SchemaError(f"{path}: expected object, got {type(item).__name__}")
         _reject_extra_keys(item, allowed_eval, path)
@@ -216,14 +218,14 @@ def _validate_evals_v1(data: dict) -> None:
         )
         if not assertions:
             raise SchemaError(f"{path}.assertions: must be non-empty")
-        for j, a in enumerate(assertions):
-            if not isinstance(a, str):
+        for assertion_index, assertion in enumerate(assertions):
+            if not isinstance(assertion, str):
                 raise SchemaError(
-                    f"{path}.assertions[{j}]: expected string (assertions are prose; "
+                    f"{path}.assertions[{assertion_index}]: expected string (assertions are prose; "
                     "the binder derives deterministic checks)"
                 )
-            if not a.strip():
-                raise SchemaError(f"{path}.assertions[{j}]: must be non-empty")
+            if not assertion.strip():
+                raise SchemaError(f"{path}.assertions[{assertion_index}]: must be non-empty")
 
 
 def _validate_trigger_v1(data: dict) -> None:
@@ -249,8 +251,8 @@ def _validate_trigger_v1(data: dict) -> None:
     seen_slugs: set[str] = set()
     allowed_query = {"slug", "description", "query", "should_trigger", "xfail"}
     valid_tiers = {"opus", "sonnet", "haiku"}
-    for i, item in enumerate(queries):
-        path = f"root.queries[{i}]"
+    for query_index, item in enumerate(queries):
+        path = f"root.queries[{query_index}]"
         if not isinstance(item, dict):
             raise SchemaError(f"{path}: expected object, got {type(item).__name__}")
         _reject_extra_keys(item, allowed_query, path)

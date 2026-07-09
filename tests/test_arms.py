@@ -50,8 +50,8 @@ def test_parse_sets_rejects_legacy_flat_config() -> None:
     with pytest.raises(SchemaError, match="eval set"):
         parse_sets(
             {
-                "arms": [{"name": "x", "harness": "claude-code", "model": "opus"}],
-                "reference": "x",
+                "arms": [{"name": "legacy", "harness": "claude-code", "model": "opus"}],
+                "reference": "legacy",
             }
         )
 
@@ -71,8 +71,8 @@ def test_parse_sets_duplicate_arm_name_fails() -> None:
                     "default": {
                         "model": "sonnet",
                         "arms": [
-                            {"name": "a", "harness": "claude-code"},
-                            {"name": "a", "harness": "claude-code"},
+                            {"name": "duplicate", "harness": "claude-code"},
+                            {"name": "duplicate", "harness": "claude-code"},
                         ],
                     }
                 }
@@ -89,7 +89,7 @@ def test_parse_sets_baseline_names_undeclared_arm_fails() -> None:
                     "default": {
                         "model": "sonnet",
                         "baseline": "nope",
-                        "arms": [{"name": "a", "harness": "claude-code"}],
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
                     }
                 }
             )
@@ -104,7 +104,7 @@ def test_parse_sets_unknown_harness_fails() -> None:
                 {
                     "default": {
                         "model": "opus",
-                        "arms": [{"name": "a", "harness": "cursor"}],
+                        "arms": [{"name": "alpha", "harness": "cursor"}],
                     }
                 }
             )
@@ -119,7 +119,7 @@ def test_parse_sets_default_set_undeclared_fails() -> None:
                 {
                     "default": {
                         "model": "opus",
-                        "arms": [{"name": "a", "harness": "claude-code"}],
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
                     }
                 },
                 default="other",
@@ -142,7 +142,7 @@ def test_parse_sets_non_dict_env_fails() -> None:
                     "default": {
                         "model": "opus",
                         "env": "nope",
-                        "arms": [{"name": "a", "harness": "claude-code"}],
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
                     }
                 }
             )
@@ -158,7 +158,7 @@ def test_parse_sets_set_env_values_must_be_strings() -> None:
                     "default": {
                         "model": "opus",
                         "env": {"COUNT": 5},
-                        "arms": [{"name": "a", "harness": "claude-code"}],
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
                     }
                 }
             )
@@ -173,7 +173,9 @@ def test_parse_sets_arm_env_values_must_be_strings() -> None:
                 {
                     "default": {
                         "model": "opus",
-                        "arms": [{"name": "a", "harness": "claude-code", "env": {"COUNT": 5}}],
+                        "arms": [
+                            {"name": "alpha", "harness": "claude-code", "env": {"COUNT": 5}}
+                        ],
                     }
                 }
             )
@@ -201,9 +203,9 @@ def test_resolve_set_appends_harness_args() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, environ={})
+    resolved_set = resolve_set(rawsets, default, environ={})
 
-    baseline, plugin = s.arms
+    baseline, plugin = resolved_set.arms
     assert baseline.harness_args == ["--set-flag", "set-value"]
     assert plugin.harness_args == [
         "--set-flag",
@@ -283,15 +285,15 @@ def test_resolve_set_inherits_defaults_and_merges_env() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, environ={})
+    resolved_set = resolve_set(rawsets, default, environ={})
 
-    base, trial = s.arms
+    base, trial = resolved_set.arms
     assert base == Arm("base", "claude-code", "sonnet", "medium", {"A": "1", "B": "2"})
     assert trial.harness == "opencode"
     assert trial.model == "anthropic/claude-sonnet-4-6"
     assert trial.effort == "high"
     assert trial.env == {"A": "1", "B": "override", "C": "3"}  # arm keys win
-    assert s.baseline == "base"
+    assert resolved_set.baseline == "base"
 
 
 def test_resolve_set_picks_named_set() -> None:
@@ -301,20 +303,20 @@ def test_resolve_set_picks_named_set() -> None:
             {
                 "default": {
                     "model": "sonnet",
-                    "arms": [{"name": "a", "harness": "claude-code"}],
+                    "arms": [{"name": "alpha", "harness": "claude-code"}],
                 },
                 "other": {
                     "model": "opus",
-                    "arms": [{"name": "b", "harness": "claude-code"}],
+                    "arms": [{"name": "beta", "harness": "claude-code"}],
                 },
             }
         )
     )
 
-    s = resolve_set(rawsets, default, set_name="other", environ={})
+    resolved_set = resolve_set(rawsets, default, set_name="other", environ={})
 
-    assert s.name == "other"
-    assert s.arms[0].model == "opus"
+    assert resolved_set.name == "other"
+    assert resolved_set.arms[0].model == "opus"
 
 
 def test_resolve_set_unknown_set_name_raises() -> None:
@@ -324,7 +326,7 @@ def test_resolve_set_unknown_set_name_raises() -> None:
             {
                 "default": {
                     "model": "opus",
-                    "arms": [{"name": "a", "harness": "claude-code"}],
+                    "arms": [{"name": "alpha", "harness": "claude-code"}],
                 }
             }
         )
@@ -348,10 +350,10 @@ def test_resolve_set_scalar_overrides_replace_defaults() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, model="opus", effort="high", environ={})
+    resolved_set = resolve_set(rawsets, default, model="opus", effort="high", environ={})
 
-    assert s.arms[0].model == "opus"
-    assert s.arms[0].effort == "high"
+    assert resolved_set.arms[0].model == "opus"
+    assert resolved_set.arms[0].effort == "high"
 
 
 def test_resolve_set_models_sweep_expands_one_arm_per_model() -> None:
@@ -370,12 +372,16 @@ def test_resolve_set_models_sweep_expands_one_arm_per_model() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, models=["sonnet", "opus", "haiku"], environ={})
+    resolved_set = resolve_set(
+        rawsets, default, models=["sonnet", "opus", "haiku"], environ={}
+    )
 
-    assert [a.name for a in s.arms] == ["sonnet", "opus", "haiku"]
-    assert [a.model for a in s.arms] == ["sonnet", "opus", "haiku"]
-    assert [a.harness for a in s.arms] == ["claude-code"] * 3  # inherited from set default
-    assert s.baseline == "sonnet"  # baseline = first swept value
+    assert [arm.name for arm in resolved_set.arms] == ["sonnet", "opus", "haiku"]
+    assert [arm.model for arm in resolved_set.arms] == ["sonnet", "opus", "haiku"]
+    assert [arm.harness for arm in resolved_set.arms] == [
+        "claude-code"
+    ] * 3  # inherited from set default
+    assert resolved_set.baseline == "sonnet"  # baseline = first swept value
 
 
 def test_resolve_set_missing_model_raises() -> None:
@@ -385,7 +391,7 @@ def test_resolve_set_missing_model_raises() -> None:
             {
                 "default": {
                     "effort": "medium",
-                    "arms": [{"name": "a", "harness": "claude-code"}],
+                    "arms": [{"name": "alpha", "harness": "claude-code"}],
                 }
             }
         )
@@ -416,9 +422,10 @@ def test_resolve_set_does_not_expand_env_at_resolve_time() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, environ={})  # no UNSET_SECRET present → must not raise
+    # no UNSET_SECRET present → must not raise
+    resolved_set = resolve_set(rawsets, default, environ={})
 
-    assert s.arms[0].env == {"TOK": "$UNSET_SECRET"}
+    assert resolved_set.arms[0].env == {"TOK": "$UNSET_SECRET"}
 
 
 def test_resolve_set_unknown_cli_harness_raises() -> None:
@@ -431,7 +438,7 @@ def test_resolve_set_unknown_cli_harness_raises() -> None:
                 "default": {
                     "model": "opus",
                     "harness": "claude-code",
-                    "arms": [{"name": "a"}],
+                        "arms": [{"name": "alpha"}],
                 }
             }
         )
@@ -461,22 +468,22 @@ def test_resolve_set_models_sweep_sanitizes_provider_qualified_names() -> None:
     )
 
     models = ["google/gemini-3.5-flash", "anthropic/claude"]
-    s = resolve_set(rawsets, default, models=models, environ={})
+    resolved_set = resolve_set(rawsets, default, models=models, environ={})
 
-    assert len(s.arms) == 2
+    assert len(resolved_set.arms) == 2
     # arm.name must be a single, filesystem-safe path segment
-    for arm in s.arms:
+    for arm in resolved_set.arms:
         assert "/" not in arm.name
         assert arm.name  # non-empty
     # safe names produced by sanitization
-    assert s.arms[0].name == "google-gemini-3.5-flash"
-    assert s.arms[1].name == "anthropic-claude"
+    assert resolved_set.arms[0].name == "google-gemini-3.5-flash"
+    assert resolved_set.arms[1].name == "anthropic-claude"
     # raw model string preserved for agent invocation
-    assert [a.model for a in s.arms] == models
+    assert [arm.model for arm in resolved_set.arms] == models
     # names are unique
-    assert len({a.name for a in s.arms}) == len(s.arms)
+    assert len({arm.name for arm in resolved_set.arms}) == len(resolved_set.arms)
     # baseline references the safe name of the first model
-    assert s.baseline == "google-gemini-3.5-flash"
+    assert resolved_set.baseline == "google-gemini-3.5-flash"
 
 
 def test_resolve_set_models_sweep_dedupes_sanitized_name_collisions() -> None:
@@ -493,7 +500,7 @@ def test_resolve_set_models_sweep_dedupes_sanitized_name_collisions() -> None:
         )
     )
 
-    s = resolve_set(rawsets, default, models=["a", "a-2", "a"], environ={})
+    resolved_set = resolve_set(rawsets, default, models=["a", "a-2", "a"], environ={})
 
-    assert [a.name for a in s.arms] == ["a", "a-2", "a-3"]
-    assert len({a.name for a in s.arms}) == len(s.arms)
+    assert [arm.name for arm in resolved_set.arms] == ["a", "a-2", "a-3"]
+    assert len({arm.name for arm in resolved_set.arms}) == len(resolved_set.arms)

@@ -28,7 +28,10 @@ _SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)
 
 def redact_env(env: dict | None) -> dict:
     """Mask secret-ish values for recording; URLs and other config pass through."""
-    return {k: ("***" if _SECRET_KEY.search(k) else v) for k, v in (env or {}).items()}
+    return {
+        key: ("***" if _SECRET_KEY.search(key) else value)
+        for key, value in (env or {}).items()
+    }
 
 
 def _load_json(path: Path) -> dict | None:
@@ -37,8 +40,10 @@ def _load_json(path: Path) -> dict | None:
         return None
     try:
         return json.loads(path.read_text())
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Malformed JSON in {path}: {e.msg} at line {e.lineno}") from e
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"Malformed JSON in {path}: {error.msg} at line {error.lineno}"
+        ) from error
 
 
 def _sample_dirs(parent: Path) -> list[Path]:
@@ -47,11 +52,11 @@ def _sample_dirs(parent: Path) -> list[Path]:
     # rejects sample-backup AND sample-1abc, so a stray sibling can't crash the write.
     return sorted(
         (
-            p
-            for p in parent.glob("sample-*")
-            if p.is_dir() and p.name.removeprefix("sample-").isdigit()
+            sample_dir
+            for sample_dir in parent.glob("sample-*")
+            if sample_dir.is_dir() and sample_dir.name.removeprefix("sample-").isdigit()
         ),
-        key=lambda p: int(p.name.removeprefix("sample-")),
+        key=lambda sample_dir: int(sample_dir.name.removeprefix("sample-")),
     )
 
 
@@ -59,7 +64,10 @@ def _trigger_qdirs(root: Path) -> list[Path]:
     """Return trigger-query result directories for one skill."""
     # `trigger-<slug>` query dirs, sorted by slug. Slugs are kebab strings, so a
     # plain name sort is stable and deterministic.
-    return sorted((d for d in root.glob("trigger-*") if d.is_dir()), key=lambda d: d.name)
+    return sorted(
+        (query_dir for query_dir in root.glob("trigger-*") if query_dir.is_dir()),
+        key=lambda query_dir: query_dir.name,
+    )
 
 
 def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
@@ -296,7 +304,9 @@ def _matrix_table(benchmark: dict) -> list[str]:
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     # baseline column first, then the rest in declared order (dict preserves it).
-    names = ([baseline] if baseline in arms else []) + [n for n in arms if n != baseline]
+    names = ([baseline] if baseline in arms else []) + [
+        arm_name for arm_name in arms if arm_name != baseline
+    ]
     if not names:
         return []
     headers = [f"{name} ({arms[name].get('harness') or '?'})" for name in names]
@@ -313,25 +323,36 @@ def _matrix_table(benchmark: dict) -> list[str]:
         "| Eval | " + " | ".join(headers) + " |",
         "|------|" + "|".join(["------"] * len(names)) + "|",
     ]
-    for eid in eval_ids:
+    for eval_id in eval_ids:
         ref_rate = (
             next(
-                (r["pass_rate_mean"] for r in arms[baseline]["per_eval"] if r["eval_id"] == eid),
+                (
+                    row["pass_rate_mean"]
+                    for row in arms[baseline]["per_eval"]
+                    if row["eval_id"] == eval_id
+                ),
                 None,
             )
             if baseline in arms
             else None
         )
         cells = []
-        for n in names:
-            row = next((r for r in arms[n]["per_eval"] if r["eval_id"] == eid), None)
+        for arm_name in names:
+            row = next(
+                (
+                    candidate_row
+                    for candidate_row in arms[arm_name]["per_eval"]
+                    if candidate_row["eval_id"] == eval_id
+                ),
+                None,
+            )
             if row is None:
                 cells.append("—")
-            elif n == baseline or ref_rate is None:
+            elif arm_name == baseline or ref_rate is None:
                 cells.append(f"{row['pass_rate_mean']:.0%}")
             else:
                 cells.append(f"{(row['pass_rate_mean'] - ref_rate) * 100:+.0f}pp")
-        lines.append(f"| {eid} | " + " | ".join(cells) + " |")
+        lines.append(f"| {eval_id} | " + " | ".join(cells) + " |")
     lines.append("")
     return lines
 
@@ -420,7 +441,7 @@ def _format_markdown(benchmark: dict) -> str:
 
 def _inline_code(value: str) -> str:
     """Wrap text in Markdown code ticks without breaking embedded ticks."""
-    longest_run = max((len(m.group(0)) for m in re.finditer(r"`+", value)), default=0)
+    longest_run = max((len(match.group(0)) for match in re.finditer(r"`+", value)), default=0)
     fence = "`" * (longest_run + 1)
     padding = " " if "`" in value else ""
     return f"{fence}{padding}{value}{padding}{fence}"
@@ -434,19 +455,23 @@ def build_benchmark(
     arm_meta: dict | None = None,
 ) -> dict:
     """Build the machine-readable benchmark report object."""
-    eval_dirs = sorted(d for d in eval_root.iterdir() if d.is_dir() and d.name.startswith("eval-"))
+    eval_dirs = sorted(
+        eval_dir
+        for eval_dir in eval_root.iterdir()
+        if eval_dir.is_dir() and eval_dir.name.startswith("eval-")
+    )
     # Arm names are arbitrary strings on disk: the per-eval subdirs ARE the arm names.
     # Require a graded sample before counting a dir as an arm, so a stray subdir
     # (__pycache__, an editor temp) never becomes an empty zero-sample arm.
     arm_names = sorted(
         {
-            d.name
-            for ed in eval_dirs
-            for d in ed.iterdir()
-            if d.is_dir() and any(d.glob("sample-*/grading.json"))
+            arm_dir.name
+            for eval_dir in eval_dirs
+            for arm_dir in eval_dir.iterdir()
+            if arm_dir.is_dir() and any(arm_dir.glob("sample-*/grading.json"))
         }
     )
-    arm_stats = {a: _arm_stats(eval_dirs, a) for a in arm_names}
+    arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name) for arm_name in arm_names}
 
     # A declared baseline that never landed on disk (e.g. its arm errored out) coerces to
     # None, so the report scores arms absolutely exactly as the run did, instead of
