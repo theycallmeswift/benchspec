@@ -1,37 +1,40 @@
 """Binder tests — all mocked, NO network.
 
-`call_host` is injected with recorded host-Claude envelopes so the binder's parse, validate,
-and punt logic is exercised offline.
+`call_model` is injected with fake GeminiReply objects so bind()'s parse, validate,
+and punt logic is exercised offline. `_call_gemini` taxonomy tests (below) are the
+one place that monkeypatches urllib — the network transport is the painful edge.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
+import urllib.error
 from typing import NoReturn
 
 import pytest
 
 from evalspec import binder
-from evalspec.agents.judge_cli import run_host_judge
-from evalspec.binder import _BINDING_PROMPT, bind
+from evalspec.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
 
 
-def _host(reply: object) -> object:
-    """Build the host test fixture."""
-    # mimic the host-claude --output-format json envelope: {"result": "<model text>"}
-    return lambda prompt, *, model, timeout=60: json.dumps({"result": reply})
+def _reply(text: str) -> object:
+    """Build a call_model fixture that returns a fixed GeminiReply."""
+    return lambda prompt, *, timeout=60: GeminiReply(
+        text=text, prompt_tokens=0, output_tokens=0, latency_ms=0.0
+    )
 
 
-def _fail_host(*args: object, **kwargs: object) -> NoReturn:
-    """Build the fail host test fixture."""
-    raise AssertionError("host binder should not be called")
+def _fail_call_model(*args: object, **kwargs: object) -> NoReturn:
+    """Build a call_model fixture that fails the test if invoked."""
+    raise AssertionError("model binder should not be called")
 
 
 def test_bind_file_exists() -> None:
     """Verify bind file exists."""
     spec = bind(
         "the file out.md exists",
-        call_host=_host('{"checker":"file_exists","path":"out.md"}'),
+        call_model=_reply('{"checker":"file_exists","path":"out.md"}'),
     )
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "out.md"
@@ -39,7 +42,7 @@ def test_bind_file_exists() -> None:
 
 def test_bare_exists_hidden_template_path_binds_without_host_call() -> None:
     """Verify bare exists hidden template path binds without host call."""
-    spec = bind("./.meta/templates/entity-person.md exists", call_host=_fail_host)
+    spec = bind("./.meta/templates/entity-person.md exists", call_model=_fail_call_model)
 
     assert spec == {
         "type": "deterministic",
@@ -50,7 +53,7 @@ def test_bare_exists_hidden_template_path_binds_without_host_call() -> None:
 
 def test_bare_exists_strips_quotes_without_losing_hidden_dot() -> None:
     """Verify bare exists strips quotes without losing hidden dot."""
-    spec = bind("'./.meta/templates/entity-person.md' exists", call_host=_fail_host)
+    spec = bind("'./.meta/templates/entity-person.md' exists", call_model=_fail_call_model)
 
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./.meta/templates/entity-person.md"
@@ -58,7 +61,7 @@ def test_bare_exists_strips_quotes_without_losing_hidden_dot() -> None:
 
 def test_bare_exists_accepts_trailing_period_without_losing_hidden_dot() -> None:
     """Verify bare exists accepts trailing period without losing hidden dot."""
-    spec = bind("./.meta/templates/entity-person.md exists.", call_host=_fail_host)
+    spec = bind("./.meta/templates/entity-person.md exists.", call_model=_fail_call_model)
 
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./.meta/templates/entity-person.md"
@@ -68,7 +71,7 @@ def test_compound_hidden_path_assertion_punts() -> None:
     """Verify compound hidden path assertion punts."""
     spec = bind(
         "./.meta/templates/entity-person.md exists and contains frontmatter",
-        call_host=_host('{"punt":true,"reason":"compound"}'),
+        call_model=_reply('{"punt":true,"reason":"compound"}'),
     )
 
     assert spec is None
@@ -78,7 +81,7 @@ def test_descriptive_exists_prose_preserves_model_bound_path() -> None:
     """Verify descriptive exists prose preserves model bound path."""
     spec = bind(
         "The previously-missing ./.obsidian/ configuration now exists",
-        call_host=_host('{"checker":"file_exists","path":"./.obsidian/"}'),
+        call_model=_reply('{"checker":"file_exists","path":"./.obsidian/"}'),
     )
 
     assert spec["path"] == "./.obsidian/"
@@ -89,7 +92,7 @@ def test_non_path_exists_prose_punts() -> None:
     assert (
         bind(
             "the success message now exists",
-            call_host=_host('{"punt":true,"reason":"not a path assertion"}'),
+            call_model=_reply('{"punt":true,"reason":"not a path assertion"}'),
         )
         is None
     )
@@ -97,7 +100,7 @@ def test_non_path_exists_prose_punts() -> None:
 
 def test_directory_created_path_shape_binds_without_host_call() -> None:
     """Verify directory created path shape binds without host call."""
-    spec = bind("the ./output/ directory was created", call_host=_fail_host)
+    spec = bind("the ./output/ directory was created", call_model=_fail_call_model)
 
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./output/"
@@ -107,7 +110,7 @@ def test_bind_skill_invoked() -> None:
     """Verify bind skill invoked."""
     spec = bind(
         "Skill `ingest` invoked",
-        call_host=_host('{"checker":"skill_invoked","skill":"ingest"}'),
+        call_model=_reply('{"checker":"skill_invoked","skill":"ingest"}'),
     )
     assert spec["checker"] == "skill_invoked"
     assert spec["skill"] == "ingest"
@@ -115,30 +118,27 @@ def test_bind_skill_invoked() -> None:
 
 def test_punt_explicit() -> None:
     """Verify punt explicit."""
-    assert bind("the note reads well", call_host=_host('{"punt":true,"reason":"semantic"}')) is None
+    assert (
+        bind("the note reads well", call_model=_reply('{"punt":true,"reason":"semantic"}'))
+        is None
+    )
 
 
 def test_punt_on_garbage() -> None:
     """Verify punt on garbage."""
-    assert bind("unknown assertion", call_host=_host("here you go: not json at all")) is None
+    assert bind("unknown assertion", call_model=_reply("here you go: not json at all")) is None
 
 
 def test_punt_on_unknown_checker() -> None:
     """Verify punt on unknown checker."""
-    assert bind("unknown assertion", call_host=_host('{"checker":"vibes","path":"a"}')) is None
-
-
-def test_punt_on_none_host_output() -> None:
-    """Verify punt on none host output."""
-    # An abnormal host call yielding None must punt, not raise (never-raises contract).
-    assert bind("unknown assertion", call_host=lambda *args, **kwargs: None) is None
+    assert bind("unknown assertion", call_model=_reply('{"checker":"vibes","path":"a"}')) is None
 
 
 def test_punt_on_schema_invalid() -> None:  # glob_count needs exactly one of count/min
     """Verify punt on schema invalid."""
     assert bind(
         "unknown assertion",
-        call_host=_host('{"checker":"glob_count","glob":"*.md"}'),
+        call_model=_reply('{"checker":"glob_count","glob":"*.md"}'),
     ) is None
 
 
@@ -146,20 +146,10 @@ def test_parses_fenced_json() -> None:
     """Verify parses fenced json."""
     spec = bind(
         "unknown assertion",
-        call_host=_host('```json\n{"checker":"file_exists","path":"a.md"}\n```'),
+        call_model=_reply('```json\n{"checker":"file_exists","path":"a.md"}\n```'),
     )
     assert spec["checker"] == "file_exists"
 
-
-def test_infra_error_propagates() -> None:
-    """Verify infra error propagates."""
-
-    def boom(prompt: object, *, model: object, timeout: object = 60) -> NoReturn:
-        """Boom."""
-        raise RuntimeError("not logged in")
-
-    with pytest.raises(RuntimeError):
-        bind("unknown assertion", call_host=boom)
 
 
 def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
@@ -170,7 +160,7 @@ def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
     (tmp_path / "out.md").write_text("hi")
     spec = bind(
         "the file out.md exists",
-        call_host=_host('{"checker":"file_exists","path":"out.md"}'),
+        call_model=_reply('{"checker":"file_exists","path":"out.md"}'),
     )
     assert run_assertion(spec, tmp_path, {})["passed"] is True
 
@@ -191,6 +181,202 @@ def test_prompt_carries_load_bearing_pieces() -> None:
     assert "not duplicated" in prompt  # A9 rule encoded
 
 
-def test_binder_still_imports_the_original_run_host_judge() -> None:
-    """Verify binder still imports the original run_host_judge."""
-    assert binder.run_host_judge is run_host_judge
+def test_infra_error_propagates() -> None:
+    """Verify infra error propagates."""
+    def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
+        raise RuntimeError("gemini transient failure")
+
+    with pytest.raises(RuntimeError):
+        bind("unknown assertion", call_model=boom)
+
+
+def test_bind_propagates_binder_auth_error() -> None:
+    """Verify a BinderAuthError from call_model is never swallowed as a punt."""
+    def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
+        raise BinderAuthError("gemini api key rejected")
+
+    with pytest.raises(BinderAuthError):
+        bind("unknown assertion", call_model=boom)
+
+
+def test_bind_default_call_model_is_call_gemini() -> None:
+    """Verify bind's default transport is the real Gemini call — the wiring proof."""
+    assert inspect.signature(bind).parameters["call_model"].default is binder._call_gemini
+
+
+def _http_response(body: dict) -> object:
+    """Build a urlopen-context-manager stub returning body as JSON."""
+    class _Resp:
+        def __enter__(self) -> object:
+            return self
+        def __exit__(self, *exc: object) -> None:
+            return None
+        def read(self) -> bytes:
+            return json.dumps(body).encode("utf-8")
+    return lambda request, timeout: _Resp()
+
+
+def _http_error(code: int, body: str) -> object:
+    """Build a urlopen stub raising HTTPError with the given status and body."""
+    def raise_it(request: object, timeout: object) -> NoReturn:
+        raise urllib.error.HTTPError(
+            "https://generativelanguage.googleapis.com/x", code, "err",
+            hdrs=None, fp=__import__("io").BytesIO(body.encode("utf-8")),
+        )
+    return raise_it
+
+
+def test_call_gemini_returns_reply_with_text_usage_and_latency(monkeypatch: object) -> None:
+    """Verify call_gemini returns reply with text usage and latency."""
+    monkeypatch.setattr(
+        binder.urllib.request, "urlopen",
+        _http_response({
+            "candidates": [{"content": {"parts": [{"text": '{"punt":true}'}]}}],
+            "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 3},
+        }),
+    )
+    reply = binder._call_gemini("prompt")
+    assert reply.text == '{"punt":true}'
+    assert reply.prompt_tokens == 12
+    assert reply.output_tokens == 3
+    assert reply.latency_ms >= 0
+
+
+def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """Verify the request carries x-goog-api-key, temperature 0, and JSON mime."""
+    captured = {}
+
+    def fake_urlopen(request: object, timeout: object) -> object:
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = json.loads(request.data)
+        return _http_response({
+            "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+        })(request, timeout)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
+
+    binder._call_gemini("prompt")
+
+    assert captured["headers"]["X-goog-api-key"] == "test-key"
+    assert captured["body"]["generationConfig"]["temperature"] == 0
+    assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"
+
+
+def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: object) -> None:
+    """Verify _call_gemini's `model` keyword controls the request URL — no env var involved.
+
+    The env-var override behavior itself is a corpus-suite concern, not a production one
+    (see Global Constraints); it is tested at the corpus wrapper level in Task 7's
+    `test_recording_call_model_honors_evalspec_binder_model_env_override`, not here.
+    """
+    captured = {}
+
+    def fake_urlopen(request: object, timeout: object) -> object:
+        captured["url"] = request.full_url
+        return _http_response({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})(
+            request, timeout
+        )
+
+    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
+    monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
+
+    binder._call_gemini("prompt", model="gemini-3.1-flash")
+
+    assert "gemini-3.1-flash" in captured["url"]
+    assert "gemini-3.1-flash-lite" not in captured["url"]
+
+
+def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
+    """Verify the `model` keyword's default is the fixed production constant, not an env read."""
+    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
+    assert (
+        inspect.signature(binder._call_gemini).parameters["model"].default
+        == binder.GEMINI_BINDER_MODEL
+    )
+
+
+@pytest.mark.parametrize(("code", "body"), [(401, "unauthorized"), (403, "forbidden")])
+def test_call_gemini_raises_binder_auth_error_on_401_403(
+    monkeypatch: object, code: int, body: str
+) -> None:
+    """Verify 401/403 raise BinderAuthError."""
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(code, body))
+    with pytest.raises(BinderAuthError):
+        binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_binder_auth_error_on_400_api_key_invalid(monkeypatch: object) -> None:
+    """Verify a 400 body naming API_KEY_INVALID raises BinderAuthError, not RuntimeError."""
+    monkeypatch.setattr(
+        binder.urllib.request, "urlopen",
+        _http_error(400, '{"error":{"status":"API_KEY_INVALID"}}'),
+    )
+    with pytest.raises(BinderAuthError):
+        binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_runtimeerror_on_other_400(monkeypatch: object) -> None:
+    """Verify a 400 NOT naming API_KEY_INVALID stays a RuntimeError, not auth."""
+    error_body = '{"error":{"status":"INVALID_ARGUMENT"}}'
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(400, error_body))
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: object) -> None:
+    """Verify a transport-level URLError normalizes to RuntimeError."""
+    def raise_it(request: object, timeout: object) -> NoReturn:
+        raise urllib.error.URLError("connection refused")
+    monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: object) -> None:
+    """Verify a socket timeout normalizes to RuntimeError."""
+    def raise_it(request: object, timeout: object) -> NoReturn:
+        raise TimeoutError("timed out")
+    monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")
+
+
+@pytest.mark.parametrize("payload", [
+    {"candidates": []},
+    {"candidates": [{"content": {"parts": []}}]},
+    {"candidates": [{"content": {}, "finishReason": "SAFETY"}]},
+    {"candidates": [{"content": {}, "finishReason": "MAX_TOKENS"}]},
+    {"promptFeedback": {"blockReason": "SAFETY"}, "candidates": []},
+])
+def test_call_gemini_raises_runtimeerror_on_degenerate_200(
+    monkeypatch: object, payload: dict
+) -> None:
+    """Verify every degenerate-200 shape normalizes to RuntimeError, never a silent punt."""
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_response(payload))
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_runtimeerror_on_malformed_json_body(monkeypatch: object) -> None:
+    """Verify a non-JSON 200 response body normalizes to RuntimeError, not a raw ValueError.
+
+    `json.loads(response.read().decode("utf-8"))` runs inside the same try block as the
+    `urlopen` call — the taxonomy is only total if `ValueError` (json.JSONDecodeError's base)
+    is in the transport-failure except tuple alongside URLError/TimeoutError/OSError.
+    """
+    class _Resp:
+        def __enter__(self) -> object:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"not json"
+
+    monkeypatch.setattr(binder.urllib.request, "urlopen", lambda request, timeout: _Resp())
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")

@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import textwrap
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 
-from evalspec.agents.judge_cli import run_host_judge
 from evalspec.judge import _balanced_objects
 from evalspec.schema import SchemaError, _validate_checker_obj
 
-BINDER_MODEL = "haiku"
+GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
+
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_GEMINI_TIMEOUT_SECONDS = 60.0
+_AUTH_HTTP_CODES = {401, 403}
 
 _PATHLIKE_RE = re.compile(r"^(?:\.?/|/|\.[^/\s]+/)|/")
 _BARE_EXISTS_RE = re.compile(
@@ -141,25 +149,148 @@ _BINDING_PROMPT = textwrap.dedent(
 )
 
 
+class BinderAuthError(Exception):
+    """Raised when the Gemini API rejects the configured credential.
+
+    Deliberately NOT a RuntimeError subclass — every RuntimeError catch site in the
+    binder's failure taxonomy (execution.py's degrade-to-judge path, the corpus
+    retry loop) must let this propagate instead of silently rerouting every
+    assertion to paid judge grading behind a green run.
+    """
+
+
+@dataclass(frozen=True)
+class GeminiReply:
+    """One Gemini generateContent response.
+
+    Trimmed to what the binder and the binder corpus suite need.
+    """
+
+    text: str
+    prompt_tokens: int
+    output_tokens: int
+    latency_ms: float
+
+
+def _call_gemini(
+    prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS, model: str = GEMINI_BINDER_MODEL,
+) -> GeminiReply:
+    """Call the Gemini binder model and return its reply.
+
+    Args:
+        prompt: The rendered binding prompt.
+        timeout: Request timeout in seconds.
+        model: The Gemini model name. Defaults to the fixed production constant;
+            no environment variable is read here — only the corpus suite's own
+            recording `call_model` wrapper (`evals/binder/conftest.py`) reads
+            `EVALSPEC_BINDER_MODEL` and passes it through this keyword.
+
+    Returns:
+        The model's text plus token usage and measured latency.
+
+    Raises:
+        BinderAuthError: the API key was rejected (HTTP 401/403, or a 400 body
+            naming API_KEY_INVALID).
+        RuntimeError: every other transport, HTTP, or degenerate-response failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        _GEMINI_URL.format(model=model),
+        data=body,
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        is_invalid_key = error.code == 400 and "API_KEY_INVALID" in error_body
+        if error.code in _AUTH_HTTP_CODES or is_invalid_key:
+            raise BinderAuthError(
+                f"Gemini API rejected the credential (HTTP {error.code}): {error_body[:500]}"
+            ) from error
+        raise RuntimeError(f"Gemini API HTTP {error.code}: {error_body[:500]}") from error
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        # ValueError catches json.JSONDecodeError (its subclass) and the rare
+        # UnicodeDecodeError-as-ValueError case — the taxonomy is total: nothing
+        # raised inside this try may escape as a raw, unnormalized exception.
+        raise RuntimeError(f"Gemini API transport failure: {error}") from error
+    latency_ms = (time.perf_counter() - started) * 1000
+
+    return _parse_gemini_payload(payload, latency_ms=latency_ms)
+
+
+def _parse_gemini_payload(payload: object, *, latency_ms: float) -> GeminiReply:
+    """Validate a 200-OK Gemini payload and extract text + usage.
+
+    Raises RuntimeError for every degenerate shape (no candidates, empty parts,
+    finishReason SAFETY/MAX_TOKENS, promptFeedback block) — a 200 status code alone
+    does not mean the model produced usable text.
+    """
+    if not isinstance(payload, dict):
+        raise RuntimeError("Gemini API returned a non-object payload")
+    feedback = payload.get("promptFeedback")
+    if isinstance(feedback, dict) and feedback.get("blockReason"):
+        raise RuntimeError(f"Gemini API blocked the prompt: {feedback['blockReason']}")
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise RuntimeError("Gemini API response had no candidates")
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        raise RuntimeError("Gemini API candidate was not an object")
+    finish_reason = candidate.get("finishReason")
+    if finish_reason in ("SAFETY", "MAX_TOKENS"):
+        raise RuntimeError(f"Gemini API candidate finished with {finish_reason}")
+    content = candidate.get("content")
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list) or not parts:
+        raise RuntimeError("Gemini API response had no content parts")
+    text = "".join(
+        part.get("text", "") for part in parts if isinstance(part, dict) and part.get("text")
+    )
+    if not text:
+        raise RuntimeError("Gemini API response had empty text")
+
+    usage = payload.get("usageMetadata")
+    usage = usage if isinstance(usage, dict) else {}
+    return GeminiReply(
+        text=text,
+        prompt_tokens=_usage_int(usage.get("promptTokenCount")),
+        output_tokens=_usage_int(usage.get("candidatesTokenCount")),
+        latency_ms=latency_ms,
+    )
+
+
+def _usage_int(value: object) -> int:
+    """Return non-boolean integer usage values, 0 otherwise."""
+    if type(value) is int:
+        return value
+    return 0
+
+
 def bind(
     assertion_text: str,
     *,
-    model: str = BINDER_MODEL,
-    call_host: object = run_host_judge,
+    call_model: object = _call_gemini,
 ) -> dict | None:
     """Return a deterministic checker spec dict for `assertion_text`, or None to punt.
 
     The returned dict is the exact checker-spec shape `checkers.run_assertion` consumes.
-    `call_host` is injected so tests drive the binder with recorded envelopes (no
-    network).
+    `call_model` is injected so tests drive the binder with fake GeminiReply objects
+    (no network); production and the corpus suite both default to `_call_gemini`.
     """
     if spec := _bind_bare_exists(assertion_text):
         return spec
     prompt = _BINDING_PROMPT.format(assertion=assertion_text)
-    # Shared host-claude transport (run_host_judge — "judge" is a slight misnomer here; it's
-    # the generic host `claude -p` call). An infra RuntimeError propagates (fail loud).
-    raw = call_host(prompt, model=model, timeout=60)
-    return _parse_binding(raw)
+    reply = call_model(prompt, timeout=60)
+    return _parse_binding(reply.text)
 
 
 def _clean_bare_exists_path(raw: str) -> str:
@@ -189,18 +320,9 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
     return spec
 
 
-def _parse_binding(raw: str) -> dict | None:
-    """Parse a model binder response into a checker spec or punt."""
-    if not isinstance(raw, str):
-        return None  # non-string host output (e.g. None on an abnormal call) → punt
-    try:
-        outer = json.loads(raw)
-        inner = outer.get("result", "") if isinstance(outer, dict) else raw
-    except json.JSONDecodeError:
-        inner = raw
-    if not isinstance(inner, str):
-        return None  # unexpected non-string `result` → punt, preserving the never-raises contract
-    for candidate in _balanced_objects(inner):
+def _parse_binding(text: str) -> dict | None:
+    """Parse a Gemini reply's text into a checker spec or punt."""
+    for candidate in _balanced_objects(text):
         try:
             obj = json.loads(candidate)
         except json.JSONDecodeError:
@@ -216,4 +338,4 @@ def _parse_binding(raw: str) -> dict | None:
             except SchemaError:
                 return None  # malformed/hallucinated args → punt, never a false-positive
             return spec
-    return None  # no envelope / no object / unparseable → punt
+    return None  # no object / unparseable → punt
