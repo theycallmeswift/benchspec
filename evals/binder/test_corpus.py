@@ -23,7 +23,7 @@ pytestmark = pytest.mark.binder_corpus
 
 SAMPLES = int(os.environ.get("EVALSPEC_BINDER_SAMPLES", "5"))
 
-# A bind that failed on infra (timeout/CLI crash) even after a retry — distinct from a punt
+# A bind that failed on infra (timeout/HTTP failure) even after a retry — distinct from a punt
 # (None) and a bind (dict). Excluded from every rate; counted by the infra-error guard.
 _ERROR = object()
 
@@ -40,19 +40,15 @@ def _samples_for(entry: object) -> object:
 def _bind_resilient(text: object, *, sink: list) -> tuple:
     """Bind one assertion with one retry for a transient Gemini infra failure.
 
-    Returns (binding, attempts): attempts counts each retry-loop iteration entered,
-    regardless of whether it succeeded, raised, or was the final abandoned try —
-    unlike `len(sink)`, which only counts replies _call_gemini actually returned and
-    undercounts whenever a retry raises before producing one.
-
     Args:
         text: The assertion text to bind.
         sink: List that the recording call_model appends each GeminiReply to.
 
     Returns:
         A (binding, attempts) tuple. `binding` is a checker spec dict, None (punt),
-        or `_ERROR` (infra failure after retry). `attempts` is 1 for a regex
-        fast-path bind (one loop pass, no API call).
+        or `_ERROR` (infra failure after retry). `attempts` counts every retry-loop
+        iteration entered — `len(sink)` would undercount a retry that raised before
+        producing a reply — and is 1 for a regex fast-path bind (no API call).
     """
     call_model = _recording_call_model(sink)
     attempts = 0
