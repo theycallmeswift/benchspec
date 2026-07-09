@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import re
 import subprocess
 import sys
 import time
-import urllib.error
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -160,30 +158,27 @@ def run_dry_run(
     if verify_findings:
         verbose_log(verbose, f"Using verifier model: {verify_model or model}")
 
-    try:
-        plan = style_lint.build_lint_plan(
-            style_lint.StyleLintConfig(
-                paths=paths,
-                default_paths=DEFAULT_PATHS,
-                rules=RULES,
-                policy_instructions=POLICY_INSTRUCTIONS,
-                api_key="unused-in-dry-run",
-                model=model,
-                verify_findings=verify_findings,
-                verify_model=verify_model,
-                max_lines=max_lines,
-            )
+    result = style_lint.run_advisory_lint(
+        style_lint.StyleLintConfig(
+            paths=paths,
+            default_paths=DEFAULT_PATHS,
+            rules=RULES,
+            policy_instructions=POLICY_INSTRUCTIONS,
+            api_key="unused-in-dry-run",
+            model=model,
+            dry_run=True,
+            verify_findings=verify_findings,
+            verify_model=verify_model,
+            max_lines=max_lines,
         )
-    except (
-        OSError,
-        TimeoutError,
-        UnicodeDecodeError,
-        urllib.error.URLError,
-        ValueError,
-        json.JSONDecodeError,
-    ) as error:
-        print(f"warning: advisory style lint skipped due to model error: {error}")
+    )
+    if result.warning is not None:
+        print(f"warning: {result.warning}")
         return 0
+
+    if result.plan is None:
+        raise TypeError("dry-run advisory lint did not return a plan")
+    plan = result.plan
 
     if verbose:
         verbose_log(

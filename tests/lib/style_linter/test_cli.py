@@ -73,8 +73,8 @@ def test_cli_dry_run_prints_files_and_planned_api_calls_without_gemini_key(
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(
         style_lint_cli.style_lint,
-        "run_advisory_lint",
-        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
     )
 
     exit_code = style_lint_cli.main(["--dry-run", "--max-lines", "1", str(source)])
@@ -112,8 +112,8 @@ def test_cli_dry_run_uses_base_scope_and_never_calls_gemini(
     )
     monkeypatch.setattr(
         style_lint_cli.style_lint,
-        "run_advisory_lint",
-        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
     )
 
     exit_code = style_lint_cli.main(["--dry-run", "--base", "origin/dev"])
@@ -145,8 +145,8 @@ def test_cli_dry_run_verbose_logs_selected_paths_and_verifier_context(
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(
         style_lint_cli.style_lint,
-        "run_advisory_lint",
-        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
     )
 
     exit_code = style_lint_cli.main(

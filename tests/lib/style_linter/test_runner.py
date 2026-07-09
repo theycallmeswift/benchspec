@@ -289,6 +289,50 @@ def test_build_lint_plan_predicts_detector_and_max_verifier_calls(
     assert plan.max_total_api_calls == 3
 
 
+def test_run_advisory_lint_dry_run_returns_plan_without_model_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Let the reusable linter own dry-run planning mode."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+    monkeypatch.setattr(
+        framework,
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
+    )
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            dry_run=True,
+            verify_findings=True,
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
+
+    assert result.warning is None
+    assert result.diagnostics == []
+    assert result.findings == []
+    assert result.files_checked == 1
+    assert result.chunks_checked == 3
+    assert result.plan == framework.StyleLintPlan(
+        files=[source.resolve()],
+        files_checked=1,
+        chunks_checked=3,
+        detector_api_calls=2,
+        max_verifier_api_calls=1,
+        max_total_api_calls=3,
+    )
+
+
 def test_build_lint_plan_skips_verifier_when_no_chunks(
     tmp_path: Path,
     framework: ModuleType,
