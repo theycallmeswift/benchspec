@@ -294,13 +294,9 @@ class ClaudeCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
         try:
-<<<<<<< HEAD
-            res = await sandbox.exec(
-=======
-            res = await GuestSandbox(sb).exec(
+            res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
->>>>>>> aa6d794 (refactor(agents): one adapter per harness; execution environment is a parameter)
                 # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
                 # guest_env(), arm env winning.
                 env={**self.guest_env(), **(extra_env or {})},
@@ -311,14 +307,9 @@ class ClaudeCodeAgent(BaseAgent):
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.
-<<<<<<< HEAD
             message = f"<sandbox-error> {error}"[-2000:]
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
-        result = parse_stream_run(res.stdout_text, eval_id, config, detect_skill)
-=======
-            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
         result = parse_stream_run(res.stdout, eval_id, config, detect_skill)
->>>>>>> aa6d794 (refactor(agents): one adapter per harness; execution environment is a parameter)
         # Non-zero exit with no result event = a crash; its diagnostic is on stderr, not in
         # the empty stream. Surface stderr, keeping the raw/trajectory already captured.
         if res.exit_code != 0 and result.is_error and res.stderr.strip():

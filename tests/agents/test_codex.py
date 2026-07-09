@@ -510,11 +510,11 @@ def test_parse_codex_jsonl_carries_normalized_trajectory() -> None:
 
 def test_provision_runs_install_script() -> None:
     """Verify provision runs install script."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().provision(sb))
+    asyncio.run(_agent().provision(sandbox))
 
-    kind, script, kw = sb.calls[0]
+    kind, script, kw = sandbox.calls[0]
     assert kind == "shell"
     assert "CODEX_NON_INTERACTIVE=1" in script
     assert "EVALSPEC_CODEX_VERSION" in script
@@ -527,19 +527,19 @@ def test_provision_runs_install_script() -> None:
 
 def test_provision_raises_on_failure() -> None:
     """Verify provision raises for on failure."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
 
     with pytest.raises(RuntimeError, match="codex provision failed"):
-        asyncio.run(_agent().provision(sb))
+        asyncio.run(_agent().provision(sandbox))
 
 
 def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
     """Verify stage project assets copies skills into codex discovery dir."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().stage_project_assets(sb, "/project"))
+    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
 
-    kind, script, kw = sb.calls[0]
+    kind, script, kw = sandbox.calls[0]
     assert kind == "shell"
     assert "/project/skills" in script
     assert "/project/.agents/skills" in script
@@ -550,7 +550,7 @@ def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
 
 def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
     """Verify invoke success parses codex jsonl and closes stdin."""
-    sb = FakeSandbox(
+    sandbox = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_success.jsonl")),
         ]
@@ -558,7 +558,7 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
 
     res = asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "do it",
             eval_id="e1",
             config="trial",
@@ -571,7 +571,7 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
         )
     )
 
-    kind, cmd, args, kw = sb.calls[0]
+    kind, cmd, args, kw = sandbox.calls[0]
     assert kind == "exec"
     assert cmd == CodexAgent.CODEX_BIN
     assert args[-1] == "do it"
@@ -584,7 +584,7 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
 
 def test_invoke_extra_env_overrides_guest_env() -> None:
     """Verify invoke extra env overrides guest env."""
-    sb = FakeSandbox(
+    sandbox = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
         ]
@@ -592,7 +592,7 @@ def test_invoke_extra_env_overrides_guest_env() -> None:
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "do it",
             eval_id="e1",
             config="trial",
@@ -606,7 +606,7 @@ def test_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _, _, kw = sb.calls[0]
+    _, _, _, kw = sandbox.calls[0]
     assert kw["env"]["TZ"] == "America/Los_Angeles"
     assert kw["env"]["EXTRA"] == "1"
     assert kw["env"]["HOME"] == "/root"
@@ -614,11 +614,11 @@ def test_invoke_extra_env_overrides_guest_env() -> None:
 
 def test_invoke_nonzero_exit_is_error() -> None:
     """Verify invoke nonzero exit is error."""
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
     res = asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="trial",
@@ -637,7 +637,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
     """Verify invoke threads harness args into build command."""
-    sb = FakeSandbox(
+    sandbox = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
         ]
@@ -645,7 +645,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "do the thing",
             eval_id="e1",
             config="trial",
@@ -659,13 +659,13 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _, args, _ = sb.calls[0]
+    _, _, args, _ = sandbox.calls[0]
     assert args[-3:] == ["--color", "never", "do the thing"]
 
 
 def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
     """Verify invoke copies mounted auth json before codex exec."""
-    sb = FakeSandbox(
+    sandbox = FakeSandbox(
         exec_outputs=[
             FakeExecOutput(exit_code=0, stdout_text=_text("codex_parse_tool_only.jsonl")),
         ]
@@ -673,7 +673,7 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
 
     asyncio.run(
         _agent(auth_json_path="/host/auth.json").invoke(
-            sb,
+            sandbox,
             "do the thing",
             eval_id="e1",
             config="trial",
@@ -686,7 +686,7 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
         )
     )
 
-    auth_call, exec_call = sb.calls
+    auth_call, exec_call = sandbox.calls
     assert auth_call[0] == "shell"
     assert CodexAgent.AUTH_JSON_GUEST_SOURCE in auth_call[1]
     assert "/root/.codex/auth.json" in auth_call[1]
@@ -695,11 +695,11 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
 
 def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
     """Verify invoke returns error when auth json copy fails."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="copy failed"))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="copy failed"))
 
     res = asyncio.run(
         _agent(auth_json_path="/host/auth.json").invoke(
-            sb,
+            sandbox,
             "do the thing",
             eval_id="e1",
             config="trial",

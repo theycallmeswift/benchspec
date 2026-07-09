@@ -245,11 +245,11 @@ class CodexAgent(BaseAgent):
                 return True
         return False
 
-    async def _write_auth_json(self: object, sb: object) -> None:
+    async def _write_auth_json(self: object, sandbox: object) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
             return
-        res = await sb.shell(
+        res = await sandbox.shell(
             "mkdir -p /root/.codex && "
             "umask 077 && "
             f"cp {self.AUTH_JSON_GUEST_SOURCE} /root/.codex/auth.json",
@@ -280,19 +280,19 @@ class CodexAgent(BaseAgent):
                 return True
         return False
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
+        res = await sandbox.shell(self.PROVISION_SCRIPT, env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
                 f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
-        await self._write_auth_json(sb)
+        await self._write_auth_json(sandbox)
         dest = self.skill_load_dir
-        await sb.shell(
+        await sandbox.shell(
             f"mkdir -p {dest} && "
             f"for src in {project_mount}/skills {project_mount}/.agents/skills "
             f"{project_mount}/.claude/skills; do "
@@ -303,7 +303,7 @@ class CodexAgent(BaseAgent):
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: object,
         *,
         eval_id: object,
@@ -332,8 +332,8 @@ class CodexAgent(BaseAgent):
             workdir=workdir,
         )
         try:
-            await self._write_auth_json(sb)
-            res = await GuestSandbox(sb).exec(
+            await self._write_auth_json(sandbox)
+            res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
                 env={**self.guest_env(), **(extra_env or {})},

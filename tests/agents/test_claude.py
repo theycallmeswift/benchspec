@@ -290,18 +290,18 @@ def test_build_command_rejects_reserved_no_session_persistence_flag() -> None:
 
 def test_provision_runs_install_script() -> None:
     """Verify provision runs install script."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
-    asyncio.run(_agent().provision(sb))
-    kind, script, _ = sb.calls[0]
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    asyncio.run(_agent().provision(sandbox))
+    kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
     assert "claude.ai/install.sh" in script
 
 
 def test_provision_raises_on_failure() -> None:
     """Verify provision raises for on failure."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
-        asyncio.run(_agent().provision(sb))
+        asyncio.run(_agent().provision(sandbox))
 
 
 def test_invoke_baseline_parses_stream_result() -> None:
@@ -317,11 +317,11 @@ def test_invoke_baseline_parses_stream_result() -> None:
             "usage": {},
         }
     )
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
 
     res = asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="without_skill",
@@ -339,7 +339,7 @@ def test_invoke_baseline_parses_stream_result() -> None:
     assert res.is_error is False
     assert res.fired is False
     assert res.raw == payload
-    _, cmd, args, kw = sb.calls[0]
+    _, cmd, args, kw = sandbox.calls[0]
     assert cmd == ClaudeCodeAgent.CLAUDE_BIN
     assert kw["cwd"] == "/workspace"
     assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home
@@ -358,10 +358,10 @@ def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
             "usage": {},
         }
     )
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="without_skill",
@@ -373,7 +373,7 @@ def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
             detect_skill=None,
         )
     )
-    _, _cmd, _args, kw = sb.calls[0]
+    _, _cmd, _args, kw = sandbox.calls[0]
     assert kw["stdin"] == b""
 
 
@@ -388,11 +388,11 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
             "usage": {},
         }
     )
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="without_skill",
@@ -406,16 +406,16 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _cmd, args, _kw = sb.calls[0]
+    _, _cmd, args, _kw = sandbox.calls[0]
     assert args[-2:] == ["--plugin-dir", "/project"]
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
     """Verify invoke nonzero exit is error."""
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
     res = asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="without_skill",
@@ -473,9 +473,9 @@ def test_guest_env_pins_utc_timezone() -> None:
 
 def test_stage_project_assets_copies_project_skills_into_guest_home() -> None:
     """Verify stage project assets copies project skills into guest home."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
-    asyncio.run(_agent().stage_project_assets(sb, "/project"))
-    kind, script, _ = sb.calls[0]
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
+    kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
     assert "/project/.claude/skills" in script
     assert f"{ClaudeCodeAgent.guest_home}/.claude/skills" in script
@@ -591,11 +591,11 @@ def test_claude_invoke_extra_env_overrides_guest_env() -> None:
             "usage": {},
         }
     )
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="trial",
@@ -612,7 +612,7 @@ def test_claude_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _cmd, _args, kw = sb.calls[0]
+    _, _cmd, _args, kw = sandbox.calls[0]
     assert kw["env"]["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home  # guest_env still present
