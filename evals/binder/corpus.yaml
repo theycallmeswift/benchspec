@@ -4,6 +4,11 @@
 # cohort, and expect_checker are positional — the gate reconstructs them on load.
 
 # binds — gold:bind. Sub-key is the checker each assertion should bind to.
+#
+# Several entries are decomposition demonstrators: an atomic single-fact child of a
+# compound line under punts/semantic. The flat compound parent must stay a punt (a
+# compound assertion defers at the binder layer) while its children bind —
+# test_corpus_integrity.py pins each parent↔child pairing.
 binds:
   skill_invoked:
   - Skill `archive` invoked
@@ -31,24 +36,14 @@ binds:
     so the skill did not emit a confident hollow one
   - Exactly one spec file exists under './docs/specs/'
   - No spec file under './docs/specs/' carries a '-design' suffix
-  # decomposed child of the six-template-files compound punts below (the
-  # `./.meta/templates/ contains all six template files named exactly: …` line and its
-  # "previously-missing" restatement under semantic): the flat lines punt, this count binds.
   - text: Exactly six files match ./.meta/templates/*.md
     expect:
       glob: ./.meta/templates/*.md
       count: 6
-  # decomposed child of the dated-log-file compound punt below (the `A dated log file
-  # named YYYY-MM-DD.md exists … and contains a header …` line under semantic): the
-  # flat line punts, this count check binds.
   - text: At least one file matches ./.meta/logs/*.md
     expect:
       glob: ./.meta/logs/*.md
       min: 1
-  # decomposed child of the full-skim-first-spec compound punt below (the `A spec file
-  # was written at './docs/specs/{TODAY}-<slug>.md' with the full skim-first section
-  # set` line under semantic): the flat line punts, this count check binds — not a
-  # duplicate of the spec-path counts above, which decompose a different punt.
   - text: At least one file matches './docs/specs/{TODAY}-*.md'
     expect:
       glob: ./docs/specs/{TODAY}-*.md
@@ -58,66 +53,38 @@ binds:
   - The capture now lives at ./9. Archive/Sources/{TODAY}/openai-o1-launch.md — a flat markdown
     file under a dated Sources folder (NOT a per-source subfolder, NOT renamed to index.md)
   - The previously-missing ./.obsidian/ configuration now exists
-  # decomposed children of the seven-PARA-directories compound punt below (the
-  # `./ contains all seven numbered PARA directories: …` line under semantic):
-  # the flat line punts, these atomic single-directory checks bind.
   - The 0. Inbox/ directory exists under ./
   - The 1. Profile/ directory exists under ./
   - The 2. Entities/ directory exists under ./
   - The 3. Projects/ directory exists under ./
   - The 4. Areas/ directory exists under ./
   - The 5. Resources/ directory exists under ./
-  # seventh atom: the nested `9. Archive/Sources/` from the flat punt, as a directory check
   - The 9. Archive/Sources/ directory exists under ./
-  # the "previously-missing PARA folders now all exist: …" compound punt below reuses
-  # five of these directory children — no new entries needed.
-  # file_exists child of the index.md compound punt below (the
-  # `./.meta/index.md exists, opens with a '# Index' heading, …` line under
-  # semantic): the flat line punts, this atomic existence check binds.
   - ./.meta/index.md exists
   - text: ./.meta/templates/entity-person.md exists
     expect:
       path: ./.meta/templates/entity-person.md
-  # file_exists children of the ./.meta/-contents compound punt below (the `./.meta/
-  # exists and contains index.md, logs/, templates/` line under semantic): the flat
-  # line punts, these directory checks bind; index.md's child is the entry above.
   - The ./.meta/logs/ directory exists
   - The ./.meta/templates/ directory exists
-  # file_exists child of the whoami frontmatter compound punt below (the `./1. Profile/
-  # whoami.md exists and its frontmatter … ISO 8601 …` line under semantic): the flat
-  # line punts — its ISO-format half stays judge territory — this existence check binds.
   - ./1. Profile/whoami.md exists
   regex:
   - ./.meta/index.md now exists with a '# Index' heading
-  # the two regex children of the index.md compound punt: phrased so the
-  # line-content (regex) intent is unmistakable, distinct from file_exists.
   - the first line of ./.meta/index.md matches '# Index'
   - ./.meta/index.md has a line beginning '_Last updated'
   - text: ./.meta/templates/entity-person.md has a line beginning 'aliases:'
     expect:
       path: ./.meta/templates/entity-person.md
-  # regex child of the same dated-log-file compound punt (see the glob_count child
-  # above): the flat line punts, this line-content check binds.
   - text: ./.meta/logs/{TODAY}.md has a line containing 'bootstrap | '
     expect:
       path: ./.meta/logs/{TODAY}.md
-  # decomposed regex child of the spec-H2-sections compound punt below (the `The spec
-  # opens with a one-line TL;DR and contains all of these H2 sections: …` line under
-  # semantic): the full section SET punts, this single-section check binds.
   - text: ./docs/specs/{TODAY}-<slug>.md has a line matching '## Problem'
     expect:
       path: ./docs/specs/{TODAY}-<slug>.md
   frontmatter_has:
-  # key-presence child of the same whoami frontmatter compound punt (see its
-  # file_exists child above): the flat line punts, this key check binds.
   - text: ./1. Profile/whoami.md frontmatter has a 'created' key
     expect:
       path: ./1. Profile/whoami.md
       key: created
-  # decomposed child of the six-template-files-frontmatter compound punt below (the
-  # `Each of the six template files begins with YAML frontmatter declaring at least
-  # the keys …` line under semantic): all-six-files-all-five-keys punts, this
-  # single-file single-key demonstrator binds.
   - text: ./.meta/templates/entity-person.md frontmatter has a 'title' key
     expect:
       path: ./.meta/templates/entity-person.md
