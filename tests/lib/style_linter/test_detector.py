@@ -65,6 +65,33 @@ def test_build_detector_prompt_limits_model_to_direct_rule_matches(
     )
 
 
+def test_build_detector_prompt_includes_docstring_exemption(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Serialize caller-owned docstring exemptions into detector prompts."""
+    source = tmp_path / "sample.py"
+    source.write_text('"""Module docstring."""\n')
+    chunks = framework.chunk_source_files([source], max_lines=80)
+
+    prompt = framework.build_detector_prompt(
+        chunks=chunks,
+        rules=[
+            framework.Rule(
+                id="dedented-multiline-strings",
+                description=(
+                    "Use textwrap.dedent for indented multiline string values. "
+                    "Docstrings are exempt — indented multiline docstrings are correct."
+                ),
+            )
+        ],
+        instructions="Use the repository style guide.",
+    )
+
+    assert "indented multiline string values" in prompt
+    assert "Docstrings are exempt" in prompt
+
+
 def test_parse_findings_rejects_unknown_rule_ids(
     tmp_path: Path,
     framework: ModuleType,

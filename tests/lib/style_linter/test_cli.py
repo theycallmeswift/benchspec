@@ -34,6 +34,12 @@ def test_cli_owns_repo_specific_rules_prompt_and_default_paths(
     assert "Review the numbered source chunks" not in style_lint_cli.POLICY_INSTRUCTIONS
     assert "Ruff" not in style_lint_cli.POLICY_INSTRUCTIONS
 
+    rules = {rule.id: rule.description for rule in style_lint_cli.RULES}
+    assert rules["dedented-multiline-strings"] == (
+        "Use textwrap.dedent for indented multiline string values. "
+        "Docstrings are exempt — indented multiline docstrings are correct."
+    )
+
 
 def test_cli_rules_cover_semantic_block_newlines(style_lint_cli: ModuleType) -> None:
     """Keep readability spacing as caller-owned style policy."""
