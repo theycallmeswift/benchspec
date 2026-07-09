@@ -5,7 +5,7 @@ provider credential as a host-substituted secret scoped to the provider host, bu
 the `opencode run --format json` command, and parses its JSONL output. Pinning,
 model surface, and effort taxonomy are documented in `agents.md`.
 
-Event shape (verified live, OpenCode 1.15.13): JSONL, one event per line, nested
+Event shape: JSONL, one event per line, nested
 under `part`. Turn events are `step_start` / `text` / `tool_use` / `step_finish`;
 there is NO terminal `result` event. A skill dispatch is
 `{"type":"tool_use","part":{"tool":"skill","state":{"input":{"name":"<skill>"}}}}`;
@@ -85,7 +85,7 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
     return harness_args
 
 
-# Minimal OpenCode plugin baked into the snapshot. Mirrors superpowers'
+# Minimal OpenCode plugin baked into the snapshot. It uses OpenCode's
 # `experimental.chat.messages.transform` hook: injects a generic "you have these
 # skills available via the `skill` tool" bootstrap into the first user message of
 # each session. The list is regenerated per session from whatever's staged at
@@ -171,13 +171,17 @@ export const EvalspecBootstrap = async () => ({
 });
 """
 
-_BOOTSTRAP_PACKAGE_JSON = (
-    '{"name":"evalspec-bootstrap","version":"0.0.0","type":"module","main":"index.js"}'
+_COMPACT_JSON = {"separators": ((",", ":"))}
+_BOOTSTRAP_PACKAGE_JSON = json.dumps(
+    {"name": "evalspec-bootstrap", "version": "0.0.0", "type": "module", "main": "index.js"},
+    **_COMPACT_JSON,
 )
-
-_OPENCODE_CONFIG_JSON = (
-    '{"$schema":"https://opencode.ai/config.json",'
-    '"plugin":["/root/.config/opencode/plugins/evalspec-bootstrap"]}'
+_OPENCODE_CONFIG_JSON = json.dumps(
+    {
+        "$schema": "https://opencode.ai/config.json",
+        "plugin": ["/root/.config/opencode/plugins/evalspec-bootstrap"],
+    },
+    **_COMPACT_JSON,
 )
 
 
@@ -187,7 +191,7 @@ class OpenCodeAgent(BaseAgent):
     id = "opencode"
     guest_home = "/root"
     skill_load_dir = "/root/.config/opencode/skills"
-    # multi_turn: invoke() accepts resume_session_id for protocol parity but does not
+    # multi_turn: invoke() accepts resume_session_id but does not
     # honor it — each call is a fresh session. token_split: OpenCode usage events
     # carry no cache split, so cost would be a guess.
     capabilities = AgentCapabilities(
@@ -202,9 +206,7 @@ class OpenCodeAgent(BaseAgent):
         """)
         + 'npm i -g "opencode-ai@${EVALSPEC_OPENCODE_VERSION:-latest}" && '
         # Bake the evalspec bootstrap plugin into the snapshot, plus a global
-        # opencode.json that registers it. Mirrors superpowers' approach so the
-        # `skill` tool is actually considered by models that wouldn't reach for
-        # it unprompted (e.g. Gemini Flash).
+        # opencode.json that registers it.
         "mkdir -p /root/.config/opencode/plugins/evalspec-bootstrap && "
         + "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
         + _BOOTSTRAP_PACKAGE_JSON
@@ -215,16 +217,9 @@ class OpenCodeAgent(BaseAgent):
         "cat > /root/.config/opencode/opencode.json <<'EOF_CFG'\n"
         + _OPENCODE_CONFIG_JSON
         + "\nEOF_CFG\n"
-        # Warm OpenCode's one-time SQLite migration at snapshot-build time. On first
-        # invocation OpenCode prints "Performing one time database migration..." and
-        # creates ~/.local/share/opencode/opencode.db; deferred to a measured run
-        # that banner is captured as the agent result, erroring every arm. `auth list`
-        # triggers the migration with no provider credential and no network, so the
-        # migrated DB bakes into the snapshot and real runs boot past it.
+        # Warm OpenCode's one-time SQLite migration at snapshot-build time.
         + "/usr/local/bin/opencode auth list > /dev/null 2>&1 && "
-        # Fail provisioning loudly if the migration didn't bake the DB into the
-        # snapshot — otherwise a future opencode that changes the migration trigger
-        # silently reintroduces the per-VM banner that errors every arm.
+        # Fail provisioning loudly if the migration did not bake the DB into the snapshot.
         + "test -f /root/.local/share/opencode/opencode.db"
     )
 
@@ -311,9 +306,7 @@ class OpenCodeAgent(BaseAgent):
         """Return secret values that must be redacted from logs."""
         from microsandbox import Secret
 
-        allow_host = _PROVIDER_HOSTS[
-            self._auth_env
-        ]  # loud KeyError beats a silent wrong-host route
+        allow_host = _PROVIDER_HOSTS[self._auth_env]
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
         return [
             Secret.env(guest_env_name, value=self._auth_value, allow_hosts=[allow_host]),
@@ -337,9 +330,7 @@ class OpenCodeAgent(BaseAgent):
                 f"got {model!r}. The --evalspec-model default 'sonnet' is a Claude-only alias; "
                 f"pass --evalspec-model explicitly under EVALSPEC_AGENT=opencode."
             )
-        # Map the agent-neutral effort tier to OpenCode's --variant. plugin_dir and
-        # resume_session_id are accepted for protocol parity but unused — OpenCode v1 has
-        # no equivalents.
+        # Map the agent-neutral effort tier to OpenCode's --variant.
         variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
             self.OPENCODE_BIN,
@@ -413,9 +404,7 @@ class OpenCodeAgent(BaseAgent):
                 cwd=workdir,
                 env=env,
                 timeout=timeout,
-                # Force EOF on stdin: `opencode run` blocks reading stdin forever
-                # without it (microsandbox's default leaves a pipe open), which
-                # bins the whole arm against the per-eval timeout for no work.
+                # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
         except (MicrosandboxError, asyncio.TimeoutError, OSError) as e:
@@ -425,22 +414,11 @@ class OpenCodeAgent(BaseAgent):
         return parse_opencode_jsonl(res.stdout_text, eval_id, config, detect_skill)
 
     def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Delegate judging to the host's Claude CLI so grading quality stays.
-
-        consistent across the matrix — task arms differ; grading should not. See
-        run_host_judge for the RuntimeError-on-infra-failure contract (a missing
-        `claude` on PATH included) that keeps an infra failure from being mistaken for
-        assertion failures.
-        """
+        """Delegate judging to the host's Claude CLI."""
         return run_host_judge(prompt, model=model, timeout=timeout)
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
-        """Return true when a line shows any skill route.
-
-        Once routing is decided, the sandbox does not need to wait out the turn. The tally
-        (`detect_fired`) re-checks for the target skill, so loosening this detector cannot
-        widen the fire count.
-        """
+        """Return true when a line shows any skill route."""
         text = line.strip()
         if not text:
             return False
@@ -498,11 +476,7 @@ class OpenCodeAgent(BaseAgent):
 
 
 def _skill_dispatch_name(part: dict) -> str | None:
-    """Return the skill name from a `skill` dispatcher tool_use.
-
-    Returns None when this part is not a skill dispatch. This is the single source for both
-    fired-detection and trajectory normalization so they cannot drift.
-    """
+    """Return the skill name from a `skill` dispatcher tool_use."""
     if part.get("tool") != "skill":
         return None
     state = part.get("state") if isinstance(part.get("state"), dict) else {}
@@ -512,14 +486,7 @@ def _skill_dispatch_name(part: dict) -> str | None:
 
 
 def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
-    """True if this tool_use event's `part` block dispatches the named skill.
-
-    Two fire shapes (mirroring trigger.py's Claude detector):
-    - Primary: `part.tool == "skill"` (OpenCode's native skill dispatcher) with
-      `part.state.input.name` matching the skill (exact or namespaced).
-    - Fallback: `part.tool` itself is the skill name (some agents register skills
-      directly as tools instead of going through a dispatcher).
-    """
+    """True if this tool_use event's `part` block dispatches the named skill."""
     name = _skill_dispatch_name(part)
     if name is not None and (name == skill_name or name.endswith(f":{skill_name}")):
         return True
@@ -528,12 +495,7 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
 
 
 def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
-    """Return true when a part routes to any skill.
-
-    Matches either the `skill` dispatcher or, as the namespaced-tool fallback, the target
-    skill registered directly as a tool. Mirrors Claude's `dispatches_skill`: early-stop on
-    any route; the tally filters to ours.
-    """
+    """Return true when a part routes to any skill."""
     tool = part.get("tool")
     if not isinstance(tool, str):
         return False
@@ -543,15 +505,7 @@ def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
 
 
 def _opencode_trajectory(events: list[dict]) -> list[dict]:
-    """Canonical trajectory (schema: see evalspec.trajectory) from OpenCode events.
-
-    OpenCode models a tool use as a single completed `tool_use` event (input under
-    part.state.input) with NO separate tool_result frame, so we emit tool_call events
-    only. A skill dispatch (part.tool == "skill", state.input.name) is normalized to the
-    canonical Skill shape (name="Skill", arguments={"skill": ...}) so
-    skills_dispatched()/render_process_facts() stay agent-agnostic. OpenCode exposes no
-    per-call id we link against, so id is "" (there is no result to link).
-    """
+    """Canonical trajectory from OpenCode events."""
     traj: list[dict] = []
     for ev in events:
         if ev.get("type") != "tool_use":
@@ -594,18 +548,7 @@ def parse_opencode_jsonl(
     config: str,
     detect_skill: str | None,
 ) -> RunResult:
-    """Parse OpenCode's JSONL event stream into a RunResult.
-
-    OpenCode has no terminal `result` event the way Claude Code does — the agent emits
-    `step_start` / `text` / `tool_use` / `step_finish` events and exits. The final agent
-    message concatenates every non-empty `part.text` event (joined with blank lines) so
-    the judge sees mid-run narration, not just the wrap-up; when none is present (a
-    tool-only run), it falls back to a re-serialized tail of parsed events
-    (`_debug_tail`). Totals come from `step_finish.part.tokens.total`; duration is the
-    timestamp span. `errored` keys on zero tokens — proof the agent never reached the
-    wire — NOT on a missing text event (concise models routinely finish via tool calls
-    without a wrap-up message).
-    """
+    """Parse OpenCode's JSONL event stream into a RunResult."""
     events = list(iter_events(stdout))
 
     text_parts: list[str] = []
@@ -637,10 +580,7 @@ def parse_opencode_jsonl(
             if isinstance(text_value, str) and text_value.strip():
                 text_parts.append(text_value)
         elif etype == "tool_use" and detect_skill:
-            # Gate on completed frames like _opencode_trajectory, so this `fired` and
-            # the process-facts trajectory can't disagree. The trigger router's
-            # detect_fired stays status-agnostic on purpose: routing is decided at
-            # dispatch, not completion.
+            # Gate on completed frames so `fired` agrees with the process-facts trajectory.
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
 
             if state.get("status") == "completed" and _tool_dispatches_skill(part, detect_skill):
@@ -661,8 +601,5 @@ def parse_opencode_jsonl(
         fired=fired,
         raw=stdout,
         trajectory=_opencode_trajectory(events),
-        # cache_*/result_subtype stay at defaults: OpenCode's verified token object
-        # exposes only tokens.total (no cache breakdown), and the stream has no
-        # terminal result event (no subtype/finish-reason). Revisit if a live run
-        # surfaces either.
+        # OpenCode currently reports only total tokens and no terminal result subtype.
     )

@@ -110,8 +110,10 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
             raise SchemaError(f"{where}: needs at least one arm in `arms`")
 
         seen: set[str] = set()
-        for i, entry in enumerate(raw_arms):
-            at = f"{where} arms[{i}]"
+
+        for arm_index, entry in enumerate(raw_arms):
+            at = f"{where} arms[{arm_index}]"
+
             if not isinstance(entry, dict):
                 raise SchemaError(f"{at}: expected a table")
 
@@ -188,11 +190,10 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
     if not (isinstance(model, str) and model):
         raise SchemaError(f"{where} arm `{name}`: no `model` (no arm value, no set default)")
     effort = raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
-    merged = {**defaults.get("env", {}), **raw.get("env", {})}  # arm keys win
+    merged = {**defaults.get("env", {}), **raw.get("env", {})}
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
 
-    # Env merged but NOT $VAR-expanded — expansion is deferred to exec time (run_eval_arm)
-    # so collection never needs a secret a deselected arm references.
+    # Env stays unexpanded until the arm executes.
     return Arm(name, harness, model, effort, merged, harness_args)
 
 
@@ -208,14 +209,7 @@ def resolve_set(
     models: list | None = None,
     environ: Mapping | None = None,
 ) -> Set:
-    """Pick the set (`set_name` or `default_set`), apply CLI scalar overrides to its.
-
-    defaults, then materialize arms (inheritance + env merge; env stays unexpanded — see
-    _materialize_arm).
-
-    `models` (`--evalspec-models a,b,c`) replaces the declared arms entirely: one arm per
-    value, named by the value, inheriting the (overridden) defaults, baseline = first value.
-    """
+    """Resolve one eval set into concrete arms."""
     environ = environ if environ is not None else os.environ
     chosen = set_name if set_name is not None else default_set
     rs = rawsets.get(chosen)

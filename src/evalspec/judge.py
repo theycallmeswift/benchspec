@@ -26,7 +26,10 @@ def build_judge_prompt(
     process_facts: str = "",
 ) -> str:
     """Build the prompt sent to the judge model."""
-    numbered = "\n".join(f"{i}. {a}" for i, a in enumerate(assertions, 1))
+    numbered = "\n".join(
+        f"{assertion_number}. {assertion}"
+        for assertion_number, assertion in enumerate(assertions, 1)
+    )
     files_block = "\n\n".join(
         f"### {name} (sha256={shas.get(name, 'n/a')})\n{content}"
         for name, content in file_contents.items()
@@ -91,13 +94,13 @@ def _balanced_objects(text: str) -> object:
     depth = 0
     start = None
     in_str = False
-    esc = False
+    escaped = False
     for index, char in enumerate(text):
         if in_str:
-            if esc:
-                esc = False
+            if escaped:
+                escaped = False
             elif char == "\\":
-                esc = True
+                escaped = True
             elif char == '"':
                 in_str = False
             continue
@@ -205,11 +208,11 @@ def grade_run(
                 "arm": config,
                 "assertions": [
                     {
-                        "text": a,
+                        "text": assertion,
                         "passed": False,
                         "evidence": "JUDGE ERROR: unparseable output",
                     }
-                    for a in assertions
+                    for assertion in assertions
                 ],
             }
     raise AssertionError("unreachable: loop exits via return in both branches")

@@ -120,10 +120,17 @@ def _glob_count(
     if raw.startswith("/") or ".." in Path(pat).parts:
         raise ValueError(f"checker glob escapes the workdir: {raw!r}")
     root = workdir.resolve()
-    n = sum(1 for m in workdir.glob(pat) if m.is_file() and m.resolve().is_relative_to(root))
+    match_count = sum(
+        1
+        for match_path in workdir.glob(pat)
+        if match_path.is_file() and match_path.resolve().is_relative_to(root)
+    )
     if "count" in spec:
-        return n == spec["count"], f"{n} match(es), expected exactly {spec['count']}"
-    return n >= spec["min"], f"{n} match(es), expected at least {spec['min']}"
+        return (
+            match_count == spec["count"],
+            f"{match_count} match(es), expected exactly {spec['count']}",
+        )
+    return match_count >= spec["min"], f"{match_count} match(es), expected at least {spec['min']}"
 
 
 def _sha256_match(
@@ -167,16 +174,16 @@ def _frontmatter_has(
     if not path.is_file():
         return False, f"{spec['path']} absent"
     try:
-        fm = _frontmatter(path)
-    except yaml.YAMLError as e:
-        return False, f"frontmatter is not valid YAML: {e}"
-    if fm is None:
+        frontmatter = _frontmatter(path)
+    except yaml.YAMLError as error:
+        return False, f"frontmatter is not valid YAML: {error}"
+    if frontmatter is None:
         return False, "no frontmatter block"
     key = spec["key"]
-    if key not in fm:
-        return False, f"key `{key}` missing (has: {sorted(map(str, fm))})"
-    if "value" in spec and fm[key] != _yaml_scalar(spec["value"]):
-        return False, f"`{key}` = {fm[key]!r}, expected {spec['value']!r}"
+    if key not in frontmatter:
+        return False, f"key `{key}` missing (has: {sorted(map(str, frontmatter))})"
+    if "value" in spec and frontmatter[key] != _yaml_scalar(spec["value"]):
+        return False, f"`{key}` = {frontmatter[key]!r}, expected {spec['value']!r}"
     return True, f"`{key}` present" + (f" = {spec['value']!r}" if "value" in spec else "")
 
 

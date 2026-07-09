@@ -40,19 +40,19 @@ class Finding:
 def lint_assertion(text: str) -> list[tuple[str, str]]:
     """(rule, message) pairs for one assertion string."""
     findings = []
-    if m := _VAGUE.search(text):
+    if vague_match := _VAGUE.search(text):
         findings.append(
             (
                 "vague-adverb",
-                f"`{m.group(0)}` names no observable criterion — state the behavior "
+                f"`{vague_match.group(0)}` names no observable criterion — state the behavior "
                 "the evidence can show",
             )
         )
-    if not _ANCHORED.search(text) and (m := _PATHISH.search(text)):
+    if not _ANCHORED.search(text) and (path_match := _PATHISH.search(text)):
         findings.append(
             (
                 "unseen-file",
-                f"the judge never sees `{m.group(0)}` — it grades only workdir facts "
+                f"the judge never sees `{path_match.group(0)}` — it grades only workdir facts "
                 "and the final message; anchor it to the workdir with a leading `./`",
             )
         )
@@ -89,11 +89,11 @@ def run(repo_root: Path, eval_roots: list[str] | None = None) -> int:
     """Print findings grouped by file; exit 1 on any finding (all are warnings)."""
     findings = lint_repo(repo_root, eval_roots)
     current = None
-    for f in findings:
-        if f.file != current:
-            print(f"\n{f.file}")
-            current = f.file
-        print(f"  [warning] {f.eval_id}: {f.rule}: {f.message}")
-        print(f"      `{f.assertion[:100]}`")
+    for finding in findings:
+        if finding.file != current:
+            print(f"\n{finding.file}")
+            current = finding.file
+        print(f"  [warning] {finding.eval_id}: {finding.rule}: {finding.message}")
+        print(f"      `{finding.assertion[:100]}`")
     print(f"\n{len(findings)} warning(s)")
     return 1 if findings else 0

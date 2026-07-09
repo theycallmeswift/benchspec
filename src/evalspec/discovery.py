@@ -65,8 +65,8 @@ class EvalCase:
     @property
     def fixtures_dir(self: object) -> Path | None:
         """Return the fixtures directory for this eval when present."""
-        d = self.skill_dir / "evals" / self.slug / "fixtures"
-        return d if d.is_dir() else None
+        fixtures_dir = self.skill_dir / "evals" / self.slug / "fixtures"
+        return fixtures_dir if fixtures_dir.is_dir() else None
 
 
 @dataclass
@@ -192,8 +192,8 @@ def resolve_environment_config(repo_root: Path) -> EnvConfig:
             )
         try:
             script = (repo_root / rel).read_bytes()
-        except OSError as err:
-            raise schema.SchemaError(f"environment_script: file not found: {rel}") from err
+        except OSError as error:
+            raise schema.SchemaError(f"environment_script: file not found: {rel}") from error
         script_path = rel
 
     return EnvConfig(base_image=base_image, script=script, script_path=script_path)
@@ -210,17 +210,20 @@ def _skill_dirs(repo_root: Path, eval_roots: list[str] | None = None) -> list[Pa
     """
     roots = eval_roots if eval_roots is not None else _DEFAULT_EVAL_ROOTS
     seen: dict[str, Path] = {}
-    for rel in roots:
-        root = repo_root / rel
+    for relative_root in roots:
+        root = repo_root / relative_root
         if not root.is_dir():
             continue
-        for p in root.iterdir():
-            if not p.is_dir():
+        for skill_path in root.iterdir():
+            if not skill_path.is_dir():
                 continue
-            if p.name in seen:
-                raise schema.SchemaError(f"duplicate skill name {p.name!r}: {seen[p.name]} and {p}")
-            seen[p.name] = p
-    return sorted(seen.values(), key=lambda p: p.name)
+            if skill_path.name in seen:
+                raise schema.SchemaError(
+                    f"duplicate skill name {skill_path.name!r}: "
+                    f"{seen[skill_path.name]} and {skill_path}"
+                )
+            seen[skill_path.name] = skill_path
+    return sorted(seen.values(), key=lambda skill_path: skill_path.name)
 
 
 def discover_eval_cases(repo_root: Path, eval_roots: list[str] | None = None) -> list[EvalCase]:
@@ -235,21 +238,23 @@ def discover_eval_cases(repo_root: Path, eval_roots: list[str] | None = None) ->
         # flat evals load_suite_dir would silently drop, so fail loudly regardless of how
         # many slug dirs the suite has.
         stray = sorted(
-            p.name
-            for p in evals_dir.iterdir()
-            if p.is_file() and p.suffix == ".md" and p.name not in mdformat.NON_EVAL_MD
+            path.name
+            for path in evals_dir.iterdir()
+            if path.is_file() and path.suffix == ".md" and path.name not in mdformat.NON_EVAL_MD
         )
         if stray:
             raise schema.SchemaError(
                 f"{evals_dir}: legacy flat eval file(s) {stray} — explode each into its "
                 f"own evals/<slug>/prompt.md dir or delete it."
             )
-        has_slug = any(p.is_dir() and (p / "prompt.md").is_file() for p in evals_dir.iterdir())
+        has_slug = any(
+            path.is_dir() and (path / "prompt.md").is_file() for path in evals_dir.iterdir()
+        )
         if not has_slug:
             continue  # trigger-only suite (just trigger-evals.md) — no output evals
         data = mdformat.load_suite_dir(evals_dir)
-        for ev in data["evals"]:
-            cases.append(EvalCase(skill_dir=skill_dir, eval=ev))
+        for eval_data in data["evals"]:
+            cases.append(EvalCase(skill_dir=skill_dir, eval=eval_data))
     return cases
 
 
@@ -260,17 +265,17 @@ def discover_trigger_cases(
     cases: list[TriggerCase] = []
     for skill_dir in _skill_dirs(repo_root, eval_roots):
         evals_dir = skill_dir / "evals"
-        f = evals_dir / "trigger-evals.md"
-        if not f.is_file():
+        trigger_file = evals_dir / "trigger-evals.md"
+        if not trigger_file.is_file():
             continue
-        data = mdformat.parse_trigger(f)
-        for q in data.get("queries", []):
+        data = mdformat.parse_trigger(trigger_file)
+        for query in data.get("queries", []):
             cases.append(
                 TriggerCase(
                     skill_dir=skill_dir,
                     repo_root=repo_root,
                     skill_name=data["skill_name"],
-                    query=q,
+                    query=query,
                 )
             )
     return cases

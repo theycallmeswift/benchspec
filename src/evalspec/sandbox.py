@@ -27,8 +27,7 @@ from evalspec.trigger import RoutingError
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
 BASE_IMAGE = "ubuntu:latest"
-# microsandbox's ~512 MiB default OOM-kills the agent CLI installer (exit 137) and would
-# starve the agent doing real work, so size the VMs to match interactive use.
+# Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
 VM_MEMORY_MIB = 2048
 
@@ -114,15 +113,7 @@ async def _snapshot_artifact_shas(sb: object, agent: object) -> dict | None:
 
 
 async def _read_authored(sb: object, agent: object, baseline_shas: dict | None) -> dict:
-    """Files the agent authored in its artifact dirs since `baseline_shas`, as.
-
-    {display-path: content}. Hashes first, then streams bytes for ONLY the changed/new
-    paths — empty (no extra shell) when the agent wrote nothing there.
-
-    Captures nothing when either snapshot failed (baseline or the current pass is
-    `None`): a failed snapshot means "capture nothing this arm," never "everything is
-    new" — which would grade the staged (given) skills as if the agent authored them.
-    """
+    """Return display-path content for files authored since `baseline_shas`."""
     if baseline_shas is None:
         return {}
     current = await _snapshot_artifact_shas(sb, agent)
@@ -138,10 +129,7 @@ async def _read_authored(sb: object, agent: object, baseline_shas: dict | None) 
 
 
 async def _stop_quietly(sb: object) -> None:
-    """Best-effort VM teardown: swallow only runtime/OS errors so a teardown hiccup.
-
-    never masks the real flow (and never leaks the microVM).
-    """
+    """Best-effort VM teardown that never masks the real flow."""
     from microsandbox.errors import MicrosandboxError
 
     with contextlib.suppress(MicrosandboxError, asyncio.TimeoutError, OSError):
@@ -248,12 +236,7 @@ def _plugin_dir_for(host_repo_root: object, marker: str = DEFAULT_PROJECT_MARKER
 
 
 def _agent_extra_volumes(agent: object, volume_cls: object) -> dict:
-    """Optional agent-owned host files that must be visible in the guest.
-
-    Codex can run against a ChatGPT subscription login by copying a host `auth.json`
-    into the guest before `codex exec`; the agent exposes that path without widening the
-    core CodingAgent protocol for agents that do not need file credentials.
-    """
+    """Optional agent-owned host files that must be visible in the guest."""
     path_getter = getattr(agent, "auth_json_path", None)
     if not callable(path_getter):
         return {}
@@ -277,11 +260,7 @@ async def run_setup_sh(
 ) -> None:
     """Run an eval setup.sh script inside the arm sandbox when present."""
     env = {**agent.cell_env(arm=arm, model=model, eval_set=eval_set), **(arm_env or {})}
-    # An absent setup.sh is a clean no-op; a present-but-failing one must propagate its
-    # exit, so `if [ -f ]; then ...; fi` under `set -e` (never `... || true`, which masks
-    # the failure). setup.sh authors may use bashisms, so the body runs under `bash`; the
-    # outer wrapper stays POSIX-sh in case a future base image drops bash. A missing suite
-    # dir leaves cwd at PROJECT_MOUNT (no `./evals/setup.sh` there) — still a clean no-op.
+    # Missing setup scripts are no-ops; present scripts run under bash and fail loudly.
     safe_skill = shlex.quote(skill)
     script = (
         "set -e\n"
@@ -311,11 +290,7 @@ async def _create_sandbox(
     """Create a microsandbox instance from a snapshot."""
     from microsandbox import Sandbox, Volume
 
-    # The project mounts read-only at /project for BOTH arms: per-cell setup.sh needs
-    # /project/skills/<skill> or /project/.claude/skills/<skill> present (whichever eval
-    # root holds the suite). The install is the only per-arm asymmetry; the baseline arm's
-    # setup.sh is `exit 0`. The implicit `cp .claude/skills` staging stage_project_assets
-    # did is retired for output evals — the skills-home bridge + setup.sh replace it.
+    # The project mounts read-only so setup.sh can install the suite-specific skill.
     volumes = {GUEST_WORKDIR: Volume.bind(str(host_workdir), readonly=False)}
     if host_repo_root is not None:
         volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)
@@ -337,11 +312,7 @@ class SandboxSession:
     `__aenter__` boots the VM and returns a per-turn async `run`; `__aexit__` tears it
     down.
 
-    The whole lifecycle (create → turns → stop) MUST run inside a single `asyncio.run`:
-    microsandbox's `Sandbox` is bound to the event loop it was created in and raises "no
-    running event loop" if used from a separate loop activation. The snapshot is
-    resolved by the caller *before* the `asyncio.run`, so building it (which itself uses
-    `asyncio.run`) never nests inside a running loop.
+    The whole lifecycle (create → turns → stop) runs inside a single `asyncio.run`.
     """
 
     def __init__(
@@ -371,18 +342,11 @@ class SandboxSession:
         self._host_repo_root = host_repo_root
         self._model = model
         self._effort = effort
-        # Per-arm leaky env (e.g. ANTHROPIC_BASE_URL for an OpenRouter arm), already
-        # $VAR-expanded by the caller. Threads into setup.sh's env and the agent's exec
-        # env; `eval_set` only stamps EVALSPEC_SET for setup.sh.
+        # Per-arm environment, already expanded, is shared by setup.sh and the agent exec.
         self._arm_env = arm_env
         self._eval_set = eval_set
         self._harness_args = harness_args
-        # `skill` is the suite whose `setup.sh` installs the skill for this cell; `arm` is
-        # the arm-name string EVALSPEC_ARM carries to that setup.sh. `skill` defaults to
-        # None so callers with no skill suite skip setup.sh (the gate in __aenter__ reads
-        # `_skill` alone); `arm` defaults to the arm name (`config`) when unspecified.
-        # `is not None`, not `or`: a stray empty-string `arm` is a caller bug that must
-        # reach setup.sh as the visible mismatch it is, not get masked by `config`.
+        # Preserve explicit empty arm names; they should reach setup.sh unchanged.
         self._skill = skill
         self._arm = arm if arm is not None else config
         self._project_marker = project_marker
@@ -396,12 +360,7 @@ class SandboxSession:
             host_workdir=self._host_workdir,
             host_repo_root=self._host_repo_root,
         )
-        # Install the skill for this cell BEFORE the artifact baseline: the populated skills
-        # home is the "before" the per-turn diff subtracts, so only agent-authored files
-        # surface. A non-zero setup.sh aborts the cell loudly (run_setup_sh raises); stop the
-        # VM first, since the caller's `async with` never entered. Gated on `_skill is not
-        # None`: a live arm passes `skill` so this runs on every production cell; only callers
-        # that omit `skill` (e.g. trigger routing) skip it.
+        # Install before the artifact baseline so only later agent-authored files surface.
         if self._skill is not None:
             try:
                 await run_setup_sh(
@@ -437,9 +396,7 @@ class SandboxSession:
             extra_env=self._arm_env,
             harness_args=self._harness_args,
         )
-        # Capture skill artifacts the agent wrote outside the workdir mount: files new or
-        # changed vs the staged baseline, labelled ~/... for the judge. Empty (and cheap) for
-        # agents/evals that write solely to the workdir.
+        # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(self._sb, self._agent, self._artifact_base)
         if authored:
             result = replace(result, artifacts=authored)
@@ -521,8 +478,7 @@ def _trigger_command(
 ) -> list[str]:
     """Build the command that asks an agent to route a trigger query."""
     plugin = _plugin_dir_for(repo_root, project_marker)
-    # A non-None sentinel: per the protocol it requests a streamable format for routing.
-    # Routing reads the streamed events (detect_fired), so it's never matched as a skill name.
+    # Non-None sentinel requesting streamable routing output.
     return agent.build_command(
         query,
         plugin_dir=plugin,
@@ -546,9 +502,7 @@ async def _route_in_sandbox_async(
     project_marker: object = DEFAULT_PROJECT_MARKER,
 ) -> object:
     """Route in sandbox async."""
-    # agent + snapshot are resolved by the SYNC wrapper before asyncio.run: building
-    # a missing snapshot itself calls asyncio.run, which can't nest. Same constraint
-    # as SandboxSession's __init__ → __aenter__ split.
+    # Snapshot resolution happens before this coroutine because snapshot builds run loops.
     sb = await _create_trigger_sandbox(
         agent=agent,
         snapshot=snapshot,
@@ -564,22 +518,15 @@ async def _route_in_sandbox_async(
             cmd[0],
             cmd[1:],
             cwd=agent.guest_home,
-            env=agent.guest_env(),  # HOME + IS_SANDBOX
-            # Force EOF on stdin: opencode run blocks reading stdin forever otherwise
-            # (microsandbox leaves the pipe open), binning routing against the timeout.
-            # Confirmed exec_stream accepts stdin (microsandbox/_microsandbox.pyi:85).
+            env=agent.guest_env(),
+            # Force EOF on stdin so routing cannot block on an open pipe.
             stdin=b"",
         )
 
         async def _drain() -> None:
             """Drain streamed exec events into output lines and exit state."""
             nonlocal dispatched, exit_code
-            # exec_stream delivers stdout in arbitrary chunks that do NOT align to newlines,
-            # and OpenCode's skill `tool_use` event embeds the full skill output (multi-KB),
-            # so a single JSONL line routinely spans several chunks. Line-buffer here:
-            # reassemble complete lines before detecting, or json.loads fails on every
-            # partial chunk — the dispatch goes unseen, early-stop never fires, and the fire
-            # tallies 0 (the trigger path's silent-zero bug).
+            # Reassemble arbitrary stdout chunks into complete JSONL lines before detection.
             buffer = ""
             async for event in handle:
                 if event.event_type == "stdout":
@@ -594,11 +541,9 @@ async def _route_in_sandbox_async(
                 elif event.event_type == "exited":
                     exit_code = event.code
                 elif event.event_type == "failed":
-                    # `is not None`, not truthiness: a real exit code of 0 must not become 1.
+                    # Preserve real exit code 0.
                     exit_code = event.code if event.code is not None else 1
-            # Flush a trailing partial line: the final JSONL event may lack a newline
-            # (or routing was killed mid-line), and count_fires' detect_fired(lines)
-            # must still see that complete line to tally a last-moment fire.
+            # Flush a trailing partial JSONL line if the process exits without a newline.
             if buffer.strip():
                 lines.append(buffer)
 
@@ -618,7 +563,7 @@ async def _route_in_sandbox_async(
         return lines
     if timed_out:
         if agent.streamed_activity(lines):
-            return lines  # worked but didn't route in time — a clean non-fire
+            return lines
         raise RoutingError(f"routing streamed no model activity before the {timeout}s cutoff")
     if (exit_code not in (None, 0)) or not any(line.strip() for line in lines):
         raise RoutingError(

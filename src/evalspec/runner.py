@@ -47,11 +47,9 @@ class RunResult:
     cache_creation_tokens: int = 0  # usage.cache_creation_input_tokens
     input_tokens: int = 0  # usage.input_tokens — uncached input only
     output_tokens: int = 0  # usage.output_tokens
-    # the CLI result event's `subtype` (e.g. "success", "error_max_turns") — NOT the API stop_reason
+    # CLI result event subtype such as "success" or "error_max_turns".
     result_subtype: str = ""
-    # {display-path: content} for files the agent authored in its skills dir (outside the
-    # workdir mount), already diffed against the staged baseline. Empty unless the
-    # session captured any. Merged into the turn's facts so the judge can grade them.
+    # {display-path: content} for authored skill files outside the workdir mount.
     artifacts: dict = field(default_factory=dict)
 
 
@@ -63,7 +61,7 @@ def utc_today(now: datetime.datetime | None = None) -> str:
 
 def sum_tokens(usage: dict) -> int:
     """Sum token counts across agent run results."""
-    return sum(int(usage.get(f, 0) or 0) for f in _TOKEN_FIELDS)
+    return sum(int(usage.get(field, 0) or 0) for field in _TOKEN_FIELDS)
 
 
 def substitute_prompt(prompt: str, today: str | None = None) -> str:
@@ -84,7 +82,7 @@ def substitute_prompt(prompt: str, today: str | None = None) -> str:
 def substitute_assertions(assertions: list, today: str) -> list:
     """Apply date placeholders to assertions and reject unknown placeholders."""
 
-    def _sub(assertion: object) -> object:
+    def substitute_assertion(assertion: object) -> object:
         """Replace placeholders inside one assertion value."""
         if isinstance(assertion, str):
             return assertion.replace("{TODAY}", today)
@@ -93,7 +91,7 @@ def substitute_assertions(assertions: list, today: str) -> list:
             for key, value in assertion.items()
         }
 
-    result = [_sub(assertion) for assertion in assertions]
+    result = [substitute_assertion(assertion) for assertion in assertions]
     residual = sorted(
         {
             placeholder
@@ -118,6 +116,7 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
     """Parse one agent run JSON record from stdout."""
     data = json.loads(raw)
     usage = data.get("usage", {})
+
     return RunResult(
         eval_id=eval_id,
         config=config,

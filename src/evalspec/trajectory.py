@@ -122,12 +122,12 @@ def skills_dispatched(trajectory: list[dict], skill_name: str | None = None) -> 
     aligned means activation grades True wherever the skill demonstrably fired.
     """
     names: list[str] = []
-    for ev in trajectory:
-        if ev.get("kind") != "tool_call":
+    for event in trajectory:
+        if event.get("kind") != "tool_call":
             continue
-        name = ev.get("name")
+        name = event.get("name")
         if name == "Skill":
-            skill = ev.get("arguments", {}).get("skill")
+            skill = event.get("arguments", {}).get("skill")
             if isinstance(skill, str) and skill:
                 names.append(skill)
         elif (
@@ -146,19 +146,19 @@ def render_process_facts(trajectories: list[list[dict]], start: int = 1) -> str:
     string when no turn carried tool activity. Turns with no tool calls are omitted.
     """
     lines: list[str] = []
-    for i, traj in enumerate(trajectories, start):
+    for turn_index, trajectory in enumerate(trajectories, start):
         parts: list[str] = []
-        for ev in traj:
-            if ev.get("kind") != "tool_call":
+        for event in trajectory:
+            if event.get("kind") != "tool_call":
                 continue
-            name = ev.get("name") or "?"
+            name = event.get("name") or "?"
             if name == "Skill":
-                skill = ev.get("arguments", {}).get("skill")
+                skill = event.get("arguments", {}).get("skill")
                 parts.append(f"Skill({skill})" if skill else "Skill")
             else:
                 parts.append(name)
         if parts:
-            lines.append(f"Turn {i}: " + ", ".join(parts))
+            lines.append(f"Turn {turn_index}: " + ", ".join(parts))
     return "\n".join(lines)
 
 
@@ -200,10 +200,10 @@ def _looks_like_opencode(events: list[dict]) -> bool:
     `message`. session.jsonl carries no agent marker, so we sniff the shape from the events
     themselves.
     """
-    for ev in events:
-        if isinstance(ev.get("part"), dict):
+    for event in events:
+        if isinstance(event.get("part"), dict):
             return True
-        if isinstance(ev.get("message"), dict):
+        if isinstance(event.get("message"), dict):
             return False
     return False
 
@@ -225,6 +225,6 @@ def trajectory_from_session(session_text: str) -> list[dict]:
             turn_traj = _opencode_trajectory(events)
         else:
             turn_traj = _claude_trajectory(events)
-        for ev in turn_traj:
-            out.append({TURN_DELIM: turn_idx, **ev})
+        for event in turn_traj:
+            out.append({TURN_DELIM: turn_idx, **event})
     return out

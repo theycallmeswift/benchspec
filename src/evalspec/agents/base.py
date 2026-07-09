@@ -25,12 +25,12 @@ class BaseAgent:
 
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""
-        d = self.skill_load_dir
-        parent = d.rsplit("/", 1)[0]
+        skill_dir = self.skill_load_dir
+        parent = skill_dir.rsplit("/", 1)[0]
         return (
             f"mkdir -p {FIXED_SKILLS_HOME} && "
-            f"mkdir -p {parent} && rm -rf {d} && "
-            f"ln -s {FIXED_SKILLS_HOME} {d}"
+            f"mkdir -p {parent} && rm -rf {skill_dir} && "
+            f"ln -s {FIXED_SKILLS_HOME} {skill_dir}"
         )
 
     def cell_env(self: object, *, arm: str, model: str, eval_set: str = "") -> dict:
@@ -117,17 +117,17 @@ class CodingAgent(Protocol):
         """Build the guest command used to invoke the agent."""
         ...
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
         ...
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         ...
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: str,
         *,
         eval_id: str,

@@ -41,6 +41,11 @@ _STARTED_AT = pytest.StashKey[str]()
 _SUMMARY_LINES = pytest.StashKey[list]()
 
 
+def _help(*parts: str) -> str:
+    """Join help text fragments into one argparse string."""
+    return " ".join(parts)
+
+
 def pytest_addoption(parser: object) -> None:
     """Register evalspec command-line options with pytest."""
     group = parser.getgroup("evalspec", "skill-eval runner")
@@ -113,39 +118,49 @@ def pytest_addoption(parser: object) -> None:
         "--evalspec-trigger-timeout",
         type=int,
         default=20,
-        help="per-pass routing budget in seconds (default: 20). A pass that streams "
-        "model activity but doesn't dispatch within it counts as a non-fire",
+        help=_help(
+            "per-pass routing budget in seconds (default: 20).",
+            "A pass that streams model activity but doesn't dispatch within it",
+            "counts as a non-fire.",
+        ),
     )
     group.addoption(
         "--evalspec-eval-roots",
         default=None,
-        help="comma-separated paths (relative to repo root) to scan for eval-bearing "
-        "skill dirs (default: skills, .claude/skills; also overridable via "
-        "[tool.evalspec] eval_roots in pyproject.toml)",
+        help=_help(
+            "comma-separated paths (relative to repo root) to scan for eval-bearing skill dirs",
+            "(default: skills, .claude/skills; also overridable via",
+            "[tool.evalspec] eval_roots in pyproject.toml)",
+        ),
     )
     group.addoption(
         "--evalspec-project-marker",
         default=".claude-plugin/plugin.json",
-        help="path (relative to repo root) whose presence marks the repo as a host "
-        "plugin worth mounting in the sandbox as --plugin-dir "
-        "(default: .claude-plugin/plugin.json — the Claude Code plugin manifest)",
+        help=_help(
+            "path (relative to repo root) whose presence marks the repo as a host plugin",
+            "worth mounting in the sandbox as --plugin-dir",
+            "(default: .claude-plugin/plugin.json — the Claude Code plugin manifest)",
+        ),
     )
     group.addoption(
         "--evalspec-agent",
         default=None,
-        help="coding agent for TRIGGER-routing runs (default: claude-code). Output-eval "
-        "task arms now select their harness per arm (each arm's `harness`), so this "
-        "flag no longer governs them. Precedence: this flag > EVALSPEC_AGENT > "
-        "[tool.evalspec] agent in pyproject.toml. Unknown values fail at startup "
-        "naming the source.",
+        help=_help(
+            "coding agent for TRIGGER-routing runs (default: claude-code).",
+            "Output-eval task arms select their harness per arm, so this flag no longer",
+            "governs them. Precedence: this flag > EVALSPEC_AGENT > [tool.evalspec]",
+            "agent in pyproject.toml. Unknown values fail at startup naming the source.",
+        ),
     )
     group.addoption(
         "--evalspec-judge-model",
         default="sonnet",
-        help="model for the LLM judge (default: sonnet). Must be a Claude alias: "
-        "the judge always shells out to the host `claude` CLI regardless of "
-        "the task agent, and a provider-qualified task model would 404 it. "
-        "Recorded in meta.json — cross-run comparisons need a constant judge.",
+        help=_help(
+            "model for the LLM judge (default: sonnet). Must be a Claude alias:",
+            "the judge shells out to the host `claude` CLI regardless of the task agent,",
+            "and a provider-qualified task model would 404 it. Recorded in meta.json",
+            "for cross-run comparisons.",
+        ),
     )
     group.addoption(
         "--evalspec-fail-under",
@@ -348,6 +363,7 @@ def _write_manifest(
         # Any failure probing the agent (no credential, missing CLI, version error):
         # best-effort identity stays null, the resolved config is still recorded.
         pass
+
     cfg = {
         "agent": os.environ.get("EVALSPEC_AGENT", "claude-code"),
         "agent_version": agent_version,
@@ -420,18 +436,19 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     baseline = run_set.baseline if run_set else None
     arm_meta = (
         {
-                arm.name: {
-                    "harness": arm.harness,
-                    "model": arm.model,
-                    "effort": arm.effort,
-                    "env": report.redact_env(arm.env),
-                    "harness_args": arm.harness_args,
-                }
-                for arm in run_set.arms
+            arm.name: {
+                "harness": arm.harness,
+                "model": arm.model,
+                "effort": arm.effort,
+                "env": report.redact_env(arm.env),
+                "harness_args": arm.harness_args,
+            }
+            for arm in run_set.arms
         }
         if run_set
         else None
     )
+
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         if not any(
             child_dir.is_dir() and child_dir.name.startswith(("eval-", "trigger-"))
@@ -503,16 +520,16 @@ def pytest_generate_tests(metafunc: object) -> None:
         # routing keeps a concrete model, so fall back to sonnet (mirrors cases.py).
         model = metafunc.config.getoption("evalspec_model") or "sonnet"
         params = []
-        for q in queries:
+        for query in queries:
             # A tier-scoped `xfail` is a documented routing miss on SPECIFIC tiers.
             # Attach the non-strict mark only when the running model is one of them,
             # so any other tier runs strict and a regression there still fails. The
             # routing still runs — we keep measuring it.
-            xfail = q.query.get("xfail")
+            xfail = query.query.get("xfail")
             marks = (
                 [pytest.mark.xfail(reason=xfail["reason"], strict=False)]
                 if xfail and xfail_applies(xfail, model)
                 else []
             )
-            params.append(pytest.param(q, marks=marks, id=q.param_id))
+            params.append(pytest.param(query, marks=marks, id=query.param_id))
         metafunc.parametrize("trigger_query", params)

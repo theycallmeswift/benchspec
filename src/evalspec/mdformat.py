@@ -55,21 +55,21 @@ def _split_frontmatter(text: str, path: Path) -> tuple[dict, list[str]]:
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         raise MdFormatError(f"{path}: must start with `---` frontmatter")
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+    for line_index in range(1, len(lines)):
+        if lines[line_index].strip() == "---":
             try:
-                fm = yaml.safe_load("\n".join(lines[1:i])) or {}
-            except yaml.YAMLError as e:
-                raise MdFormatError(f"{path}: invalid YAML frontmatter: {e}") from e
-            if not isinstance(fm, dict):
+                frontmatter = yaml.safe_load("\n".join(lines[1:line_index])) or {}
+            except yaml.YAMLError as error:
+                raise MdFormatError(f"{path}: invalid YAML frontmatter: {error}") from error
+            if not isinstance(frontmatter, dict):
                 raise MdFormatError(f"{path}: frontmatter must be a YAML mapping")
-            return fm, lines[i + 1 :]
+            return frontmatter, lines[line_index + 1 :]
     raise MdFormatError(f"{path}: unterminated frontmatter (no closing `---`)")
 
 
-def _check_fm_keys(fm: dict, allowed: set[str], path: Path) -> None:
+def _check_fm_keys(frontmatter: dict, allowed: set[str], path: Path) -> None:
     """Validate frontmatter keys against the allowed set."""
-    extra = set(fm) - allowed
+    extra = set(frontmatter) - allowed
     if extra:
         raise MdFormatError(
             f"{path}: unknown frontmatter key(s) {sorted(extra)} (allowed: {sorted(allowed)})"
@@ -87,10 +87,10 @@ def _sections(body_lines: list[str], path: Path) -> list[tuple[int, str, list[st
             in_fence = not in_fence
             current.append(line)
             continue
-        m = None if in_fence else _HEADER.match(line)
-        if m:
+        header_match = None if in_fence else _HEADER.match(line)
+        if header_match:
             current = []
-            sections.append((len(m.group(1)), m.group(2), current))
+            sections.append((len(header_match.group(1)), header_match.group(2), current))
         else:
             current.append(line)
     if in_fence:
@@ -130,10 +130,10 @@ def _checklist(content_lines: list[str], where: str, path: Path) -> list[str]:
             continue
         if not line[0].isspace():
             flush()
-            m = _CHECKBOX.match(line)
-            if not m:
+            checkbox_match = _CHECKBOX.match(line)
+            if not checkbox_match:
                 raise MdFormatError(f"{path}: {where}: expected `- [ ] ...` items, got: {line!r}")
-            parent = m.group(1)
+            parent = checkbox_match.group(1)
             parent_has_children = False
             child_indent = None
             continue
@@ -142,8 +142,8 @@ def _checklist(content_lines: list[str], where: str, path: Path) -> list[str]:
                 f"{path}: {where}: indented `- [ ]` child with no parent item above it: {line!r}"
             )
         indent = len(line) - len(line.lstrip())
-        m = _CHECKBOX.match(line.lstrip())
-        if not m:
+        checkbox_match = _CHECKBOX.match(line.lstrip())
+        if not checkbox_match:
             raise MdFormatError(
                 f"{path}: {where}: indented lines must be `- [ ]` children — "
                 f"one assertion per line, no continuations: {line!r}"
@@ -159,7 +159,7 @@ def _checklist(content_lines: list[str], where: str, path: Path) -> list[str]:
                 f"{path}: {where}: ragged child indent — siblings must align: {line!r}"
             )
         parent_has_children = True
-        items.append(m.group(1))
+        items.append(checkbox_match.group(1))
 
     flush()
     return items
@@ -240,9 +240,9 @@ def _parse_trigger_section(
         if not line.strip():
             reason_open = False
             continue
-        mq = _TRIG_QUERY.match(line)
-        if mq:
-            body = mq.group(1)
+        query_match = _TRIG_QUERY.match(line)
+        if query_match:
+            body = query_match.group(1)
             if ": " not in body:
                 raise MdFormatError(f"{path}: {label}: expected `<slug>: <query>`, got: {body!r}")
             slug, query = body.split(": ", 1)
@@ -254,14 +254,14 @@ def _parse_trigger_section(
             queries.append(current)
             reason_open = False
             continue
-        mx = _TRIG_XFAIL.match(line)
-        if mx:
+        xfail_match = _TRIG_XFAIL.match(line)
+        if xfail_match:
             if current is None:
                 raise MdFormatError(f"{path}: {label}: fails-on before any query: {line!r}")
             if "xfail" in current:
                 raise MdFormatError(f"{path}: {label}: duplicate fails-on for `{current['slug']}`")
-            models = [t.strip() for t in mx.group(1).split(",")]
-            current["xfail"] = {"models": models, "reason": mx.group(2).rstrip()}
+            models = [tier.strip() for tier in xfail_match.group(1).split(",")]
+            current["xfail"] = {"models": models, "reason": xfail_match.group(2).rstrip()}
             reason_open = True
             continue
         if line[0].isspace() and reason_open:

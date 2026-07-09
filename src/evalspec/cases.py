@@ -167,9 +167,9 @@ def test_trigger(
     # staged from repo_root) against its peers.
     # `--evalspec-trigger-mode` picks the fire threshold (majority / best-of /
     # asymmetric); count_fires short-circuits the 3 passes once locked.
-    tc = trigger_query
+    trigger_case = trigger_query
     passes = 3
-    threshold = fire_threshold(trigger_mode, tc.query["should_trigger"], passes)
+    threshold = fire_threshold(trigger_mode, trigger_case.query["should_trigger"], passes)
     per_pass: list[dict] = []
 
     def route(
@@ -194,9 +194,9 @@ def test_trigger(
 
     agent = make_agent()
     fires = count_fires(
-        tc.query["query"],
-        tc.skill_name,
-        tc.repo_root,
+        trigger_case.query["query"],
+        trigger_case.skill_name,
+        trigger_case.repo_root,
         model,
         passes=passes,
         threshold=threshold,
@@ -211,12 +211,14 @@ def test_trigger(
     fired = fires >= threshold
     # Record per-query timing/outcome (one file per query, xdist-safe) so a run can
     # decompose wall-clock (trigger vs task vs judge) and surface which pass fired.
-    run_dir = workspace.trigger_dir(tc.repo_root, tc.skill, tc.query["slug"], sample=sample_index)
+    run_dir = workspace.trigger_dir(
+        trigger_case.repo_root, trigger_case.skill, trigger_case.query["slug"], sample=sample_index
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "timing.json").write_text(
         json.dumps(
             trigger_record(
-                tc.query,
+                trigger_case.query,
                 mode=trigger_mode,
                 threshold=threshold,
                 fires=fires,
@@ -226,8 +228,8 @@ def test_trigger(
         )
         + "\n"
     )
-    assert fired == tc.query["should_trigger"], (
-        f"{tc.query['slug']} ({tc.query['query']!r}): fired={fired} "
+    assert fired == trigger_case.query["should_trigger"], (
+        f"{trigger_case.query['slug']} ({trigger_case.query['query']!r}): fired={fired} "
         f"({fires}/{passes} fired, mode={trigger_mode}, threshold={threshold}), "
-        f"expected should_trigger={tc.query['should_trigger']}"
+        f"expected should_trigger={trigger_case.query['should_trigger']}"
     )

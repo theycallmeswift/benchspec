@@ -38,27 +38,28 @@ def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None)
     shutil.copytree(fixture_dir, workdir, dirs_exist_ok=True)
     if today is not None:
         # 1. Substitute {TODAY} in file contents first (before any path renames).
-        for p in sorted(workdir.rglob("*")):
-            if p.is_file():
+        for path in sorted(workdir.rglob("*")):
+            if path.is_file():
                 try:
-                    text = p.read_text(encoding="utf-8")
+                    text = path.read_text(encoding="utf-8")
                     if "{TODAY}" in text:
-                        p.write_text(text.replace("{TODAY}", today), encoding="utf-8")
+                        path.write_text(text.replace("{TODAY}", today), encoding="utf-8")
                 except UnicodeDecodeError:
                     pass  # binary files are left untouched
         # 2. Rename paths (bottom-up so parent dirs are renamed after children).
         paths_to_rename = sorted(
-            (p for p in workdir.rglob("*") if "{TODAY}" in p.name),
-            key=lambda p: len(p.parts),
+            (path for path in workdir.rglob("*") if "{TODAY}" in path.name),
+            key=lambda path: len(path.parts),
             reverse=True,
         )
-        for p in paths_to_rename:
-            new_name = p.parent / p.name.replace("{TODAY}", today)
-            p.rename(new_name)
+        for path in paths_to_rename:
+            new_name = path.parent / path.name.replace("{TODAY}", today)
+            path.rename(new_name)
+
     shas: dict[str, str] = {}
-    for p in sorted(workdir.rglob("*")):
-        if p.is_file():
-            shas[str(p.relative_to(workdir))] = _sha256(p)
+    for path in sorted(workdir.rglob("*")):
+        if path.is_file():
+            shas[str(path.relative_to(workdir))] = _sha256(path)
     return shas
 
 
@@ -67,13 +68,13 @@ def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
     if not seed:
         return ""
     lines = ["<transcript>"]
-    for i, turn in enumerate(seed):
+    for turn_index, turn in enumerate(seed):
         if not isinstance(turn, dict):
-            raise SchemaError(f"seed[{i}]: turn must be a mapping with role/text")
+            raise SchemaError(f"seed[{turn_index}]: turn must be a mapping with role/text")
         for key in ("role", "text"):
             val = turn.get(key)
             if not isinstance(val, str) or not val.strip():
-                raise SchemaError(f"seed[{i}]: missing or non-string `{key}`")
+                raise SchemaError(f"seed[{turn_index}]: missing or non-string `{key}`")
         text = substitute_prompt(turn["text"], today)
         lines.append(f"{turn['role']}: {text}")
     lines.append("</transcript>")
@@ -83,32 +84,29 @@ def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
 def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
     """Collect clean-room file facts for grading evidence."""
     tree_lines, contents, shas = [], {}, {}
-    for p in sorted(workdir.rglob("*")):
-        rel = str(p.relative_to(workdir))
-        if p.is_dir():
-            tree_lines.append(rel + "/")
+    for path in sorted(workdir.rglob("*")):
+        relative_path = str(path.relative_to(workdir))
+        if path.is_dir():
+            tree_lines.append(relative_path + "/")
             continue
-        tree_lines.append(rel)
-        shas[rel] = _sha256(p)
+        tree_lines.append(relative_path)
+        shas[relative_path] = _sha256(path)
         try:
-            data = p.read_text(encoding="utf-8")
-            contents[rel] = data if len(data) <= max_bytes else data[:max_bytes] + "\n<TRUNCATED>"
+            data = path.read_text(encoding="utf-8")
+            contents[relative_path] = (
+                data if len(data) <= max_bytes else data[:max_bytes] + "\n<TRUNCATED>"
+            )
         except UnicodeDecodeError:
-            contents[rel] = "<binary>"
+            contents[relative_path] = "<binary>"
     return "\n".join(tree_lines), contents, shas
 
 
-# --- Artifact capture outside the workdir mount ---------------------------------
-#
-# Some agents write skill artifacts to a fixed guest dir (e.g. claude → ~/.claude/skills,
-# opencode → ~/.config/opencode/skills) rather than the workdir mount. That dir is internal
-# to the microVM — no host bind-mount — so `gather_facts` can't see it, and any skill the
-# agent authors there is invisible to the judge. The agent declares the dirs
-# (`CodingAgent.artifact_dirs`); the session snapshots them in-guest and merges the
-# AGENT-AUTHORED files (diffed against the staged baseline) into the workdir facts.
+# Agents may write skill artifacts to fixed guest dirs rather than the workdir mount. Those
+# dirs are internal to the microVM, so artifact capture snapshots them in-guest and merges
+# authored files into the workdir facts.
 
 # Two-phase capture keeps snapshot cost off the hot path: hash every file cheaply each turn
-# (a sha line is ~80 bytes), diff against the staged baseline, stream the bytes of ONLY the
+# (a SHA line is ~80 bytes), diff against the staged baseline, stream the bytes of ONLY the
 # changed/new files. When the agent authored nothing in its skills dir (the common case)
 # that's zero content transfer — one `sha256sum` pass — so the snapshot doesn't add 296KB×N
 # of stdout per turn and starve the concurrent agent VMs into timeouts.
@@ -116,7 +114,7 @@ def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
 
 def sha_snapshot_script(dirs: list[str]) -> str:
     """Build a shell script that prints SHA-256 facts for artifact dirs."""
-    quoted = " ".join(shlex.quote(d) for d in dirs)
+    quoted = " ".join(shlex.quote(directory) for directory in dirs)
     return (
         f'for d in {quoted}; do [ -d "$d" ] && '
         'find -L "$d" -type f -exec sha256sum {} + 2>/dev/null; done; true'
@@ -125,17 +123,17 @@ def sha_snapshot_script(dirs: list[str]) -> str:
 
 def parse_sha_stream(stdout: str) -> dict[str, str]:
     """Parse `sha_snapshot_script` stdout into {abs-path: sha}."""
-    out: dict[str, str] = {}
+    paths_by_sha: dict[str, str] = {}
     for line in stdout.splitlines():
         sha, sep, path = line.partition("  ")
         if sep and path:
-            out[path] = sha
-    return out
+            paths_by_sha[path] = sha
+    return paths_by_sha
 
 
 def changed_paths(baseline_shas: dict[str, str], current_shas: dict[str, str]) -> list[str]:
     """Return artifact paths whose SHA differs from the baseline."""
-    return [p for p, sha in current_shas.items() if baseline_shas.get(p) != sha]
+    return [path for path, sha in current_shas.items() if baseline_shas.get(path) != sha]
 
 
 # Record-separator-framed header so file contents pass through verbatim. RS (0x1e) is
@@ -146,9 +144,9 @@ _ARTIFACT_RE = re.compile("\x1e\x1eARTIFACT\x1e\x1e(.*?)\x1e\x1e\n")
 def read_files_script(paths: list[str]) -> str:
     r"""Return POSIX shell that prints each path as an RS-framed record."""
     body = "".join(
-        f"printf '\\036\\036ARTIFACT\\036\\036%s\\036\\036\\n' {shlex.quote(p)}; "
-        f"cat {shlex.quote(p)} 2>/dev/null; "
-        for p in paths
+        f"printf '\\036\\036ARTIFACT\\036\\036%s\\036\\036\\n' {shlex.quote(path)}; "
+        f"cat {shlex.quote(path)} 2>/dev/null; "
+        for path in paths
     )
     return body or "true"
 
@@ -158,20 +156,21 @@ def parse_artifact_stream(stdout: str) -> dict[str, str]:
     parts = _ARTIFACT_RE.split(stdout)
     # parts = [pre, path1, content1, path2, content2, ...]; the pre-segment before the
     # first header is discarded.
-    out: dict[str, str] = {}
+    artifacts: dict[str, str] = {}
     it = iter(parts[1:])
+
     for path, content in zip(it, it, strict=False):
-        out[path] = content
-    return out
+        artifacts[path] = content
+    return artifacts
 
 
 def to_display_paths(mapping: dict[str, str], guest_home: str) -> dict[str, str]:
     """Rewrite guest-home paths into display paths for judge evidence."""
     home = guest_home.rstrip("/")
-    out: dict[str, str] = {}
+    display_paths: dict[str, str] = {}
     for path, content in mapping.items():
-        out["~" + path[len(home) :] if path.startswith(home + "/") else path] = content
-    return out
+        display_paths["~" + path[len(home) :] if path.startswith(home + "/") else path] = content
+    return display_paths
 
 
 def merge_facts(
@@ -181,8 +180,12 @@ def merge_facts(
     tree_lines = [ln for ln in tree.split("\n") if ln] if tree else []
     contents, shas = dict(contents), dict(shas)
     for path in sorted(extra):
-        data = extra[path]
+        artifact_content = extra[path]
         tree_lines.append(path)
-        shas[path] = _text_sha(data)
-        contents[path] = data if len(data) <= max_bytes else data[:max_bytes] + "\n<TRUNCATED>"
+        shas[path] = _text_sha(artifact_content)
+        contents[path] = (
+            artifact_content
+            if len(artifact_content) <= max_bytes
+            else artifact_content[:max_bytes] + "\n<TRUNCATED>"
+        )
     return "\n".join(tree_lines), contents, shas

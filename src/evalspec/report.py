@@ -22,8 +22,7 @@ from pathlib import Path
 
 from evalspec.trigger import xfail_applies
 
-# Credential-shaped env key names; their values are masked in the report. URLs and
-# other config pass through.
+# Credential-shaped env key names are masked in reports. URLs and other config pass through.
 _SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)
 
 
@@ -110,6 +109,8 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         if not sample_rates:
             continue
 
+        pass_rate_stdev = statistics.stdev(sample_rates) if len(sample_rates) > 1 else None
+
         per_eval.append(
             {
                 "eval_id": eval_dir.name.removeprefix("eval-"),
@@ -118,16 +119,13 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
                 "passed_total": passed_total,
                 "total_total": total_total,
                 "pass_rate_mean": statistics.mean(sample_rates),
-                "pass_rate_stdev": statistics.stdev(sample_rates)
-                if len(sample_rates) > 1
-                else None,
+                "pass_rate_stdev": pass_rate_stdev,
             }
         )
         pair_rates.extend(sample_rates)
 
     return {
-        # Macro-mean across (eval × sample) pairs. If errors drop samples unevenly,
-        # evals with more surviving samples carry more weight — see per_eval[].samples.
+        # Macro-mean across surviving eval/sample pairs; errored samples are excluded.
         "pass_rate": statistics.mean(pair_rates) if pair_rates else None,
         "pass_rate_stdev": statistics.stdev(pair_rates) if len(pair_rates) > 1 else None,
         "duration_ms_mean": statistics.mean(durations) if durations else None,
@@ -308,6 +306,7 @@ def _matrix_table(benchmark: dict) -> list[str]:
         for row in arms[name]["per_eval"]:
             if row["eval_id"] not in eval_ids:
                 eval_ids.append(row["eval_id"])
+
     lines = [
         "## Matrix",
         "",
@@ -356,29 +355,34 @@ def _format_markdown(benchmark: dict) -> str:
             rendered_args = " ".join(_inline_code(arg) for arg in stats["harness_args"])
             lines.append(f"- Harness args: {rendered_args}")
         if stats.get("env"):
-            rendered = ", ".join(f"{k}={v}" for k, v in stats["env"].items())
+            rendered = ", ".join(f"{key}={value}" for key, value in stats["env"].items())
             lines.append(f"- Env: {rendered}")
-        dm = stats["duration_ms_mean"]
-        if dm is not None:
-            sd = stats["duration_ms_stdev"]
-            entry = f"- Time per sample: {dm / 1000:.1f}s task" + (
-                f" ± {sd / 1000:.1f}s" if sd else ""
+        duration_mean = stats["duration_ms_mean"]
+        if duration_mean is not None:
+            duration_stdev = stats["duration_ms_stdev"]
+            entry = f"- Time per sample: {duration_mean / 1000:.1f}s task" + (
+                f" ± {duration_stdev / 1000:.1f}s" if duration_stdev else ""
             )
             if stats["judge_ms_mean"] is not None:
                 entry += f" + {stats['judge_ms_mean'] / 1000:.1f}s judge"
             lines.append(entry)
-        tm = stats["tokens_mean"]
-        if tm is not None:
-            sd = stats["tokens_stdev"]
-            lines.append(f"- Tokens per sample: {tm:,.0f}" + (f" ± {sd:,.0f}" if sd else ""))
+        tokens_mean = stats["tokens_mean"]
+        if tokens_mean is not None:
+            tokens_stdev = stats["tokens_stdev"]
+            lines.append(
+                f"- Tokens per sample: {tokens_mean:,.0f}"
+                + (f" ± {tokens_stdev:,.0f}" if tokens_stdev else "")
+            )
         if stats["errored_samples"]:
             lines.append(
                 f"- Errored: {stats['errored_samples']} sample(s) excluded "
                 "from rates (infra, not skill)"
             )
+
         lines += [""]
         lines.append("| Eval | Samples | Passed | Total | Rate | Flakiness | Note |")
         lines.append("|------|---------|--------|-------|------|-----------|------|")
+
         for row in stats["per_eval"]:
             flakiness = ""
             if row["samples"] > 1 and row["pass_rate_stdev"] is not None:
@@ -391,13 +395,16 @@ def _format_markdown(benchmark: dict) -> str:
                 f"| {row['total_total']} | {row['pass_rate_mean']:.0%} | {flakiness} "
                 f"| {', '.join(notes)} |"
             )
+
         lines.append("")
+
     trigger = benchmark.get("trigger") or []
     if trigger:
         ok = sum(1 for row in trigger if row["as_expected"] == row["samples"])
         lines += [f"## Trigger routing — {ok}/{len(trigger)} queries as expected", ""]
         lines.append("| Query | Text | Expected | As expected |")
         lines.append("|-------|------|----------|-------------|")
+
         for row in trigger:
             expected = "fire" if row["should_trigger"] else "no fire"
             mark = " (xfail)" if row.get("xfail") else ""
@@ -405,7 +412,9 @@ def _format_markdown(benchmark: dict) -> str:
                 f"| {row['slug']}{mark} | {_md_cell(row['query'])} "
                 f"| {expected} | {row['as_expected']}/{row['samples']} |"
             )
+
         lines.append("")
+
     return "\n".join(lines)
 
 
@@ -478,6 +487,7 @@ def build_benchmark(
         (row["samples"] for stats in arm_stats.values() for row in stats["per_eval"]),
         default=0,
     )
+
     return {
         "format_version": 1,
         "label": label,
@@ -528,6 +538,7 @@ def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
                     seg += f", within noise ±{band:.0f}pp"
                 seg += ")"
             parts.append(seg)
+
         # Baseline-only sweep: show the baseline's own rate so the terminal line still
         # carries a score, not just a bare path.
         if not parts and baseline in arms:

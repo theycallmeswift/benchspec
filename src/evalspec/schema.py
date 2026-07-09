@@ -4,9 +4,8 @@ Dispatches on the top-level `$schema` field and raises `SchemaError` on any
 deviation. No unknown fields permitted. Used at pytest collection (see
 `discovery._validate`, which names the offending file).
 
-Supported schemas:
-    evalspec/v1          — output evals (self-contained `evals/<slug>/`)
-    evalspec-trigger/v1  — trigger-evals.md
+Supported schemas are `evalspec/v1` for output evals and `evalspec-trigger/v1` for
+`trigger-evals.md`.
 """
 
 from __future__ import annotations

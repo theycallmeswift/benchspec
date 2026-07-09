@@ -24,8 +24,8 @@ _COMPOUND_AFTER_EXISTS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# LOAD-BEARING and TUNABLE: this wording is the binder's accuracy budget. The
-# semantic and conjunction rules below keep surface checks from accepting wrong output.
+# Prompt wording is part of binder accuracy. The semantic and conjunction rules below keep
+# surface checks from accepting wrong output.
 # Keep `{assertion}` as the only format field.
 _BINDING_PROMPT = textwrap.dedent(
     """\

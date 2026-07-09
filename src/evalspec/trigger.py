@@ -236,7 +236,7 @@ def count_fires(
     if threshold is None:
         threshold = passes // 2 + 1
     fires = 0
-    for i in range(passes):
+    for pass_index in range(passes):
         started = time.perf_counter()
         for attempt in range(1, attempts + 1):
             try:
@@ -259,7 +259,7 @@ def count_fires(
             fires += 1
         if on_pass is not None:
             on_pass(int((time.perf_counter() - started) * 1000), fired, routed)
-        remaining = passes - (i + 1)
+        remaining = passes - (pass_index + 1)
         if fires >= threshold or fires + remaining < threshold:
             break
     return fires

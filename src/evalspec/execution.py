@@ -77,7 +77,9 @@ def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> d
         "fired": result.fired,
         "result_subtype": result.result_subtype,
         # count dispatches (tool_call), not the round-trip tool_result events
-        "tool_call_count": sum(1 for e in result.trajectory if e.get("kind") == "tool_call"),
+        "tool_call_count": sum(
+            1 for event in result.trajectory if event.get("kind") == "tool_call"
+        ),
         "workdir_tree": tree,
     }
     # Pass the skill so a fire via the namespaced-tool fallback still lands here, keeping
@@ -120,14 +122,18 @@ def _grade_via_judge(
             original_shas=pre_run_shas,
             process_facts=process_facts,
         )
-    except RuntimeError as e:
+    except RuntimeError as error:
         # The judge CLI failed at the infra level (auth, rate limit, missing binary);
         # mark the arm errored so the benchmark drops it instead of scoring fake fails.
         judge_errored = True
         graded = {
             "assertions": [
-                {"text": a, "passed": False, "evidence": f"JUDGE INFRA ERROR: {e}"}
-                for a in assertions
+                {
+                    "text": assertion,
+                    "passed": False,
+                    "evidence": f"JUDGE INFRA ERROR: {error}",
+                }
+                for assertion in assertions
             ]
         }
     return graded, int((time.perf_counter() - t0) * 1000), judge_errored
@@ -155,7 +161,7 @@ def _grade_mixed(
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
     bind_cache: dict[str, dict | None] = {}
-    for i, text in enumerate(assertions):
+    for assertion_index, text in enumerate(assertions):
         if text not in bind_cache:
             try:
                 bind_cache[text] = bind(text)
@@ -168,13 +174,13 @@ def _grade_mixed(
         if spec is not None:
             entry = checkers.run_assertion(spec, workdir, pre_run_shas, context=grade_context)
             entry["text"] = text  # the author's prose, not the spec-derived rendering
-            results[i] = entry
+            results[assertion_index] = entry
         else:
-            judge_idx.append(i)
+            judge_idx.append(assertion_index)
     if not judge_idx:
         return results, 0, False
 
-    texts = [assertions[i] for i in judge_idx]
+    texts = [assertions[assertion_index] for assertion_index in judge_idx]
     graded, judge_ms, judge_errored = _grade_via_judge(
         assertions=texts,
         tree=tree,
@@ -189,9 +195,9 @@ def _grade_mixed(
         pre_run_shas=pre_run_shas,
         process_facts=process_facts,
     )
-    for i, entry in zip(judge_idx, graded["assertions"], strict=False):
+    for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
-        results[i] = entry
+        results[assertion_index] = entry
     return results, judge_ms, judge_errored
 
 

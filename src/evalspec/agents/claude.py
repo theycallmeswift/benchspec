@@ -46,16 +46,18 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
     """Validate harness argument strings from configuration."""
     if harness_args is None:
         return []
-    for arg in harness_args:
+    for harness_arg in harness_args:
         if (
-            arg in _RESERVED_HARNESS_ARGS
-            or any(arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS)
+            harness_arg in _RESERVED_HARNESS_ARGS
             or any(
-                arg.startswith(flag) and len(arg) > len(flag)
+                harness_arg.startswith(f"{flag}=") for flag in _RESERVED_HARNESS_LONG_FLAGS
+            )
+            or any(
+                harness_arg.startswith(flag) and len(harness_arg) > len(flag)
                 for flag in _RESERVED_HARNESS_SHORT_FLAGS
             )
         ):
-            raise ValueError(f"reserved harness arg for Claude Code: {arg}")
+            raise ValueError(f"reserved harness arg for Claude Code: {harness_arg}")
     return harness_args
 
 
@@ -63,8 +65,8 @@ def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | N
     """Validate plugin dir sources."""
     if plugin_dir is None or harness_args is None:
         return
-    for arg in harness_args:
-        if arg == "--plugin-dir" or arg.startswith("--plugin-dir="):
+    for harness_arg in harness_args:
+        if harness_arg == "--plugin-dir" or harness_arg.startswith("--plugin-dir="):
             raise ValueError("plugin_dir cannot be combined with harness_args --plugin-dir")
 
 
@@ -110,7 +112,7 @@ class ClaudeCodeAgent(BaseAgent):
     @staticmethod
     def credential_error() -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(v) for v in AUTH_ENV_VARS):
+        if any(os.environ.get(env_var) for env_var in AUTH_ENV_VARS):
             return None
         return (
             "no Claude credential — set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) "
@@ -188,20 +190,20 @@ class ClaudeCodeAgent(BaseAgent):
         cmd += _validate_harness_args(harness_args)
         return cmd
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sb.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
+        res = await sandbox.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
         if res.exit_code != 0:
             raise RuntimeError(
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
         # the project's local skills there for a clean per-run tree. The agent-neutral
         # name covers other agents that stage more than just .claude/skills.
-        await sb.shell(
+        await sandbox.shell(
             f"mkdir -p {self.guest_home}/.claude && "
             f"if [ -d {project_mount}/.claude/skills ]; then "
             f"cp -r {project_mount}/.claude/skills {self.guest_home}/.claude/skills; fi",
@@ -242,7 +244,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: object,
         *,
         eval_id: object,
@@ -270,7 +272,7 @@ class ClaudeCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
         try:
-            res = await sb.exec(
+            res = await sandbox.exec(
                 # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
                 # guest_env(), arm env winning.
                 cmd[0],
@@ -280,11 +282,12 @@ class ClaudeCodeAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError) as e:
+        except (MicrosandboxError, asyncio.TimeoutError, OSError) as error:
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.
-            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
+            message = f"<sandbox-error> {error}"[-2000:]
+            return RunResult(eval_id, config, message, 0, 0, is_error=True)
         result = parse_stream_run(res.stdout_text, eval_id, config, detect_skill)
         # Non-zero exit with no result event = a crash; its diagnostic is on stderr, not in
         # the empty stream. Surface stderr, keeping the raw/trajectory already captured.

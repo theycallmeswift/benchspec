@@ -54,11 +54,12 @@ def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) ->
         ("EVALSPEC_AGENT", os.environ.get("EVALSPEC_AGENT")),
         ("[tool.evalspec] agent", pyproject),
     )
-    for source, value in sources:
+    for source_name, value in sources:
         if value:
             if value not in _REGISTRY:
+                valid_agents = sorted(_REGISTRY)
                 raise RuntimeError(
-                    f"{source}={value!r} is not a known agent; valid: {sorted(_REGISTRY)}"
+                    f"{source_name}={value!r} is not a known agent; valid: {valid_agents}"
                 )
             return value
     return _DEFAULT_AGENT
