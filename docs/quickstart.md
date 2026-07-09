@@ -8,6 +8,7 @@ Run a passing eval against a trivial skill. You'll end up with a workspace dir, 
 - **Python 3.10+**.
 - **Claude Code** on `$PATH` — the judge runs host-side. Quickstart also uses Claude as the task agent; for OpenCode see [`agents.md`](agents.md).
 - **A provider credential**: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`, exported or in a repo-root `.env`.
+- **`GEMINI_API_KEY`** — the binder's classifier credential, required for every graded run (exported or in a repo-root `.env`). Unrelated to the Claude Code credential above.
 
 Missing any of these and preflight fails with a remediation message before boot.
 

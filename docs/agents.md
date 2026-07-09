@@ -68,7 +68,7 @@ One adapter per harness, two entry points: `invoke` runs the harness inside the 
 
 Judging stays independent from the task *arms*: a run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** and model. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which expands the judge env and runs `agent_class(harness).for_host().judge(prompt, config)` — a host-bound instance in a fresh `Host` environment, never the task arm's sandbox or session. Each adapter's `judge` reuses the same output parser as its sandbox path (Claude's `--output-format json` emits the `{"result": "<judge-json-string>"}` envelope natively; Codex/OpenCode parse with `parse_codex_jsonl`/`parse_opencode_jsonl` and wrap) and raises `RuntimeError` for its harness's infra-failure shapes (missing binary, nonzero exit, error events / zero-token runs).
 
-`binder.py`'s prose→checker classifier is a separate host-Claude call (`agents.judge_cli.run_host_judge`): it always uses Claude regardless of the configured judge harness.
+`binder.py`'s prose→checker classifier is a fixed, direct Gemini API call (`gemini-3.1-flash-lite`, stdlib `urllib` — no harness, no host CLI), independent from the configured judge harness and from every task arm's own harness. `ClaudeCodeAgent.judge` is the only host-Claude call site left in the package.
 
 ## What `invoke` returns
 
