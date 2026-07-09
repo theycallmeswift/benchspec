@@ -230,6 +230,35 @@ def test_run_advisory_lint_drops_invalid_individual_findings(
     ]
 
 
+def test_run_advisory_lint_warning_preserves_prepared_scope_counts(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Keep partial file and chunk counts when detector batching fails."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="test-key",
+            model="gemini-test",
+            max_lines=1,
+            chunk_batch_size=0,
+        )
+    )
+
+    assert result.warning == (
+        "advisory style lint skipped due to model error: "
+        "chunk_batch_size must be at least 1"
+    )
+    assert result.files_checked == 1
+    assert result.chunks_checked == 3
+
+
 def test_build_lint_plan_predicts_detector_and_max_verifier_calls(
     tmp_path: Path,
     framework: ModuleType,

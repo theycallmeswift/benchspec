@@ -78,6 +78,14 @@ class PreparedLintRun:
     chunk_batches: list[list[SourceChunk]]
 
 
+@dataclass(frozen=True)
+class PreparedSources:
+    """Source files and chunks collected before detector batching."""
+
+    targets: list[Path]
+    chunks: list[SourceChunk]
+
+
 def build_lint_plan(config: StyleLintConfig) -> StyleLintPlan:
     """Plan file, chunk, and API-call counts for an advisory lint run."""
     prepared_run = _prepare_lint_run(config)
@@ -105,8 +113,10 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     Returns:
         Findings, formatted diagnostics, and an optional advisory warning.
     """
+    prepared_sources: PreparedSources | None = None
     try:
-        prepared_run = _prepare_lint_run(config)
+        prepared_sources = _prepare_sources(config)
+        prepared_run = _prepare_lint_run(config, prepared_sources=prepared_sources)
         findings: list[Finding] = []
         usage = UsageMetadata()
         progressed_files: set[Path] = set()
@@ -170,12 +180,12 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             diagnostics=[],
             warning=f"advisory style lint skipped due to model error: {error}",
             usage=usage if "usage" in locals() else UsageMetadata(),
-            files_checked=(
-                len(prepared_run.targets) if "prepared_run" in locals() else 0
-            ),
-            chunks_checked=(
-                len(prepared_run.chunks) if "prepared_run" in locals() else 0
-            ),
+            files_checked=len(prepared_sources.targets)
+            if prepared_sources is not None
+            else 0,
+            chunks_checked=len(prepared_sources.chunks)
+            if prepared_sources is not None
+            else 0,
         )
 
     return StyleLintResult(
@@ -193,18 +203,33 @@ def _call_gemini(**kwargs: object) -> object:
     return style_lint.call_gemini(**kwargs)
 
 
-def _prepare_lint_run(config: StyleLintConfig) -> PreparedLintRun:
-    """Collect source files, chunks, and detector batches for a lint run."""
+def _prepare_sources(config: StyleLintConfig) -> PreparedSources:
+    """Collect source files and chunks for a lint run."""
     targets = collect_python_files(
         config.paths,
         default_paths=config.default_paths,
     )
     chunks = chunk_source_files(targets, max_lines=config.max_lines)
-    chunk_batches = _chunk_batches(chunks, size=config.chunk_batch_size)
+
+    return PreparedSources(targets=targets, chunks=chunks)
+
+
+def _prepare_lint_run(
+    config: StyleLintConfig,
+    *,
+    prepared_sources: PreparedSources | None = None,
+) -> PreparedLintRun:
+    """Collect source files, chunks, and detector batches for a lint run."""
+    sources = (
+        prepared_sources
+        if prepared_sources is not None
+        else _prepare_sources(config)
+    )
+    chunk_batches = _chunk_batches(sources.chunks, size=config.chunk_batch_size)
 
     return PreparedLintRun(
-        targets=targets,
-        chunks=chunks,
+        targets=sources.targets,
+        chunks=sources.chunks,
         chunk_batches=chunk_batches,
     )
 
