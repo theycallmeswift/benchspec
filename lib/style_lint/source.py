@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from lib.style_lint.types import SourceChunk
@@ -22,8 +23,16 @@ def collect_python_files(
         Sorted absolute paths for existing Python files.
     """
     roots = default_paths if paths is None else tuple(paths)
-    targets: set[Path] = set()
+    git_targets = _collect_python_files_with_git(roots)
+    if git_targets is not None:
+        return sorted(git_targets)
 
+    return sorted(_collect_python_files_from_filesystem(roots))
+
+
+def _collect_python_files_from_filesystem(roots: tuple[Path, ...]) -> set[Path]:
+    """Collect Python files by walking the filesystem."""
+    targets: set[Path] = set()
     for root in roots:
         resolved_root = root.resolve()
         if not resolved_root.exists():
@@ -37,7 +46,77 @@ def collect_python_files(
             if path.is_file():
                 targets.add(path.resolve())
 
-    return sorted(targets)
+    return targets
+
+
+def _collect_python_files_with_git(roots: tuple[Path, ...]) -> set[Path] | None:
+    """Collect Python files using Git's tracked and unignored file set."""
+    try:
+        completed_process = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.py",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return None
+
+    if completed_process.returncode != 0:
+        return None
+
+    cwd = Path.cwd()
+    git_paths = {
+        (cwd / relative_path).resolve()
+        for relative_path in completed_process.stdout.splitlines()
+        if relative_path
+    }
+    explicit_files = _collect_explicit_python_files(roots)
+    directory_roots = _collect_directory_roots(roots)
+    matched_git_paths = {
+        git_path
+        for git_path in git_paths
+        if any(_is_relative_to(git_path, directory_root) for directory_root in directory_roots)
+    }
+    return explicit_files | matched_git_paths
+
+
+def _collect_explicit_python_files(roots: tuple[Path, ...]) -> set[Path]:
+    """Collect explicitly named Python files, even if Git ignores them."""
+    explicit_files: set[Path] = set()
+    for root in roots:
+        resolved_root = root.resolve()
+        if resolved_root.is_file() and resolved_root.suffix == ".py":
+            explicit_files.add(resolved_root)
+
+    return explicit_files
+
+
+def _collect_directory_roots(roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Return existing directory roots that should be matched against Git paths."""
+    return tuple(
+        resolved_root
+        for root in roots
+        for resolved_root in [root.resolve()]
+        if resolved_root.exists() and resolved_root.is_dir()
+    )
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Return whether a path is contained by the given root."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+
+    return True
 
 
 def chunk_source_files(
