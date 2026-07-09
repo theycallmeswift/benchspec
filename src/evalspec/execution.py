@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -153,19 +152,29 @@ def _grade_mixed(
     pre_run_shas: object,
     process_facts: object = "",
 ) -> object:
-    """Grade bound assertions locally and punt the rest to the judge."""
+    """Grade bound assertions locally and punt the rest to the judge.
+
+    Returns (results, judge_ms, judge_errored, binder_degraded) — binder_degraded
+    counts each distinct bind_cache MISS that raised RuntimeError (a transient
+    binder infra failure degrading to judge grading), never a punt (bind() returning
+    None is the binder's designed, non-degraded outcome). A BinderAuthError is never
+    caught here — it propagates and fails the run.
+    """
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
     bind_cache: dict[str, dict | None] = {}
+    binder_degraded = 0
     for assertion_index, text in enumerate(assertions):
         if text not in bind_cache:
             try:
                 bind_cache[text] = bind(text)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                # A transient binder hiccup OR a host-subprocess timeout degrades to judge
-                # grading (the binder's designed punt), not a cell error; a logic bug raises
-                # a different type and propagates loudly, by design.
+            except RuntimeError:
+                # A transient binder infra failure degrades to judge grading (not a
+                # cell error) but must be counted, not silently absorbed — see
+                # execution.py's degradation-visibility contract. BinderAuthError
+                # deliberately isn't caught here: it propagates and fails the run.
                 bind_cache[text] = None
+                binder_degraded += 1
         spec = bind_cache[text]
         if spec is not None:
             entry = checkers.run_assertion(spec, workdir, pre_run_shas, context=grade_context)
@@ -174,7 +183,7 @@ def _grade_mixed(
         else:
             judge_idx.append(assertion_index)
     if not judge_idx:
-        return results, 0, False
+        return results, 0, False, binder_degraded
 
     texts = [assertions[assertion_index] for assertion_index in judge_idx]
     graded, judge_ms, judge_errored = _grade_via_judge(
@@ -193,7 +202,7 @@ def _grade_mixed(
     for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[assertion_index] = entry
-    return results, judge_ms, judge_errored
+    return results, judge_ms, judge_errored, binder_degraded
 
 
 async def _run_arm_turns(
@@ -341,7 +350,7 @@ def run_eval_arm(
 
     # {TODAY} resolves in the prompt, seed, and fixtures; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    merged, judge_ms, judge_errored = _grade_mixed(
+    merged, judge_ms, judge_errored, binder_degraded = _grade_mixed(
         assertions=graded_assertions,
         tree=arm_run.tree,
         contents=arm_run.contents,
@@ -367,6 +376,7 @@ def run_eval_arm(
         "arm": arm_name,
         "sample": sample,
         "errored": errored,
+        "binder_degraded": binder_degraded,
         "assertions": merged,
     }
     run_dir = workspace.arm_dir(repo_root, eval_case.skill, eval_id, arm_name, sample=sample)

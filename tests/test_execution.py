@@ -210,11 +210,9 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     assert entry["text"] == prose
 
 
-def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
-    """Verify binder timeout punts to judge not errors."""
-    # A binder host-subprocess timeout must degrade to a judge punt, not crash the cell.
-    import subprocess
-
+def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: object) -> None:
+    """Verify a binder infra RuntimeError punts to judge not errors."""
+    # A transient binder infra failure must degrade to a judge punt, not crash the cell.
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -224,7 +222,7 @@ def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
 
     def bind(text: object) -> NoReturn:
         """Bind."""
-        raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
+        raise RuntimeError("gemini transient failure")
 
     session_factory = fake_session_factory(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
@@ -244,6 +242,7 @@ def test_binder_timeout_punts_to_judge_not_errors(tmp_path: object) -> None:
     )
     assert outcome.errored is False
     assert outcome.grading["assertions"][0]["passed"] is True  # judge graded it, no crash
+    assert outcome.grading["binder_degraded"] == 1
 
 
 def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
@@ -1415,6 +1414,81 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
     assert outcome.errored is False  # bind failure did NOT error the eval_arm
     assert judged == [["a1"]]  # it was routed to the judge
     assert outcome.grading["assertions"][0]["type"] == "semantic"
+    assert outcome.grading["binder_degraded"] == 1
+
+
+def test_binder_degraded_counts_once_per_bind_cache_miss_not_per_assertion(
+    tmp_path: object,
+) -> None:
+    """Verify binder_degraded counts distinct bind_cache misses, not assertions."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    eval_case = _case(
+        tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["dup", "dup"]}
+    )
+    calls = []
+
+    def bind(text: object) -> NoReturn:
+        calls.append(text)
+        raise RuntimeError("gemini transient failure")
+
+    outcome = run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=fake_session_factory(
+            RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+        ),
+        grade=_grade_all_pass,
+        bind=bind,
+    )
+
+    assert len(calls) == 1  # the second "dup" hit the bind_cache, never called bind again
+    assert outcome.grading["binder_degraded"] == 1
+
+
+def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
+    """Verify an ordinary punt (bind returns None) is not a degradation."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
+
+    outcome = run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=fake_session_factory(
+            RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+        ),
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert outcome.grading["binder_degraded"] == 0
+
+
+def test_run_eval_arm_propagates_binder_auth_error(tmp_path: object) -> None:
+    """Verify a BinderAuthError is never caught or counted — it fails the run."""
+    from evalspec.binder import BinderAuthError
+
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
+
+    def bind(text: object) -> NoReturn:
+        raise BinderAuthError("gemini api key rejected")
+
+    with pytest.raises(BinderAuthError):
+        run_eval_arm(
+            eval_case, TRIAL, workdir, {}, tmp_path,
+            today="2099-01-01", repo_root=tmp_path, sample=0,
+            session_factory=fake_session_factory(
+                RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+            ),
+            grade=_grade_all_pass,
+            bind=bind,
+        )
 
 
 def test_bind_caches_distinct_strings(tmp_path: object) -> None:
