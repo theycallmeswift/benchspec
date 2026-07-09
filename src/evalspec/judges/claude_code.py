@@ -26,13 +26,13 @@ def run(
 
     That is the native envelope judge.py expects, no wrapping needed.
     """
-    cmd = [BIN, "-p", prompt, "--output-format", "json", "--model", model,
-           "--effort", effort, *harness_args]
+    command = [BIN, "-p", prompt, "--output-format", "json", "--model", model,
+               "--effort", effort, *harness_args]
     run_env = {**os.environ, **env}
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=run_env)
-    except FileNotFoundError as e:
-        raise RuntimeError("host claude CLI not found on PATH") from e
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=run_env)
+    except FileNotFoundError as error:
+        raise RuntimeError("host claude CLI not found on PATH") from error
     raise_for_judge_cli_failure(proc)
     return proc.stdout
 
