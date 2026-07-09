@@ -205,6 +205,6 @@ def _line_is_inside_string(*, chunk: SourceChunk, line: int) -> bool:
             end_line = chunk.line_start + token.end[0] - 1
             if start_line <= line <= end_line:
                 return True
-    except tokenize.TokenError:
+    except (IndentationError, tokenize.TokenError):
         return False
     return False
