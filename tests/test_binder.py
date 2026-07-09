@@ -350,6 +350,7 @@ def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: object) -> None
     {"candidates": [{"content": {}, "finishReason": "SAFETY"}]},
     {"candidates": [{"content": {}, "finishReason": "MAX_TOKENS"}]},
     {"promptFeedback": {"blockReason": "SAFETY"}, "candidates": []},
+    {"candidates": [{"content": {"parts": [{"text": 1}]}}]},
 ])
 def test_call_gemini_raises_runtimeerror_on_degenerate_200(
     monkeypatch: object, payload: dict

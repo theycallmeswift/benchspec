@@ -252,9 +252,17 @@ def _parse_gemini_payload(payload: object, *, latency_ms: float) -> GeminiReply:
     parts = content.get("parts") if isinstance(content, dict) else None
     if not isinstance(parts, list) or not parts:
         raise RuntimeError("Gemini API response had no content parts")
-    text = "".join(
-        part.get("text", "") for part in parts if isinstance(part, dict) and part.get("text")
-    )
+    texts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_text = part.get("text")
+        if part_text is None:
+            continue
+        if not isinstance(part_text, str):
+            raise RuntimeError("Gemini API response part text must be a string")
+        texts.append(part_text)
+    text = "".join(texts)
     if not text:
         raise RuntimeError("Gemini API response had empty text")
 
