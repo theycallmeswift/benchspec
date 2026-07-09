@@ -11,7 +11,7 @@ from evalspec import lint
 
 def _rules(text: object) -> object:
     """Build the rules test fixture."""
-    return [f[0] for f in lint.lint_assertion(text)]
+    return [finding[0] for finding in lint.lint_assertion(text)]
 
 
 def test_vague_adverb_flagged() -> None:

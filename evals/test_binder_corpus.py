@@ -52,19 +52,19 @@ def _bind_resilient(text: object) -> object:
 def _draws() -> object:
     """Build parametrized binder corpus leak-check draws."""
     return [
-        pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
-        for idx, e in enumerate(CORPUS)
-        for s in range(_samples_for(e))
+        pytest.param(entry, id=f"{entry['cohort']}-{index}#{sample}")
+        for index, entry in enumerate(CORPUS)
+        for sample in range(_samples_for(entry))
     ]
 
 
 def _field_expectation_draws() -> object:
     """Build binder corpus draws with expected checker fields."""
     return [
-        pytest.param(e, id=f"{e['cohort']}-{idx}#{s}")
-        for idx, e in enumerate(CORPUS)
-        if e["gold"] == "bind" and e.get("expect")
-        for s in range(SAMPLES)
+        pytest.param(entry, id=f"{entry['cohort']}-{index}#{sample}")
+        for index, entry in enumerate(CORPUS)
+        if entry["gold"] == "bind" and entry.get("expect")
+        for sample in range(SAMPLES)
     ]
 
 

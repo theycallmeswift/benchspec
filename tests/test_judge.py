@@ -49,19 +49,19 @@ def test_judge_prompt_no_original_shas_omits_block() -> None:
 def test_parse_judge_json_builds_grading() -> None:
     """Verify parse_judge_json builds a grading dict."""
     raw = '{"assertions":[{"text":"a","passed":true,"evidence":"x"}]}'
-    g = parse_judge_json(raw, eval_id="e1", config="without_skill")
-    assert g["eval_id"] == "e1"
-    assert g["arm"] == "without_skill"
-    assert g["assertions"][0]["passed"] is True
-    assert g["assertions"][0]["evidence"] == "x"
+    grade = parse_judge_json(raw, eval_id="e1", config="without_skill")
+    assert grade["eval_id"] == "e1"
+    assert grade["arm"] == "without_skill"
+    assert grade["assertions"][0]["passed"] is True
+    assert grade["assertions"][0]["evidence"] == "x"
 
 
 def test_parse_judge_json_strips_markdown_fence() -> None:
     """Verify a ```json fence is stripped before parsing."""
     # The judge wraps its JSON in a ```json fence in practice.
     raw = '```json\n{"assertions":[{"text":"a","passed":true,"evidence":"x"}]}\n```'
-    g = parse_judge_json(raw, eval_id="e1", config="with_skill")
-    assert g["assertions"][0]["passed"] is True
+    grade = parse_judge_json(raw, eval_id="e1", config="with_skill")
+    assert grade["assertions"][0]["passed"] is True
 
 
 def test_parse_judge_json_strips_prose_preamble() -> None:
@@ -70,9 +70,9 @@ def test_parse_judge_json_strips_prose_preamble() -> None:
         'Here is my grading:\n'
         '{"assertions":[{"text":"a","passed":false,"evidence":"y"}]}\nDone.'
     )
-    g = parse_judge_json(raw, eval_id="e1", config="with_skill")
-    assert g["assertions"][0]["passed"] is False
-    assert g["assertions"][0]["evidence"] == "y"
+    grade = parse_judge_json(raw, eval_id="e1", config="with_skill")
+    assert grade["assertions"][0]["passed"] is False
+    assert grade["assertions"][0]["evidence"] == "y"
 
 
 def test_parse_judge_json_no_object_raises() -> None:
@@ -89,8 +89,8 @@ def test_parse_judge_json_ignores_prose_braces_before_object() -> None:
         'Consider {PLACEHOLDER} and {TODAY}. Grading: '
         '{"assertions":[{"text":"a","passed":true,"evidence":"e"}]}'
     )
-    g = parse_judge_json(raw, eval_id="e1", config="with_skill")
-    assert g["assertions"][0]["passed"] is True
+    grade = parse_judge_json(raw, eval_id="e1", config="with_skill")
+    assert grade["assertions"][0]["passed"] is True
 
 
 def test_parse_judge_json_coerces_quoted_false_to_false() -> None:
@@ -98,15 +98,15 @@ def test_parse_judge_json_coerces_quoted_false_to_false() -> None:
     # bool("false") is True in Python — a judge that quotes the value must not flip
     # a failing assertion to passed.
     raw = '{"assertions":[{"text":"a","passed":"false","evidence":"e"}]}'
-    g = parse_judge_json(raw, eval_id="e1", config="with_skill")
-    assert g["assertions"][0]["passed"] is False
+    grade = parse_judge_json(raw, eval_id="e1", config="with_skill")
+    assert grade["assertions"][0]["passed"] is False
 
 
 def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
     """Verify a quoted "true" value is coerced to True."""
     raw = '{"assertions":[{"text":"a","passed":"true","evidence":"e"}]}'
-    g = parse_judge_json(raw, eval_id="e1", config="with_skill")
-    assert g["assertions"][0]["passed"] is True
+    grade = parse_judge_json(raw, eval_id="e1", config="with_skill")
+    assert grade["assertions"][0]["passed"] is True
 
 
 def test_grade_run_calls_run_judge_with_the_resolved_config(monkeypatch: object) -> None:
@@ -161,10 +161,10 @@ def test_grade_run_timeout_records_error_not_raises(monkeypatch: object) -> None
 
     monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
 
-    g = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
+    grade = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
 
-    assert [x["passed"] for x in g["assertions"]] == [False, False]
-    assert all("JUDGE ERROR" in x["evidence"] for x in g["assertions"])
+    assert [assertion["passed"] for assertion in grade["assertions"]] == [False, False]
+    assert all("JUDGE ERROR" in assertion["evidence"] for assertion in grade["assertions"])
 
 
 def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: object) -> None:
@@ -178,9 +178,9 @@ def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: object) -> Non
 
     monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
 
-    g = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
+    grade = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
 
-    assert all("JUDGE ERROR" in x["evidence"] for x in g["assertions"])
+    assert all("JUDGE ERROR" in assertion["evidence"] for assertion in grade["assertions"])
 
 
 def test_grade_run_happy_path(monkeypatch: object) -> None:
@@ -193,8 +193,8 @@ def test_grade_run_happy_path(monkeypatch: object) -> None:
 
     monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
 
-    g = grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill")
-    assert g["assertions"] == [{"text": "a1", "passed": True, "evidence": "ok"}]
+    grade = grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill")
+    assert grade["assertions"] == [{"text": "a1", "passed": True, "evidence": "ok"}]
 
 
 def test_grade_run_does_not_mask_judge_infra_error(monkeypatch: object) -> None:

@@ -25,8 +25,8 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
 
 def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
     """Verify build benchmark baseline and arm meta."""
-    seed_arm(tmp_path, "x", "baseline", passes=1, total=2)
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
         tmp_path,
@@ -41,7 +41,7 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
             },
             "trial": {
                 "harness": "opencode",
-                "model": "x",
+                "model": "test-model",
                 "effort": "high",
                 "env": {"K": "***"},
                 "harness_args": ["--print-logs"],
@@ -51,7 +51,7 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
 
     assert bench["baseline"] == "baseline"
     assert bench["arms"]["trial"]["harness"] == "opencode"
-    assert bench["arms"]["trial"]["model"] == "x"
+    assert bench["arms"]["trial"]["model"] == "test-model"
     assert bench["arms"]["trial"]["effort"] == "high"
     assert bench["arms"]["trial"]["env"] == {"K": "***"}
     assert bench["arms"]["trial"]["harness_args"] == ["--print-logs"]
@@ -63,8 +63,8 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
     """Verify build benchmark arm meta drives column order."""
     # arm_stats is discovered alphabetically; arm_meta's declared order wins so the
     # matrix columns follow the set, not the alphabet.
-    seed_arm(tmp_path, "x", "zeta", passes=1, total=2)
-    seed_arm(tmp_path, "x", "alpha", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "zeta", passes=1, total=2)
+    seed_arm(tmp_path, "alpha", "alpha", passes=2, total=2)
 
     bench = report.build_benchmark(
         tmp_path,
@@ -78,8 +78,8 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
 
 def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
     """Verify format markdown renders matrix table."""
-    seed_arm(tmp_path, "x", "baseline", passes=1, total=2)  # 50%
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)  # 100% → +50pp
+    seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)  # 100% → +50pp
 
     bench = report.build_benchmark(
         tmp_path,
@@ -104,7 +104,7 @@ def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
 
 def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
     """Verify format markdown renders harness args."""
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
         tmp_path,
@@ -128,7 +128,7 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
     tmp_path: object,
 ) -> None:
     """Verify format markdown quotes harness args with spaces and backticks."""
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
         tmp_path,
@@ -150,7 +150,7 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
 
 def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
     """Verify format markdown omits empty harness args."""
-    seed_arm(tmp_path, "x", "baseline", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "baseline", passes=2, total=2)
 
     bench = report.build_benchmark(
         tmp_path,
@@ -187,22 +187,22 @@ def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
 
 def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
     """Verify build benchmark computes delta vs reference."""
-    ed = tmp_path / "eval-x"
-    seed_arm(tmp_path, "x", "baseline", passes=0, total=2)
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)
+    eval_dir = tmp_path / "eval-alpha"
+    seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
 
     assert bench["baseline"] == "baseline"
     assert bench["arms"]["trial"]["delta_pp"] == pytest.approx(100.0)
     assert "delta_pp" not in bench["arms"]["baseline"]
-    assert ed.is_dir()  # discovered the eval dir on disk
+    assert eval_dir.is_dir()  # discovered the eval dir on disk
 
 
 def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
     """Verify build benchmark no reference absolute only."""
-    seed_arm(tmp_path, "x", "trial-opus", passes=1, total=2)
-    seed_arm(tmp_path, "x", "trial-sonnet", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "trial-opus", passes=1, total=2)
+    seed_arm(tmp_path, "alpha", "trial-sonnet", passes=2, total=2)
 
     bench = report.build_benchmark(tmp_path, "label", baseline=None)
 
@@ -217,7 +217,7 @@ def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> N
     # A declared reference the run dropped (--skip-baseline / `baseline = false`) never
     # lands on disk: coerce reference to None and score the surviving arm absolutely,
     # instead of framing it against a baseline that never ran.
-    seed_arm(tmp_path, "x", "trial", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
 
@@ -230,8 +230,8 @@ def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None
     """Verify build benchmark discovers arbitrary arm names."""
     # Arm names are arbitrary strings on disk, discovered by walking the eval dir's
     # subdirs — not pinned to a with_skill/without_skill literal.
-    seed_arm(tmp_path, "x", "claude-opus", passes=2, total=2)
-    seed_arm(tmp_path, "x", "opencode-sonnet", passes=1, total=2)
+    seed_arm(tmp_path, "alpha", "claude-opus", passes=2, total=2)
+    seed_arm(tmp_path, "alpha", "opencode-sonnet", passes=1, total=2)
 
     bench = report.build_benchmark(tmp_path, "label", baseline="claude-opus")
 
@@ -243,9 +243,9 @@ def test_delta_noise_pp_generalized(tmp_path: object) -> None:
     # The generalized delta_noise_pp(arm_a, arm_b) takes two arm-stat dicts and returns
     # a noise band in pp — assert it's computed (and non-negative), so the Δ-noise
     # rewrite away from the with_skill/without_skill literals is verified.
-    for s in range(4):
-        seed_arm(tmp_path, "x", "baseline", passes=1, total=2, sample=s)
-        seed_arm(tmp_path, "x", "trial", passes=2, total=2, sample=s)
+    for sample_index in range(4):
+        seed_arm(tmp_path, "eval", "baseline", passes=1, total=2, sample=sample_index)
+        seed_arm(tmp_path, "eval", "trial", passes=2, total=2, sample=sample_index)
 
     bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
 
@@ -472,8 +472,15 @@ def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
     # numeric key for any user-visible ordering.
     it = tmp_path / "iteration-1"
     it.mkdir()
-    for k in (0, 2, 10):
-        seed_arm(it, "alpha", "trial", passes=k, total=10, sample=k)
+    for sample_index in (0, 2, 10):
+        seed_arm(
+            it,
+            "alpha",
+            "trial",
+            passes=sample_index,
+            total=10,
+            sample=sample_index,
+        )
 
     bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
 
@@ -505,7 +512,7 @@ def test_trigger_rows_aggregate_per_query(tmp_path: object) -> None:
     seed_trigger(tmp_path, 1, should_trigger=True, fires=2)  # fired as expected
     seed_trigger(tmp_path, 2, should_trigger=False, fires=1)  # fired but shouldn't
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
 
     rows = bench["trigger"]
     assert rows[0]["slug"] == "q1"
@@ -524,7 +531,7 @@ def test_benchmark_carries_format_version(tmp_path: object) -> None:
     """Verify benchmark carries format version."""
     seed_arm(tmp_path, "alpha", "trial", passes=1, total=1)
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
 
     assert bench["format_version"] == 1
 
@@ -534,7 +541,7 @@ def test_trigger_rows_read_persisted_verdict_and_query(tmp_path: object) -> None
     seed_trigger(tmp_path, 1, should_trigger=True, fires=2, query="archive this note")
     seed_trigger(tmp_path, 2, should_trigger=False, fires=1, query="what is PARA?")
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
 
     assert bench["trigger"][0]["query"] == "archive this note"
     assert bench["trigger"][0]["as_expected"] == 1
@@ -545,13 +552,14 @@ def test_trigger_rows_read_persisted_verdict_and_query(tmp_path: object) -> None
 
 def test_trigger_md_table_escapes_pipes_and_truncates(tmp_path: object) -> None:
     """Verify trigger md table escapes pipes and truncates."""
-    seed_trigger(tmp_path, 1, should_trigger=True, fires=1, query="a | b " + "x" * 80)
+    long_query = "alpha | beta " + ("overflow" * 20)
+    seed_trigger(tmp_path, 1, should_trigger=True, fires=1, query=long_query)
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
     md = report._format_markdown(bench)
 
-    assert "a \\| b" in md  # cell-safe
-    assert "x" * 80 not in md  # truncated
+    assert "alpha \\| beta" in md  # cell-safe
+    assert long_query not in md  # truncated
 
 
 def test_trigger_xfail_marked_in_report(tmp_path: object) -> None:
@@ -565,7 +573,7 @@ def test_trigger_xfail_marked_in_report(tmp_path: object) -> None:
         xfail={"models": ["sonnet"], "reason": "documented routing boundary"},
     )
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
 
     assert bench["trigger"][0]["xfail"] == {
         "models": ["sonnet"],
@@ -583,11 +591,11 @@ def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
 
     rows = report.index_rows(tmp_path, "demo")
 
-    evals = [r for r in rows if r["kind"] == "eval"]
-    triggers = [r for r in rows if r["kind"] == "trigger"]
+    evals = [row for row in rows if row["kind"] == "eval"]
+    triggers = [row for row in rows if row["kind"] == "trigger"]
     assert len(evals) == 3
     assert len(triggers) == 1
-    first = next(r for r in evals if r["arm"] == "trial" and r["sample"] == 0)
+    first = next(row for row in evals if row["arm"] == "trial" and row["sample"] == 0)
     assert first == {
         "skill": "demo",
         "kind": "eval",
@@ -603,7 +611,7 @@ def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
         "input_tokens": 300,
         "output_tokens": 100,
     }
-    errored = next(r for r in evals if r["sample"] == 1)
+    errored = next(row for row in evals if row["sample"] == 1)
     assert errored["errored"] is True
     assert triggers[0]["slug"] == "q1"
     assert triggers[0]["passed"] is True
@@ -618,7 +626,7 @@ def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
 
     rows = report.index_rows(tmp_path, "demo")
 
-    assert {r["arm"] for r in rows if r["kind"] == "eval"} == {
+    assert {row["arm"] for row in rows if row["kind"] == "eval"} == {
         "claude-opus",
         "opencode-sonnet",
     }
@@ -626,12 +634,12 @@ def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
 
 def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
     """Verify noise band computed from arm stdevs."""
-    for s, passes in enumerate((2, 0, 2)):  # trial: 100%, 0%, 100% → noisy
-        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=s)
-    for s in range(3):
-        seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2, sample=s)
+    for sample_index, passes in enumerate((2, 0, 2)):  # trial: 100%, 0%, 100% → noisy
+        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=sample_index)
+    for sample_index in range(3):
+        seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2, sample=sample_index)
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline="baseline")
+    bench = report.build_benchmark(tmp_path, label="alpha", baseline="baseline")
     band = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
 
     assert band is not None
@@ -643,7 +651,7 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline="baseline")
+    bench = report.build_benchmark(tmp_path, label="alpha", baseline="baseline")
 
     assert report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"]) is None
 
@@ -651,12 +659,12 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
 def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None:
     """Verify within noise label in markdown and delta line."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
-    for s, passes in enumerate((2, 0, 1)):
-        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=s)
-    for s, passes in enumerate((0, 1, 1)):
-        seed_arm(tmp_path, "alpha", "baseline", passes=passes, total=2, sample=s)
+    for sample_index, passes in enumerate((2, 0, 1)):
+        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=sample_index)
+    for sample_index, passes in enumerate((0, 1, 1)):
+        seed_arm(tmp_path, "alpha", "baseline", passes=passes, total=2, sample=sample_index)
 
-    bench = report.write_benchmark(tmp_path, label="x", baseline="baseline")
+    bench = report.write_benchmark(tmp_path, label="alpha", baseline="baseline")
     md = (tmp_path / "benchmark.md").read_text()
 
     assert "within noise" in md
@@ -703,8 +711,8 @@ def test_as_expected_xfail_credited_only_on_listed_tier(tmp_path: object) -> Non
     """Verify as expected xfail credited only on listed tier."""
     # A documented sonnet miss, run on sonnet: missed but as-expected (green).
     on_tier = {
-        "slug": "x",
-        "query": "q",
+        "slug": "article-routing",
+        "query": "archive this article",
         "should_trigger": True,
         "passed": False,
         "model": "sonnet",
@@ -753,7 +761,7 @@ def test_trigger_rows_counts_xfail_miss_as_expected(tmp_path: object) -> None:
         xfail={"models": ["sonnet"], "reason": "documented sonnet routing miss"},
     )
 
-    bench = report.build_benchmark(tmp_path, label="x", baseline=None)
+    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
 
     row = bench["trigger"][0]
     assert row["xfail"] == {

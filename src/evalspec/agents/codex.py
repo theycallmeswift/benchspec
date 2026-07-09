@@ -83,8 +83,8 @@ def _auth_json_from_env() -> str | None:
     if not path:
         return None
     try:
-        with open(path, encoding="utf-8") as f:
-            auth_json = f.read()
+        with open(path, encoding="utf-8") as auth_file:
+            auth_json = auth_file.read()
     except OSError:
         return None
     try:
@@ -149,7 +149,7 @@ class CodexAgent(BaseAgent):
     @staticmethod
     def credential_error() -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(v) for v in AUTH_ENV_VARS):
+        if any(os.environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
         if _auth_json_from_env():
             return None
@@ -345,8 +345,15 @@ class CodexAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as e:
-            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
+        except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as error:
+            return RunResult(
+                eval_id,
+                config,
+                f"<sandbox-error> {error}"[-2000:],
+                0,
+                0,
+                is_error=True,
+            )
         if res.exit_code != 0:
             return RunResult(eval_id, config, res.stderr[-2000:], 0, 0, is_error=True)
         return parse_codex_jsonl(res.stdout, eval_id, config, detect_skill)

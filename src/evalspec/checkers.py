@@ -90,9 +90,9 @@ def _frontmatter(path: Path) -> dict | None:
     lines = _read_text(path).split("\n")
     if not lines or lines[0].strip() != "---":
         return None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            data = yaml.safe_load("\n".join(lines[1:i]))
+    for line_index in range(1, len(lines)):
+        if lines[line_index].strip() == "---":
+            data = yaml.safe_load("\n".join(lines[1:line_index]))
             return data if isinstance(data, dict) else None
     return None
 
@@ -207,7 +207,7 @@ def _skill_invoked(
     # Exact-or-namespaced match: a skill may fire as `ingest` or `plugin:ingest`.
     target = spec["skill"]
     fired = context.fired_skills if context else ()
-    hit = any(s == target or s.endswith(f":{target}") for s in fired)
+    hit = any(skill == target or skill.endswith(f":{target}") for skill in fired)
     return hit, (f"`{target}` invoked" if hit else f"`{target}` not among fired {list(fired)}")
 
 

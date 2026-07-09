@@ -112,8 +112,8 @@ def pyproject_table(repo_root: Path) -> dict:
         import tomllib
     else:
         import tomli as tomllib
-    with pyproject.open("rb") as f:
-        data = tomllib.load(f)
+    with pyproject.open("rb") as pyproject_file:
+        data = tomllib.load(pyproject_file)
     return data.get("tool", {}).get("evalspec", {})
 
 
@@ -122,7 +122,7 @@ def _pyproject_eval_roots(repo_root: Path) -> list[str] | None:
     roots = pyproject_table(repo_root).get("eval_roots")
     if roots is None:
         return None
-    if not (isinstance(roots, list) and all(isinstance(r, str) for r in roots)):
+    if not (isinstance(roots, list) and all(isinstance(root, str) for root in roots)):
         raise schema.SchemaError("[tool.evalspec] eval_roots must be a list of strings")
     return roots
 
@@ -136,7 +136,7 @@ def resolve_eval_roots(config: object) -> list[str]:
     """
     raw = config.getoption("evalspec_eval_roots")
     if raw:
-        return [s.strip() for s in raw.split(",") if s.strip()]
+        return [root.strip() for root in raw.split(",") if root.strip()]
     repo_root = resolve_repo_root(config)
     pyproject_roots = _pyproject_eval_roots(repo_root)
     if pyproject_roots is not None:

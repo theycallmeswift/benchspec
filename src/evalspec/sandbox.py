@@ -637,10 +637,10 @@ def cli_clean(repo_root: Path) -> None:
         ("sandboxes", ("eval-", "evalspec-build-", "trigger-")),
         ("snapshots", ("evalspec-",)),
     ):
-        d = home / sub
-        if not d.is_dir():
+        target_dir = home / sub
+        if not target_dir.is_dir():
             continue
-        for entry in d.iterdir():
+        for entry in target_dir.iterdir():
             if entry.name.startswith(prefixes):
                 if sub == "sandboxes":
                     _msb("stop", entry.name)

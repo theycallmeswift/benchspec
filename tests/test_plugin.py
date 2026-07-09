@@ -1041,7 +1041,7 @@ def test_judge_preflight_does_not_fire_on_trigger_only_session(
     # routing call so this stays a fast, hermetic unit-of-behavior check with no
     # microVM/credentials required; the routing/detection logic itself is covered
     # elsewhere (tests/test_trigger.py).
-    monkeypatch.setattr(sandbox, "route_in_sandbox", lambda *a, **kw: [])
+    monkeypatch.setattr(sandbox, "route_in_sandbox", lambda *args, **kwargs: [])
     # No explicit positional (same reasoning as the test above): self-registration
     # must load the real cases.py so this exercises the real judge preflight gate.
     result = pytester.runpytest(

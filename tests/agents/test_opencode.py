@@ -75,9 +75,9 @@ def test_build_command_shape_and_effort_mapping() -> None:
 def test_build_command_effort_low_maps_to_fast_variant() -> None:
     """Verify build command effort low maps to fast variant."""
     cmd = _opencode_agent().build_command(
-        "q",
+        "question",
         plugin_dir=None,
-        model="x/m",
+        model="provider/model",
         effort="low",
         resume_session_id=None,
         detect_skill=None,
@@ -89,9 +89,9 @@ def test_build_command_effort_low_maps_to_fast_variant() -> None:
 def test_build_command_effort_high_maps_to_thorough_variant() -> None:
     """Verify build command effort high maps to thorough variant."""
     cmd = _opencode_agent().build_command(
-        "q",
+        "question",
         plugin_dir=None,
-        model="x/m",
+        model="provider/model",
         effort="high",
         resume_session_id=None,
         detect_skill=None,
@@ -105,9 +105,9 @@ def test_build_command_ignores_plugin_and_resume() -> None:
     # OpenCode v1 has no plugin-dir or resume equivalents; the args are accepted for
     # protocol parity but must not leak into the command line.
     cmd = _opencode_agent().build_command(
-        "q",
+        "question",
         plugin_dir="/plugin",
-        model="x/m",
+        model="provider/model",
         effort="medium",
         resume_session_id="sess-X",
         detect_skill="archive",
@@ -620,15 +620,15 @@ def test_provision_runs_install_script() -> None:
 
     asyncio.run(_opencode_agent().provision(sandbox))
 
-    kind, script, _ = sandbox.calls[0]
-    assert kind == "shell"
+    call_kind, script, _ = sandbox.calls[0]
+    assert call_kind == "shell"
     assert "npm i -g" in script
     assert "opencode-ai" in script
 
 
 def test_secrets_raises_on_unmapped_auth_env() -> None:
     """Verify secrets raises for on unmapped auth env."""
-    agent = OpenCodeAgent(auth_value="x", auth_env="NEWPROVIDER_KEY")
+    agent = OpenCodeAgent(auth_value="secret-value", auth_env="NEWPROVIDER_KEY")
     with pytest.raises(KeyError):
         agent.secrets()
 
@@ -646,8 +646,8 @@ def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> Non
 
     asyncio.run(_opencode_agent().stage_project_assets(sandbox, "/project"))
 
-    kind, script, _ = sandbox.calls[0]
-    assert kind == "shell"
+    call_kind, script, _ = sandbox.calls[0]
+    assert call_kind == "shell"
     # Stage from all three plugin-shaped layouts (merged into one dest dir).
     # `skills/` (no leading dot) is the canonical Claude Code plugin layout; leaving it
     # out makes the eval skill invisible to OpenCode even when .claude/skills/ is staged.
@@ -679,7 +679,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
             config="without_skill",
             workdir="/workspace",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -695,7 +695,7 @@ def test_build_command_places_harness_args_before_prompt() -> None:
     cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
-        model="x/m",
+        model="provider/model",
         effort="medium",
         resume_session_id=None,
         detect_skill=None,
@@ -710,7 +710,7 @@ def test_build_command_allows_pass_through_equals_form() -> None:
     cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
-        model="x/m",
+        model="provider/model",
         effort="medium",
         resume_session_id=None,
         detect_skill=None,
@@ -726,7 +726,7 @@ def test_build_command_rejects_reserved_harness_args() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -740,7 +740,7 @@ def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -754,7 +754,7 @@ def test_build_command_rejects_attached_model_short_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -768,7 +768,7 @@ def test_build_command_rejects_reserved_continue_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -782,7 +782,7 @@ def test_build_command_rejects_reserved_continue_short_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -796,7 +796,7 @@ def test_build_command_rejects_reserved_session_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -810,7 +810,7 @@ def test_build_command_rejects_reserved_session_short_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -824,7 +824,7 @@ def test_build_command_rejects_reserved_session_equals_form() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -838,7 +838,7 @@ def test_build_command_rejects_reserved_command_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -852,7 +852,7 @@ def test_build_command_rejects_reserved_prompt_flag() -> None:
         _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -872,7 +872,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
             config="without_skill",
             workdir="/workspace",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
@@ -880,8 +880,8 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _cmd, args, _kw = sandbox.calls[0]
-    assert args[-2:] == ["--print-logs", "do the thing"]
+    _, _, command_args, _ = sandbox.calls[0]
+    assert command_args[-2:] == ["--print-logs", "do the thing"]
 
 
 def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
@@ -893,7 +893,7 @@ def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
                 {
                     "type": "step_start",
                     "timestamp": 1000,
-                    "sessionID": "s",
+                    "sessionID": "session-1",
                     "part": {"type": "step-start"},
                 }
             ),
@@ -901,7 +901,7 @@ def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
                 {
                     "type": "step_finish",
                     "timestamp": 2000,
-                    "sessionID": "s",
+                    "sessionID": "session-1",
                     "part": {"type": "step-finish", "tokens": {"total": 10}},
                 }
             ),
@@ -923,7 +923,7 @@ def test_parse_opencode_jsonl_carries_normalized_trajectory() -> None:
             json.dumps(
                 {
                     "type": "tool_use",
-                    "sessionID": "s",
+                    "sessionID": "session-1",
                     "part": {
                         "type": "tool",
                         "tool": "skill",
@@ -934,7 +934,7 @@ def test_parse_opencode_jsonl_carries_normalized_trajectory() -> None:
             json.dumps(
                 {
                     "type": "tool_use",
-                    "sessionID": "s",
+                    "sessionID": "session-1",
                     "part": {
                         "type": "tool",
                         "tool": "bash",
@@ -945,7 +945,7 @@ def test_parse_opencode_jsonl_carries_normalized_trajectory() -> None:
             json.dumps(
                 {
                     "type": "step_finish",
-                    "sessionID": "s",
+                    "sessionID": "session-1",
                     "part": {"type": "step-finish", "tokens": {"total": 10}},
                 }
             ),
@@ -972,7 +972,7 @@ def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
     stream = json.dumps(
         {
             "type": "tool_use",
-            "sessionID": "s",
+            "sessionID": "session-1",
             "part": {
                 "type": "tool",
                 "tool": "skill",
@@ -1083,19 +1083,19 @@ def test_parse_opencode_jsonl_skips_non_completed_tool_frames() -> None:
 
 def test_opencode_skill_load_dir_is_config_path() -> None:
     """Verify opencode skill load dir is config path."""
-    a = OpenCodeAgent()
-    assert a.skill_load_dir == f"{a.guest_home}/.config/opencode/skills"
+    agent = OpenCodeAgent()
+    assert agent.skill_load_dir == f"{agent.guest_home}/.config/opencode/skills"
 
 
 def test_opencode_bridge_script_symlinks_fixed_home() -> None:
     """Verify opencode bridge script symlinks fixed home."""
     from evalspec.agents.base import FIXED_SKILLS_HOME
 
-    s = OpenCodeAgent().bridge_skills_home_script()
+    script = OpenCodeAgent().bridge_skills_home_script()
 
-    assert FIXED_SKILLS_HOME in s
-    assert "/root/.config/opencode/skills" in s
-    assert "ln -s" in s
+    assert FIXED_SKILLS_HOME in script
+    assert "/root/.config/opencode/skills" in script
+    assert "ln -s" in script
 
 
 def test_opencode_cell_env_carries_evalspec_vars() -> None:
@@ -1117,7 +1117,7 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
     stream = json.dumps(
         {
             "type": "step_finish",
-            "sessionID": "s",
+            "sessionID": "session-1",
             "part": {"type": "step-finish", "tokens": {"total": 10}},
         }
     )
@@ -1131,7 +1131,7 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
             config="trial",
             workdir="/workspace",
             plugin_dir=None,
-            model="x/m",
+            model="provider/model",
             effort="medium",
             resume_session_id=None,
             detect_skill=None,

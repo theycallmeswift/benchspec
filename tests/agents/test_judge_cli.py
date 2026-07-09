@@ -18,7 +18,11 @@ def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> objec
 def test_run_host_judge_returns_stdout_on_healthy_run(monkeypatch: object) -> None:
     """Verify run host judge returns stdout on healthy run."""
     payload = json.dumps({"result": '{"assertions": []}', "is_error": False})
-    monkeypatch.setattr(judge_cli.subprocess, "run", lambda *a, **k: _fake_proc(stdout=payload))
+    monkeypatch.setattr(
+        judge_cli.subprocess,
+        "run",
+        lambda *args, **kwargs: _fake_proc(stdout=payload),
+    )
 
     assert run_host_judge("prompt", model="sonnet") == payload
 
@@ -30,7 +34,7 @@ def test_run_host_judge_raises_runtimeerror_on_nonzero_exit(
     monkeypatch.setattr(
         judge_cli.subprocess,
         "run",
-        lambda *a, **k: _fake_proc(returncode=1, stderr="connection reset"),
+        lambda *args, **kwargs: _fake_proc(returncode=1, stderr="connection reset"),
     )
 
     with pytest.raises(RuntimeError, match="exited 1.*connection reset"):
@@ -42,7 +46,11 @@ def test_run_host_judge_raises_runtimeerror_on_is_error_envelope(
 ) -> None:
     """Verify run host judge raises for runtimeerror on is error envelope."""
     payload = json.dumps({"result": "Not logged in · Please run /login", "is_error": True})
-    monkeypatch.setattr(judge_cli.subprocess, "run", lambda *a, **k: _fake_proc(stdout=payload))
+    monkeypatch.setattr(
+        judge_cli.subprocess,
+        "run",
+        lambda *args, **kwargs: _fake_proc(stdout=payload),
+    )
 
     with pytest.raises(RuntimeError, match="is_error=true.*Not logged in"):
         run_host_judge("prompt", model="sonnet")

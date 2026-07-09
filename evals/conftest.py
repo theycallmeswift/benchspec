@@ -43,10 +43,10 @@ def record(request: object) -> object:
     path = _results_dir(request.config) / f"results-{worker}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    def write(rec: object) -> None:
+    def write(record_data: object) -> None:
         """Append one JSON record to the worker result file."""
-        with path.open("a") as fh:
-            fh.write(json.dumps(rec) + "\n")
+        with path.open("a") as result_file:
+            result_file.write(json.dumps(record_data) + "\n")
 
     return write
 
@@ -58,16 +58,16 @@ def pytest_configure(config: object) -> None:
     if not (_is_controller(config) and _binder_selected(config)):
         return
     config.stash[_RAN] = True
-    d = _results_dir(config)
-    if d.exists():
-        for f in d.glob("results-*.jsonl"):
-            f.unlink()
-    d.mkdir(parents=True, exist_ok=True)
+    results_dir = _results_dir(config)
+    if results_dir.exists():
+        for result_path in results_dir.glob("results-*.jsonl"):
+            result_path.unlink()
+    results_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _rate(rows: object, hit: object) -> object:
     """Compute the fraction of rows matching a predicate."""
-    return sum(1 for r in rows if hit(r)) / len(rows) if rows else 0.0
+    return sum(1 for row in rows if hit(row)) / len(rows) if rows else 0.0
 
 
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
@@ -76,19 +76,21 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     if not (_is_controller(config) and config.stash.get(_RAN, False)):
         return
     rows = []
-    for f in _results_dir(config).glob("results-*.jsonl"):
-        rows += [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
+    for result_path in _results_dir(config).glob("results-*.jsonl"):
+        rows += [json.loads(line) for line in result_path.read_text().splitlines() if line.strip()]
     if not rows:
         return
 
-    errored = sum(1 for r in rows if r["result"] == "error")
-    binds = [r for r in rows if r["gold"] == "bind" and r["result"] != "error"]
+    errored = sum(1 for row in rows if row["result"] == "error")
+    binds = [row for row in rows if row["gold"] == "bind" and row["result"] != "error"]
     retention = _rate(
-        binds, lambda r: r["result"] == "bound" and r["checker"] == r["expect_checker"]
+        binds,
+        lambda row: row["result"] == "bound" and row["checker"] == row["expect_checker"],
     )
-    over_punt = _rate(binds, lambda r: r["result"] == "punt")
+    over_punt = _rate(binds, lambda row: row["result"] == "punt")
     mismatch = _rate(
-        binds, lambda r: r["result"] == "bound" and r["checker"] != r["expect_checker"]
+        binds,
+        lambda row: row["result"] == "bound" and row["checker"] != row["expect_checker"],
     )
 
     lines = [

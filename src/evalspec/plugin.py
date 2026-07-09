@@ -253,8 +253,8 @@ def _read_scratch_evalspec_table(config_path: str | None) -> dict:
     else:
         import tomli as tomllib
     try:
-        with Path(config_path).open("rb") as f:
-            raw = tomllib.load(f)
+        with Path(config_path).open("rb") as config_file:
+            raw = tomllib.load(config_file)
     except OSError as err:
         raise pytest.UsageError(f"--evalspec-config {config_path}: {err}") from None
     except UnicodeDecodeError as err:
@@ -296,7 +296,11 @@ def resolved_run_set(config: object) -> EvalSet:
     repo_root = resolve_repo_root(config)
     table = _layer_config_sets(pyproject_table(repo_root), config.getoption("evalspec_config"))
     raw_models = config.getoption("evalspec_models")
-    models = [m.strip() for m in raw_models.split(",") if m.strip()] if raw_models else None
+    models = (
+        [model.strip() for model in raw_models.split(",") if model.strip()]
+        if raw_models
+        else None
+    )
     try:
         rawsets, default_set = parse_sets(table)
         return resolve_set(
@@ -309,8 +313,8 @@ def resolved_run_set(config: object) -> EvalSet:
             env=_parse_env_pairs(config.getoption("evalspec_env")),
             models=models,
         )
-    except SchemaError as e:
-        raise pytest.UsageError(str(e)) from None
+    except SchemaError as error:
+        raise pytest.UsageError(str(error)) from None
 
 
 def _parse_judge_cli_table(config: object) -> dict:
@@ -370,8 +374,8 @@ def resolved_judge_config(config: object) -> JudgeConfig:
             scratch_table=scratch_judge,
             cli_table=_parse_judge_cli_table(config),
         )
-    except SchemaError as e:
-        raise pytest.UsageError(str(e)) from None
+    except SchemaError as error:
+        raise pytest.UsageError(str(error)) from None
 
 
 def pytest_configure(config: object) -> None:
@@ -386,8 +390,8 @@ def pytest_configure(config: object) -> None:
             config.getoption("evalspec_agent"),
             pyproject_table(repo_root).get("agent"),
         )
-    except RuntimeError as e:
-        raise pytest.UsageError(str(e)) from None
+    except RuntimeError as error:
+        raise pytest.UsageError(str(error)) from None
     # Normalize into the env var make_agent() reads everywhere downstream — the
     # EVALSPEC_ITERATION handoff pattern; xdist workers inherit the controller env.
     os.environ["EVALSPEC_AGENT"] = agent_name
@@ -616,7 +620,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
                     )
                     if session.exitstatus == 0:
                         session.exitstatus = 1
-        index_lines += [json.dumps(r) for r in report.index_rows(skill_dir, skill)]
+        index_lines += [json.dumps(row) for row in report.index_rows(skill_dir, skill)]
     if index_lines:
         (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
     config.stash[_SUMMARY_LINES] = lines

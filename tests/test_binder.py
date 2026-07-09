@@ -120,28 +120,34 @@ def test_punt_explicit() -> None:
 
 def test_punt_on_garbage() -> None:
     """Verify punt on garbage."""
-    assert bind("x", call_host=_host("here you go: not json at all")) is None
+    assert bind("unknown assertion", call_host=_host("here you go: not json at all")) is None
 
 
 def test_punt_on_unknown_checker() -> None:
     """Verify punt on unknown checker."""
-    assert bind("x", call_host=_host('{"checker":"vibes","path":"a"}')) is None
+    assert bind("unknown assertion", call_host=_host('{"checker":"vibes","path":"a"}')) is None
 
 
 def test_punt_on_none_host_output() -> None:
     """Verify punt on none host output."""
     # An abnormal host call yielding None must punt, not raise (never-raises contract).
-    assert bind("x", call_host=lambda *a, **k: None) is None
+    assert bind("unknown assertion", call_host=lambda *args, **kwargs: None) is None
 
 
 def test_punt_on_schema_invalid() -> None:  # glob_count needs exactly one of count/min
     """Verify punt on schema invalid."""
-    assert bind("x", call_host=_host('{"checker":"glob_count","glob":"*.md"}')) is None
+    assert bind(
+        "unknown assertion",
+        call_host=_host('{"checker":"glob_count","glob":"*.md"}'),
+    ) is None
 
 
 def test_parses_fenced_json() -> None:
     """Verify parses fenced json."""
-    spec = bind("x", call_host=_host('```json\n{"checker":"file_exists","path":"a.md"}\n```'))
+    spec = bind(
+        "unknown assertion",
+        call_host=_host('```json\n{"checker":"file_exists","path":"a.md"}\n```'),
+    )
     assert spec["checker"] == "file_exists"
 
 
@@ -153,7 +159,7 @@ def test_infra_error_propagates() -> None:
         raise RuntimeError("not logged in")
 
     with pytest.raises(RuntimeError):
-        bind("x", call_host=boom)
+        bind("unknown assertion", call_host=boom)
 
 
 def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
@@ -171,8 +177,8 @@ def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
 
 def test_prompt_carries_load_bearing_pieces() -> None:
     """Verify prompt carries load bearing pieces."""
-    p = _BINDING_PROMPT.format(assertion="MY ASSERTION")
-    assert "MY ASSERTION" in p
+    prompt = _BINDING_PROMPT.format(assertion="MY ASSERTION")
+    assert "MY ASSERTION" in prompt
     for name in (
         "file_exists",
         "glob_count",
@@ -181,8 +187,8 @@ def test_prompt_carries_load_bearing_pieces() -> None:
         "sha256_match",
         "skill_invoked",
     ):
-        assert name in p
-    assert "not duplicated" in p  # A9 rule encoded
+        assert name in prompt
+    assert "not duplicated" in prompt  # A9 rule encoded
 
 
 def test_binder_still_imports_the_original_run_host_judge() -> None:
