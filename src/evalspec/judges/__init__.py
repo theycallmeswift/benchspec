@@ -5,8 +5,8 @@ grading uses the same class per harness as task execution (`agents.*.judge`), ru
 a fresh host process instead of in the sandbox.
 
 `judge.py` keeps prompt-building, JSON parsing, and retry semantics; this package owns
-WHICH harness grades and resolves its config. `binder.py`'s host-Claude call
-(`agents.judge_cli.run_host_judge`) is a separate, untouched transport.
+WHICH harness grades and resolves its config. `binder.py`'s prose→checker classifier
+is a separate, unrelated direct Gemini API call, independent from this package.
 """
 
 from __future__ import annotations
