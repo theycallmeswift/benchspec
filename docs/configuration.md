@@ -45,6 +45,14 @@ env = { CODEX_HOME = "$CODEX_HOME" }
 
 > **Best practice: judge cross-family.** Prefer a judge whose model family differs from the arms it grades — an Anthropic judge (`claude-code`/`sonnet`) grading Anthropic arms can be biased toward its own family's outputs. evalspec does not enforce this (the default judge is `claude-code`/`sonnet`, same-family with the common Claude-arm setup, which is fine for iterating), but for a benchmark you publish or compare across harnesses, pick a judge from a different family than the arms under test. See [the quickstart's cross-family example](quickstart.md#a-cross-family-judge).
 
+## The binder
+
+The binder (`binder.py`) maps each prose assertion to a deterministic checker or punts to the judge, via a fixed, direct call to `gemini-3.1-flash-lite` — no `[tool.evalspec.binder]` table, no CLI flag; the model is a module constant, not a config surface. Every graded run needs `GEMINI_API_KEY` (see Environment variables above); a missing or empty key fails fast, before any paid arm runs.
+
+A transient binder infra failure degrades that one assertion to judge grading rather than erroring the cell — this is by design (see [`concepts.md`](concepts.md#the-binder)) — but is never silent: each degraded assertion increments `binder_degraded` in the arm's `grading.json`, and the run prints a `WARN binder: N assertion(s) degraded…` summary line when the total is nonzero. A credential rejection (`BinderAuthError`) is never degraded — it fails the run outright.
+
+`EVALSPEC_BINDER_MODEL` overrides the binder model for the **corpus suite only** (`make evals:binder`, `evals/binder/`) — a candidate-model comparison knob with no production surface. Corpus runs call the real Gemini API directly and cost money; they are a separate concern from evalspec's own offline integration tests (`tests/test_execution.py -k bind`), which inject a fake `call_model` and never touch the network.
+
 ## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
 
 | Flag | Default | Notes |
@@ -90,7 +98,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude credential (preferred over `ANTHROPIC_API_KEY`). From `claude setup-token`. |
 | `ANTHROPIC_API_KEY` | Claude credential fallback. Also OpenCode's second-choice provider when `OPENROUTER_API_KEY` is unset. |
 | `OPENROUTER_API_KEY` | OpenCode credential (highest precedence among OpenCode providers). |
-| `GEMINI_API_KEY` | OpenCode's Google/Gemini provider credential. Used when neither OpenRouter nor Anthropic keys are set. |
+| `GEMINI_API_KEY` | Two independent consumers. (1) **The binder** (`binder.py`) — required unconditionally for any graded run; classification always calls `gemini-3.1-flash-lite` directly, regardless of the task or judge harness. Empty counts as missing. (2) **OpenCode's** Google/Gemini provider credential — conditional, used only when neither `OPENROUTER_API_KEY` nor `ANTHROPIC_API_KEY` is set, and only for OpenCode arms. |
 | `CODEX_API_KEY` | Codex credential, preferred by `CodexAgent`. |
 | `CODEX_ACCESS_TOKEN` | Codex credential fallback when `CODEX_API_KEY` is unset. |
 | `CODEX_AUTH_JSON_PATH` | Path to a local Codex `auth.json` created by `codex login`. Used when `CODEX_API_KEY` and `CODEX_ACCESS_TOKEN` are unset; evalspec copies it into the sandbox as `/root/.codex/auth.json` so Codex can use ChatGPT/Codex subscription auth. |
