@@ -14,15 +14,15 @@
 
 ## File Map
 
-- `lib/style_lint/runner.py` — add a reusable dry-run planning result and planner function that reuses `collect_python_files()`, `chunk_source_files()`, and `_chunk_batches()`.
-- `lib/style_lint/__init__.py` — add the new planner API to the existing import surface so the CLI and tests can import it through `lib.style_lint` without dropping current exports.
-- `tests/lib/style_linter/test_runner.py` — cover planner behavior for chunk batching and verifier-call upper-bound prediction without any Gemini transport.
+- `lib/style_lint/runner.py` — add dry-run support to `run_advisory_lint()` through `StyleLintConfig.dry_run`, returning a `StyleLintPlan` after collection/chunking/batching and before model execution.
+- `lib/style_lint/__init__.py` — export `StyleLintPlan` without adding a separate planner method.
+- `tests/lib/style_linter/test_runner.py` — cover dry-run behavior on the existing runner path, including no Gemini calls and verifier-call upper-bound prediction.
 - `bin/linters/style_lint.py` — add `--dry-run`, skip `GEMINI_API_KEY` enforcement in dry-run mode, print the dry-run report, and keep existing `--base`, `--max-lines`, `--verify-findings`, `--verify-model`, and `--verbose` behavior intact.
 - `tests/lib/style_linter/test_cli.py` — cover dry-run stdout, `--base` composition, verbose stderr, and the guarantee that Gemini is never called in dry-run mode.
 - `docs/specs/2026-07-05-style-lint-rules.md` — document the new preflight mode in the CLI behavior bullets and example commands.
 - `docs/specs/2026-07-08-style-lint-dry-run.md` — update the issue spec so its dry-run contract and output fields match the implementation plan.
 
-### Task 1: Add a Reusable Dry-Run Planner in `lib/style_lint`
+### Task 1: Add Dry-Run Mode to the Reusable Linter Runner
 
 **Files:**
 - Modify: `lib/style_lint/runner.py`
@@ -34,14 +34,20 @@
 Add these tests to `tests/lib/style_linter/test_runner.py`:
 
 ```python
-def test_build_lint_plan_predicts_detector_and_max_verifier_calls(
+def test_run_advisory_lint_dry_run_returns_plan_without_model_calls(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     framework: ModuleType,
 ) -> None:
     source = tmp_path / "sample.py"
     source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+    monkeypatch.setattr(
+        framework,
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
+    )
 
-    plan = framework.build_lint_plan(
+    result = framework.run_advisory_lint(
         framework.StyleLintConfig(
             paths=[source],
             default_paths=(Path("src"),),
@@ -49,28 +55,34 @@ def test_build_lint_plan_predicts_detector_and_max_verifier_calls(
             policy_instructions="Use the repository style guide.",
             api_key="unused-in-dry-run",
             model="gemini-test",
+            dry_run=True,
             verify_findings=True,
             max_lines=1,
             chunk_batch_size=2,
         )
     )
 
-    assert plan.files == [source.resolve()]
-    assert plan.files_checked == 1
-    assert plan.chunks_checked == 3
-    assert plan.detector_api_calls == 2
-    assert plan.max_verifier_api_calls == 1
-    assert plan.max_total_api_calls == 3
+    assert result.warning is None
+    assert result.diagnostics == []
+    assert result.findings == []
+    assert result.plan == framework.StyleLintPlan(
+        files=[source.resolve()],
+        files_checked=1,
+        chunks_checked=3,
+        detector_api_calls=2,
+        max_verifier_api_calls=1,
+        max_total_api_calls=3,
+    )
 
 
-def test_build_lint_plan_skips_verifier_when_no_chunks(
+def test_run_advisory_lint_dry_run_skips_verifier_when_no_chunks(
     tmp_path: Path,
     framework: ModuleType,
 ) -> None:
     source = tmp_path / "empty.py"
     source.write_text("")
 
-    plan = framework.build_lint_plan(
+    result = framework.run_advisory_lint(
         framework.StyleLintConfig(
             paths=[source],
             default_paths=(Path("src"),),
@@ -78,16 +90,19 @@ def test_build_lint_plan_skips_verifier_when_no_chunks(
             policy_instructions="Use the repository style guide.",
             api_key="unused-in-dry-run",
             model="gemini-test",
+            dry_run=True,
             verify_findings=True,
         )
     )
 
-    assert plan.files == [source.resolve()]
-    assert plan.files_checked == 1
-    assert plan.chunks_checked == 0
-    assert plan.detector_api_calls == 0
-    assert plan.max_verifier_api_calls == 0
-    assert plan.max_total_api_calls == 0
+    assert result.plan == framework.StyleLintPlan(
+        files=[source.resolve()],
+        files_checked=1,
+        chunks_checked=0,
+        detector_api_calls=0,
+        max_verifier_api_calls=0,
+        max_total_api_calls=0,
+    )
 ```
 
 - [ ] **Step 2: Run the runner tests to verify they fail**
@@ -95,12 +110,12 @@ def test_build_lint_plan_skips_verifier_when_no_chunks(
 Run:
 
 ```bash
-uv run pytest tests/lib/style_linter/test_runner.py -k build_lint_plan -v
+uv run pytest tests/lib/style_linter/test_runner.py -k dry_run -v
 ```
 
-Expected: FAIL with `AttributeError` because `build_lint_plan` is not defined or exported yet.
+Expected: FAIL because `StyleLintConfig` does not accept `dry_run` yet.
 
-- [ ] **Step 3: Add the planner result and implementation**
+- [ ] **Step 3: Add the dry-run result and runner branch**
 
 Update `lib/style_lint/runner.py` and `lib/style_lint/__init__.py` with these additions:
 
@@ -118,19 +133,39 @@ class StyleLintPlan:
 ```
 
 ```python
-def build_lint_plan(config: StyleLintConfig) -> StyleLintPlan:
-    """Plan file, chunk, and API-call counts for an advisory lint run."""
+@dataclass(frozen=True)
+class StyleLintResult:
+    """Result from an advisory lint run."""
+
+    findings: list[Finding]
+    diagnostics: list[str]
+    warning: str | None = None
+    usage: UsageMetadata = field(default_factory=UsageMetadata)
+    files_checked: int = 0
+    chunks_checked: int = 0
+    plan: StyleLintPlan | None = None
+```
+
+Add `dry_run: bool = False` to `StyleLintConfig`. Inside `run_advisory_lint()`, keep the normal setup path:
+
+```python
     targets = collect_python_files(
         config.paths,
         default_paths=config.default_paths,
     )
     chunks = chunk_source_files(targets, max_lines=config.max_lines)
-    detector_api_calls = len(_chunk_batches(chunks, size=config.chunk_batch_size))
+    chunk_batches = _chunk_batches(chunks, size=config.chunk_batch_size)
+```
+
+Then, before detector calls, return a plan when `config.dry_run` is enabled:
+
+```python
+if config.dry_run:
+    detector_api_calls = len(chunk_batches)
     max_verifier_api_calls = (
         1 if config.verify_findings and detector_api_calls > 0 else 0
     )
-
-    return StyleLintPlan(
+    plan = StyleLintPlan(
         files=targets,
         files_checked=len(targets),
         chunks_checked=len(chunks),
@@ -138,16 +173,24 @@ def build_lint_plan(config: StyleLintConfig) -> StyleLintPlan:
         max_verifier_api_calls=max_verifier_api_calls,
         max_total_api_calls=detector_api_calls + max_verifier_api_calls,
     )
+
+    return StyleLintResult(
+        findings=[],
+        diagnostics=[],
+        files_checked=plan.files_checked,
+        chunks_checked=plan.chunks_checked,
+        plan=plan,
+    )
 ```
 
-Add `StyleLintPlan` and `build_lint_plan` to the existing `lib/style_lint/__init__.py` import list and `__all__` list. Do not replace any current imports or exports.
+Add `StyleLintPlan` to the existing `lib/style_lint/__init__.py` import list and `__all__` list. Do not add a separate planner method.
 
 - [ ] **Step 4: Run the runner tests to verify they pass**
 
 Run:
 
 ```bash
-uv run pytest tests/lib/style_linter/test_runner.py -k build_lint_plan -v
+uv run pytest tests/lib/style_linter/test_runner.py -k dry_run -v
 ```
 
 Expected: PASS with both new planner tests green.
@@ -158,7 +201,7 @@ Run:
 
 ```bash
 git add lib/style_lint/runner.py lib/style_lint/__init__.py tests/lib/style_linter/test_runner.py
-git commit -m "feat: add style lint dry-run planner"
+git commit -m "feat: add style lint dry-run runner mode"
 ```
 
 ### Task 2: Wire `--dry-run` Into the CLI Without Gemini Calls
@@ -254,21 +297,6 @@ Expected: FAIL because `argparse` does not accept `--dry-run` yet.
 Update `bin/linters/style_lint.py` with these concrete changes:
 
 ```python
-def print_dry_run_report(plan: object) -> None:
-    """Print the planned file set and model-call counts."""
-    if not isinstance(plan, style_lint.StyleLintPlan):
-        raise TypeError("plan must be a StyleLintPlan")
-
-    for path in plan.files:
-        print(path)
-    print(f"files: {plan.files_checked}")
-    print(f"chunks: {plan.chunks_checked}")
-    print(f"detector_api_calls: {plan.detector_api_calls}")
-    print(f"max_verifier_api_calls: {plan.max_verifier_api_calls}")
-    print(f"max_total_api_calls: {plan.max_total_api_calls}")
-```
-
-```python
 parser.add_argument("--dry-run", action="store_true")
 ```
 
@@ -281,21 +309,17 @@ if args.verbose:
         verbose_log(args.verbose, f"Using verifier model: {args.verify_model or args.model}")
 
 if args.dry_run:
-    plan = style_lint.build_lint_plan(
-        style_lint.StyleLintConfig(
-            paths=paths,
-            default_paths=DEFAULT_PATHS,
-            rules=RULES,
-            policy_instructions=POLICY_INSTRUCTIONS,
-            api_key="",
-            model=args.model,
-            changed_lines=changed_lines,
-            verify_findings=verify_findings,
-            verify_model=args.verify_model,
-            max_lines=args.max_lines,
-            progress_callback=None,
-        )
+    result = run(
+        paths,
+        model=args.model,
+        changed_lines=changed_lines,
+        verify_findings=verify_findings,
+        verify_model=args.verify_model,
+        max_lines=args.max_lines,
+        verbose=args.verbose,
+        dry_run=True,
     )
+    plan = result.plan
     verbose_log(
         args.verbose,
         (
@@ -307,7 +331,6 @@ if args.dry_run:
             f"{plan.max_total_api_calls} max total calls"
         ),
     )
-    print_dry_run_report(plan)
     return 0
 ```
 

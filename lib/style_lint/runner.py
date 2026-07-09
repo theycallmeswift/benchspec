@@ -71,29 +71,6 @@ class StyleLintPlan:
     max_total_api_calls: int
 
 
-@dataclass(frozen=True)
-class PreparedLintRun:
-    """Source files, chunks, and detector batches for one lint run."""
-
-    targets: list[Path]
-    chunks: list[SourceChunk]
-    chunk_batches: list[list[SourceChunk]]
-
-
-@dataclass(frozen=True)
-class PreparedSources:
-    """Source files and chunks collected before detector batching."""
-
-    targets: list[Path]
-    chunks: list[SourceChunk]
-
-
-def build_lint_plan(config: StyleLintConfig) -> StyleLintPlan:
-    """Plan file, chunk, and API-call counts for an advisory lint run."""
-    prepared_run = _prepare_lint_run(config)
-    return _plan_from_prepared_run(config=config, prepared_run=prepared_run)
-
-
 def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     """Run the advisory lint pipeline.
 
@@ -103,14 +80,27 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     Returns:
         Findings, formatted diagnostics, and an optional advisory warning.
     """
-    prepared_sources: PreparedSources | None = None
+    targets: list[Path] | None = None
+    chunks: list[SourceChunk] | None = None
     try:
-        prepared_sources = _prepare_sources(config)
-        prepared_run = _prepare_lint_run(config, prepared_sources=prepared_sources)
+        targets = collect_python_files(
+            config.paths,
+            default_paths=config.default_paths,
+        )
+        chunks = chunk_source_files(targets, max_lines=config.max_lines)
+        chunk_batches = _chunk_batches(chunks, size=config.chunk_batch_size)
         if config.dry_run:
-            plan = _plan_from_prepared_run(
-                config=config,
-                prepared_run=prepared_run,
+            detector_api_calls = len(chunk_batches)
+            max_verifier_api_calls = (
+                1 if config.verify_findings and detector_api_calls > 0 else 0
+            )
+            plan = StyleLintPlan(
+                files=targets,
+                files_checked=len(targets),
+                chunks_checked=len(chunks),
+                detector_api_calls=detector_api_calls,
+                max_verifier_api_calls=max_verifier_api_calls,
+                max_total_api_calls=detector_api_calls + max_verifier_api_calls,
             )
             return StyleLintResult(
                 findings=[],
@@ -123,11 +113,11 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         findings: list[Finding] = []
         usage = UsageMetadata()
         progressed_files: set[Path] = set()
-        for chunk_batch in prepared_run.chunk_batches:
+        for chunk_batch in chunk_batches:
             _emit_file_progress(
                 chunks=chunk_batch,
                 progressed_files=progressed_files,
-                total_files=len(prepared_run.targets),
+                total_files=len(targets),
                 progress_callback=config.progress_callback,
             )
             prompt = build_detector_prompt(
@@ -147,7 +137,7 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
             findings.extend(
                 parse_findings(
                     response.text,
-                    chunks=prepared_run.chunks,
+                    chunks=chunks,
                     rules=config.rules,
                     drop_invalid=True,
                 )
@@ -155,7 +145,7 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         if config.verify_findings:
             verification = verify_findings(
                 findings=findings,
-                chunks=prepared_run.chunks,
+                chunks=chunks,
                 rules=config.rules,
                 instructions=config.policy_instructions,
                 api_key=config.api_key,
@@ -181,15 +171,16 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         return _warning_result(
             error=error,
             usage=usage if "usage" in locals() else UsageMetadata(),
-            prepared_sources=prepared_sources,
+            targets=targets,
+            chunks=chunks,
         )
 
     return StyleLintResult(
         findings=findings,
         diagnostics=format_findings(findings),
         usage=usage,
-        files_checked=len(prepared_run.targets),
-        chunks_checked=len(prepared_run.chunks),
+        files_checked=len(targets),
+        chunks_checked=len(chunks),
     )
 
 
@@ -203,14 +194,16 @@ def _warning_result(
     *,
     error: Exception,
     usage: UsageMetadata,
-    prepared_sources: PreparedSources | None,
+    targets: list[Path] | None,
+    chunks: list[SourceChunk] | None,
 ) -> StyleLintResult:
     """Build an advisory warning result while preserving prepared scope counts."""
     files_checked = 0
     chunks_checked = 0
-    if prepared_sources is not None:
-        files_checked = len(prepared_sources.targets)
-        chunks_checked = len(prepared_sources.chunks)
+    if targets is not None:
+        files_checked = len(targets)
+    if chunks is not None:
+        chunks_checked = len(chunks)
 
     return StyleLintResult(
         findings=[],
@@ -219,58 +212,6 @@ def _warning_result(
         usage=usage,
         files_checked=files_checked,
         chunks_checked=chunks_checked,
-    )
-
-
-def _prepare_sources(config: StyleLintConfig) -> PreparedSources:
-    """Collect source files and chunks for a lint run."""
-    targets = collect_python_files(
-        config.paths,
-        default_paths=config.default_paths,
-    )
-    chunks = chunk_source_files(targets, max_lines=config.max_lines)
-
-    return PreparedSources(targets=targets, chunks=chunks)
-
-
-def _prepare_lint_run(
-    config: StyleLintConfig,
-    *,
-    prepared_sources: PreparedSources | None = None,
-) -> PreparedLintRun:
-    """Collect source files, chunks, and detector batches for a lint run."""
-    sources = (
-        prepared_sources
-        if prepared_sources is not None
-        else _prepare_sources(config)
-    )
-    chunk_batches = _chunk_batches(sources.chunks, size=config.chunk_batch_size)
-
-    return PreparedLintRun(
-        targets=sources.targets,
-        chunks=sources.chunks,
-        chunk_batches=chunk_batches,
-    )
-
-
-def _plan_from_prepared_run(
-    *,
-    config: StyleLintConfig,
-    prepared_run: PreparedLintRun,
-) -> StyleLintPlan:
-    """Build dry-run counts from prepared lint work."""
-    detector_api_calls = len(prepared_run.chunk_batches)
-    max_verifier_api_calls = (
-        1 if config.verify_findings and detector_api_calls > 0 else 0
-    )
-
-    return StyleLintPlan(
-        files=prepared_run.targets,
-        files_checked=len(prepared_run.targets),
-        chunks_checked=len(prepared_run.chunks),
-        detector_api_calls=detector_api_calls,
-        max_verifier_api_calls=max_verifier_api_calls,
-        max_total_api_calls=detector_api_calls + max_verifier_api_calls,
     )
 
 

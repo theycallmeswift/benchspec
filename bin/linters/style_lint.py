@@ -73,6 +73,7 @@ def run(
     verify_model: str | None = None,
     max_lines: int = DEFAULT_CHUNK_LINES,
     verbose: bool = False,
+    dry_run: bool = False,
 ) -> int:
     """Run evalspec advisory style lint and print findings.
 
@@ -86,6 +87,7 @@ def run(
             override.
         max_lines: Maximum source lines per model chunk.
         verbose: Whether to print Ruff-style debug progress to stderr.
+        dry_run: Whether to plan lint work without making model calls.
 
     Returns:
         Always returns zero because this linter is advisory.
@@ -97,7 +99,7 @@ def run(
         verbose_log(verbose, f"Using verifier model: {verify_model or model}")
 
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+    if not dry_run and not api_key:
         verbose_log(verbose, "GEMINI_API_KEY is not set")
         print("skip: GEMINI_API_KEY is not set; advisory style lint is disabled")
         return 0
@@ -108,9 +110,10 @@ def run(
             default_paths=DEFAULT_PATHS,
             rules=RULES,
             policy_instructions=POLICY_INSTRUCTIONS,
-            api_key=api_key,
+            api_key=api_key or "unused-in-dry-run",
             model=model,
             changed_lines=changed_lines,
+            dry_run=dry_run,
             verify_findings=verify_findings,
             verify_model=verify_model,
             max_lines=max_lines,
@@ -118,6 +121,16 @@ def run(
         )
     )
     elapsed = time.perf_counter() - started_at
+
+    if dry_run:
+        if result.warning is not None:
+            print(f"warning: {result.warning}")
+            return 0
+        if result.plan is None:
+            raise TypeError("dry-run advisory lint did not return a plan")
+        print_dry_run_result(result.plan, verbose=verbose)
+        return 0
+
     verbose_log(
         verbose,
         (
@@ -143,43 +156,10 @@ def run(
     return 0
 
 
-def run_dry_run(
-    paths: list[Path] | None = None,
-    *,
-    model: str = DEFAULT_MODEL,
-    verify_findings: bool = False,
-    verify_model: str | None = None,
-    max_lines: int = DEFAULT_CHUNK_LINES,
-    verbose: bool = False,
-) -> int:
-    """Print advisory style-lint planning data without model calls."""
-    verbose_log(verbose, f"Using paths: {format_paths(paths)}")
-    verbose_log(verbose, f"Using model: {model}")
-    if verify_findings:
-        verbose_log(verbose, f"Using verifier model: {verify_model or model}")
-
-    result = style_lint.run_advisory_lint(
-        style_lint.StyleLintConfig(
-            paths=paths,
-            default_paths=DEFAULT_PATHS,
-            rules=RULES,
-            policy_instructions=POLICY_INSTRUCTIONS,
-            api_key="unused-in-dry-run",
-            model=model,
-            dry_run=True,
-            verify_findings=verify_findings,
-            verify_model=verify_model,
-            max_lines=max_lines,
-        )
-    )
-    if result.warning is not None:
-        print(f"warning: {result.warning}")
-        return 0
-
-    if result.plan is None:
-        raise TypeError("dry-run advisory lint did not return a plan")
-    plan = result.plan
-
+def print_dry_run_result(plan: object, *, verbose: bool) -> None:
+    """Print dry-run source paths and model-call counts."""
+    if not isinstance(plan, style_lint.StyleLintPlan):
+        raise TypeError("plan must be a StyleLintPlan")
     if verbose:
         verbose_log(
             True,
@@ -201,8 +181,6 @@ def run_dry_run(
     print(f"max_verifier_api_calls: {plan.max_verifier_api_calls}")
     print(f"max_total_api_calls: {plan.max_total_api_calls}")
 
-    return 0
-
 
 def main(argv: list[str] | None = None) -> int:
     """Run the style lint CLI."""
@@ -222,16 +200,6 @@ def main(argv: list[str] | None = None) -> int:
         changed_lines = changed_lines_from_base(args.base)
         paths = sorted(changed_lines)
 
-    if args.dry_run:
-        return run_dry_run(
-            paths,
-            model=args.model,
-            verify_findings=args.verify_findings or args.base is not None,
-            verify_model=args.verify_model,
-            max_lines=args.max_lines,
-            verbose=args.verbose,
-        )
-
     return run(
         paths,
         model=args.model,
@@ -240,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_model=args.verify_model,
         max_lines=args.max_lines,
         verbose=args.verbose,
+        dry_run=args.dry_run,
     )
 
 
