@@ -7,28 +7,33 @@ from pathlib import Path
 from types import ModuleType
 
 
-def test_makefile_wires_custom_lint_target_and_keeps_lint_ruff_only(
+def test_makefile_lint_runs_ruff_before_verified_style_lint(
     repo_root: Path,
 ) -> None:
-    """Keep the default lint target Ruff-only and expose the custom make target."""
+    """Verify the lint target runs Ruff before verified style lint."""
     makefile_text = (repo_root / "Makefile").read_text()
 
     assert "lint\\:custom" in makefile_text
     assert "uv run ruff check ." in makefile_text
     assert "uv run python bin/linters/style_lint.py" in makefile_text
 
-    lint_target_text = makefile_text.split("lint:  ## Lint with ruff", maxsplit=1)[1]
+    lint_target_text = makefile_text.split(
+        "lint:  ## Lint with ruff and verified style checks",
+        maxsplit=1,
+    )[1]
     lint_target_text = lint_target_text.split("\n\n", maxsplit=1)[0]
+    ruff_index = lint_target_text.index("uv run ruff check .")
+    style_lint_index = lint_target_text.index(
+        "uv run python bin/linters/style_lint.py --verify-findings --verbose ."
+    )
 
-    assert "style_lint.py" not in lint_target_text
+    assert ruff_index < style_lint_index
 
 
 def test_plan_file_lives_in_docs_plans(repo_root: Path) -> None:
     """Keep implementation plans in the repository-level plans directory."""
     assert (repo_root / "docs/plans/2026-07-05-style-lint-rules.md").exists()
-    assert not (
-        repo_root / "docs/superpowers/plans/2026-07-05-style-lint-rules.md"
-    ).exists()
+    assert not (repo_root / "docs/superpowers/plans/2026-07-05-style-lint-rules.md").exists()
 
 
 def test_agent_directory_structure_mentions_doc_buckets(repo_root: Path) -> None:
