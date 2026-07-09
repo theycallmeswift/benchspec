@@ -178,6 +178,26 @@ def test_cli_dry_run_verbose_logs_selected_paths_and_verifier_context(
     assert "Dry run summary:" in captured.err
 
 
+def test_cli_dry_run_stays_advisory_on_planning_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Soft-fail dry-run planning errors like real advisory lint runs."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    exit_code = style_lint_cli.main(["--dry-run", "--max-lines", "0"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        "warning: advisory style lint skipped due to model error: "
+        "max_lines must be at least 1\n"
+    )
+    assert captured.err == ""
+
+
 def test_cli_script_runs_from_makefile_entry_path_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
     repo_root: Path,
