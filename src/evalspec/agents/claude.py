@@ -10,10 +10,16 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
+from evalspec.agents.judge_cli import raise_for_is_error_envelope
+from evalspec.environments import ExecutionEnv, GuestSandbox, Host
 from evalspec.runner import RunResult, parse_stream_run
 from evalspec.trigger import detect_skill_fired, dispatches_skill, streamed_activity
+
+if TYPE_CHECKING:
+    from evalspec.judges.config import JudgeConfig
 
 # Credentials Claude Code reads, in preference order. The runner injects whichever is set as
 # a microsandbox secret (substituted only for the Anthropic API host).
@@ -74,6 +80,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     id = "claude-code"
     CLAUDE_BIN = "/root/.local/bin/claude"
+    host_bin = "claude"
     guest_home = "/root"
     skill_load_dir = "/root/.claude/skills"
     capabilities = AgentCapabilities(
@@ -209,6 +216,29 @@ class ClaudeCodeAgent(BaseAgent):
             env={"HOME": self.guest_home},
         )
 
+    async def judge(
+        self: object,
+        prompt: str,
+        config: JudgeConfig,
+        *,
+        env: ExecutionEnv | None = None,
+    ) -> str:
+        """Grade via `claude -p --output-format json` (default env: fresh Host process).
+
+        The output is already the {"result": ..., "is_error": ...} envelope judge.py
+        parses, so it is returned as-is after infra checks. RuntimeError on a missing
+        binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota — the
+        same contract binder.py's host call relies on via judge_cli).
+        """
+        command = [self.host_bin, "-p", prompt, "--output-format", "json",
+                   "--model", config.model, "--effort", config.effort,
+                   *config.harness_args]
+        proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
+
+        proc.require_success()
+        raise_for_is_error_envelope(proc.stdout)
+        return proc.stdout
+
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
         """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
 
@@ -264,12 +294,15 @@ class ClaudeCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
         try:
+<<<<<<< HEAD
             res = await sandbox.exec(
+=======
+            res = await GuestSandbox(sb).exec(
+                cmd,
+                cwd=workdir,
+>>>>>>> aa6d794 (refactor(agents): one adapter per harness; execution environment is a parameter)
                 # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
                 # guest_env(), arm env winning.
-                cmd[0],
-                cmd[1:],
-                cwd=workdir,
                 env={**self.guest_env(), **(extra_env or {})},
                 timeout=timeout,
                 stdin=b"",
@@ -278,11 +311,16 @@ class ClaudeCodeAgent(BaseAgent):
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.
+<<<<<<< HEAD
             message = f"<sandbox-error> {error}"[-2000:]
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
         result = parse_stream_run(res.stdout_text, eval_id, config, detect_skill)
+=======
+            return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
+        result = parse_stream_run(res.stdout, eval_id, config, detect_skill)
+>>>>>>> aa6d794 (refactor(agents): one adapter per harness; execution environment is a parameter)
         # Non-zero exit with no result event = a crash; its diagnostic is on stderr, not in
         # the empty stream. Surface stderr, keeping the raw/trajectory already captured.
-        if res.exit_code != 0 and result.is_error and res.stderr_text.strip():
-            return replace(result, result_text=res.stderr_text[-2000:])
+        if res.exit_code != 0 and result.is_error and res.stderr.strip():
+            return replace(result, result_text=res.stderr[-2000:])
         return result

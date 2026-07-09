@@ -18,13 +18,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
+from evalspec.environments import ExecutionEnv, GuestSandbox, Host
 from evalspec.runner import RunResult
 from evalspec.trajectory import iter_events
+
+if TYPE_CHECKING:
+    from evalspec.judges.config import JudgeConfig
 
 # Credentials OpenCode reads (host-side env var names), in preference order. The
 # runner injects whichever is set as a microsandbox secret, substituted only for
@@ -65,6 +71,8 @@ _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.sta
 _RESERVED_HARNESS_SHORT_FLAGS = {
     arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
 }
+# Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
+_EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
@@ -188,6 +196,7 @@ class OpenCodeAgent(BaseAgent):
     """Store open code agent data."""
 
     id = "opencode"
+    host_bin = "opencode"
     guest_home = "/root"
     skill_load_dir = "/root/.config/opencode/skills"
     # multi_turn: invoke() accepts resume_session_id but does not
@@ -395,11 +404,11 @@ class OpenCodeAgent(BaseAgent):
         )
 
         try:
+            # Per-arm extra_env merges over guest_env(), arm env winning.
             env = {**self.guest_env(), **(extra_env or {})}
 
-            res = await sb.exec(
-                cmd[0],
-                cmd[1:],
+            res = await GuestSandbox(sb).exec(
+                cmd,
                 cwd=workdir,
                 env=env,
                 timeout=timeout,
@@ -409,8 +418,40 @@ class OpenCodeAgent(BaseAgent):
         except (MicrosandboxError, asyncio.TimeoutError, OSError) as e:
             return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
         if res.exit_code != 0:
-            return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
-        return parse_opencode_jsonl(res.stdout_text, eval_id, config, detect_skill)
+            return RunResult(eval_id, config, res.stderr[-2000:], 0, 0, is_error=True)
+        return parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
+
+    async def judge(
+        self: object,
+        prompt: str,
+        config: JudgeConfig,
+        *,
+        env: ExecutionEnv | None = None,
+    ) -> str:
+        """Grade via `opencode run --format json` (default env: fresh Host process).
+
+        Reads the output through the same `parse_opencode_jsonl` the sandbox path
+        uses — that parser treats a run that spent zero tokens as an error (the
+        harness never reached the model: auth, quota, or launch failure), so infra
+        detection is the same structured signal as the arm, never a stderr scan.
+        Wraps the final text in the {"result": ...} envelope judge.py parses.
+        """
+        variant = _EFFORT_TO_VARIANT.get(config.effort, "default")
+        command = [
+            self.host_bin, "run", "--format", "json", "--variant", variant,
+            "-m", config.model, *config.harness_args, prompt,
+        ]
+        proc = await (env or Host()).exec(
+            command, env=config.env, timeout=config.timeout,
+            stdin=subprocess.DEVNULL,  # opencode blocks reading stdin forever without this
+        )
+
+        proc.require_success()
+        result = parse_opencode_jsonl(proc.stdout, "judge", "judge", None)
+        if result.is_error:
+            detail = (proc.stderr or "").strip()[-1000:] or result.result_text[:1000]
+            raise RuntimeError(f"opencode judge made no successful model call: {detail}")
+        return json.dumps({"result": result.result_text})
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
         """Return true when a line shows any skill route."""

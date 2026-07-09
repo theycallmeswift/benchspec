@@ -55,11 +55,19 @@ def raise_for_judge_cli_failure(proc: subprocess.CompletedProcess) -> None:
         raise RuntimeError(
             f"host claude CLI exited {proc.returncode}: {body[-1000:] or '(no output)'}"
         )
+    raise_for_is_error_envelope(proc.stdout)
+
+
+def raise_for_is_error_envelope(stdout: str) -> None:
+    """Raise RuntimeError when a 0-exit `claude -p` envelope carries is_error=true.
+
+    This is how `claude -p` reports auth, rate-limit, quota, and overload failures.
+    Unparseable stdout is deliberately NOT an error here (a transient streaming
+    glitch isn't a CLI failure); parse_judge_json surfaces that case instead.
+    """
     try:
-        outer = json.loads(proc.stdout)
+        outer = json.loads(stdout)
     except json.JSONDecodeError:
-        # 0-exit + unparseable stdout is unusual but not necessarily a CLI failure
-        # (e.g. transient streaming glitch); let parse_judge_json surface it.
         return
 
     if isinstance(outer, dict) and outer.get("is_error"):

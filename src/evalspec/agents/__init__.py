@@ -23,6 +23,7 @@ __all__ = [
     "ClaudeCodeAgent",
     "CodexAgent",
     "OpenCodeAgent",
+    "agent_class",
     "make_agent",
     "credential_preflight_error",
     "resolve_agent_name",
@@ -70,6 +71,20 @@ def _selected_agent_class() -> type:
     return _REGISTRY[resolve_agent_name()]
 
 
+def agent_class(harness: str) -> type:
+    """The registered adapter class for a harness name.
+
+    The class (not an instance) is what judge-mode dispatch needs — `judge` and
+    `probe_host_version` are classmethods that use the host's own credentials, so no
+    `from_env()` instantiation is involved. An unknown `harness` raises.
+    """
+    if harness not in _REGISTRY:
+        raise RuntimeError(
+            f"harness {harness!r} is not a known agent; valid: {sorted(_REGISTRY)}"
+        )
+    return _REGISTRY[harness]
+
+
 def make_agent(harness: str | None = None) -> CodingAgent:
     """The coding agent for a run or a single arm.
 
@@ -79,11 +94,7 @@ def make_agent(harness: str | None = None) -> CodingAgent:
     unknown `harness` raises.
     """
     if harness is not None:
-        if harness not in _REGISTRY:
-            raise RuntimeError(
-                f"harness {harness!r} is not a known agent; valid: {sorted(_REGISTRY)}"
-            )
-        return _REGISTRY[harness].from_env()
+        return agent_class(harness).from_env()
     return _selected_agent_class().from_env()
 
 
