@@ -76,6 +76,75 @@ def _rate(rows: object, hit: object) -> object:
     return sum(1 for row in rows if hit(row)) / len(rows) if rows else 0.0
 
 
+def _recording_call_model(sink: list) -> object:
+    """Build a call_model that delegates to _call_gemini and records every reply.
+
+    Reads EVALSPEC_BINDER_MODEL itself (falling back to GEMINI_BINDER_MODEL) and passes
+    it through as _call_gemini's `model` keyword — this is the corpus suite's *only*
+    model override; _call_gemini's production default takes no env input at all (see
+    the plan's Global Constraints). Exceptions propagate unchanged (a retry in
+    _bind_resilient still sees the real failure) — this wrapper only appends successful
+    replies to `sink`. The per-draw `attempts` count is tracked separately, by
+    _bind_resilient's retry loop, since a retry that raises before producing a reply
+    must still count as an attempt — `len(sink)` alone would undercount that case.
+
+    Args:
+        sink: List to append each successful GeminiReply to.
+
+    Returns:
+        A call_model callable suitable for `bind(..., call_model=...)`.
+    """
+    model = os.environ.get("EVALSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
+
+    def call(prompt: str, *, timeout: int = 60) -> object:
+        """Call the Gemini binder model and record the reply in sink."""
+        reply = binder._call_gemini(prompt, timeout=timeout, model=model)
+        sink.append(reply)
+        return reply
+
+    return call
+
+
+# Approximate — a corpus-suite pricing constant, not a billing source of truth.
+_GEMINI_FLASH_LITE_USD_PER_1K_PROMPT_TOKENS = 0.0001
+_GEMINI_FLASH_LITE_USD_PER_1K_OUTPUT_TOKENS = 0.0004
+
+
+def _latency_cost_summary(rows: list) -> dict:
+    """Aggregate latency/token/cost stats over Gemini-sourced rows only.
+
+    Regex fast-path rows (bare file_exists assertions bound without any API call)
+    are reported as their own count, never folded into the latency mean — their
+    near-zero latency would corrupt it.
+
+    Args:
+        rows: Per-draw records from both live tests (leak and field-preservation).
+
+    Returns:
+        A dict of regex/gemini counts, latency mean/p95, token totals, and an
+        approximate USD cost estimate.
+    """
+    gemini_rows = [row for row in rows if row.get("source") == "gemini"]
+    latencies = sorted(
+        row["latency_ms"] for row in gemini_rows if row.get("latency_ms") is not None
+    )
+    prompt_tokens = sum(row.get("prompt_tokens") or 0 for row in gemini_rows)
+    output_tokens = sum(row.get("output_tokens") or 0 for row in gemini_rows)
+    p95_index = max(0, int(len(latencies) * 0.95) - 1) if latencies else None
+    return {
+        "regex_fast_path_count": sum(1 for row in rows if row.get("source") == "regex"),
+        "gemini_count": len(gemini_rows),
+        "latency_ms_mean": sum(latencies) / len(latencies) if latencies else None,
+        "latency_ms_p95": latencies[p95_index] if latencies else None,
+        "total_prompt_tokens": prompt_tokens,
+        "total_output_tokens": output_tokens,
+        "estimated_cost_usd": (
+            prompt_tokens / 1000 * _GEMINI_FLASH_LITE_USD_PER_1K_PROMPT_TOKENS
+            + output_tokens / 1000 * _GEMINI_FLASH_LITE_USD_PER_1K_OUTPUT_TOKENS
+        ),
+    }
+
+
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     """Aggregate binder corpus records after the pytest session."""
     config = session.config
@@ -87,26 +156,43 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     if not rows:
         return
 
-    errored = sum(1 for row in rows if row["result"] == "error")
-    binds = [row for row in rows if row["gold"] == "bind" and row["result"] != "error"]
-    retention = _rate(
-        binds,
-        lambda row: row["result"] == "bound" and row["checker"] == row["expect_checker"],
-    )
-    over_punt = _rate(binds, lambda row: row["result"] == "punt")
-    mismatch = _rate(
-        binds,
-        lambda row: row["result"] == "bound" and row["checker"] != row["expect_checker"],
+    leak_rows = [row for row in rows if row["test"] == "leak"]
+    lines: list = []
+    if leak_rows:
+        errored = sum(1 for row in leak_rows if row["result"] == "error")
+        binds = [row for row in leak_rows if row["gold"] == "bind" and row["result"] != "error"]
+        retention = _rate(
+            binds,
+            lambda row: row["result"] == "bound" and row["checker"] == row["expect_checker"],
+        )
+        over_punt = _rate(binds, lambda row: row["result"] == "punt")
+        mismatch = _rate(
+            binds,
+            lambda row: row["result"] == "bound" and row["checker"] != row["expect_checker"],
+        )
+        lines += [
+            f"binder corpus: {len(leak_rows)} draws, {errored} infra errors",
+            f"determinism_retention={retention:.3f} (no floor)  "
+            f"over_punt_rate={over_punt:.3f}  bind_mismatch={mismatch:.3f}",
+        ]
+
+    # Both live tests (leak + field-preservation) meter latency/cost; the leak-only
+    # gate above is unaffected — it only ever read leak_rows.
+    cost = _latency_cost_summary(rows)
+    lines.append(
+        f"latency_ms: mean={cost['latency_ms_mean']} p95={cost['latency_ms_p95']} "
+        f"(gemini={cost['gemini_count']} regex_fast_path={cost['regex_fast_path_count']})  "
+        f"tokens: prompt={cost['total_prompt_tokens']} output={cost['total_output_tokens']}  "
+        f"est_cost_usd~{cost['estimated_cost_usd']:.4f}"
     )
 
-    lines = [
-        f"binder corpus: {len(rows)} draws, {errored} infra errors",
-        f"determinism_retention={retention:.3f} (no floor)  "
-        f"over_punt_rate={over_punt:.3f}  bind_mismatch={mismatch:.3f}",
-    ]
     # 0 leaks is meaningless if most draws errored, so a broadly-broken infra run fails loud.
-    if errored / len(rows) >= 0.05:
-        lines.append(f"FAIL: too many infra errors ({errored}/{len(rows)}) — gate unmeasurable")
+    # Guarded on leak_rows: a `-k`-filtered run that selects only the field-preservation
+    # test has no leak rows to divide by, and must not crash sessionfinish over it.
+    if leak_rows and errored / len(leak_rows) >= 0.05:
+        lines.append(
+            f"FAIL: too many infra errors ({errored}/{len(leak_rows)}) — gate unmeasurable"
+        )
         if session.exitstatus == 0:
             session.exitstatus = 1
     config.stash[_SUMMARY] = lines
