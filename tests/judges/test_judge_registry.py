@@ -54,8 +54,9 @@ def test_run_judge_dispatches_by_harness(monkeypatch: object) -> None:
     """Verify run judge dispatches by harness."""
     calls = []
 
-    def fake_claude_run(prompt: object, **kw: object) -> str:
-        calls.append(("claude-code", prompt, kw))
+    def fake_claude_run(prompt: object, **kwargs: object) -> str:
+        """Record the dispatched call and return a canned envelope."""
+        calls.append(("claude-code", prompt, kwargs))
         return '{"result": "ok"}'
 
     monkeypatch.setattr("evalspec.judges.claude_code.run", fake_claude_run)
@@ -72,8 +73,9 @@ def test_run_judge_expands_env_using_arms_expand_env(monkeypatch: object) -> Non
     monkeypatch.setenv("MY_JUDGE_VAR", "expanded-value")
     captured = {}
 
-    def fake_codex_run(prompt: object, **kw: object) -> str:
-        captured["env"] = kw["env"]
+    def fake_codex_run(prompt: object, **kwargs: object) -> str:
+        """Capture the expanded env passed to the runner and return a canned envelope."""
+        captured["env"] = kwargs["env"]
         return '{"result": "ok"}'
 
     monkeypatch.setattr("evalspec.judges.codex.run", fake_codex_run)
