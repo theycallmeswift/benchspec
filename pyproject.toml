@@ -91,6 +91,6 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests", "evals"]
 markers = [
-    "binder_corpus: live Haiku binder corpus eval (costs money; run via `make evals:binder`)",
+    "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals:binder`)",
 ]
 addopts = "-m 'not binder_corpus'"

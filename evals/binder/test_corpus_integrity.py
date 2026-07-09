@@ -12,7 +12,7 @@ import yaml
 
 from evalspec.checkers import derive_text
 
-CORPUS_PATH = Path(__file__).resolve().parent / "binder_corpus.yaml"
+CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
 
 
 def _load_corpus(path: Path) -> list[dict]:

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from evalspec import binder
+
 _SUMMARY = pytest.StashKey[list]()
 _RAN = pytest.StashKey[bool]()
 
@@ -57,6 +59,10 @@ def pytest_configure(config: object) -> None:
     # unrelated `make test` never deletes a live run's data. Runs before workers spawn.
     if not (_is_controller(config) and _binder_selected(config)):
         return
+    try:
+        binder.preflight_gemini_key()
+    except RuntimeError as error:
+        raise pytest.UsageError(str(error)) from None
     config.stash[_RAN] = True
     results_dir = _results_dir(config)
     if results_dir.exists():

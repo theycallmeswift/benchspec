@@ -10,10 +10,10 @@ install:  ## Create the venv and install dev dependencies
 test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
-# Keep modest: high fan-out trips the host CLI's ~60s timeout (12-way -> SIGKILL).
+# Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
 BINDER_WORKERS ?= 6
 evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
-	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals $(EVAL_ARGS)
+	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/binder $(EVAL_ARGS)
 
 evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
 	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
