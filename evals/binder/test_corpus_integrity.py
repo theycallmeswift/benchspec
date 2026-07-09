@@ -205,6 +205,114 @@ def test_index_compound_punts_with_decomposed_children() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("case_label", "flat_substring", "checker", "child_substring"),
+    [
+        (
+            "meta-contents",
+            "exists and contains index.md (a file)",
+            "file_exists",
+            "The ./.meta/logs/ directory exists",
+        ),
+        (
+            "meta-contents",
+            "exists and contains index.md (a file)",
+            "file_exists",
+            "The ./.meta/templates/ directory exists",
+        ),
+        (
+            "six-templates",
+            "contains all six template files named exactly",
+            "glob_count",
+            "./.meta/templates/*.md",
+        ),
+        (
+            "templates-restated",
+            "previously-missing ./.meta/templates/ now exists and contains all six template files",
+            "file_exists",
+            "./.meta/templates/ directory exists",
+        ),
+        (
+            "para-restated",
+            "previously-missing PARA folders now all exist",
+            "file_exists",
+            "The 2. Entities/ directory exists under ./",
+        ),
+        (
+            "whoami-frontmatter",
+            "its frontmatter created and updated",
+            "file_exists",
+            "./1. Profile/whoami.md exists",
+        ),
+        (
+            "whoami-frontmatter",
+            "its frontmatter created and updated",
+            "frontmatter_has",
+            "./1. Profile/whoami.md frontmatter has a 'created' key",
+        ),
+        (
+            "template-frontmatter",
+            "begins with YAML frontmatter declaring at least the keys",
+            "frontmatter_has",
+            "entity-person.md frontmatter has a 'title' key",
+        ),
+        (
+            "dated-log",
+            "dated log file named YYYY-MM-DD.md",
+            "glob_count",
+            "./.meta/logs/*.md",
+        ),
+        (
+            "dated-log",
+            "dated log file named YYYY-MM-DD.md",
+            "regex",
+            "./.meta/logs/{TODAY}.md has a line containing 'bootstrap | '",
+        ),
+        (
+            "spec-full-set",
+            "with the full skim-first section set",
+            "glob_count",
+            "./docs/specs/{TODAY}-*.md",
+        ),
+        (
+            "spec-sections",
+            "contains all of these H2 sections: Problem",
+            "regex",
+            "'## Problem'",
+        ),
+    ],
+)
+def test_semantic_compound_punts_with_decomposed_children(
+    case_label: str, flat_substring: str, checker: str, child_substring: str
+) -> None:
+    """Each compound semantic punt stays a punt while its atomic children bind.
+
+    Mirrors `test_para_compound_punts_with_decomposed_children` and
+    `test_index_compound_punts_with_decomposed_children`: the compound line must defer
+    to the judge, while the single-fact child proves an eval author can decompose it for
+    deterministic grading. Restated/dedup pairings (`templates-restated`, `para-restated`)
+    assert the same contract against children reused from an earlier decomposition.
+    """
+    flat_entries = [entry for entry in CORPUS if flat_substring in entry["text"]]
+    assert flat_entries, (
+        f"{case_label}: flat compound entry containing {flat_substring!r} is missing"
+    )
+    assert all(entry["gold"] == "punt" for entry in flat_entries), (
+        f"{case_label}: the flat compound line {flat_substring!r} must stay a punt"
+    )
+
+    children = [
+        entry
+        for entry in CORPUS
+        if entry["gold"] == "bind"
+        and entry["expect_checker"] == checker
+        and child_substring in entry["text"]
+    ]
+    assert children, (
+        f"{case_label}: missing decomposed {checker} child containing {child_substring!r}"
+    )
+
+
 def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     """Verify regex-sourced rows are excluded from latency/token/cost aggregates."""
     rows = [

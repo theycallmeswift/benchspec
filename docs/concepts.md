@@ -107,6 +107,8 @@ Verification is its own labeled-corpus eval, `make evals:binder`, which gates `f
 
 Decomposition is an authoring convenience layered over this model, not a new assertion type. A `- [ ]` item with indented `- [ ]` children flattens to one standalone prose assertion per child (the parent line is a display-only header, never graded); each child then goes through the binder exactly like any top-level line. It only changes how a compound assertion is *written* — so a failure pinpoints the clause — never how an atom is graded. No inline determinism tags ride on the checkbox; the binder still owns every child's checker.
 
+A compound assertion always punts — the binder maps one object to one checker, so "and" always defers to the judge. Authors buy back deterministic grading by writing one fact per assertion: split "`X` exists and contains `Y`" into a bare `X exists` (binds `file_exists`) plus a separate compound-content assertion (stays a punt, since "contains `Y`" still needs the judge to verify).
+
 ## Why the judge is on the host
 
 The judge spawns a fresh host process for the configured judge harness (`evalspec.judges.run_judge`), not a sandboxed call. Two reasons:
