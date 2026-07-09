@@ -133,6 +133,17 @@ docs/style/development.md
 
   - `bin/linters/style_lint.py` should also be directly runnable for scoped debugging, for example `uv run python bin/linters/style_lint.py src/evalspec/plugin.py`.
   - Changeset-focused runs use `uv run python bin/linters/style_lint.py --base origin/dev`.
+  - `bin/linters/style_lint.py` also supports preflight planning with `uv run python bin/linters/style_lint.py --dry-run`.
+  - Dry-run composes with explicit paths, `--base origin/dev`, `--max-lines`, `--verify-findings`, `--verify-model`, and `--verbose`.
+  - Dry-run prints the resolved file list plus `files`, `chunks`, `detector_api_calls`, `max_verifier_api_calls`, and `max_total_api_calls` without requiring `GEMINI_API_KEY` or calling Gemini.
+  - `detector_api_calls` is exact for the resolved file and chunk plan; `max_verifier_api_calls` and `max_total_api_calls` are upper bounds because verifier execution depends on detector findings.
+  - With `--base`, dry-run resolves the changed files exactly, but changed-line filtering inside chunks still depends on the real lint pass.
+  - Example preflight commands:
+
+    ```sh
+    uv run python bin/linters/style_lint.py --dry-run
+    uv run python bin/linters/style_lint.py --dry-run --base origin/dev --verbose
+    ```
 
 - **CI policy mirrors the fast blocking command.**
   - This repo does not currently contain `.github/` workflow files, so this spec does not require adding CI as part of the lint implementation.

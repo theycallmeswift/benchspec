@@ -1,4 +1,4 @@
-**TL;DR** - Add `--dry-run` to the advisory style-lint CLI so users can see which Python files would be linted and how many Gemini API calls would be made before spending time or tokens.
+**TL;DR** - Add `--dry-run` to the advisory style-lint CLI so users can see which Python files would be linted and the maximum Gemini API calls before spending time or tokens.
 
 ## Problem
 
@@ -14,7 +14,7 @@
 uv run python bin/linters/style_lint.py --dry-run [--base origin/dev] [paths...]
 ```
 
-`--dry-run` resolves the same target Python files and chunks as a real run, prints the file list plus predicted detector and verifier API-call counts, and exits `0` without calling Gemini. It gives users the cost-shaping facts before they choose whether to run the advisory model check.
+`--dry-run` resolves the same target Python files and chunks as a real run, prints the file list plus the exact detector API-call count and upper-bound verifier and total API-call counts, and exits `0` without calling Gemini. It gives users the cost-shaping facts before they choose whether to run the advisory model check.
 
 ## User Stories
 
@@ -29,38 +29,40 @@ bin/linters/style_lint.py --dry-run
   -> changed_lines_from_base() / argparse paths
   -> lib.style_lint.collect_python_files()
   -> lib.style_lint.chunk_source_files()
-  -> planned detector batches + optional verifier call
+  -> planned detector batches + maximum optional verifier call
   -> stdout dry-run report, no Gemini call
 ```
 
 - **Add a reusable planning result instead of duplicating path math in the CLI.**
   - `origin/dev:lib/style_lint/source.py` already owns `collect_python_files()` and `chunk_source_files()`.
   - `origin/dev:lib/style_lint/runner.py` already owns `chunk_batch_size`, `files_checked`, and `chunks_checked`.
-  - Add a small library function or result type that returns sorted files, chunk count, detector request count, and verifier request count from the same inputs as `StyleLintConfig`.
+  - Add a small library function or result type that returns sorted files, chunk count, exact detector request count, maximum verifier request count, and maximum total request count from the same inputs as `StyleLintConfig`.
 - **Make `--dry-run` a first-class CLI mode.**
   - `origin/dev:bin/linters/style_lint.py` currently parses positional `paths`, `--base`, `--model`, `--verify-findings`, `--verify-model`, `--max-lines`, and `--verbose`.
   - Add `parser.add_argument("--dry-run", action="store_true")`.
   - When `--dry-run` is set, skip the `GEMINI_API_KEY` check and skip `run_advisory_lint()`.
-  - Preserve the existing `--base` behavior where changeset runs imply verifier filtering; the dry-run report should include that verifier call in the planned call count.
+  - Preserve the existing `--base` behavior where changeset runs imply verifier filtering; the dry-run report should include that possible verifier call in the maximum planned call count.
 - **Report concrete files and planned calls in stable text.**
   - Print one file per line in the same sorted order the linter would use.
-  - Print counts for `files`, `chunks`, `detector_api_calls`, `verifier_api_calls`, and `total_api_calls`.
+  - Print counts for `files`, `chunks`, `detector_api_calls`, `max_verifier_api_calls`, and `max_total_api_calls`.
   - Under `--verbose`, keep the existing stderr debug style and include the same selected paths/model context, but do not emit per-file model progress because no model work is happening.
 - **Keep API-call prediction simple and explicit.**
   - Detector calls equal `ceil(chunks / chunk_batch_size)`.
-  - Verifier calls are `1` only when verification would run and detector calls are nonzero.
-  - Total calls equal detector plus verifier.
+  - `max_verifier_api_calls` is `1` only when verification would run and detector calls are nonzero.
+  - `max_total_api_calls` equals detector calls plus `max_verifier_api_calls`.
+  - Exact verifier calls cannot be known without detector output because empty findings short-circuit before a verifier Gemini call.
+  - With `--base`, dry-run resolves the changed file set exactly, but changed-line filtering inside chunks still depends on the real lint pass.
   - Token counts remain out of scope for dry-run because they require either Gemini `countTokens` calls or an estimator that this CLI does not currently own.
 
 ## Testing Plan
 
 ### Logic
 - **Target planning matches real lint planning** - the dry-run planner resolves default paths, explicit paths, non-Python files, empty files, `--max-lines`, and chunk batching the same way a real advisory lint run does.
-- **Call-count prediction is deterministic** - detector, verifier, and total API-call counts are derived from chunk count and verification settings without calling Gemini.
+- **Call-count prediction is deterministic** - detector, maximum verifier, and maximum total API-call counts are derived from chunk count and verification settings without calling Gemini.
 
 ### Behavior
 - **Dry-run does not call Gemini** - running with no `GEMINI_API_KEY` still prints the dry-run report and exits `0`.
-- **Changeset dry-run honors touched-file scope** - `--dry-run --base <ref>` reports only changed Python files and includes the verifier call implied by `--base`.
+- **Changeset dry-run honors touched-file scope** - `--dry-run --base <ref>` reports only changed Python files and includes the maximum verifier call implied by `--base`.
 - **Verbose dry-run remains diagnostic only** - verbose messages go to stderr while the dry-run report remains on stdout.
 
 ### Interface

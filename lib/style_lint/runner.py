@@ -37,6 +37,7 @@ class StyleLintConfig:
     api_key: str
     model: str
     changed_lines: dict[Path, set[int]] | None = None
+    dry_run: bool = False
     verify_findings: bool = False
     verify_model: str | None = None
     max_lines: int = 120
@@ -55,6 +56,19 @@ class StyleLintResult:
     usage: UsageMetadata = field(default_factory=UsageMetadata)
     files_checked: int = 0
     chunks_checked: int = 0
+    plan: StyleLintPlan | None = None
+
+
+@dataclass(frozen=True)
+class StyleLintPlan:
+    """Planned work for one advisory lint run without model calls."""
+
+    files: list[Path]
+    files_checked: int
+    chunks_checked: int
+    detector_api_calls: int
+    max_verifier_api_calls: int
+    max_total_api_calls: int
 
 
 def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
@@ -66,16 +80,40 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     Returns:
         Findings, formatted diagnostics, and an optional advisory warning.
     """
+    targets: list[Path] | None = None
+    chunks: list[SourceChunk] | None = None
     try:
         targets = collect_python_files(
             config.paths,
             default_paths=config.default_paths,
         )
         chunks = chunk_source_files(targets, max_lines=config.max_lines)
+        chunk_batches = _chunk_batches(chunks, size=config.chunk_batch_size)
+        if config.dry_run:
+            detector_api_calls = len(chunk_batches)
+            max_verifier_api_calls = (
+                1 if config.verify_findings and detector_api_calls > 0 else 0
+            )
+            plan = StyleLintPlan(
+                files=targets,
+                files_checked=len(targets),
+                chunks_checked=len(chunks),
+                detector_api_calls=detector_api_calls,
+                max_verifier_api_calls=max_verifier_api_calls,
+                max_total_api_calls=detector_api_calls + max_verifier_api_calls,
+            )
+            return StyleLintResult(
+                findings=[],
+                diagnostics=[],
+                files_checked=plan.files_checked,
+                chunks_checked=plan.chunks_checked,
+                plan=plan,
+            )
+
         findings: list[Finding] = []
         usage = UsageMetadata()
         progressed_files: set[Path] = set()
-        for chunk_batch in _chunk_batches(chunks, size=config.chunk_batch_size):
+        for chunk_batch in chunk_batches:
             _emit_file_progress(
                 chunks=chunk_batch,
                 progressed_files=progressed_files,
@@ -130,13 +168,11 @@ def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        return StyleLintResult(
-            findings=[],
-            diagnostics=[],
-            warning=f"advisory style lint skipped due to model error: {error}",
+        return _warning_result(
+            error=error,
             usage=usage if "usage" in locals() else UsageMetadata(),
-            files_checked=len(targets) if "targets" in locals() else 0,
-            chunks_checked=len(chunks) if "chunks" in locals() else 0,
+            targets=targets,
+            chunks=chunks,
         )
 
     return StyleLintResult(
@@ -152,6 +188,31 @@ def _call_gemini(**kwargs: object) -> object:
     """Call the package-level Gemini transport for easy test stubbing."""
     style_lint = importlib.import_module("lib.style_lint")
     return style_lint.call_gemini(**kwargs)
+
+
+def _warning_result(
+    *,
+    error: Exception,
+    usage: UsageMetadata,
+    targets: list[Path] | None,
+    chunks: list[SourceChunk] | None,
+) -> StyleLintResult:
+    """Build an advisory warning result while preserving prepared scope counts."""
+    files_checked = 0
+    chunks_checked = 0
+    if targets is not None:
+        files_checked = len(targets)
+    if chunks is not None:
+        chunks_checked = len(chunks)
+
+    return StyleLintResult(
+        findings=[],
+        diagnostics=[],
+        warning=f"advisory style lint skipped due to model error: {error}",
+        usage=usage,
+        files_checked=files_checked,
+        chunks_checked=chunks_checked,
+    )
 
 
 def _response_parts(response: object) -> GeminiResponse:

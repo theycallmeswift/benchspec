@@ -99,9 +99,31 @@ def test_run_advisory_lint_batches_detector_calls(
             ),
         )
     )
+    dry_run_result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            dry_run=True,
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
 
     assert result.warning is None
     assert len(seen_prompts) == 2
+    assert dry_run_result.plan is not None
+    assert dry_run_result.plan.detector_api_calls == len(seen_prompts)
+    assert dry_run_result.files_checked == result.files_checked
+    assert dry_run_result.chunks_checked == result.chunks_checked
     assert progress_events == [(source.resolve(), 1, 1)]
     assert result.files_checked == 1
     assert result.chunks_checked == 3
@@ -208,3 +230,107 @@ def test_run_advisory_lint_drops_invalid_individual_findings(
     assert result.diagnostics == [
         f"{source.resolve()}:1:1: descriptive-names Use a descriptive binding name."
     ]
+
+
+def test_run_advisory_lint_warning_preserves_prepared_scope_counts(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Keep partial file and chunk counts when detector batching fails."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="test-key",
+            model="gemini-test",
+            max_lines=1,
+            chunk_batch_size=0,
+        )
+    )
+
+    assert result.warning == (
+        "advisory style lint skipped due to model error: "
+        "chunk_batch_size must be at least 1"
+    )
+    assert result.files_checked == 1
+    assert result.chunks_checked == 3
+
+
+def test_run_advisory_lint_dry_run_returns_plan_without_model_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Let the reusable linter own dry-run planning mode."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+    monkeypatch.setattr(
+        framework,
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
+    )
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            dry_run=True,
+            verify_findings=True,
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
+
+    assert result.warning is None
+    assert result.diagnostics == []
+    assert result.findings == []
+    assert result.files_checked == 1
+    assert result.chunks_checked == 3
+    assert result.plan == framework.StyleLintPlan(
+        files=[source.resolve()],
+        files_checked=1,
+        chunks_checked=3,
+        detector_api_calls=2,
+        max_verifier_api_calls=1,
+        max_total_api_calls=3,
+    )
+
+
+def test_run_advisory_lint_dry_run_skips_verifier_when_no_chunks(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Skip verifier planning when chunking produces no detector work."""
+    source = tmp_path / "empty.py"
+    source.write_text("")
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            dry_run=True,
+            verify_findings=True,
+        )
+    )
+
+    assert result.plan == framework.StyleLintPlan(
+        files=[source.resolve()],
+        files_checked=1,
+        chunks_checked=0,
+        detector_api_calls=0,
+        max_verifier_api_calls=0,
+        max_total_api_calls=0,
+    )

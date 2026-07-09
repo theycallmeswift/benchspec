@@ -11,6 +11,7 @@ from lib.style_lint.detector import (
 from lib.style_lint.gemini import GEMINI_TIMEOUT_SECONDS, call_gemini, urllib
 from lib.style_lint.runner import (
     StyleLintConfig,
+    StyleLintPlan,
     StyleLintResult,
     run_advisory_lint,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "Rule",
     "SourceChunk",
     "StyleLintConfig",
+    "StyleLintPlan",
     "StyleLintResult",
     "UsageMetadata",
     "build_detector_prompt",
