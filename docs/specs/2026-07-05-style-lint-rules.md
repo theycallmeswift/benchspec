@@ -136,6 +136,8 @@ docs/style/development.md
   - `bin/linters/style_lint.py` also supports preflight planning with `uv run python bin/linters/style_lint.py --dry-run`.
   - Dry-run composes with explicit paths, `--base origin/dev`, `--max-lines`, `--verify-findings`, `--verify-model`, and `--verbose`.
   - Dry-run prints the resolved file list plus `files`, `chunks`, `detector_api_calls`, `max_verifier_api_calls`, and `max_total_api_calls` without requiring `GEMINI_API_KEY` or calling Gemini.
+  - Default-path and explicit directory scans respect Git ignore rules, so generated local files under ignored directories such as `.venv/`, `.worktrees/`, `tmp/`, `dist/`, and `build/` are not lint targets.
+  - Explicitly named Python files are still linted even when ignored, matching the CLI convention that direct file operands are intentional.
   - `detector_api_calls` is exact for the resolved file and chunk plan; `max_verifier_api_calls` and `max_total_api_calls` are upper bounds because verifier execution depends on detector findings.
   - With `--base`, dry-run resolves the changed files exactly, but changed-line filtering inside chunks still depends on the real lint pass.
   - Example preflight commands:
