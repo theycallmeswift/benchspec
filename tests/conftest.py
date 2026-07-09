@@ -29,6 +29,7 @@ def seed_arm(
     cache_creation_tokens: int = 25,
     judge_ms: int = 200,
     errored: bool = False,
+    binder_degraded: int = 0,
 ) -> Path:
     """Write a sample-sharded grading.json + timing.json.
 
@@ -45,6 +46,7 @@ def seed_arm(
                 "arm": arm,
                 "sample": sample,
                 "errored": errored,
+                "binder_degraded": binder_degraded,
                 "assertions": assertions,
             }
         )

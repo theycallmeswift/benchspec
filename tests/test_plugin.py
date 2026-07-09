@@ -1202,6 +1202,46 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     assert session.exitstatus == 0
 
 
+def test_binder_degraded_warns_in_terminal_summary(tmp_path: object, monkeypatch: object) -> None:
+    """Verify a nonzero binder_degraded total prints a WARN line, doesn't fail the run."""
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2, binder_degraded=3)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)
+
+    config = _FakeConfig(tmp_path)
+    session = _FakeSession(config)
+    plugin.pytest_sessionfinish(session, 0)
+
+    assert session.exitstatus == 0
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
+    assert any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
+
+
+def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) -> None:
+    """Verify no binder WARN line when nothing degraded."""
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)
+
+    config = _FakeConfig(tmp_path)
+    session = _FakeSession(config)
+    plugin.pytest_sessionfinish(session, 0)
+
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
+    # A bare "binder" substring check would self-collide: pytest's tmp_path embeds this
+    # test's own name (which contains "binder") into the benchmark.md path the delta
+    # line reports. Match the WARN line's actual shape instead.
+    assert not any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
+
+
 # On-disk --evalspec-config judge fixtures; each is driven end-to-end through the
 # real plugin hooks at collection time by the tests below.
 _FIXTURES = Path(__file__).parent / "fixtures" / "judge"
