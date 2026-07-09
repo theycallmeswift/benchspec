@@ -78,6 +78,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
     judge_ms: list[int] = []
     tokens: list[int] = []
     errored_total = 0
+    binder_degraded_total = 0
 
     for eval_dir in eval_dirs:
         arm_dir = eval_dir / arm
@@ -93,6 +94,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
             timing = _load_json(sample_dir / "timing.json")
             if grading is None:
                 continue
+            binder_degraded_total += grading.get("binder_degraded", 0)
             if grading.get("errored"):
                 # Infra failure — excluded from rates, counted so the report can't
                 # present a half-crashed run as a clean one.
@@ -142,6 +144,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         "tokens_mean": statistics.mean(tokens) if tokens else None,
         "tokens_stdev": statistics.stdev(tokens) if len(tokens) > 1 else None,
         "errored_samples": errored_total,
+        "binder_degraded": binder_degraded_total,
         "n": len(pair_rates),
         "per_eval": per_eval,
     }

@@ -592,6 +592,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         else None
     )
 
+    binder_degraded_total = 0
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         if not any(
             child_dir.is_dir() and child_dir.name.startswith(("eval-", "trigger-"))
@@ -604,6 +605,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             label=f"{iteration} · {skill}",
             baseline=baseline,
             arm_meta=arm_meta,
+        )
+        binder_degraded_total += sum(
+            stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
         lines.append(report.delta_line(skill, benchmark, skill_dir / "benchmark.md"))
         if fail_under is not None and benchmark["baseline"] is not None:
@@ -623,6 +627,14 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         index_lines += [json.dumps(row) for row in report.index_rows(skill_dir, skill)]
     if index_lines:
         (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
+    if binder_degraded_total:
+        # Visibility, not a CI gate — session.exitstatus is deliberately untouched, unlike
+        # the fail_under gate above. See execution.py's degradation-visibility contract.
+        lines.append(
+            f"WARN binder: {binder_degraded_total} assertion(s) degraded to judge "
+            "grading after a binder infra RuntimeError — see grading.json's "
+            "binder_degraded field per arm"
+        )
     config.stash[_SUMMARY_LINES] = lines
 
 

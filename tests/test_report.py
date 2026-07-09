@@ -270,6 +270,17 @@ def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
     assert stats["pass_rate"] == 1.0  # the errored 0% is excluded
 
 
+def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: object) -> None:
+    """Verify _arm_stats sums binder_degraded across every sample in the arm."""
+    eval_root = tmp_path / "archive"
+    seed_arm(eval_root, "alpha", "trial", passes=1, total=1, sample=0, binder_degraded=2)
+    seed_arm(eval_root, "alpha", "trial", passes=1, total=1, sample=1, binder_degraded=1)
+
+    stats = report._arm_stats([eval_root / "eval-alpha"], "trial")
+
+    assert stats["binder_degraded"] == 3
+
+
 def test_write_benchmark_writes_files(tmp_path: object) -> None:
     """Verify write benchmark writes files."""
     it = tmp_path / "iteration-1"
