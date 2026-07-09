@@ -296,8 +296,7 @@ def test_run_advisory_lint_warning_preserves_prepared_scope_counts(
     )
 
     assert result.warning == (
-        "advisory style lint skipped due to model error: "
-        "chunk_batch_size must be at least 1"
+        "advisory style lint skipped due to model error: chunk_batch_size must be at least 1"
     )
     assert result.files_checked == 1
     assert result.chunks_checked == 3

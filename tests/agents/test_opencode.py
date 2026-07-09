@@ -14,12 +14,12 @@ from tests.support import FakeExecOutput, FakeSandbox
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _lines(name: str) -> list[str]:
+def _fixture_lines(name: str) -> list[str]:
     """Build the lines test fixture."""
     return (FIXTURES / name).read_text().splitlines()
 
 
-def _agent(auth_env: str = "ANTHROPIC_API_KEY") -> OpenCodeAgent:
+def _opencode_agent(auth_env: str = "ANTHROPIC_API_KEY") -> OpenCodeAgent:
     """Build the agent test fixture."""
     return OpenCodeAgent(auth_value="sk-test", auth_env=auth_env, version="latest")
 
@@ -54,7 +54,7 @@ def test_build_command_accepts_qualified_model() -> None:
 
 def test_build_command_shape_and_effort_mapping() -> None:
     """Verify build command shape and effort mapping."""
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
         model="anthropic/claude-sonnet-4-6",
@@ -74,7 +74,7 @@ def test_build_command_shape_and_effort_mapping() -> None:
 
 def test_build_command_effort_low_maps_to_fast_variant() -> None:
     """Verify build command effort low maps to fast variant."""
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "q",
         plugin_dir=None,
         model="x/m",
@@ -88,7 +88,7 @@ def test_build_command_effort_low_maps_to_fast_variant() -> None:
 
 def test_build_command_effort_high_maps_to_thorough_variant() -> None:
     """Verify build command effort high maps to thorough variant."""
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "q",
         plugin_dir=None,
         model="x/m",
@@ -104,7 +104,7 @@ def test_build_command_ignores_plugin_and_resume() -> None:
     """Verify build command ignores plugin and resume."""
     # OpenCode v1 has no plugin-dir or resume equivalents; the args are accepted for
     # protocol parity but must not leak into the command line.
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "q",
         plugin_dir="/plugin",
         model="x/m",
@@ -124,7 +124,7 @@ def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
     # Primary OpenCode shape: `skill` tool dispatcher with `state.input.name`. This
     # is what fires when the agent uses OpenCode's native `skill` tool to load a
     # discovered skill from ~/.config/opencode/skills/<name>/SKILL.md.
-    agent = _agent()
+    agent = _opencode_agent()
     line = json.dumps(
         {
             "type": "tool_use",
@@ -153,7 +153,7 @@ def test_detect_dispatch_matches_tool_use_by_part_tool_fallback() -> None:
     """Verify detect dispatch matches tool use by part tool fallback."""
     # Fallback shape: tool name IS the skill name (some agents register skills
     # directly as tools instead of going through a dispatcher).
-    agent = _agent()
+    agent = _opencode_agent()
     line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
     assert agent.detect_dispatch(line, "archive") is True
     ns_line = json.dumps(
@@ -168,7 +168,7 @@ def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
     # is decided, so don't wait out the turn. The our-skill distinction no longer
     # lives here — it lives in detect_fired, which stays strict (see the dedicated
     # test_detect_dispatch_early_stops_on_any_skill test).
-    agent = _agent()
+    agent = _opencode_agent()
     line = json.dumps(
         {
             "type": "tool_use",
@@ -186,12 +186,12 @@ def test_detect_dispatch_false_for_other_tool_names() -> None:
     """Verify detect dispatch false for other tool names."""
     read = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "bash"}})
 
-    assert _agent().detect_dispatch(read, "archive") is False
+    assert _opencode_agent().detect_dispatch(read, "archive") is False
 
 
 def test_detect_dispatch_false_for_non_json_input() -> None:
     """Verify detect dispatch false for non json input."""
-    agent = _agent()
+    agent = _opencode_agent()
 
     assert agent.detect_dispatch("not json", "archive") is False
     assert agent.detect_dispatch("", "archive") is False
@@ -203,7 +203,7 @@ def test_detect_dispatch_false_when_skill_name_none() -> None:
     # dispatcher in OpenCode today).
     skill_line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
 
-    assert _agent().detect_dispatch(skill_line, None) is False
+    assert _opencode_agent().detect_dispatch(skill_line, None) is False
 
 
 def test_detect_dispatch_early_stops_on_any_skill() -> None:
@@ -228,19 +228,19 @@ def test_detect_dispatch_early_stops_on_any_skill() -> None:
 def test_opencode_detect_fired_true_on_our_skill() -> None:
     """Verify opencode detect fired true on our skill."""
     agent = OpenCodeAgent()
-    assert agent.detect_fired(_lines("opencode_route_fired.jsonl"), "archive") is True
+    assert agent.detect_fired(_fixture_lines("opencode_route_fired.jsonl"), "archive") is True
 
 
 def test_opencode_detect_fired_false_on_different_tool() -> None:
     """Verify opencode detect fired false on different tool."""
     agent = OpenCodeAgent()
-    assert agent.detect_fired(_lines("opencode_route_nofire.jsonl"), "archive") is False
+    assert agent.detect_fired(_fixture_lines("opencode_route_nofire.jsonl"), "archive") is False
 
 
 def test_opencode_streamed_activity_true_when_turn_began() -> None:
     """Verify opencode streamed activity true when turn began."""
     agent = OpenCodeAgent()
-    assert agent.streamed_activity(_lines("opencode_route_nofire.jsonl")) is True
+    assert agent.streamed_activity(_fixture_lines("opencode_route_nofire.jsonl")) is True
 
 
 def test_opencode_streamed_activity_false_on_no_events() -> None:
@@ -618,7 +618,7 @@ def test_provision_runs_install_script() -> None:
     """Verify provision runs install script."""
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().provision(sandbox))
+    asyncio.run(_opencode_agent().provision(sandbox))
 
     kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
@@ -637,14 +637,14 @@ def test_provision_raises_on_failure() -> None:
     """Verify provision raises for on failure."""
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
-        asyncio.run(_agent().provision(sandbox))
+        asyncio.run(_opencode_agent().provision(sandbox))
 
 
 def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> None:
     """Verify stage project assets copies skills into opencode discovery dir."""
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
+    asyncio.run(_opencode_agent().stage_project_assets(sandbox, "/project"))
 
     kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
@@ -672,7 +672,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
     sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
     res = asyncio.run(
-        _agent().invoke(
+        _opencode_agent().invoke(
             sandbox,
             "p",
             eval_id="e1",
@@ -692,7 +692,7 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
 def test_build_command_places_harness_args_before_prompt() -> None:
     """Verify build command places harness args before prompt."""
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
         model="x/m",
@@ -707,7 +707,7 @@ def test_build_command_places_harness_args_before_prompt() -> None:
 
 def test_build_command_allows_pass_through_equals_form() -> None:
     """Verify build command allows pass through equals form."""
-    cmd = _agent().build_command(
+    cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
         model="x/m",
@@ -723,7 +723,7 @@ def test_build_command_allows_pass_through_equals_form() -> None:
 def test_build_command_rejects_reserved_harness_args() -> None:
     """Verify build command rejects reserved harness args."""
     with pytest.raises(ValueError, match="reserved.*-m"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -737,7 +737,7 @@ def test_build_command_rejects_reserved_harness_args() -> None:
 def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
     """Verify build command rejects reserved harness arg equals form."""
     with pytest.raises(ValueError, match="reserved.*--variant"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -751,7 +751,7 @@ def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
 def test_build_command_rejects_attached_model_short_flag() -> None:
     """Verify build command rejects attached model short flag."""
     with pytest.raises(ValueError, match="reserved.*-m"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -765,7 +765,7 @@ def test_build_command_rejects_attached_model_short_flag() -> None:
 def test_build_command_rejects_reserved_continue_flag() -> None:
     """Verify build command rejects reserved continue flag."""
     with pytest.raises(ValueError, match="reserved.*--continue"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -779,7 +779,7 @@ def test_build_command_rejects_reserved_continue_flag() -> None:
 def test_build_command_rejects_reserved_continue_short_flag() -> None:
     """Verify build command rejects reserved continue short flag."""
     with pytest.raises(ValueError, match="reserved.*-c"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -793,7 +793,7 @@ def test_build_command_rejects_reserved_continue_short_flag() -> None:
 def test_build_command_rejects_reserved_session_flag() -> None:
     """Verify build command rejects reserved session flag."""
     with pytest.raises(ValueError, match="reserved.*--session"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -807,7 +807,7 @@ def test_build_command_rejects_reserved_session_flag() -> None:
 def test_build_command_rejects_reserved_session_short_flag() -> None:
     """Verify build command rejects reserved session short flag."""
     with pytest.raises(ValueError, match="reserved.*-s"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -821,7 +821,7 @@ def test_build_command_rejects_reserved_session_short_flag() -> None:
 def test_build_command_rejects_reserved_session_equals_form() -> None:
     """Verify build command rejects reserved session equals form."""
     with pytest.raises(ValueError, match="reserved.*--session"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -835,7 +835,7 @@ def test_build_command_rejects_reserved_session_equals_form() -> None:
 def test_build_command_rejects_reserved_command_flag() -> None:
     """Verify build command rejects reserved command flag."""
     with pytest.raises(ValueError, match="reserved.*--command"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -849,7 +849,7 @@ def test_build_command_rejects_reserved_command_flag() -> None:
 def test_build_command_rejects_reserved_prompt_flag() -> None:
     """Verify build command rejects reserved prompt flag."""
     with pytest.raises(ValueError, match="reserved.*--prompt"):
-        _agent().build_command(
+        _opencode_agent().build_command(
             "do the thing",
             plugin_dir=None,
             model="x/m",
@@ -865,7 +865,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
     sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text="")])
 
     asyncio.run(
-        _agent().invoke(
+        _opencode_agent().invoke(
             sandbox,
             "do the thing",
             eval_id="e1",
@@ -1124,7 +1124,7 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
     sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=stream)])
 
     asyncio.run(
-        _agent().invoke(
+        _opencode_agent().invoke(
             sandbox,
             "p",
             eval_id="e1",

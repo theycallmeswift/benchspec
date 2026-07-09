@@ -24,11 +24,11 @@ ALPHA_MD = textwrap.dedent(
 
 ## Prompt
 
-p
+Archive the source note.
 
 ## Assertions
 
-- [ ] a
+- [ ] source note archived
 """
 )
 
@@ -44,7 +44,7 @@ t1
 
 ## Assertions
 
-- [ ] x
+- [ ] summary written
 """
 )
 
@@ -123,13 +123,13 @@ def test_cross_product_of_evals_and_arms(pytester: object) -> None:
 
     out = _collect(pytester).stdout.str()
 
-    for ident in (
+    for node_id in (
         "test_eval[myskill-alpha-baseline]",
         "test_eval[myskill-alpha-trial]",
         "test_eval[myskill-beta-baseline]",
         "test_eval[myskill-beta-trial]",
     ):
-        assert ident in out
+        assert node_id in out
     assert out.count("test_eval[") == 4  # 2 evals × 2 arms
 
 
@@ -238,7 +238,7 @@ class _SetConfig:
         config: object = None,
         model: object = None,
         harness: object = None,
-        effort: object = None,
+        effort_level: object = None,
         env: object = None,
         models: object = None,
     ) -> None:
@@ -252,7 +252,7 @@ class _SetConfig:
                 "evalspec_config": config,
                 "evalspec_model": model,
                 "evalspec_harness": harness,
-                "evalspec_effort": effort,
+                "evalspec_effort": effort_level,
                 "evalspec_env": env or [],
                 "evalspec_models": models,
             },
@@ -475,8 +475,8 @@ def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object)
 LOG = r"{log}"
 
 def test_eval(eval_arm, sample_index):
-    with open(LOG, "a") as f:
-        f.write(f"{{sample_index}}\\n")
+    with open(LOG, "a") as sample_log:
+        sample_log.write(f"{{sample_index}}\\n")
 """
     )
 
@@ -543,14 +543,14 @@ class _FakeTR:
         self.events = []
         self.lines = []
 
-    def write_sep(self: object, sep: object, title: object) -> None:
-        """Write sep."""
-        self.events.append(("sep", title))
+    def write_sep(self: object, separator: object, title: object) -> None:
+        """Write separator."""
+        self.events.append(("separator", title))
 
-    def line(self: object, msg: object) -> None:
+    def line(self: object, message: object) -> None:
         """Line."""
-        self.events.append(("line", msg))
-        self.lines.append(msg)
+        self.events.append(("line", message))
+        self.lines.append(message)
 
 
 class _FakeSession:
@@ -585,9 +585,9 @@ def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> objec
     config = _FakeConfig(tmp_path)
     session = _FakeSession(config)
     plugin.pytest_sessionfinish(session, 0)
-    tr = _FakeTR()
-    plugin.pytest_terminal_summary(tr, 0, config)
-    return session, tr
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
+    return session, terminal_reporter
 
 
 def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) -> None:
@@ -595,16 +595,16 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=2, total=2)
-    seed_arm(it, "alpha", "baseline", passes=0, total=2)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)
 
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert ("sep", "evalspec benchmark") in terminal_reporter.events
+    assert ("separator", "evalspec benchmark") in terminal_reporter.events
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
     assert any("archive" in message and "+100pp" in message for message in lines)
-    assert (it / "benchmark.md").is_file()
+    assert (skill_results_dir / "benchmark.md").is_file()
 
 
 def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
@@ -630,7 +630,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
 
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert terminal_reporter.events.count(("sep", "evalspec benchmark")) == 1
+    assert terminal_reporter.events.count(("separator", "evalspec benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
     # trigger-only skill now reports too.
@@ -651,8 +651,14 @@ def test_build_manifest_assembles_shape_by_value() -> None:
         "agent": "claude-code",
         "agent_version": "9.9.9",
         "model": "sonnet",
-        "judge": {"harness": "claude-code", "model": "sonnet", "effort": "medium",
-                  "timeout": 300, "env": {}, "harness_args": []},
+        "judge": {
+            "harness": "claude-code",
+            "model": "sonnet",
+            "effort_level": "medium",
+            "timeout": 300,
+            "env": {},
+            "harness_args": [],
+        },
         "eval_effort": "medium",
         "trigger_effort": "low",
         "trigger_mode": "asymmetric",
@@ -688,8 +694,14 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         "agent": "claude-code",
         "agent_version": None,
         "model": "sonnet",
-        "judge": {"harness": "claude-code", "model": "sonnet", "effort": "medium",
-                  "timeout": 300, "env": {}, "harness_args": []},
+        "judge": {
+            "harness": "claude-code",
+            "model": "sonnet",
+            "effort_level": "medium",
+            "timeout": 300,
+            "env": {},
+            "harness_args": [],
+        },
         "eval_effort": "medium",
         "trigger_effort": "low",
         "trigger_mode": "asymmetric",
@@ -738,13 +750,13 @@ arms = [
         )
     )
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=1, total=1)
-    seed_arm(it, "alpha", "baseline", passes=0, total=1)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
     _finish_and_summarize(tmp_path)
 
-    meta = json.loads((it.parent.parent / "meta.json").read_text())
+    meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert meta["format_version"] == 1
     assert len(meta["run_id"]) == 32  # uuid4 hex
     assert len(meta["config_hash"]) == 12
@@ -770,15 +782,15 @@ arms = [
     assert "started_at" in meta
     assert "evalspec_version" in meta
 
-    benchmark = json.loads((it / "benchmark.json").read_text())
+    benchmark = json.loads((skill_results_dir / "benchmark.json").read_text())
     assert benchmark["arms"]["baseline"]["harness_args"] == ["--set-flag"]
     assert benchmark["arms"]["trial"]["harness_args"] == [
         "--set-flag",
         "--plugin-dir",
         "/project",
     ]
-    md = (it / "benchmark.md").read_text()
-    assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in md
+    benchmark_markdown = (skill_results_dir / "benchmark.md").read_text()
+    assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in benchmark_markdown
 
 
 def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch: object) -> None:
@@ -787,13 +799,13 @@ def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch:
     # harness=claude-code, model=sonnet/opus arms
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=1, total=1)
-    seed_arm(it, "alpha", "baseline", passes=0, total=1)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
     _finish_and_summarize(tmp_path)
 
-    meta = json.loads((it.parent.parent / "meta.json").read_text())
+    meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert "judge_model" not in meta
     assert meta["judge"]["harness"] == "claude-code"
     assert meta["judge"]["model"] == "sonnet"
@@ -815,13 +827,13 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(JUDGE_ENV_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=1, total=1)
-    seed_arm(it, "alpha", "baseline", passes=0, total=1)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
     _finish_and_summarize(tmp_path)
 
-    raw_text = (it.parent.parent / "meta.json").read_text()
+    raw_text = (skill_results_dir.parent.parent / "meta.json").read_text()
     meta = json.loads(raw_text)
     assert meta["judge"]["env"]["OPENAI_API_KEY"] == "***"
     assert "sk-live-supersecret123" not in raw_text
@@ -861,12 +873,12 @@ def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatc
     monkeypatch.setattr(plugin, "make_agent", boom)
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=1, total=1)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
 
     _finish_and_summarize(tmp_path)
 
-    meta = json.loads((it.parent.parent / "meta.json").read_text())
+    meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert meta["agent_version"] is None
     assert meta["token_split"] is None
     assert meta["set"] == "default"
@@ -916,8 +928,9 @@ def test_judge_model_flag_is_accepted(pytester: object) -> None:
 def test_judge_harness_flag_is_accepted(pytester: object) -> None:
     """Verify judge harness flag is accepted."""
     _make_project(pytester)
-    result = _collect(pytester, "--evalspec-judge-harness", "codex",
-                       "--evalspec-judge-model", "gpt-5.5")
+    result = _collect(
+        pytester, "--evalspec-judge-harness", "codex", "--evalspec-judge-model", "gpt-5.5"
+    )
 
     assert result.ret == 0
 
@@ -925,8 +938,9 @@ def test_judge_harness_flag_is_accepted(pytester: object) -> None:
 def test_judge_effort_and_timeout_flags_are_accepted(pytester: object) -> None:
     """Verify judge effort and timeout flags are accepted."""
     _make_project(pytester)
-    result = _collect(pytester, "--evalspec-judge-effort", "high",
-                       "--evalspec-judge-timeout", "120")
+    result = _collect(
+        pytester, "--evalspec-judge-effort", "high", "--evalspec-judge-timeout", "120"
+    )
 
     assert result.ret == 0
 
@@ -937,8 +951,11 @@ def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
     # token starting with `--` as a new option, not this option's value — a stock
     # argparse gotcha, unrelated to this flag's own parsing.
     _make_project(pytester)
-    result = _collect(pytester, "--evalspec-judge-harness-arg=--plugin-dir",
-                       "--evalspec-judge-harness-arg=/project")
+    result = _collect(
+        pytester,
+        "--evalspec-judge-harness-arg=--plugin-dir",
+        "--evalspec-judge-harness-arg=/project",
+    )
 
     assert result.ret == 0
 
@@ -946,8 +963,7 @@ def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
 def test_judge_env_flag_is_repeatable(pytester: object) -> None:
     """Verify judge env flag is repeatable."""
     _make_project(pytester)
-    result = _collect(pytester, "--evalspec-judge-env", "A=1",
-                       "--evalspec-judge-env", "B=2")
+    result = _collect(pytester, "--evalspec-judge-env", "A=1", "--evalspec-judge-env", "B=2")
 
     assert result.ret == 0
 
@@ -973,7 +989,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
 
     _make_project(pytester)
     monkeypatch.setattr(shutil, "which", lambda name: None)
-    # No-op the sandbox preflight so it can't fail first for unrelated reasons (no
+    # No-op the sandbox preflight so it cannot fail first for unrelated reasons (no
     # microVM/credentials) and mask the judge-binary assertion below.
     monkeypatch.setattr(sandbox, "preflight", lambda: None)
     # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
@@ -987,9 +1003,12 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     # `-k test_eval` keeps this to the real (parametrized) test_eval items; the dummy
     # project has no trigger-evals.md, so test_trigger collects zero items anyway.
     result = pytester.runpytest(
-        "-p", "evalspec.plugin",
-        "--evalspec-repo-root", str(pytester.path),
-        "-k", "test_eval",
+        "-p",
+        "evalspec.plugin",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "-k",
+        "test_eval",
     )
     assert result.ret != 0
     out = result.stdout.str() + result.stderr.str()
@@ -1003,7 +1022,7 @@ def test_judge_preflight_does_not_fire_on_trigger_only_session(
     # Regression guard: a trigger-only session (test_trigger, which doesn't request the
     # judge_config fixture) must not be forced to have a judge binary on PATH — trigger
     # runs never grade. No judge binary is "missing" here on purpose, so a failure can
-    # only mean the judge preflight fired when it shouldn't have.
+    # only mean the judge preflight fired when it should not have.
     import shutil
 
     from evalspec import sandbox
@@ -1026,9 +1045,12 @@ def test_judge_preflight_does_not_fire_on_trigger_only_session(
     # No explicit positional (same reasoning as the test above): self-registration
     # must load the real cases.py so this exercises the real judge preflight gate.
     result = pytester.runpytest(
-        "-p", "evalspec.plugin",
-        "--evalspec-repo-root", str(pytester.path),
-        "-k", "q1",
+        "-p",
+        "evalspec.plugin",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "-k",
+        "q1",
     )
     out = result.stdout.str() + result.stderr.str()
     assert "not found on PATH" not in out
@@ -1038,11 +1060,14 @@ def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(pyteste
     """Verify judge model flag no longer shadows pyproject default when unset."""
     # Regression guard for the precedence bug: --evalspec-judge-model must default to
     # None so an unset flag never overrides [tool.evalspec.judge] model.
-    project_toml = ARMS_TOML + """
+    project_toml = (
+        ARMS_TOML
+        + """
 [tool.evalspec.judge]
 harness = "codex"
 model = "gpt-5.5"
 """
+    )
     _make_project(pytester, arms_toml=project_toml)
     result = _collect(pytester)  # no --evalspec-judge-model passed
     assert result.ret == 0
@@ -1050,10 +1075,13 @@ model = "gpt-5.5"
 
 def test_unsupported_judge_harness_fails_at_collection(pytester: object) -> None:
     """Verify unsupported judge harness fails at collection."""
-    project_toml = ARMS_TOML + """
+    project_toml = (
+        ARMS_TOML
+        + """
 [tool.evalspec.judge]
 harness = "cursor"
 """
+    )
     _make_project(pytester, arms_toml=project_toml)
     result = _collect(pytester)
     assert result.ret != 0
@@ -1101,14 +1129,17 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
-    seed_arm(it / "archive", "alpha", "trial", passes=1, total=1)
-    seed_arm(it / "archive", "alpha", "baseline", passes=0, total=1)
-    seed_trigger(it / "bootstrap", 1, should_trigger=True, fires=1)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    seed_arm(skill_results_dir / "archive", "alpha", "trial", passes=1, total=1)
+    seed_arm(skill_results_dir / "archive", "alpha", "baseline", passes=0, total=1)
+    seed_trigger(skill_results_dir / "bootstrap", 1, should_trigger=True, fires=1)
 
     _finish_and_summarize(tmp_path)
 
-    lines = [json.loads(line) for line in (it.parent / "index.jsonl").read_text().splitlines()]
+    lines = [
+        json.loads(line)
+        for line in (skill_results_dir.parent / "index.jsonl").read_text().splitlines()
+    ]
     assert {record["skill"] for record in lines} == {"archive", "bootstrap"}
     assert sum(1 for record in lines if record["kind"] == "eval") == 2
     assert sum(1 for record in lines if record["kind"] == "trigger") == 1
@@ -1119,9 +1150,9 @@ def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> N
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=0, total=2)  # 0%
-    seed_arm(it, "alpha", "baseline", passes=2, total=2)  # 100% → delta -100pp
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=0, total=2)  # 0%
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)  # 100% → delta -100pp
 
     config = _FakeConfig(tmp_path, fail_under=0.0)
     session = _FakeSession(config)
@@ -1138,9 +1169,9 @@ def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> Non
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial", passes=2, total=2)  # 100%
-    seed_arm(it, "alpha", "baseline", passes=0, total=2)  # 0% → delta +100pp
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)  # 100%
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)  # 0% → delta +100pp
 
     config = _FakeConfig(tmp_path, fail_under=0.0)
     session = _FakeSession(config)
@@ -1160,9 +1191,9 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
         'arms = [{name="trial-opus"}, {name="trial-sonnet"}]\n'
     )
     workspace.set_current_iteration("iteration_01")
-    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
-    seed_arm(it, "alpha", "trial-opus", passes=0, total=2)
-    seed_arm(it, "alpha", "trial-sonnet", passes=0, total=2)
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial-opus", passes=0, total=2)
+    seed_arm(skill_results_dir, "alpha", "trial-sonnet", passes=0, total=2)
 
     config = _FakeConfig(tmp_path, fail_under=0.0)
     session = _FakeSession(config)
@@ -1180,9 +1211,14 @@ def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> No
     """Verify unsupported judge harness fixture exits nonzero."""
     _make_project(pytester)
     result = pytester.runpytest(
-        "-p", "evalspec.plugin", "--collect-only", "-q",
-        "--evalspec-repo-root", str(pytester.path),
-        "--evalspec-config", str(_FIXTURES / "unsupported-judge-harness.toml"),
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "--evalspec-config",
+        str(_FIXTURES / "unsupported-judge-harness.toml"),
         "test_cases.py::test_eval",
     )
     assert result.ret != 0
@@ -1201,8 +1237,8 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
 
     from evalspec.judges import resolve_judge_config
 
-    with (_FIXTURES / "unset-judge-env.toml").open("rb") as f:
-        raw = tomllib.load(f)
+    with (_FIXTURES / "unset-judge-env.toml").open("rb") as fixture_file:
+        raw = tomllib.load(fixture_file)
     judge_table = raw["tool"]["evalspec"]["judge"]
     config = resolve_judge_config(pyproject_table=judge_table)  # no raise — structural only
     assert config.env == {"SOME_JUDGE_KEY": "$EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"}

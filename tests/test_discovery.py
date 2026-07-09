@@ -50,13 +50,13 @@ class _FakeConfig:
 def _seed_slug_suite(
     tmp_path: object,
     skill: object = "demo",
-    evals: object = None,
-    root: object = "skills",
+    eval_cases: object = None,
+    suite_root: object = "skills",
 ) -> object:
     """Seed slug suite."""
-    base = tmp_path / root / skill / "evals"
+    base = tmp_path / suite_root / skill / "evals"
     for slug, (prompt, assertions) in (
-        evals
+        eval_cases
         or {
             "alpha": ("do the thing", ["it did the thing"]),
         }
@@ -86,8 +86,8 @@ def _write_triggers(skill_dir: Path, queries: list[str], *, skill_name: object =
 
 def test_resolve_repo_root_prefers_option(tmp_path: object) -> None:
     """Verify resolve repo root prefers option."""
-    cfg = _FakeConfig(repo_root=str(tmp_path))
-    assert resolve_repo_root(cfg) == tmp_path.resolve()
+    fake_config = _FakeConfig(repo_root=str(tmp_path))
+    assert resolve_repo_root(fake_config) == tmp_path.resolve()
 
 
 def test_resolve_repo_root_falls_back_to_project_root_env(
@@ -101,8 +101,8 @@ def test_resolve_repo_root_falls_back_to_project_root_env(
 def test_resolve_repo_root_falls_back_to_rootpath(monkeypatch: object) -> None:
     """Verify resolve repo root falls back to rootpath."""
     monkeypatch.delenv("PROJECT_ROOT", raising=False)
-    cfg = _FakeConfig(rootpath=Path("/some/rootdir"))
-    assert resolve_repo_root(cfg) == Path("/some/rootdir")
+    fake_config = _FakeConfig(rootpath=Path("/some/rootdir"))
+    assert resolve_repo_root(fake_config) == Path("/some/rootdir")
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +111,10 @@ def test_resolve_repo_root_falls_back_to_rootpath(monkeypatch: object) -> None:
 
 
 def _skill(
-    tmp_path: object, name: object, slug: object, body: object, root: object = "skills"
+    tmp_path: object, name: object, slug: object, body: object, suite_root: object = "skills"
 ) -> object:
     """Write one `<root>/<name>/evals/<slug>/prompt.md` with the given body."""
-    eval_dir = tmp_path / root / name / "evals" / slug
+    eval_dir = tmp_path / suite_root / name / "evals" / slug
     eval_dir.mkdir(parents=True)
     (eval_dir / "prompt.md").write_text(body)
     return tmp_path
@@ -172,8 +172,8 @@ def test_discover_rejects_unknown_frontmatter_end_to_end(tmp_path: object) -> No
     _skill(
         tmp_path,
         "ingest",
-        "bad",
-        "---\nid: bad\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n",
+        "bad_prompt",
+        "---\nid: bad_prompt\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] x\n",
     )
 
     with pytest.raises(MdFormatError):
@@ -232,7 +232,7 @@ def test_discover_eval_cases_one_per_slug(tmp_path: object) -> None:
     _seed_slug_suite(
         tmp_path,
         skill="myskill",
-        evals={
+        eval_cases={
             "alpha": ("p", ["a"]),
             "beta": ("t1", ["x"]),
         },
@@ -247,8 +247,8 @@ def test_discover_eval_cases_one_per_slug(tmp_path: object) -> None:
 
 def test_discover_eval_cases_sorted_by_skill(tmp_path: object) -> None:
     """Verify discover eval cases sorted by skill."""
-    _seed_slug_suite(tmp_path, skill="zebra", evals={"z": ("p", ["a"])})
-    _seed_slug_suite(tmp_path, skill="alpha", evals={"a": ("p", ["a"])})
+    _seed_slug_suite(tmp_path, skill="zebra", eval_cases={"z": ("p", ["a"])})
+    _seed_slug_suite(tmp_path, skill="alpha", eval_cases={"a": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
     assert [case.skill for case in cases] == ["alpha", "zebra"]
 
@@ -261,22 +261,22 @@ def test_discover_eval_cases_no_skills_root(tmp_path: object) -> None:
 def test_discover_eval_cases_skips_skill_without_evals(tmp_path: object) -> None:
     """Verify discover eval cases skips skill without evals."""
     (tmp_path / "skills" / "bare").mkdir(parents=True)
-    _seed_slug_suite(tmp_path, skill="real", evals={"r": ("p", ["a"])})
+    _seed_slug_suite(tmp_path, skill="real", eval_cases={"r": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
     assert [case.skill for case in cases] == ["real"]
 
 
 def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
-    """Verify discover eval cases raises for on bad schema."""
+    """Verify discover eval cases raises for on bad_prompt schema."""
     # Malformed here = a bare `## Prompt` with no `## Assertions` section.
-    bad = tmp_path / "skills" / "bad" / "evals" / "a" / "prompt.md"
-    bad.parent.mkdir(parents=True)
-    bad.write_text("---\n{}\n---\n\n## Prompt\n\np\n")
+    bad_prompt = tmp_path / "skills" / "bad_prompt" / "evals" / "a" / "prompt.md"
+    bad_prompt.parent.mkdir(parents=True)
+    bad_prompt.write_text("---\n{}\n---\n\n## Prompt\n\np\n")
 
     with pytest.raises((MdFormatError, schema.SchemaError)) as exc_info:
         discover_eval_cases(tmp_path)
 
-    assert str(bad) in str(exc_info.value)  # the offending file is named
+    assert str(bad_prompt) in str(exc_info.value)  # the offending file is named
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +400,7 @@ def test_output_and_trigger_evals_coexist(tmp_path: object) -> None:
     # and must not include anything derived from trigger-evals.md.
     # discover_trigger_cases must return the trigger case.
     skill_dir = tmp_path / "skills" / "myskill"
-    _seed_slug_suite(tmp_path, skill="myskill", evals={"alpha": ("do the thing", ["it did"])})
+    _seed_slug_suite(tmp_path, skill="myskill", eval_cases={"alpha": ("do the thing", ["it did"])})
     _write_triggers(skill_dir, ["- my-query: do this thing\n"])
 
     output_cases = discover_eval_cases(tmp_path)
@@ -429,32 +429,32 @@ def _write_pyproject(tmp_path: object, body: str) -> None:
 
 def test_env_config_absent_is_falsy_and_empty_digest(tmp_path: object) -> None:
     """Verify env config absent is falsy and empty digest."""
-    cfg = resolve_environment_config(tmp_path)  # no pyproject.toml at all
-    assert bool(cfg) is False
-    assert cfg.base_image is None
-    assert cfg.script == b""
-    assert cfg.digest() == ""
+    fake_config = resolve_environment_config(tmp_path)  # no pyproject.toml at all
+    assert bool(fake_config) is False
+    assert fake_config.base_image is None
+    assert fake_config.script == b""
+    assert fake_config.digest() == ""
 
 
 def test_env_config_base_image_only(tmp_path: object) -> None:
     """Verify env config base image only."""
     _write_pyproject(tmp_path, 'base_image = "python:3.12-slim"\n')
-    cfg = resolve_environment_config(tmp_path)
-    assert bool(cfg) is True
-    assert cfg.base_image == "python:3.12-slim"
-    assert cfg.script == b""
-    assert len(cfg.digest()) == 8
+    fake_config = resolve_environment_config(tmp_path)
+    assert bool(fake_config) is True
+    assert fake_config.base_image == "python:3.12-slim"
+    assert fake_config.script == b""
+    assert len(fake_config.digest()) == 8
 
 
 def test_env_config_script_resolved_to_bytes(tmp_path: object) -> None:
     """Verify env config script resolved to bytes."""
     (tmp_path / "setup.sh").write_text("apt-get install -y jq\n", encoding="utf-8")
     _write_pyproject(tmp_path, 'environment_script = "setup.sh"\n')
-    cfg = resolve_environment_config(tmp_path)
-    assert bool(cfg) is True
-    assert cfg.script == b"apt-get install -y jq\n"
-    assert cfg.script_path == "setup.sh"
-    assert len(cfg.digest()) == 8
+    fake_config = resolve_environment_config(tmp_path)
+    assert bool(fake_config) is True
+    assert fake_config.script == b"apt-get install -y jq\n"
+    assert fake_config.script_path == "setup.sh"
+    assert len(fake_config.digest()) == 8
 
 
 def test_env_config_digest_changes_with_script_bytes(tmp_path: object) -> None:
@@ -473,10 +473,10 @@ def test_env_config_digest_ignores_script_path(tmp_path: object) -> None:
     (tmp_path / "a.sh").write_text("echo same\n", encoding="utf-8")
     (tmp_path / "b.sh").write_text("echo same\n", encoding="utf-8")
     _write_pyproject(tmp_path, 'environment_script = "a.sh"\n')
-    da = resolve_environment_config(tmp_path).digest()
+    digest_a = resolve_environment_config(tmp_path).digest()
     _write_pyproject(tmp_path, 'environment_script = "b.sh"\n')
-    db = resolve_environment_config(tmp_path).digest()
-    assert da == db
+    digest_b = resolve_environment_config(tmp_path).digest()
+    assert digest_a == digest_b
 
 
 def test_env_config_base_image_wrong_type_raises(tmp_path: object) -> None:
