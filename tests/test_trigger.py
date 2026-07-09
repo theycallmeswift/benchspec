@@ -472,7 +472,7 @@ def test_count_fires_uses_injected_detect_fired() -> None:
 
     # A detector that fires only on a sentinel line proves count_fires honors the
     # injected callable rather than the Claude-hardcoded default.
-    def route(*a: object, **k: object) -> object:
+    def route(*args: object, **kwargs: object) -> object:
         """Route."""
         return ["FIRE"]
 
@@ -480,7 +480,7 @@ def test_count_fires_uses_injected_detect_fired() -> None:
         """Detect fired."""
         return "FIRE" in lines
 
-    n = count_fires(
+    fire_count = count_fires(
         "q",
         "archive",
         "/repo",
@@ -490,7 +490,7 @@ def test_count_fires_uses_injected_detect_fired() -> None:
         passes=3,
         threshold=3,
     )
-    assert n == 3
+    assert fire_count == 3
 
 
 def test_trigger_record_persists_verdict_and_query() -> None:
@@ -590,13 +590,15 @@ def test_trigger_record_carries_slug_and_model() -> None:
     """Verify trigger record carries slug and model."""
     from evalspec.trigger import trigger_record
 
-    q = {"slug": "ingest-article", "query": "q", "should_trigger": True}
-    rec = trigger_record(q, mode="majority", threshold=2, fires=2, per_pass=[], model="opus")
-    assert rec["slug"] == "ingest-article"
-    assert rec["model"] == "opus"
-    assert "query_id" not in rec
-    assert rec["fired"] is True
-    assert rec["passed"] is True
+    query = {"slug": "ingest-article", "query": "q", "should_trigger": True}
+    record = trigger_record(
+        query, mode="majority", threshold=2, fires=2, per_pass=[], model="opus"
+    )
+    assert record["slug"] == "ingest-article"
+    assert record["model"] == "opus"
+    assert "query_id" not in record
+    assert record["fired"] is True
+    assert record["passed"] is True
 
 
 def test_xfail_applies_when_model_is_a_listed_tier() -> None:

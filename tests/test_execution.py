@@ -22,7 +22,7 @@ def _no_real_vm(monkeypatch: object) -> None:
     # run_eval_arm resolves a real agent + snapshot (which would build a microVM). Stub both
     # so unit tests never touch microsandbox; session_factory is faked separately per test.
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: None)
-    monkeypatch.setattr("evalspec.execution.ensure_snapshot", lambda agent, **k: "snap")
+    monkeypatch.setattr("evalspec.execution.ensure_snapshot", lambda agent, **kwargs: "snap")
 
 
 def _grade_all_pass(
@@ -43,7 +43,9 @@ def _grade_all_pass(
     return {
         "eval_id": eval_id,
         "arm": config,
-        "assertions": [{"text": a, "passed": True, "evidence": "ok"} for a in assertions],
+        "assertions": [
+            {"text": assertion, "passed": True, "evidence": "ok"} for assertion in assertions
+        ],
     }
 
 
@@ -110,7 +112,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
 
     assert outcome.errored is False
     assert outcome.fired is True
-    assert [a["passed"] for a in outcome.grading["assertions"]] == [True, True]
+    assert [assertion["passed"] for assertion in outcome.grading["assertions"]] == [True, True]
     # session_factory called with the arm NAME (not the Arm repr) and arm.model
     factory_kwargs = session_factory.calls[0]
     assert factory_kwargs["host_workdir"] == workdir
@@ -256,10 +258,10 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
     assertions = ["Skill `ingest` invoked", "the summary reflects the facts"]
     judged = []
 
-    def grade(texts: object, *a: object, **k: object) -> object:
+    def grade(texts: object, *args: object, **kwargs: object) -> object:
         """Grade."""
         judged.append(list(texts))
-        return {"assertions": [{"text": t, "passed": True, "evidence": "ok"} for t in texts]}
+        return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
 
     wd_trial = tmp_path / "trial"
     wd_trial.mkdir()
@@ -303,8 +305,10 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
         bind=bind,
     )
 
-    t = {a["text"]: a["passed"] for a in trial.grading["assertions"]}
-    assert t["Skill `ingest` invoked"] is True
+    text_results = {
+        assertion["text"]: assertion["passed"] for assertion in trial.grading["assertions"]
+    }
+    assert text_results["Skill `ingest` invoked"] is True
     assert judged == [["the summary reflects the facts"]]  # the semantic one reached the judge
     assert "gated" not in trial.grading
 
@@ -328,10 +332,10 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     assertions = ["Skill `ingest` invoked", "the summary reflects the facts"]
     judged = []
 
-    def grade(texts: object, *a: object, **k: object) -> object:
+    def grade(texts: object, *args: object, **kwargs: object) -> object:
         """Grade."""
         judged.append(list(texts))
-        return {"assertions": [{"text": t, "passed": True, "evidence": "ok"} for t in texts]}
+        return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
 
     wd_base = tmp_path / "base"
     wd_base.mkdir()
@@ -367,16 +371,17 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
         bind=bind,
     )
 
-    b = {a["text"]: a["passed"] for a in baseline.grading["assertions"]}
-    assert b["Skill `ingest` invoked"] is False  # graded False, not a crash or skip
-    assert judged == [["the summary reflects the facts"]]  # the semantic one reached the judge
+    baseline_results = {
+        assertion["text"]: assertion["passed"] for assertion in baseline.grading["assertions"]
+    }
+    assert baseline_results["Skill `ingest` invoked"] is False
+    assert judged == [["the summary reflects the facts"]]
     assert "gated" not in baseline.grading
 
 
 def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
     """Verify run eval arm no fired gate."""
-    # A trial arm where the skill never fired must grade the activation assertion False,
-    # not raise — there is no fired-gate that crashes the arm.
+    # Missing skill activation grades false.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -424,8 +429,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
 
 def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
     """Verify baseline arm fired skills empty not errored."""
-    # Baseline arm, skill absent: the trajectory reports nothing dispatched. The
-    # skill_invoked assertion grades False off an EMPTY fired set, not off an error.
+    # Empty dispatched-skill context grades the activation assertion false.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -490,7 +494,7 @@ def _record_session_model(seen: object, name: object) -> object:
 
 def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
     """Verify run eval arm routes opus arm model."""
-    # The recorded session model == arm.model, NOT a shared --evalspec-model fixture value.
+    # The session model comes from the arm configuration.
     workspace.set_current_iteration("iteration_01")
     ec = _case(tmp_path, {"slug": "m", "prompt": "p", "assertions": ["a"]})
     seen = {}
@@ -541,8 +545,7 @@ def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
 
 def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch: object) -> None:
     """Verify run eval arm selects agent by arm harness."""
-    # The agent is built from arm.harness, so a multi-harness set runs each column on its
-    # own harness, not the single global EVALSPEC_AGENT.
+    # The agent is built from arm.harness.
     workspace.set_current_iteration("iteration_01")
     captured = {}
 
@@ -580,8 +583,7 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     tmp_path: object, monkeypatch: object
 ) -> None:
     """Verify run eval arm threads arm effort and expanded env."""
-    # Effort and env reach the session from `arm`, not a shared fixture; env `$VAR` is
-    # expanded against os.environ at exec time, and the resolved eval-set name threads through.
+    # Effort, env, and eval-set name reach the session from the arm context.
     workspace.set_current_iteration("iteration_01")
     monkeypatch.setenv("SECRET", "s3cr3t")
     workdir = tmp_path / "wd"
@@ -613,13 +615,13 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
         bind=_punt_all,
     )
 
-    kw = session_factory.calls[0]
-    assert kw["effort"] == "high"  # effort comes from arm.effort
-    assert kw["arm_env"] == {
+    call_kwargs = session_factory.calls[0]
+    assert call_kwargs["effort"] == "high"
+    assert call_kwargs["arm_env"] == {
         "TOK": "s3cr3t",
         "LIT": "plain",
-    }  # $VAR expanded at exec time
-    assert kw["eval_set"] == "trial-set"
+    }
+    assert call_kwargs["eval_set"] == "trial-set"
 
 
 def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
@@ -652,8 +654,7 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
 
 def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
     """Verify artifact dir uses arm name string."""
-    # The written workspace dir is eval-<id>/trial/sample-0 — the arm NAME, not an Arm(...)
-    # repr. Guards the writer/reader desync with the report reader.
+    # Artifact paths use the arm name string.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -684,7 +685,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
 
 def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
     """Verify seed block prepended to graded prompt."""
-    # The one behavioral promise of seed:, verified end-to-end.
+    # Seed turns are prepended to the graded prompt.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -754,8 +755,7 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
 
 def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
     """Verify detect skill passed unconditionally."""
-    # `fired` bookkeeping streams the skill name on every arm — detect_skill is the
-    # suite's skill, not gated on a with_skill literal.
+    # Fired bookkeeping streams the suite skill name on every arm.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -791,9 +791,14 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
         RunResult("gamma", "baseline", "<timeout>", 0, 0, True),
     )
 
-    def grade_fail(assertions: object, *a: object, **k: object) -> object:
+    def grade_fail(assertions: object, *args: object, **kwargs: object) -> object:
         """Grade fail."""
-        return {"assertions": [{"text": x, "passed": False, "evidence": ""} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": False, "evidence": ""}
+                for assertion in assertions
+            ]
+        }
 
     outcome = run_eval_arm(
         ec,
@@ -814,16 +819,20 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
 
 def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     """Verify failed assertions do not error the arm."""
-    # A failed assertion is the recorded measurement, not a gate — outcome.errored stays
-    # False so the report counts it as an honest 0%, not an excluded infra failure.
+    # Failed assertions do not mark the arm as an infrastructure error.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
     ec = _case(tmp_path, {"slug": "fail", "prompt": "p", "assertions": ["a1", "a2"]})
 
-    def grade_fail(assertions: object, *a: object, **k: object) -> object:
+    def grade_fail(assertions: object, *args: object, **kwargs: object) -> object:
         """Grade fail."""
-        return {"assertions": [{"text": x, "passed": False, "evidence": "no"} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": False, "evidence": "no"}
+                for assertion in assertions
+            ]
+        }
 
     outcome = run_eval_arm(
         ec,
@@ -842,13 +851,12 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     )
 
     assert outcome.errored is False
-    assert [a["passed"] for a in outcome.grading["assertions"]] == [False, False]
+    assert [assertion["passed"] for assertion in outcome.grading["assertions"]] == [False, False]
 
 
 def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> None:
     """Verify judge pinned to claude regardless of task model."""
-    # The judge always shells out to the host `claude` CLI, which only knows Claude-family
-    # aliases. An arm model like `google/gemini-3.5-flash` must not reach the judge.
+    # The judge model is independent of the task model.
     from evalspec.execution import JUDGE_MODEL
 
     workspace.set_current_iteration("iteration_01")
@@ -857,10 +865,15 @@ def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> No
     ec = _case(tmp_path, {"slug": "mu", "prompt": "p", "assertions": ["a"]})
     seen_models = []
 
-    def grade(assertions: object, *a: object, model: object, **k: object) -> object:
+    def grade(assertions: object, *args: object, model: object, **kwargs: object) -> object:
         """Grade."""
         seen_models.append(model)
-        return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": True, "evidence": "ok"}
+                for assertion in assertions
+            ]
+        }
 
     run_eval_arm(
         ec,
@@ -889,10 +902,15 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
     ec = _case(tmp_path, {"slug": "nu", "prompt": "p", "assertions": ["a"]})
     seen_models = []
 
-    def grade(assertions: object, *a: object, model: object, **k: object) -> object:
+    def grade(assertions: object, *args: object, model: object, **kwargs: object) -> object:
         """Grade."""
         seen_models.append(model)
-        return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": True, "evidence": "ok"}
+                for assertion in assertions
+            ]
+        }
 
     run_eval_arm(
         ec,
@@ -916,14 +934,13 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
 
 def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
     """Verify judge runtimeerror marks arm errored."""
-    # An infra-level judge failure raises RuntimeError; run_eval_arm surfaces it as
-    # arm-level errored=True with the real cause in each assertion's evidence.
+    # Judge infrastructure failures mark the arm errored.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
     ec = _case(tmp_path, {"slug": "kappa", "prompt": "p", "assertions": ["a1", "a2"]})
 
-    def grade_raises(*a: object, **k: object) -> NoReturn:
+    def grade_raises(*args: object, **kwargs: object) -> NoReturn:
         """Grade raises."""
         raise RuntimeError("host claude CLI returned is_error=true: Not logged in")
 
@@ -954,9 +971,9 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
 
     assert outcome.errored is True
     assertions = outcome.grading["assertions"]
-    assert [a["text"] for a in assertions] == ["a1", "a2"]
-    assert all("JUDGE INFRA ERROR" in a["evidence"] for a in assertions)
-    assert all("Not logged in" in a["evidence"] for a in assertions)
+    assert [assertion["text"] for assertion in assertions] == ["a1", "a2"]
+    assert all("JUDGE INFRA ERROR" in assertion["evidence"] for assertion in assertions)
+    assert all("Not logged in" in assertion["evidence"] for assertion in assertions)
     run_dir = workspace.arm_dir(tmp_path, "myskill", "kappa", "trial", sample=0)
     persisted = json.loads((run_dir / "grading.json").read_text())
     assert persisted["errored"] is True
@@ -964,8 +981,7 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
 
 def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: object) -> None:
     """Verify missing judge binary marks arm errored."""
-    # The host `claude` CLI missing must surface as arm-level errored=True. Drives the REAL
-    # grade_run + a real agent so the whole chain runs.
+    # Missing judge binary marks the arm errored.
     from evalspec.agents.claude import ClaudeCodeAgent
 
     workspace.set_current_iteration("iteration_01")
@@ -975,7 +991,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
     agent = ClaudeCodeAgent(auth_value="k", version="v")
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
 
-    def boom(*a: object, **k: object) -> NoReturn:
+    def boom(*args: object, **kwargs: object) -> NoReturn:
         """Boom."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
@@ -998,8 +1014,8 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
 
     assert outcome.errored is True
     assertions = outcome.grading["assertions"]
-    assert [a["passed"] for a in assertions] == [False, False]
-    assert all("JUDGE INFRA ERROR" in a["evidence"] for a in assertions)
+    assert [assertion["passed"] for assertion in assertions] == [False, False]
+    assert all("JUDGE INFRA ERROR" in assertion["evidence"] for assertion in assertions)
     run_dir = workspace.arm_dir(tmp_path, "myskill", "lam", "trial", sample=0)
     assert json.loads((run_dir / "grading.json").read_text())["errored"] is True
 
@@ -1036,8 +1052,7 @@ def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
 
 def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> None:
     """Verify session jsonl consolidated with turn delimiter."""
-    # One session.jsonl for the arm, delimited by {"turn": 1}; the structured trajectory
-    # regenerates from it.
+    # The consolidated session file uses explicit turn delimiters.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1144,8 +1159,7 @@ def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
 
 def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
     """Verify run result artifacts merge into graded facts."""
-    # Files the agent wrote outside the workdir mount ride on RunResult.artifacts and must
-    # reach the judge's tree/contents.
+    # RunResult artifacts are merged into judge facts.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1159,12 +1173,17 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
         contents: object,
         shas: object,
         result_text: object,
-        *a: object,
-        **k: object,
+        *args: object,
+        **kwargs: object,
     ) -> object:
         """Grade."""
         seen["tree"], seen["contents"] = tree, contents
-        return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": True, "evidence": "ok"}
+                for assertion in assertions
+            ]
+        }
 
     run_eval_arm(
         ec,
@@ -1235,7 +1254,12 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
     ) -> object:
         """Grade."""
         seen["process_facts"] = process_facts
-        return {"assertions": [{"text": a, "passed": True, "evidence": "ok"} for a in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": True, "evidence": "ok"}
+                for assertion in assertions
+            ]
+        }
 
     run_eval_arm(
         ec,
@@ -1268,7 +1292,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
 
 def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
     """Verify bind failure punts to judge not error."""
-    # A transient bind() RuntimeError must degrade to semantic grading, never error the cell.
+    # Bind failures degrade to semantic grading.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1279,10 +1303,15 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
         """Bind raises."""
         raise RuntimeError("host claude hiccup")
 
-    def grade(assertions: object, *a: object, **k: object) -> object:
+    def grade(assertions: object, *args: object, **kwargs: object) -> object:
         """Grade."""
         judged.append(list(assertions))
-        return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
+        return {
+            "assertions": [
+                {"text": assertion, "passed": True, "evidence": "ok"}
+                for assertion in assertions
+            ]
+        }
 
     outcome = run_eval_arm(
         ec,
@@ -1307,8 +1336,7 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
 
 def test_bind_caches_distinct_strings(tmp_path: object) -> None:
     """Verify bind caches distinct strings."""
-    # A repeated assertion binds once — the binder is a per-assertion host call, so caching
-    # bounds the new latency.
+    # Repeated assertions bind once.
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1364,7 +1392,7 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
         """Bind."""
         return {"type": "deterministic", "checker": "file_exists", "path": "report.md"}
 
-    def grade(assertions: object, *a: object, **k: object) -> object:
+    def grade(assertions: object, *args: object, **kwargs: object) -> object:
         """Grade."""
         judged.append(list(assertions))
         return {"assertions": []}

@@ -19,7 +19,7 @@ from evalspec.testing import FakeExecOutput, FakeSandbox
 
 def _claude_agent() -> object:
     """Build the claude agent test fixture."""
-    return ClaudeCodeAgent(auth_value="k", version="v")
+    return ClaudeCodeAgent(auth_value="test-token", version="v")
 
 
 class _FakeEvent:
@@ -37,7 +37,7 @@ class _FakeEvent:
 
 def _stdout(*chunks: object) -> object:
     """`stdout` events from raw byte chunks."""
-    return [_FakeEvent("stdout", data=c) for c in chunks]
+    return [_FakeEvent("stdout", data=chunk) for chunk in chunks]
 
 
 def _route_via_fake_vm(
@@ -60,7 +60,7 @@ def _route_via_fake_vm(
 
         def __init__(self: object) -> None:
             """Initialize the instance."""
-            self._i = 0
+            self._index = 0
 
         def __aiter__(self: object) -> object:
             """Build the aiter test fixture."""
@@ -68,11 +68,11 @@ def _route_via_fake_vm(
 
         async def __anext__(self: object) -> object:
             """Build the anext test fixture."""
-            if self._i >= len(events):
+            if self._index >= len(events):
                 raise StopAsyncIteration
-            ev = events[self._i]
-            self._i += 1
-            return ev
+            event = events[self._index]
+            self._index += 1
+            return event
 
         async def kill(self: object) -> None:
             """Kill."""
@@ -81,21 +81,21 @@ def _route_via_fake_vm(
     class FakeTriggerSandbox:
         """Provide a fake trigger sandbox for tests."""
 
-        async def shell(self: object, *a: object, **k: object) -> object:
+        async def shell(self: object, *args: object, **kwargs: object) -> object:
             """Shell."""
             return FakeExecOutput(0)
 
-        async def exec_stream(self: object, *a: object, **k: object) -> object:
+        async def exec_stream(self: object, *args: object, **kwargs: object) -> object:
             """Exec stream."""
             if capture is not None:
-                capture.update(k)
+                capture.update(kwargs)
             return FakeHandle()
 
         async def stop(self: object, timeout: object = None) -> None:
             """Stop."""
             return None
 
-    monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **k: "snap")
+    monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
     monkeypatch.setattr(sandbox, "make_agent", agent_factory)
 
     async def fake_create_trigger(**kwargs: object) -> object:
@@ -104,7 +104,7 @@ def _route_via_fake_vm(
 
     monkeypatch.setattr(sandbox, "_create_trigger_sandbox", fake_create_trigger)
     return sandbox.route_in_sandbox(
-        "q",
+        "query",
         tmp_path,
         model,
         20,
@@ -115,32 +115,36 @@ def _route_via_fake_vm(
 
 def test_snapshot_name() -> None:
     """Verify snapshot name."""
-    agent = ClaudeCodeAgent(auth_value="k", version="1.2.3")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     assert sandbox.snapshot_name(agent) == "evalspec-claude-code-1.2.3"
 
 
 def test_snapshot_name_unchanged_when_env_absent() -> None:
     """Verify snapshot name unchanged when env absent."""
-    agent = ClaudeCodeAgent(auth_value="k", version="1.2.3")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     # An empty EnvConfig is falsy ⇒ no suffix, identical to the no-arg form.
     assert sandbox.snapshot_name(agent, EnvConfig()) == "evalspec-claude-code-1.2.3"
 
 
 def test_snapshot_name_changes_when_base_image_changes() -> None:
     """Verify snapshot name changes when base image changes."""
-    agent = ClaudeCodeAgent(auth_value="k", version="1.2.3")
-    a = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"))
-    b = sandbox.snapshot_name(agent, EnvConfig(base_image="ubuntu:22.04"))
-    assert a != b
-    assert a.startswith("evalspec-claude-code-1.2.3-")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    base_snapshot = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"))
+    changed_snapshot = sandbox.snapshot_name(agent, EnvConfig(base_image="ubuntu:22.04"))
+    assert base_snapshot != changed_snapshot
+    assert base_snapshot.startswith("evalspec-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
     """Verify snapshot name changes when script bytes change."""
-    agent = ClaudeCodeAgent(auth_value="k", version="1.2.3")
-    a = sandbox.snapshot_name(agent, EnvConfig(script=b"echo one\n", script_path="s.sh"))
-    b = sandbox.snapshot_name(agent, EnvConfig(script=b"echo two\n", script_path="s.sh"))
-    assert a != b
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    base_snapshot = sandbox.snapshot_name(
+        agent, EnvConfig(script=b"echo one\n", script_path="s.sh")
+    )
+    changed_snapshot = sandbox.snapshot_name(
+        agent, EnvConfig(script=b"echo two\n", script_path="s.sh")
+    )
+    assert base_snapshot != changed_snapshot
 
 
 def test_snapshot_exists_checks_microsandbox_dir(tmp_path: object, monkeypatch: object) -> None:
@@ -157,11 +161,11 @@ def test_preflight_collects_all_failures(monkeypatch: object) -> None:
     monkeypatch.setattr(sandbox.platform, "system", lambda: "Windows")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    with pytest.raises(RuntimeError) as ei:
+    with pytest.raises(RuntimeError) as exc_info:
         sandbox.preflight()
-    msg = str(ei.value)
-    assert "unsupported platform" in msg
-    assert "credential" in msg
+    message = str(exc_info.value)
+    assert "unsupported platform" in message
+    assert "credential" in message
 
 
 def test_preflight_passes_on_supported(monkeypatch: object) -> None:
@@ -178,8 +182,8 @@ def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path:
     """Verify ensure snapshot skips build when present."""
     monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: True)
     built = []
-    monkeypatch.setattr(sandbox, "build_snapshot", lambda *a, **k: built.append(a))
-    agent = ClaudeCodeAgent(auth_value="k", version="v1")
+    monkeypatch.setattr(sandbox, "build_snapshot", lambda *args, **kwargs: built.append(args))
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
     name = sandbox.ensure_snapshot(agent, repo_root=tmp_path)
     assert name == "evalspec-claude-code-v1"
     assert built == []
@@ -191,7 +195,7 @@ def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: obje
     monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: next(states))
     built = []
     monkeypatch.setattr(sandbox, "build_snapshot", lambda agent, name, env: built.append(name))
-    agent = ClaudeCodeAgent(auth_value="k", version="v1")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
     sandbox.ensure_snapshot(agent, repo_root=tmp_path)
     assert built == ["evalspec-claude-code-v1"]
 
@@ -209,7 +213,7 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
         lambda agent, name, env: captured.update(name=name, image=env.base_image),
     )
     name = sandbox.ensure_snapshot(
-        agent=ClaudeCodeAgent(auth_value="k", version="v1"), repo_root=tmp_path
+        agent=ClaudeCodeAgent(auth_value="test-token", version="v1"), repo_root=tmp_path
     )
     assert name.startswith("evalspec-claude-code-v1-")  # digest suffix present
     assert captured["name"] == name
@@ -266,7 +270,7 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -282,9 +286,9 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="archive")
 
-    res = asyncio.run(drive())
-    assert isinstance(res, RunResult)
-    assert res.result_text == "ok"
+    response = asyncio.run(drive())
+    assert isinstance(response, RunResult)
+    assert response.result_text == "ok"
     assert fake.stopped is True
 
 
@@ -296,7 +300,7 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
         raise RuntimeError("boot failed")
 
     monkeypatch.setattr(sandbox, "_create_sandbox", boom)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> None:
         """Drive."""
@@ -387,7 +391,7 @@ def test_cli_clean_tolerates_missing_msb(monkeypatch: object, tmp_path: object) 
     monkeypatch.setattr(sandbox.Path, "home", lambda: home)
     monkeypatch.chdir(tmp_path)
 
-    def boom(*a: object, **k: object) -> NoReturn:
+    def boom(*args: object, **kwargs: object) -> NoReturn:
         """Boom."""
         raise FileNotFoundError("msb")
 
@@ -397,7 +401,7 @@ def test_cli_clean_tolerates_missing_msb(monkeypatch: object, tmp_path: object) 
 
 def _opencode_agent() -> object:
     """Build the opencode agent test fixture."""
-    return OpenCodeAgent(auth_value="k", auth_env="GEMINI_API_KEY", version="v")
+    return OpenCodeAgent(auth_value="test-token", auth_env="GEMINI_API_KEY", version="v")
 
 
 def _drive_route_with_stdout_events(
@@ -475,12 +479,12 @@ def test_route_flushes_trailing_partial_line_without_newline(
 
 def _artifact_stream(*pairs: object) -> object:
     """Build the artifact stream test fixture."""
-    return "".join(f"\x1e\x1eARTIFACT\x1e\x1e{p}\x1e\x1e\n{c}" for p, c in pairs)
+    return "".join(f"\x1e\x1eARTIFACT\x1e\x1e{path}\x1e\x1e\n{content}" for path, content in pairs)
 
 
 def _sha_lines(*pairs: object) -> object:
     """Build the sha lines test fixture."""
-    return "".join(f"{sha}  {p}\n" for p, sha in pairs)
+    return "".join(f"{sha}  {path}\n" for path, sha in pairs)
 
 
 class _QueuedShellSandbox(FakeSandbox):
@@ -491,9 +495,9 @@ class _QueuedShellSandbox(FakeSandbox):
         super().__init__(exec_outputs=list(exec_outputs))
         self._shell_queue = list(shell_queue)
 
-    async def shell(self: object, script: object, **kw: object) -> object:
+    async def shell(self: object, script: object, **kwargs: object) -> object:
         """Shell."""
-        self.calls.append(("shell", script, kw))
+        self.calls.append(("shell", script, kwargs))
         return self._shell_queue.pop(0)
 
 
@@ -526,7 +530,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -542,10 +546,12 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="writing-agent-skills")
 
-    res = asyncio.run(drive())
-    assert res.artifacts == {"~/.claude/skills/commit-message/SKILL.md": "---\nname: commit\n---\n"}
+    response = asyncio.run(drive())
+    assert response.artifacts == {
+        "~/.claude/skills/commit-message/SKILL.md": "---\nname: commit\n---\n"
+    }
     # staged skill is NOT reported — it was in the pre-turn baseline, unchanged
-    assert "~/.claude/skills/writing-agent-skills/SKILL.md" not in res.artifacts
+    assert "~/.claude/skills/writing-agent-skills/SKILL.md" not in response.artifacts
 
 
 def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
@@ -554,7 +560,7 @@ def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
     # (genuinely-empty success) — so _read_authored can tell "capture nothing this arm"
     # from "nothing to capture". Collapsing both to {} makes changed_paths read an empty
     # baseline as "everything is newly authored".
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     failing = FakeSandbox(shell_output=FakeExecOutput(exit_code=1))
     assert asyncio.run(sandbox._snapshot_artifact_shas(failing, agent)) is None
@@ -592,7 +598,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -608,8 +614,8 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="writing-agent-skills")
 
-    res = asyncio.run(drive())
-    assert res.artifacts == {}  # the staged tree was NOT dumped as authored
+    response = asyncio.run(drive())
+    assert response.artifacts == {}  # the staged tree was NOT dumped as authored
 
 
 
@@ -757,7 +763,7 @@ def test_arm_session_runs_setup_sh_when_skill_set(monkeypatch: object, tmp_path:
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -812,7 +818,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -831,7 +837,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
     asyncio.run(drive())
-    exec_call = next(c for c in fake.calls if c[0] == "exec")
+    exec_call = next(call for call in fake.calls if call[0] == "exec")
     assert "--plugin-dir" not in exec_call[2]
 
 
@@ -856,7 +862,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -876,7 +882,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
     asyncio.run(drive())
-    exec_call = next(c for c in fake.calls if c[0] == "exec")
+    exec_call = next(call for call in fake.calls if call[0] == "exec")
     assert exec_call[2][-2:] == ["--plugin-dir", "/project"]
 
 
@@ -902,7 +908,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
         """Drive."""
@@ -919,7 +925,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
             return await run("prompt", resume_session_id=None, detect_skill=None)
 
     asyncio.run(drive())
-    assert all("setup.sh" not in c[1] for c in fake.calls if c[0] == "shell")
+    assert all("setup.sh" not in call[1] for call in fake.calls if call[0] == "shell")
 
 
 def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: object) -> None:
@@ -936,7 +942,7 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
         return fake
 
     monkeypatch.setattr(sandbox, "_create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> None:
         """Drive."""
@@ -966,10 +972,10 @@ def test_build_runs_skills_home_bridge_after_provision(monkeypatch: object) -> N
     # bridge, environment script.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh"))
 
-    shells = [c for c in fake.calls if c[0] == "shell"]
+    shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 3
     assert "claude.ai/install.sh" in shells[0][1]  # provision
     assert "ln -s" in shells[1][1]  # bridge
@@ -983,13 +989,13 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
     # A broken bridge must fail the build, never seal a snapshot that can't load skills.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision (first shell) succeeds; the bridge (second shell) fails.
     outputs = iter([FakeExecOutput(0), FakeExecOutput(exit_code=1, stderr_text="ln failed")])
 
-    async def shell(script: object, **kw: object) -> object:
+    async def shell(script: object, **kwargs: object) -> object:
         """Shell."""
-        fake.calls.append(("shell", script, kw))
+        fake.calls.append(("shell", script, kwargs))
         return next(outputs)
 
     fake.shell = shell
@@ -1057,7 +1063,7 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     """Verify build passes base image to sandbox create."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
     assert fake.create_image == "python:3.12-slim"
     assert fake.sealed is True
@@ -1067,7 +1073,7 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     """Verify build defaults base image when env has none."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(agent, "snap", EnvConfig())
     assert fake.create_image == sandbox.BASE_IMAGE
 
@@ -1076,10 +1082,10 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
     """Verify build runs environment script after provision."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh"))
 
-    shells = [c for c in fake.calls if c[0] == "shell"]
+    shells = [call for call in fake.calls if call[0] == "shell"]
     # provision runs PROVISION_SCRIPT first (claude.py.provision issues exactly one
     # shell); the skills-home bridge second; the environment script third.
     assert len(shells) == 3
@@ -1097,7 +1103,7 @@ def test_build_runs_base_image_and_environment_script_together(
     # The worked-example shape: custom base image AND an extra-tools script.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(
         agent,
         "snap",
@@ -1108,7 +1114,7 @@ def test_build_runs_base_image_and_environment_script_together(
         ),
     )
     assert fake.create_image == "python:3.12-slim"
-    shells = [c for c in fake.calls if c[0] == "shell"]
+    shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 3  # provision, bridge, environment script
     assert "apt-get install -y jq" in shells[2][1]
     assert fake.sealed is True
@@ -1118,9 +1124,9 @@ def test_build_no_environment_script_runs_only_provision(monkeypatch: object) ->
     """Verify build no environment script runs only provision."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     sandbox.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
-    shells = [c for c in fake.calls if c[0] == "shell"]
+    shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 2  # provision + skills-home bridge; no environment script declared
 
 
@@ -1128,7 +1134,7 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
     """Verify build raises for when environment script fails."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    agent = ClaudeCodeAgent(auth_value="k", version="v")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision + bridge (first two shells) succeed; the environment script (third shell)
     # fails. Queue distinct outputs so the fail lands on the script, not provision/bridge.
     outputs = iter(
@@ -1139,9 +1145,9 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
         ]
     )
 
-    async def shell(script: object, **kw: object) -> object:
+    async def shell(script: object, **kwargs: object) -> object:
         """Shell."""
-        fake.calls.append(("shell", script, kw))
+        fake.calls.append(("shell", script, kwargs))
         return next(outputs)
 
     fake.shell = shell

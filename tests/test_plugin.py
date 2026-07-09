@@ -6,6 +6,7 @@ runs; we assert on the parametrized node ids the plugin generates. Each project 
 """
 
 import json
+import textwrap
 from typing import NoReturn
 
 import pytest
@@ -14,7 +15,8 @@ from evalspec import plugin, workspace
 from evalspec.agents.base import AgentCapabilities
 from tests.support import seed_arm, seed_trigger
 
-ALPHA_MD = """\
+ALPHA_MD = textwrap.dedent(
+    """\
 ---
 {}
 ---
@@ -27,8 +29,10 @@ p
 
 - [ ] a
 """
+)
 
-BETA_MD = """\
+BETA_MD = textwrap.dedent(
+    """\
 ---
 {}
 ---
@@ -41,11 +45,13 @@ t1
 
 - [ ] x
 """
+)
 
 # A `default` eval set with two arms — the resolved columns are [baseline, trial] with
 # baseline as the Δ reference. The set-level harness = "claude-code" means a sweep
 # inherits a concrete harness, and the dummy collect never needs a real CLI.
-ARMS_TOML = """\
+ARMS_TOML = textwrap.dedent(
+    """\
 [tool.evalspec]
 default-set = "default"
 
@@ -55,6 +61,7 @@ model = "sonnet"
 baseline = "baseline"
 arms = [{name="baseline"}, {name="trial", model="opus"}]
 """
+)
 
 DUMMY_CASES = """
 def test_eval(eval_arm):
@@ -256,9 +263,9 @@ def _write_sets_pyproject(tmp_path: object) -> None:
 def test_resolved_run_set_reads_pyproject(tmp_path: object) -> None:
     """Verify resolved run set reads pyproject."""
     _write_sets_pyproject(tmp_path)
-    s = plugin.resolved_run_set(_SetConfig(tmp_path))
-    assert [a.name for a in s.arms] == ["baseline", "trial"]
-    assert s.baseline == "baseline"
+    run_set = plugin.resolved_run_set(_SetConfig(tmp_path))
+    assert [arm.name for arm in run_set.arms] == ["baseline", "trial"]
+    assert run_set.baseline == "baseline"
 
 
 def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
@@ -277,10 +284,10 @@ def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
         "]\n"
     )
 
-    s = plugin.resolved_run_set(_SetConfig(tmp_path))
+    run_set = plugin.resolved_run_set(_SetConfig(tmp_path))
 
-    assert s.arms[0].harness_args == ["--set-flag"]
-    assert s.arms[1].harness_args == ["--set-flag", "--plugin-dir", "/project"]
+    assert run_set.arms[0].harness_args == ["--set-flag"]
+    assert run_set.arms[1].harness_args == ["--set-flag", "--plugin-dir", "/project"]
 
 
 def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> None:
@@ -291,19 +298,19 @@ def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> N
         '[tool.evalspec.sets.default]\nharness = "claude-code"\n'
         'model = "opus"\nbaseline = "b"\narms = [{name="b"}]\n'
     )
-    s = plugin.resolved_run_set(_SetConfig(tmp_path))  # evalspec_model defaults to None
-    assert s.arms[0].model == "opus"
+    run_set = plugin.resolved_run_set(_SetConfig(tmp_path))  # evalspec_model defaults to None
+    assert run_set.arms[0].model == "opus"
 
 
 def test_resolved_run_set_models_sweep(tmp_path: object) -> None:
     """Verify resolved run set models sweep."""
     _write_sets_pyproject(tmp_path)
 
-    s = plugin.resolved_run_set(_SetConfig(tmp_path, models="sonnet,opus"))
+    run_set = plugin.resolved_run_set(_SetConfig(tmp_path, models="sonnet,opus"))
 
-    assert [a.name for a in s.arms] == ["sonnet", "opus"]
-    assert s.baseline == "sonnet"
-    assert all(a.harness == "claude-code" for a in s.arms)  # inherited, never None
+    assert [arm.name for arm in run_set.arms] == ["sonnet", "opus"]
+    assert run_set.baseline == "sonnet"
+    assert all(arm.harness == "claude-code" for arm in run_set.arms)  # inherited, never None
 
 
 def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path: object) -> None:
@@ -470,7 +477,7 @@ def test_eval(eval_arm, sample_index):
     )
 
     result.assert_outcomes(passed=8)
-    observed = [int(x) for x in log.read_text().split() if x]
+    observed = [int(value) for value in log.read_text().split() if value]
     assert sorted(observed) == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
@@ -569,11 +576,11 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
     seed_arm(it, "alpha", "trial", passes=2, total=2)
     seed_arm(it, "alpha", "baseline", passes=0, total=2)
 
-    _, tr = _finish_and_summarize(tmp_path)
+    _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert ("sep", "evalspec benchmark") in tr.events
-    lines = [m for kind, m in tr.events if kind == "line"]
-    assert any("archive" in m and "+100pp" in m for m in lines)
+    assert ("sep", "evalspec benchmark") in terminal_reporter.events
+    lines = [message for kind, message in terminal_reporter.events if kind == "line"]
+    assert any("archive" in message and "+100pp" in message for message in lines)
     assert (it / "benchmark.md").is_file()
 
 
@@ -598,14 +605,14 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     trigger_only_dir = skills / "trigger-only"
     seed_trigger(trigger_only_dir, 1, should_trigger=True, fires=0)
 
-    _, tr = _finish_and_summarize(tmp_path)
+    _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert tr.events.count(("sep", "evalspec benchmark")) == 1
+    assert terminal_reporter.events.count(("sep", "evalspec benchmark")) == 1
 
-    lines = [m for kind, m in tr.events if kind == "line"]
+    lines = [message for kind, message in terminal_reporter.events if kind == "line"]
     # trigger-only skill now reports too
     assert len(lines) == 3
-    assert any("trigger-only" in m and "trigger 0/1" in m for m in lines)
+    assert any("trigger-only" in message and "trigger 0/1" in message for message in lines)
     assert (trigger_only_dir / "benchmark.md").exists()
 
     benchmark = json.loads((archive_dir / "benchmark.json").read_text())
@@ -662,7 +669,7 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
     }
     reordered = dict(reversed(list(cfg.items())))
 
-    a = plugin.build_manifest(
+    manifest_a = plugin.build_manifest(
         run_id="a" * 32,
         started_at="t1",
         commit="c1",
@@ -670,7 +677,7 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         cfg=cfg,
         token_split=True,
     )
-    b = plugin.build_manifest(
+    manifest_b = plugin.build_manifest(
         run_id="b" * 32,
         started_at="t2",
         commit="c2",
@@ -679,14 +686,15 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         token_split=False,
     )
 
-    assert a["config_hash"] == b["config_hash"]
+    assert manifest_a["config_hash"] == manifest_b["config_hash"]
 
 
 def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes run manifest."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
-        """\
+        textwrap.dedent(
+            """\
 [tool.evalspec]
 default-set = "default"
 
@@ -700,6 +708,7 @@ arms = [
   {name="trial", model="opus", harness_args=["--plugin-dir", "/project"]},
 ]
 """
+        )
     )
     workspace.set_current_iteration("iteration_01")
     it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -716,7 +725,7 @@ arms = [
     assert meta["agent"] == "claude-code"
     assert meta["agent_version"] == "9.9.9"
     assert meta["set"] == "default"
-    assert [a["name"] for a in meta["arms"]] == ["baseline", "trial"]
+    assert [arm["name"] for arm in meta["arms"]] == ["baseline", "trial"]
     assert meta["arms"][0]["harness_args"] == ["--set-flag"]
     assert meta["arms"][1]["harness_args"] == ["--set-flag", "--plugin-dir", "/project"]
     assert meta["arms"][1]["model"] == "opus"  # trial arm declared its own model
@@ -750,13 +759,15 @@ def test_sessionfinish_trigger_only_without_eval_set(tmp_path: object, monkeypat
     trigger_only = skills / "router"
     seed_trigger(trigger_only, 1, should_trigger=True, fires=1)
 
-    _, tr = _finish_and_summarize(tmp_path)  # old code: UsageError from resolved_run_set
+    _, terminal_reporter = _finish_and_summarize(tmp_path)
 
     meta = json.loads((skills.parent / "meta.json").read_text())
     assert meta["set"] is None
     assert meta["arms"] == []
     assert (trigger_only / "benchmark.md").exists()
-    assert any("router" in m and "trigger 1/1" in m for m in tr.lines)
+    assert any(
+        "router" in message and "trigger 1/1" in message for message in terminal_reporter.lines
+    )
 
 
 def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatch: object) -> None:
@@ -787,9 +798,9 @@ def test_terminal_summary_noop_without_artifacts(tmp_path: object, monkeypatch: 
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     workspace.set_current_iteration("iteration_01")
 
-    _, tr = _finish_and_summarize(tmp_path)
+    _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert tr.events == []
+    assert terminal_reporter.events == []
 
 
 def test_unknown_agent_flag_fails_at_startup(pytester: object) -> None:
@@ -835,10 +846,10 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
 
     _finish_and_summarize(tmp_path)
 
-    lines = [json.loads(x) for x in (it.parent / "index.jsonl").read_text().splitlines()]
-    assert {r["skill"] for r in lines} == {"archive", "bootstrap"}
-    assert sum(1 for r in lines if r["kind"] == "eval") == 2
-    assert sum(1 for r in lines if r["kind"] == "trigger") == 1
+    lines = [json.loads(line) for line in (it.parent / "index.jsonl").read_text().splitlines()]
+    assert {record["skill"] for record in lines} == {"archive", "bootstrap"}
+    assert sum(1 for record in lines if record["kind"] == "eval") == 2
+    assert sum(1 for record in lines if record["kind"] == "trigger") == 1
 
 
 def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:
@@ -855,9 +866,9 @@ def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> N
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 1
-    tr = _FakeTR()
-    plugin.pytest_terminal_summary(tr, 1, config)
-    assert any("fail-under" in line for line in tr.lines)
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
+    assert any("fail-under" in line for line in terminal_reporter.lines)
 
 
 def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> None:

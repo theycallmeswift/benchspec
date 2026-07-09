@@ -25,9 +25,9 @@ def _write_trigger_md(skill_dir: Path, queries: list[str], *, skill_name: object
     """Write trigger md."""
     evals_dir = skill_dir / "evals"
     evals_dir.mkdir(parents=True, exist_ok=True)
-    f = evals_dir / "trigger-evals.md"
-    f.write_text(_trigger_md(skill_name or skill_dir.name, queries), encoding="utf-8")
-    return f
+    trigger_path = evals_dir / "trigger-evals.md"
+    trigger_path.write_text(_trigger_md(skill_name or skill_dir.name, queries), encoding="utf-8")
+    return trigger_path
 
 
 class _FakeConfig:
@@ -42,9 +42,9 @@ class _FakeConfig:
         self._repo_root = repo_root
         self.rootpath = rootpath
 
-    def getoption(self: object, name: object) -> object:
+    def getoption(self: object, option_name: object) -> object:
         """Getoption."""
-        return self._repo_root if name == "evalspec_repo_root" else None
+        return self._repo_root if option_name == "evalspec_repo_root" else None
 
 
 def _seed_slug_suite(
@@ -61,10 +61,10 @@ def _seed_slug_suite(
             "alpha": ("do the thing", ["it did the thing"]),
         }
     ).items():
-        d = base / slug
-        d.mkdir(parents=True)
-        lines = [f"- [ ] {a}" for a in assertions]
-        (d / "prompt.md").write_text(
+        eval_dir = base / slug
+        eval_dir.mkdir(parents=True)
+        lines = [f"- [ ] {assertion}" for assertion in assertions]
+        (eval_dir / "prompt.md").write_text(
             f"---\n{{}}\n---\n\n## Prompt\n\n{prompt}\n\n"
             "## Assertions\n\n" + "\n".join(lines) + "\n"
         )
@@ -114,9 +114,9 @@ def _skill(
     tmp_path: object, name: object, slug: object, body: object, root: object = "skills"
 ) -> object:
     """Write one `<root>/<name>/evals/<slug>/prompt.md` with the given body."""
-    d = tmp_path / root / name / "evals" / slug
-    d.mkdir(parents=True)
-    (d / "prompt.md").write_text(body)
+    eval_dir = tmp_path / root / name / "evals" / slug
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "prompt.md").write_text(body)
     return tmp_path
 
 
@@ -134,15 +134,15 @@ def test_discover_eval_cases_self_contained(tmp_path: object) -> None:
     cases = discover_eval_cases(tmp_path)
 
     assert len(cases) == 1
-    c = cases[0]
-    assert c.skill == "ingest"
-    assert c.slug == "single-article"
-    assert c.eval_id == "single-article"
-    assert c.param_id == "ingest-single-article"
-    assert c.prompt == "Use `ingest`."
-    assert c.assertions == ["Skill `ingest` invoked"]
-    assert c.seed == []
-    assert c.fixtures_dir is None
+    case = cases[0]
+    assert case.skill == "ingest"
+    assert case.slug == "single-article"
+    assert case.eval_id == "single-article"
+    assert case.param_id == "ingest-single-article"
+    assert case.prompt == "Use `ingest`."
+    assert case.assertions == ["Skill `ingest` invoked"]
+    assert case.seed == []
+    assert case.fixtures_dir is None
 
 
 def test_discover_eval_cases_seed_and_fixtures(tmp_path: object) -> None:
@@ -154,14 +154,14 @@ def test_discover_eval_cases_seed_and_fixtures(tmp_path: object) -> None:
         "---\nseed:\n  - role: user\n    text: hi\n---\n\n"
         "## Prompt\n\nArchive ./x.\n\n## Assertions\n\n- [ ] it refused\n",
     )
-    fx = base / "skills" / "archive" / "evals" / "clobber" / "fixtures"
-    fx.mkdir()
-    (fx / "x.md").write_text("body")
+    fixtures_dir = base / "skills" / "archive" / "evals" / "clobber" / "fixtures"
+    fixtures_dir.mkdir()
+    (fixtures_dir / "x.md").write_text("body")
 
-    [c] = discover_eval_cases(tmp_path)
+    [case] = discover_eval_cases(tmp_path)
 
-    assert c.seed == [{"role": "user", "text": "hi"}]
-    assert c.fixtures_dir == fx
+    assert case.seed == [{"role": "user", "text": "hi"}]
+    assert case.fixtures_dir == fixtures_dir
 
 
 def test_discover_rejects_unknown_frontmatter_end_to_end(tmp_path: object) -> None:
@@ -240,9 +240,9 @@ def test_discover_eval_cases_one_per_slug(tmp_path: object) -> None:
 
     cases = discover_eval_cases(tmp_path)
 
-    assert [c.param_id for c in cases] == ["myskill-alpha", "myskill-beta"]
-    assert all(c.skill_dir == tmp_path / "skills" / "myskill" for c in cases)
-    assert all(c.skill == "myskill" for c in cases)
+    assert [case.param_id for case in cases] == ["myskill-alpha", "myskill-beta"]
+    assert all(case.skill_dir == tmp_path / "skills" / "myskill" for case in cases)
+    assert all(case.skill == "myskill" for case in cases)
 
 
 def test_discover_eval_cases_sorted_by_skill(tmp_path: object) -> None:
@@ -250,7 +250,7 @@ def test_discover_eval_cases_sorted_by_skill(tmp_path: object) -> None:
     _seed_slug_suite(tmp_path, skill="zebra", evals={"z": ("p", ["a"])})
     _seed_slug_suite(tmp_path, skill="alpha", evals={"a": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
-    assert [c.skill for c in cases] == ["alpha", "zebra"]
+    assert [case.skill for case in cases] == ["alpha", "zebra"]
 
 
 def test_discover_eval_cases_no_skills_root(tmp_path: object) -> None:
@@ -263,7 +263,7 @@ def test_discover_eval_cases_skips_skill_without_evals(tmp_path: object) -> None
     (tmp_path / "skills" / "bare").mkdir(parents=True)
     _seed_slug_suite(tmp_path, skill="real", evals={"r": ("p", ["a"])})
     cases = discover_eval_cases(tmp_path)
-    assert [c.skill for c in cases] == ["real"]
+    assert [case.skill for case in cases] == ["real"]
 
 
 def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
@@ -273,10 +273,10 @@ def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
     bad.parent.mkdir(parents=True)
     bad.write_text("---\n{}\n---\n\n## Prompt\n\np\n")
 
-    with pytest.raises((MdFormatError, schema.SchemaError)) as e:
+    with pytest.raises((MdFormatError, schema.SchemaError)) as exc_info:
         discover_eval_cases(tmp_path)
 
-    assert str(bad) in str(e.value)  # the offending file is named
+    assert str(bad) in str(exc_info.value)  # the offending file is named
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +294,9 @@ def test_discover_trigger_cases_one_per_query(tmp_path: object) -> None:
         ],
     )
     cases = discover_trigger_cases(tmp_path)
-    assert [c.param_id for c in cases] == ["myskill-do-it", "myskill-not-this"]
-    assert all(c.skill_name == "myskill" for c in cases)
-    assert all(c.repo_root == tmp_path for c in cases)
+    assert [case.param_id for case in cases] == ["myskill-do-it", "myskill-not-this"]
+    assert all(case.skill_name == "myskill" for case in cases)
+    assert all(case.repo_root == tmp_path for case in cases)
 
 
 def test_discover_trigger_reads_markdown(tmp_path: object) -> None:
@@ -321,17 +321,19 @@ def test_discover_trigger_reads_markdown(tmp_path: object) -> None:
 
 def _seed_md_under(root: object, skill: object, eval_id: object = "e") -> object:
     """Seed md under."""
-    d = root / skill / "evals" / eval_id
-    d.mkdir(parents=True)
-    (d / "prompt.md").write_text("---\n{}\n---\n\n## Prompt\n\nx\n\n## Assertions\n\n- [ ] a\n")
-    return d
+    eval_dir = root / skill / "evals" / eval_id
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "prompt.md").write_text(
+        "---\n{}\n---\n\n## Prompt\n\nx\n\n## Assertions\n\n- [ ] a\n"
+    )
+    return eval_dir
 
 
 def test_discover_eval_cases_finds_both_roots(tmp_path: object) -> None:
     """Verify discover eval cases finds both roots."""
     _seed_md_under(tmp_path / "skills", "plug", "p")
     _seed_md_under(tmp_path / ".claude" / "skills", "loc", "l")
-    cases = {c.skill: c for c in discover_eval_cases(tmp_path)}
+    cases = {case.skill: case for case in discover_eval_cases(tmp_path)}
     assert set(cases) == {"plug", "loc"}
     assert cases["loc"].skill_dir == tmp_path / ".claude" / "skills" / "loc"
 
@@ -339,14 +341,14 @@ def test_discover_eval_cases_finds_both_roots(tmp_path: object) -> None:
 def test_discover_eval_cases_local_only(tmp_path: object) -> None:
     """Verify discover eval cases local only."""
     _seed_md_under(tmp_path / ".claude" / "skills", "loc", "l")
-    assert [c.skill for c in discover_eval_cases(tmp_path)] == ["loc"]
+    assert [case.skill for case in discover_eval_cases(tmp_path)] == ["loc"]
 
 
 def test_discover_eval_cases_skips_local_skill_without_evals(tmp_path: object) -> None:
     """Verify discover eval cases skips local skill without evals."""
     (tmp_path / ".claude" / "skills" / "stub").mkdir(parents=True)
     _seed_md_under(tmp_path / ".claude" / "skills", "real", "r")
-    assert [c.skill for c in discover_eval_cases(tmp_path)] == ["real"]
+    assert [case.skill for case in discover_eval_cases(tmp_path)] == ["real"]
 
 
 def test_discover_trigger_cases_finds_both_roots(tmp_path: object) -> None:
@@ -359,9 +361,9 @@ def test_discover_trigger_cases_finds_both_roots(tmp_path: object) -> None:
         tmp_path / ".claude" / "skills" / "loc",
         ["- some-query: q\n"],
     )
-    cases = {c.skill: c for c in discover_trigger_cases(tmp_path)}
+    cases = {case.skill: case for case in discover_trigger_cases(tmp_path)}
     assert set(cases) == {"plug", "loc"}
-    assert all(c.repo_root == tmp_path for c in cases.values())
+    assert all(case.repo_root == tmp_path for case in cases.values())
 
 
 def test_discover_raises_on_duplicate_name_across_roots(tmp_path: object) -> None:
@@ -408,7 +410,7 @@ def test_output_and_trigger_evals_coexist(tmp_path: object) -> None:
     assert len(output_cases) == 1
     assert output_cases[0].eval_id == "alpha"
     assert output_cases[0].skill == "myskill"
-    assert not any("trigger" in c.eval_id for c in output_cases)
+    assert not any("trigger" in case.eval_id for case in output_cases)
 
     # Trigger cases: exactly one, from trigger-evals.md
     assert len(trigger_cases) == 1
