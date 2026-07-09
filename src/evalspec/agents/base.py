@@ -5,14 +5,24 @@ lives in the guest, how to provision the CLI into a microVM (the cached step), w
 secrets it needs, how to stage local skills, how to build its headless command, and how
 to parse its output. `sandbox.py` drives a live sandbox through this interface and never
 names a concrete agent; adding a second agent is additive, not a refactor.
+
+One adapter per harness, transport-blind: the adapter builds commands and parses
+output, and an `evalspec.environments.ExecutionEnv` decides where the process runs —
+`GuestSandbox` for task arms (`invoke`), `Host` for grading (`judge`). Sandbox-vs-host
+is a parameter of the call, not a code path baked into each harness.
 """
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from evalspec.runner import RunResult
+
+if TYPE_CHECKING:
+    from evalspec.environments import ExecutionEnv
+    from evalspec.judges.config import JudgeConfig
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical
@@ -22,6 +32,21 @@ FIXED_SKILLS_HOME = "/home/evalspec/skills"
 
 class BaseAgent:
     """Store base agent data."""
+
+    host_bin: str  # the harness's host-side binary name (judge mode + version probe)
+
+    @classmethod
+    def probe_host_version(cls: object) -> str | None:
+        """Best-effort `host_bin --version` probe — never raises, never fails the run."""
+        try:
+            proc = subprocess.run(
+                [cls.host_bin, "--version"], capture_output=True, text=True, timeout=10
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.strip() or None
 
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""
@@ -69,6 +94,7 @@ class CodingAgent(Protocol):
     id: str  # snapshot-cache key + report label
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
     skill_load_dir: str  # absolute guest path the agent loads skills from
+    host_bin: str  # host-side binary name (judge mode + version probe)
     capabilities: AgentCapabilities
 
     def version(self: object) -> str:
@@ -142,6 +168,25 @@ class CodingAgent(Protocol):
         extra_env: dict | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
+        ...
+
+    async def judge(
+        self: object,
+        prompt: str,
+        config: JudgeConfig,
+        *,
+        env: ExecutionEnv | None = None,
+    ) -> str:
+        """Grade a judge prompt in `env` (default: a fresh Host process).
+
+        Returns the {"result": "<judge-json-string>"} envelope judge.py parses.
+        Raises RuntimeError for the harness's infra-failure shapes.
+        """
+        ...
+
+    @classmethod
+    def probe_host_version(cls: object) -> str | None:
+        """Return the host CLI version, or None on any failure (best effort)."""
         ...
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:

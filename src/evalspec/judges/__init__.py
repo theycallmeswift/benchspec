@@ -1,10 +1,12 @@
 """Run-level judge abstraction, independent from task arms.
 
-Config resolution and host-side judge runners for claude-code/codex/opencode.
+Config resolution plus dispatch onto the harness adapters' host-side judge mode —
+grading uses the same class per harness as task execution (`agents.*.judge`), run as
+a fresh host process instead of in the sandbox.
 
 `judge.py` keeps prompt-building, JSON parsing, and retry semantics; this package owns
-everything about WHICH harness grades and HOW it's invoked. `binder.py`'s host-Claude
-call (`agents.judge_cli.run_host_judge`) is a separate, untouched transport.
+WHICH harness grades and resolves its config. `binder.py`'s host-Claude call
+(`agents.judge_cli.run_host_judge`) is a separate, untouched transport.
 """
 
 from __future__ import annotations

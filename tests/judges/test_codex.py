@@ -1,11 +1,13 @@
-"""Tests for the Codex judge runner (envelope + infra-error handling)."""
+"""Tests for CodexAgent's judge mode (envelope + infra errors)."""
 
+import asyncio
 import json
 import subprocess
 
 import pytest
 
-from evalspec.judges import codex as codex_judge
+from evalspec.agents.codex import CodexAgent
+from evalspec.judges.config import JudgeConfig
 
 
 def _fake_proc(
@@ -20,8 +22,13 @@ def _stream(*events: dict) -> str:
     return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
-def test_run_wraps_final_agent_message_in_result_envelope(monkeypatch: object) -> None:
-    """Verify run wraps the final agent message in a result envelope."""
+def _judge(prompt: str, config: JudgeConfig) -> str:
+    """Run CodexAgent's judge to completion in the default Host environment."""
+    return asyncio.run(CodexAgent().judge(prompt, config))
+
+
+def test_judge_wraps_final_agent_message_in_result_envelope(monkeypatch: object) -> None:
+    """Verify judge wraps the final agent message in a result envelope."""
     verdict = '{"assertions": [{"text": "a", "passed": true, "evidence": "ok"}]}'
     stdout = _stream(
         {"type": "thread.started", "thread_id": "t1"},
@@ -37,10 +44,9 @@ def test_run_wraps_final_agent_message_in_result_envelope(monkeypatch: object) -
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    out = codex_judge.run(
-        "grade this", model="gpt-5.5", effort="medium", timeout=300,
-        harness_args=["--sandbox", "read-only"], env={},
-    )
+    out = _judge("grade this", JudgeConfig(
+        harness="codex", model="gpt-5.5", harness_args=["--sandbox", "read-only"],
+    ))
 
     assert json.loads(out)["result"] == verdict
     assert captured["command"][:3] == ["codex", "exec", "--json"]
@@ -49,28 +55,28 @@ def test_run_wraps_final_agent_message_in_result_envelope(monkeypatch: object) -
     assert captured["command"][-1] == "grade this"  # trailing positional prompt
 
 
-def test_run_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on a nonzero exit."""
+def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(
         subprocess, "run",
         lambda *args, **kwargs: _fake_proc(returncode=1, stderr="network error"),
     )
 
     with pytest.raises(RuntimeError, match="exited 1.*network error"):
-        codex_judge.run("p", model="gpt-5.5", effort="medium", timeout=300, harness_args=[], env={})
+        _judge("p", JudgeConfig(harness="codex", model="gpt-5.5"))
 
 
-def test_run_raises_runtimeerror_on_error_event(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_on_error_event(monkeypatch: object) -> None:
     """Verify a harness error event (surfaced by the shared parser) raises RuntimeError."""
     stdout = _stream({"type": "error", "message": "Unauthorized: invalid API key"})
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout=stdout))
 
     with pytest.raises(RuntimeError, match="Unauthorized"):
-        codex_judge.run("p", model="gpt-5.5", effort="medium", timeout=300, harness_args=[], env={})
+        _judge("p", JudgeConfig(harness="codex", model="gpt-5.5"))
 
 
-def test_run_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError when the binary is missing."""
+def test_judge_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError when the binary is missing."""
     def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
@@ -78,11 +84,11 @@ def test_run_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> Non
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
-        codex_judge.run("p", model="gpt-5.5", effort="medium", timeout=300, harness_args=[], env={})
+        _judge("p", JudgeConfig(harness="codex", model="gpt-5.5"))
 
 
-def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on an unknown model."""
+def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError on an unknown model."""
     # No local model/harness allow-list: a fake or wrong-family model reaches the
     # harness, which rejects it (nonzero exit) — surfaced as infra RuntimeError, not
     # laundered into a passing grade.
@@ -92,15 +98,15 @@ def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
     )
 
     with pytest.raises(RuntimeError, match="unknown model"):
-        codex_judge.run("p", model="sonnet", effort="medium", timeout=300, harness_args=[], env={})
+        _judge("p", JudgeConfig(harness="codex", model="sonnet"))
 
 
-def test_probe_version_best_effort_none_on_failure(monkeypatch: object) -> None:
-    """Verify probe_version returns None on failure."""
+def test_probe_host_version_best_effort_none_on_failure(monkeypatch: object) -> None:
+    """Verify probe_host_version returns None on failure."""
     def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
 
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
-    assert codex_judge.probe_version() is None
+    assert CodexAgent.probe_host_version() is None

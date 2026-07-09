@@ -6,10 +6,15 @@ import asyncio
 import datetime
 import json
 import os
+from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
+from evalspec.environments import ExecutionEnv, GuestSandbox, Host
 from evalspec.runner import RunResult
 from evalspec.trajectory import iter_events
+
+if TYPE_CHECKING:
+    from evalspec.judges.config import JudgeConfig
 
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
@@ -96,6 +101,7 @@ class CodexAgent(BaseAgent):
 
     id = "codex"
     CODEX_BIN = "/usr/local/bin/codex"
+    host_bin = "codex"
     AUTH_JSON_GUEST_SOURCE = "/evalspec-codex-auth/auth.json"
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
@@ -326,9 +332,8 @@ class CodexAgent(BaseAgent):
         )
         try:
             await self._write_auth_json(sb)
-            res = await sb.exec(
-                cmd[0],
-                cmd[1:],
+            res = await GuestSandbox(sb).exec(
+                cmd,
                 cwd=workdir,
                 env={**self.guest_env(), **(extra_env or {})},
                 timeout=timeout,
@@ -337,8 +342,33 @@ class CodexAgent(BaseAgent):
         except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as e:
             return RunResult(eval_id, config, f"<sandbox-error> {e}"[-2000:], 0, 0, is_error=True)
         if res.exit_code != 0:
-            return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
-        return parse_codex_jsonl(res.stdout_text, eval_id, config, detect_skill)
+            return RunResult(eval_id, config, res.stderr[-2000:], 0, 0, is_error=True)
+        return parse_codex_jsonl(res.stdout, eval_id, config, detect_skill)
+
+    async def judge(
+        self: object,
+        prompt: str,
+        config: JudgeConfig,
+        *,
+        env: ExecutionEnv | None = None,
+    ) -> str:
+        """Grade via `codex exec --json` (default env: fresh Host process).
+
+        Reads the output through the same `parse_codex_jsonl` the sandbox path uses,
+        wraps the final agent text in the {"result": ...} envelope judge.py parses,
+        and raises RuntimeError on infra failure — a missing binary, a nonzero exit,
+        or a harness error event surfaced by the parser as `is_error`. `config.effort`
+        is deliberately unused: codex exec has no stable effort flag.
+        """
+        command = [self.host_bin, "exec", "--json", "-m", config.model,
+                   *config.harness_args, prompt]
+        proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
+
+        proc.require_success()
+        result = parse_codex_jsonl(proc.stdout, "judge", "judge", None)
+        if result.is_error:
+            raise RuntimeError(f"codex judge reported an error: {result.result_text[:1000]}")
+        return json.dumps({"result": result.result_text})
 
 
 def _event_item(event: dict) -> dict:

@@ -21,7 +21,7 @@ src/evalspec/agents/
   __init__.py   # make_agent() factory + credential_preflight_error()
 ```
 
-`sandbox.py` calls only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) — trigger routing uses this run-level agent, so a multi-harness set's trigger numbers are single-harness. `judge.py` does not call `make_agent()` — grading resolves its own `JudgeConfig` independent from the task agent (see [Grading is not an agent-protocol member](#grading-is-not-an-agent-protocol-member) below).
+`sandbox.py` calls only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) — trigger routing uses this run-level agent, so a multi-harness set's trigger numbers are single-harness. Grading selects its adapter from its own `JudgeConfig`, independent from the task agent (see [Grading uses the same adapter](#grading-uses-the-same-adapter-in-a-different-environment) below).
 
 ## The `CodingAgent` protocol
 
@@ -60,9 +60,11 @@ Plus the class-level conveniences callers rely on:
 - `cls.from_env() -> CodingAgent` — build from host env (version pin + credential).
 - `cls.credential_error() -> str | None` — `None` if a usable credential is set, else a preflight remediation string.
 
-## Grading is not an agent-protocol member
+## Grading uses the same adapter, in a different environment
 
-Judging is independent from the task agent. A run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** (`claude-code`, `codex`, or `opencode`) and model, launched as a fresh host process independent from every task arm's harness. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which dispatches to the selected harness's runner in `evalspec/judges/{claude_code,codex,opencode}.py`. Each runner returns the exact envelope `judge.py` parses — `{"result": "<judge-json-string>"}` — normalizing its own harness's output shape (Claude's `--output-format json` emits it natively; Codex/OpenCode extract their final agent-message/text events and wrap it) and raises `RuntimeError` for its own infra-failure shapes (missing binary, nonzero exit, auth/quota/rate-limit/overload).
+One adapter per harness, two entry points: `invoke` runs the harness inside the sandbox for task arms; `judge` grades with the same harness on the host. Where a process runs is an **execution environment** (`evalspec.environments`): `GuestSandbox` wraps a live microVM session's exec, `Host` runs a fresh host process, and both return the same `ProcResult` — the adapter builds commands and parses output without knowing which one it got, so sandbox-vs-host is a parameter of the call, not a code path per harness.
+
+Judging stays independent from the task *arms*: a run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** and model. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which expands the judge env and runs `make_agent(harness).judge(prompt, config)` — defaulting to a fresh `Host` environment, never the task arm's sandbox or session. Each adapter's `judge` reuses the same output parser as its sandbox path (Claude's `--output-format json` emits the `{"result": "<judge-json-string>"}` envelope natively; Codex/OpenCode parse with `parse_codex_jsonl`/`parse_opencode_jsonl` and wrap) and raises `RuntimeError` for its harness's infra-failure shapes (missing binary, nonzero exit, error events / zero-token runs).
 
 `binder.py`'s prose→checker classifier is a separate host-Claude call (`agents.judge_cli.run_host_judge`): it always uses Claude regardless of the configured judge harness.
 

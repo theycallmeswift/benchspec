@@ -1,11 +1,13 @@
-"""Tests for the OpenCode judge runner (envelope + infra-error handling)."""
+"""Tests for OpenCodeAgent's judge mode (envelope + infra errors)."""
 
+import asyncio
 import json
 import subprocess
 
 import pytest
 
-from evalspec.judges import opencode as opencode_judge
+from evalspec.agents.opencode import OpenCodeAgent
+from evalspec.judges.config import JudgeConfig
 
 
 def _fake_proc(
@@ -33,8 +35,13 @@ def _successful_stream(verdict: str) -> str:
     )
 
 
-def test_run_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> None:
-    """Verify run wraps the final text events in a result envelope."""
+def _judge(config: JudgeConfig) -> str:
+    """Run OpenCodeAgent's judge to completion in the default Host environment."""
+    return asyncio.run(OpenCodeAgent().judge("grade this", config))
+
+
+def test_judge_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> None:
+    """Verify judge wraps the final text events in a result envelope."""
     verdict = '{"assertions": [{"text": "a", "passed": false, "evidence": "no"}]}'
     captured = {}
 
@@ -45,10 +52,9 @@ def test_run_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> 
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    out = opencode_judge.run(
-        "grade this", model="anthropic/claude-sonnet-4-6", effort="high", timeout=300,
-        harness_args=[], env={},
-    )
+    out = _judge(JudgeConfig(
+        harness="opencode", model="anthropic/claude-sonnet-4-6", effort="high",
+    ))
 
     assert json.loads(out)["result"] == verdict
     assert captured["command"][:2] == ["opencode", "run"]
@@ -57,19 +63,18 @@ def test_run_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> 
     assert captured["command"][-1] == "grade this"
 
 
-def test_run_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on a nonzero exit."""
+def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(
         subprocess, "run",
         lambda *args, **kwargs: _fake_proc(returncode=1, stderr="connection reset"),
     )
 
     with pytest.raises(RuntimeError, match="exited 1.*connection reset"):
-        opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                           harness_args=[], env={})
+        _judge(JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6"))
 
 
-def test_run_raises_runtimeerror_when_no_model_call_was_made(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_when_no_model_call_was_made(monkeypatch: object) -> None:
     """Verify a zero-token run (no successful model call) raises, surfacing stderr.
 
     Infra detection is the same zero-token signal the task arm uses, not a stderr
@@ -86,11 +91,10 @@ def test_run_raises_runtimeerror_when_no_model_call_was_made(monkeypatch: object
     )
 
     with pytest.raises(RuntimeError, match="no successful model call.*Unauthorized"):
-        opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                           harness_args=[], env={})
+        _judge(JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6"))
 
 
-def test_run_does_not_consult_stderr_when_the_run_succeeded(monkeypatch: object) -> None:
+def test_judge_does_not_consult_stderr_when_the_run_succeeded(monkeypatch: object) -> None:
     """Verify a successful (nonzero-token) run returns its verdict despite noisy stderr.
 
     Because success is decided by tokens spent rather than stderr contents, benign
@@ -107,16 +111,13 @@ def test_run_does_not_consult_stderr_when_the_run_succeeded(monkeypatch: object)
         ),
     )
 
-    out = opencode_judge.run(
-        "p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-        harness_args=[], env={},
-    )
+    out = _judge(JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6"))
 
     assert json.loads(out)["result"] == verdict
 
 
-def test_run_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError when the binary is missing."""
+def test_judge_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError when the binary is missing."""
     def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
@@ -124,12 +125,11 @@ def test_run_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> Non
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
-        opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                           harness_args=[], env={})
+        _judge(JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6"))
 
 
-def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on an unknown model."""
+def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
+    """Verify judge raises RuntimeError on an unknown model."""
     # No local model/harness allow-list: a fake provider-qualified model reaches the
     # harness, which rejects it (nonzero exit) — surfaced as infra RuntimeError, not
     # laundered into a passing grade.
@@ -141,16 +141,15 @@ def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
     )
 
     with pytest.raises(RuntimeError, match="unknown model"):
-        opencode_judge.run("p", model="anthropic/not-a-real-model", effort="medium", timeout=300,
-                           harness_args=[], env={})
+        _judge(JudgeConfig(harness="opencode", model="anthropic/not-a-real-model"))
 
 
-def test_probe_version_best_effort_none_on_failure(monkeypatch: object) -> None:
-    """Verify probe_version returns None on failure."""
+def test_probe_host_version_best_effort_none_on_failure(monkeypatch: object) -> None:
+    """Verify probe_host_version returns None on failure."""
     def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
 
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
-    assert opencode_judge.probe_version() is None
+    assert OpenCodeAgent.probe_host_version() is None

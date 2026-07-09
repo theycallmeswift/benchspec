@@ -1,49 +1,37 @@
-"""Harness -> judge runner lookup, binary-on-PATH preflight, and the run_judge dispatcher.
+"""Judge dispatch onto the harness adapters.
 
-`run_judge` expands config.env via evalspec.arms.expand_env (the same
-function arms use, so judge env expansion is provably identical) then dispatches to
-the selected harness's runner; `probe_judge_version` is a best-effort per-harness
-version probe that never raises. `judges/config.py`'s structural preflight depends on
-`known_judge_harnesses`; JudgeConfig is imported here only under TYPE_CHECKING, never
-at runtime, to avoid a circular import with `judges/config.py`.
+The same adapter that runs a harness inside the sandbox (`invoke`) also grades with
+it (`judge`) — one class per harness, with the execution environment
+(`evalspec.environments`) deciding where the process runs. `run_judge` is the sync
+boundary the grading path calls: it expands config.env via evalspec.arms.expand_env
+(the same function arms use, so judge env expansion is provably identical) and runs
+the adapter's async `judge` to completion in a Host environment. JudgeConfig is
+imported only under TYPE_CHECKING to avoid a circular import with `judges/config.py`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from evalspec.agents import agent_class, known_harnesses, make_agent
 from evalspec.arms import expand_env
-from evalspec.judges import claude_code, codex, opencode
 
 if TYPE_CHECKING:
     from evalspec.judges.config import JudgeConfig
 
-_BINARIES = {"claude-code": "claude", "codex": "codex", "opencode": "opencode"}
-# Map to the runner *modules*, not their `.run`/`.probe_version` functions directly:
-# looking up the attribute at call time (module.run, module.probe_version) means
-# `monkeypatch.setattr("evalspec.judges.claude_code.run", ...)` in tests takes effect;
-# binding the bare function at import time would freeze in the pre-patch reference.
-_HARNESS_MODULES = {
-    "claude-code": claude_code,
-    "codex": codex,
-    "opencode": opencode,
-}
-
 
 def known_judge_harnesses() -> frozenset[str]:
-    """Registered judge-runner harnesses — deliberately its own registry.
-
-    Decoupled from evalspec.agents.known_harnesses() (task harnesses), even though the
-    two currently name the same three values.
-    """
-    return frozenset(_BINARIES)
+    """Judge-capable harnesses — every registered adapter can judge."""
+    return known_harnesses()
 
 
 def judge_binary(harness: str) -> str:
-    """The PATH binary name for a judge harness (e.g. 'codex' -> 'codex')."""
-    return _BINARIES[harness]
+    """The PATH binary name for a judge harness (e.g. 'claude-code' -> 'claude')."""
+    return agent_class(harness).host_bin
 
 
 def preflight_judge_binary(config: JudgeConfig) -> None:
@@ -61,32 +49,31 @@ def preflight_judge_binary(config: JudgeConfig) -> None:
 
 
 def run_judge(prompt: str, *, config: JudgeConfig) -> str:
-    """Expand config.env like an arm's env, then dispatch to the selected harness's runner.
+    """Expand config.env like an arm's env, then judge with the harness's own adapter.
 
     Uses evalspec.arms.expand_env — the same function, so judge env expansion is
-    provably identical to arm env expansion. Raises SchemaError for an unset
-    referenced $VAR (never a silent empty string); RuntimeError propagates unchanged
-    from the runner for infra failures.
+    provably identical to arm env expansion — and hands the adapter a config whose
+    env is already resolved. Raises SchemaError for an unset referenced $VAR (never a
+    silent empty string); RuntimeError propagates unchanged from the adapter for
+    infra failures.
     """
-    env = expand_env(config.env, os.environ)
-    module = _HARNESS_MODULES[config.harness]  # KeyError impossible after config.py's preflight
+    expanded = replace(config, env=expand_env(config.env, os.environ))
+    agent = make_agent(config.harness)
 
-    return module.run(
-        prompt, model=config.model, effort=config.effort, timeout=config.timeout,
-        harness_args=config.harness_args, env=env,
-    )
+    return asyncio.run(agent.judge(prompt, expanded))
 
 
 def probe_judge_version(harness: str) -> str | None:
     """Best-effort version probe for meta.json.
 
-    Never raises — any exception from the per-harness probe degrades to None, matching
-    the existing agent-version pattern in plugin._write_manifest.
+    Never raises — an unknown harness or any probe exception degrades to None,
+    matching the existing agent-version pattern in plugin._write_manifest.
     """
-    module = _HARNESS_MODULES.get(harness)
-    if module is None:
+    try:
+        adapter = agent_class(harness)
+    except RuntimeError:
         return None
     try:
-        return module.probe_version()
+        return adapter.probe_host_version()
     except Exception:
         return None
