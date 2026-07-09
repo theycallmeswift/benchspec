@@ -60,6 +60,124 @@ def test_cli_run_skips_cleanly_without_gemini_api_key(
     assert "skip" in captured.out.lower()
 
 
+def test_cli_dry_run_prints_files_and_planned_api_calls_without_gemini_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Print planned dry-run work without requiring a Gemini API key."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "run_advisory_lint",
+        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+    )
+
+    exit_code = style_lint_cli.main(["--dry-run", "--max-lines", "1", str(source)])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        f"{source.resolve()}\n"
+        "files: 1\n"
+        "chunks: 3\n"
+        "detector_api_calls: 1\n"
+        "max_verifier_api_calls: 0\n"
+        "max_total_api_calls: 1\n"
+    )
+    assert captured.err == ""
+
+
+def test_cli_dry_run_uses_base_scope_and_never_calls_gemini(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Scope dry-run with --base and avoid advisory execution entirely."""
+    source = (tmp_path / "changed.py").resolve()
+    source.write_text("one = 1\ntwo = 2\n")
+    changed_lines = {source: {2}}
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        style_lint_cli,
+        "changed_lines_from_base",
+        lambda ref: changed_lines,
+    )
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "run_advisory_lint",
+        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+    )
+
+    exit_code = style_lint_cli.main(["--dry-run", "--base", "origin/dev"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        f"{source}\n"
+        "files: 1\n"
+        "chunks: 1\n"
+        "detector_api_calls: 1\n"
+        "max_verifier_api_calls: 1\n"
+        "max_total_api_calls: 2\n"
+    )
+    assert captured.err == ""
+
+
+def test_cli_dry_run_verbose_logs_selected_paths_and_verifier_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Log dry-run selection details and verifier fallback on stderr."""
+    source = (tmp_path / "sample.py").resolve()
+    source.write_text("value = 1\n")
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "run_advisory_lint",
+        lambda _config: pytest.fail("dry-run must not call run_advisory_lint"),
+    )
+
+    exit_code = style_lint_cli.main(
+        [
+            "--dry-run",
+            "--verbose",
+            "--model",
+            "gemini-detector",
+            "--verify-findings",
+            str(source),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        f"{source}\n"
+        "files: 1\n"
+        "chunks: 1\n"
+        "detector_api_calls: 1\n"
+        "max_verifier_api_calls: 1\n"
+        "max_total_api_calls: 2\n"
+    )
+    assert "Using paths: " in captured.err
+    assert str(source) in captured.err
+    assert "Using model: gemini-detector" in captured.err
+    assert "Using verifier model: gemini-detector" in captured.err
+    assert "Dry run summary:" in captured.err
+
+
 def test_cli_script_runs_from_makefile_entry_path_without_gemini_api_key(
     monkeypatch: pytest.MonkeyPatch,
     repo_root: Path,

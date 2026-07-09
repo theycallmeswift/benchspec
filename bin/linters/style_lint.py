@@ -143,11 +143,65 @@ def run(
     return 0
 
 
+def run_dry_run(
+    paths: list[Path] | None = None,
+    *,
+    model: str = DEFAULT_MODEL,
+    verify_findings: bool = False,
+    verify_model: str | None = None,
+    max_lines: int = DEFAULT_CHUNK_LINES,
+    verbose: bool = False,
+) -> int:
+    """Print advisory style-lint planning data without model calls."""
+    verbose_log(verbose, f"Using paths: {format_paths(paths)}")
+    verbose_log(verbose, f"Using model: {model}")
+    if verify_findings:
+        verbose_log(verbose, f"Using verifier model: {verify_model or model}")
+
+    plan = style_lint.build_lint_plan(
+        style_lint.StyleLintConfig(
+            paths=paths,
+            default_paths=DEFAULT_PATHS,
+            rules=RULES,
+            policy_instructions=POLICY_INSTRUCTIONS,
+            api_key="unused-in-dry-run",
+            model=model,
+            verify_findings=verify_findings,
+            verify_model=verify_model,
+            max_lines=max_lines,
+        )
+    )
+
+    if verbose:
+        verbose_log(
+            True,
+            (
+                "Dry run summary: "
+                f"{plan.files_checked} files, "
+                f"{plan.chunks_checked} chunks, "
+                f"{plan.detector_api_calls} detector calls, "
+                f"{plan.max_verifier_api_calls} max verifier calls, "
+                f"{plan.max_total_api_calls} max total calls"
+            ),
+        )
+
+    for path in plan.files:
+        print(path)
+    print(f"files: {plan.files_checked}")
+    print(f"chunks: {plan.chunks_checked}")
+    print(f"detector_api_calls: {plan.detector_api_calls}")
+    print(f"max_verifier_api_calls: {plan.max_verifier_api_calls}")
+    print(f"max_total_api_calls: {plan.max_total_api_calls}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the style lint CLI."""
     parser = argparse.ArgumentParser(prog="style_lint")
     parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument("--base")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--verify-findings", action="store_true")
     parser.add_argument("--verify-model")
@@ -159,6 +213,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.base is not None:
         changed_lines = changed_lines_from_base(args.base)
         paths = sorted(changed_lines)
+
+    if args.dry_run:
+        return run_dry_run(
+            paths,
+            model=args.model,
+            verify_findings=args.verify_findings or args.base is not None,
+            verify_model=args.verify_model,
+            max_lines=args.max_lines,
+            verbose=args.verbose,
+        )
 
     return run(
         paths,
