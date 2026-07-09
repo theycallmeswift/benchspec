@@ -29,7 +29,7 @@ def test_build_command_always_streams_even_without_detect() -> None:
         detect_skill=None,
     )
 
-    assert cmd[0] == ClaudeCodeAgent.CLAUDE_BIN
+    assert cmd[0] == "/root/.local/bin/claude"
     assert cmd[1:3] == ["-p", "do the thing"]
     assert cmd[cmd.index("--output-format") + 1] == "stream-json"
     assert "--verbose" in cmd
@@ -340,7 +340,7 @@ def test_invoke_baseline_parses_stream_result() -> None:
     assert res.fired is False
     assert res.raw == payload
     _, cmd, args, kw = sandbox.calls[0]
-    assert cmd == ClaudeCodeAgent.CLAUDE_BIN
+    assert cmd == "/root/.local/bin/claude"
     assert kw["cwd"] == "/workspace"
     assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home
 

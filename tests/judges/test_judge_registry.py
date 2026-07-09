@@ -98,18 +98,18 @@ def test_run_judge_env_unset_var_raises_schemaerror(monkeypatch: object) -> None
 
 def test_probe_judge_version_best_effort_none_on_exception(monkeypatch: object) -> None:
     """Verify probe judge version is best effort, returning None on exception."""
-    def boom() -> NoReturn:
+    def boom(self: object) -> NoReturn:
         """Raise to simulate a probe failure."""
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(ClaudeCodeAgent, "probe_host_version", boom)
+    monkeypatch.setattr(ClaudeCodeAgent, "binary_version", boom)
 
     assert probe_judge_version("claude-code") is None
 
 
 def test_probe_judge_version_returns_probe_result(monkeypatch: object) -> None:
     """Verify probe judge version returns the probe result."""
-    monkeypatch.setattr(CodexAgent, "probe_host_version", lambda: "1.2.3")
+    monkeypatch.setattr(CodexAgent, "binary_version", lambda self: "1.2.3")
     assert probe_judge_version("codex") == "1.2.3"
 
 

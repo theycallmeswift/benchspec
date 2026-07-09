@@ -101,8 +101,6 @@ class CodexAgent(BaseAgent):
     """Store codex agent data."""
 
     id = "codex"
-    CODEX_BIN = "/usr/local/bin/codex"
-    host_bin = "codex"
     AUTH_JSON_GUEST_SOURCE = "/evalspec-codex-auth/auth.json"
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
@@ -121,12 +119,19 @@ class CodexAgent(BaseAgent):
         auth_env: str = "CODEX_API_KEY",
         version: str = "latest",
         auth_json_path: str = "",
+        agent_bin: str = "/usr/local/bin/codex",  # default binding: the guest install path
     ) -> None:
         """Initialize the instance."""
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._auth_json_path = auth_json_path
         self._version = version
+        self.agent_bin = agent_bin
+
+    @classmethod
+    def for_host(cls: object) -> CodexAgent:
+        """An instance bound to the host environment (judge mode): PATH resolves `codex`."""
+        return cls(agent_bin="codex")
 
     @classmethod
     def from_env(cls: object) -> CodexAgent:
@@ -207,7 +212,7 @@ class CodexAgent(BaseAgent):
         # parity. Codex exec has no stable evalspec-owned equivalents for them yet.
         cd = workdir or self.guest_home
         return [
-            self.CODEX_BIN,
+            self.agent_bin,
             "exec",
             "--json",
             "-m",
@@ -361,7 +366,7 @@ class CodexAgent(BaseAgent):
         or a harness error event surfaced by the parser as `is_error`. `config.effort`
         is deliberately unused: codex exec has no stable effort flag.
         """
-        command = [self.host_bin, "exec", "--json", "-m", config.model,
+        command = [self.agent_bin, "exec", "--json", "-m", config.model,
                    *config.harness_args, prompt]
         proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
 

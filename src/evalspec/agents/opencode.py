@@ -196,7 +196,6 @@ class OpenCodeAgent(BaseAgent):
     """Store open code agent data."""
 
     id = "opencode"
-    host_bin = "opencode"
     guest_home = "/root"
     skill_load_dir = "/root/.config/opencode/skills"
     # multi_turn: invoke() accepts resume_session_id but does not
@@ -207,7 +206,6 @@ class OpenCodeAgent(BaseAgent):
         multi_turn=False,
         token_split=False,
     )
-    OPENCODE_BIN = "/usr/local/bin/opencode"  # npm i -g installs the symlink here
     PROVISION_SCRIPT = (
         dedent("""\
         apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
@@ -237,11 +235,19 @@ class OpenCodeAgent(BaseAgent):
         *,
         auth_env: str = "ANTHROPIC_API_KEY",
         version: str = "latest",
+        # Default binding: the guest install path (npm i -g installs the symlink here).
+        agent_bin: str = "/usr/local/bin/opencode",
     ) -> None:
         """Initialize the instance."""
+        self.agent_bin = agent_bin
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
+
+    @classmethod
+    def for_host(cls: object) -> OpenCodeAgent:
+        """An instance bound to the host environment (judge mode): PATH resolves `opencode`."""
+        return cls(agent_bin="opencode")
 
     @classmethod
     def from_env(cls: object) -> OpenCodeAgent:
@@ -341,7 +347,7 @@ class OpenCodeAgent(BaseAgent):
         # Map the agent-neutral effort tier to OpenCode's --variant.
         variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
-            self.OPENCODE_BIN,
+            self.agent_bin,
             "run",
             "--format",
             "json",
@@ -438,7 +444,7 @@ class OpenCodeAgent(BaseAgent):
         """
         variant = _EFFORT_TO_VARIANT.get(config.effort, "default")
         command = [
-            self.host_bin, "run", "--format", "json", "--variant", variant,
+            self.agent_bin, "run", "--format", "json", "--variant", variant,
             "-m", config.model, *config.harness_args, prompt,
         ]
         proc = await (env or Host()).exec(

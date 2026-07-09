@@ -65,7 +65,7 @@ def test_build_command_shape_for_exec_json() -> None:
     )
 
     assert cmd == [
-        CodexAgent.CODEX_BIN,
+        "/usr/local/bin/codex",
         "exec",
         "--json",
         "-m",
@@ -573,7 +573,7 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
 
     kind, cmd, args, kw = sandbox.calls[0]
     assert kind == "exec"
-    assert cmd == CodexAgent.CODEX_BIN
+    assert cmd == "/usr/local/bin/codex"
     assert args[-1] == "do it"
     assert args[args.index("-C") + 1] == "/workspace"
     assert kw["cwd"] == "/workspace"

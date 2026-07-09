@@ -79,8 +79,6 @@ class ClaudeCodeAgent(BaseAgent):
     """Store claude code agent data."""
 
     id = "claude-code"
-    CLAUDE_BIN = "/root/.local/bin/claude"
-    host_bin = "claude"
     guest_home = "/root"
     skill_load_dir = "/root/.claude/skills"
     capabilities = AgentCapabilities(
@@ -99,11 +97,18 @@ class ClaudeCodeAgent(BaseAgent):
         *,
         auth_env: str = "ANTHROPIC_API_KEY",
         version: str = "latest",
+        agent_bin: str = "/root/.local/bin/claude",  # default binding: the guest install path
     ) -> None:
         """Initialize the instance."""
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
+        self.agent_bin = agent_bin
+
+    @classmethod
+    def for_host(cls: object) -> ClaudeCodeAgent:
+        """An instance bound to the host environment (judge mode): PATH resolves `claude`."""
+        return cls(agent_bin="claude")
 
     @classmethod
     def from_env(cls: object) -> ClaudeCodeAgent:
@@ -176,7 +181,7 @@ class ClaudeCodeAgent(BaseAgent):
         # so the agent runs with full autonomy — no host-side --allowedTools workaround needed.
         _validate_plugin_dir_sources(plugin_dir, harness_args)
         cmd = [
-            self.CLAUDE_BIN,
+            self.agent_bin,
             "-p",
             prompt,
             "--output-format",
@@ -230,7 +235,7 @@ class ClaudeCodeAgent(BaseAgent):
         binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota — the
         same contract binder.py's host call relies on via judge_cli).
         """
-        command = [self.host_bin, "-p", prompt, "--output-format", "json",
+        command = [self.agent_bin, "-p", prompt, "--output-format", "json",
                    "--model", config.model, "--effort", config.effort,
                    *config.harness_args]
         proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)

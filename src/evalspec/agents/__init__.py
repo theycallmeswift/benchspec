@@ -74,9 +74,9 @@ def _selected_agent_class() -> type:
 def agent_class(harness: str) -> type:
     """The registered adapter class for a harness name.
 
-    The class (not an instance) is what judge-mode dispatch needs — `judge` and
-    `probe_host_version` are classmethods that use the host's own credentials, so no
-    `from_env()` instantiation is involved. An unknown `harness` raises.
+    Judge-mode dispatch looks the class up, then binds an instance to the host
+    environment via `for_host()` — the judge uses the host's own credentials, so no
+    `from_env()` credential read is involved. An unknown `harness` raises.
     """
     if harness not in _REGISTRY:
         raise RuntimeError(

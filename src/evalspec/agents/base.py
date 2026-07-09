@@ -33,14 +33,16 @@ FIXED_SKILLS_HOME = "/home/evalspec/skills"
 class BaseAgent:
     """Store base agent data."""
 
-    host_bin: str  # the harness's host-side binary name (judge mode + version probe)
+    # The binary THIS instance runs. An instance is bound to one execution
+    # environment: the default binding is the guest install path (task arms);
+    # for_host() rebinds to the name PATH resolves on the host (judge mode).
+    agent_bin: str
 
-    @classmethod
-    def probe_host_version(cls: object) -> str | None:
-        """Best-effort `host_bin --version` probe — never raises, never fails the run."""
+    def binary_version(self: object) -> str | None:
+        """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
         try:
             proc = subprocess.run(
-                [cls.host_bin, "--version"], capture_output=True, text=True, timeout=10
+                [self.agent_bin, "--version"], capture_output=True, text=True, timeout=10
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             return None
@@ -94,7 +96,7 @@ class CodingAgent(Protocol):
     id: str  # snapshot-cache key + report label
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
     skill_load_dir: str  # absolute guest path the agent loads skills from
-    host_bin: str  # host-side binary name (judge mode + version probe)
+    agent_bin: str  # the binary this instance runs (guest install path; for_host() rebinds)
     capabilities: AgentCapabilities
 
     def version(self: object) -> str:
@@ -185,8 +187,12 @@ class CodingAgent(Protocol):
         ...
 
     @classmethod
-    def probe_host_version(cls: object) -> str | None:
-        """Return the host CLI version, or None on any failure (best effort)."""
+    def for_host(cls: object) -> CodingAgent:
+        """An instance bound to the host environment: agent_bin resolves from PATH."""
+        ...
+
+    def binary_version(self: object) -> str | None:
+        """Return this instance's CLI version, or None on any failure (best effort)."""
         ...
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:

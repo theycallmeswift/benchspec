@@ -32,6 +32,7 @@ Implement every member (signatures in `base.py`):
 | `id: str` | Stable slug — snapshot-cache key and report label (e.g. `"claude-code"`). |
 | `guest_home: str` | The agent's `HOME` inside the guest; asset staging target and trigger-run cwd. |
 | `skill_load_dir: str` | Absolute guest path the agent auto-loads skills from (e.g. `/root/.claude/skills`). Must differ from `FIXED_SKILLS_HOME` and `guest_home` — the bridge `rm -rf`s it before symlinking. |
+| `agent_bin: str` | The binary this **instance** runs — an instance is bound to one execution environment. The default binding is the guest install path (`build_command`'s argv[0] for sandbox runs); `for_host()` returns an instance bound to the host name PATH resolves (judge mode's argv[0], the judge binary preflight, `binary_version()`). |
 | `capabilities: AgentCapabilities` | Typed capability declaration — see the field table below for each field's consumer (`efforts` is documentation-only today). |
 | `version() -> str` | Cache-key input — pinned version or `"latest"`. Bumping produces a new snapshot. |
 | `bridge_skills_home_script() -> str` | POSIX-sh run once at provision: symlinks `skill_load_dir` → `FIXED_SKILLS_HOME` (`/home/evalspec/skills`) so a per-cell `setup.sh` that installs into the fixed home lands where the agent auto-loads. The fixed home is agent-neutral; `skill_load_dir` is the only agent-specific fact. |
@@ -57,14 +58,15 @@ Implement every member (signatures in `base.py`):
 
 Plus the class-level conveniences callers rely on:
 
-- `cls.from_env() -> CodingAgent` — build from host env (version pin + credential).
+- `cls.from_env() -> CodingAgent` — build from host env (version pin + credential), bound to the guest binary.
+- `cls.for_host() -> CodingAgent` — an instance bound to the host environment (judge mode); `agent_bin` resolves from PATH.
 - `cls.credential_error() -> str | None` — `None` if a usable credential is set, else a preflight remediation string.
 
 ## Grading uses the same adapter, in a different environment
 
 One adapter per harness, two entry points: `invoke` runs the harness inside the sandbox for task arms; `judge` grades with the same harness on the host. Where a process runs is an **execution environment** (`evalspec.environments`): `GuestSandbox` wraps a live microVM session's exec, `Host` runs a fresh host process, and both return the same `ProcResult` — the adapter builds commands and parses output without knowing which one it got, so sandbox-vs-host is a parameter of the call, not a code path per harness.
 
-Judging stays independent from the task *arms*: a run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** and model. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which expands the judge env and runs `make_agent(harness).judge(prompt, config)` — defaulting to a fresh `Host` environment, never the task arm's sandbox or session. Each adapter's `judge` reuses the same output parser as its sandbox path (Claude's `--output-format json` emits the `{"result": "<judge-json-string>"}` envelope natively; Codex/OpenCode parse with `parse_codex_jsonl`/`parse_opencode_jsonl` and wrap) and raises `RuntimeError` for its harness's infra-failure shapes (missing binary, nonzero exit, error events / zero-token runs).
+Judging stays independent from the task *arms*: a run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** and model. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which expands the judge env and runs `agent_class(harness).for_host().judge(prompt, config)` — a host-bound instance in a fresh `Host` environment, never the task arm's sandbox or session. Each adapter's `judge` reuses the same output parser as its sandbox path (Claude's `--output-format json` emits the `{"result": "<judge-json-string>"}` envelope natively; Codex/OpenCode parse with `parse_codex_jsonl`/`parse_opencode_jsonl` and wrap) and raises `RuntimeError` for its harness's infra-failure shapes (missing binary, nonzero exit, error events / zero-token runs).
 
 `binder.py`'s prose→checker classifier is a separate host-Claude call (`agents.judge_cli.run_host_judge`): it always uses Claude regardless of the configured judge harness.
 

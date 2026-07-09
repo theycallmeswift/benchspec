@@ -63,7 +63,7 @@ def test_build_command_shape_and_effort_mapping() -> None:
         detect_skill=None,
     )
 
-    assert cmd[0] == OpenCodeAgent.OPENCODE_BIN
+    assert cmd[0] == "/usr/local/bin/opencode"
     assert cmd[1] == "run"
     assert cmd[cmd.index("--format") + 1] == "json"
     assert cmd[cmd.index("--variant") + 1] == "default"  # medium → default

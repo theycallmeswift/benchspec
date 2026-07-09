@@ -19,7 +19,7 @@ def _fake_proc(
 
 def _judge(config: JudgeConfig) -> str:
     """Run ClaudeCodeAgent's judge to completion in the default Host environment."""
-    return asyncio.run(ClaudeCodeAgent().judge("grade this", config))
+    return asyncio.run(ClaudeCodeAgent.for_host().judge("grade this", config))
 
 
 def test_judge_returns_native_result_envelope(monkeypatch: object) -> None:
@@ -97,18 +97,18 @@ def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None
         _judge(JudgeConfig(model="gpt-5.5"))
 
 
-def test_probe_host_version_best_effort_none_on_failure(monkeypatch: object) -> None:
-    """Verify probe_host_version returns None on failure."""
+def test_binary_version_best_effort_none_on_failure(monkeypatch: object) -> None:
+    """Verify binary_version returns None on failure."""
     def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
 
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
-    assert ClaudeCodeAgent.probe_host_version() is None
+    assert ClaudeCodeAgent.for_host().binary_version() is None
 
 
-def test_probe_host_version_returns_stripped_stdout(monkeypatch: object) -> None:
-    """Verify probe_host_version returns stripped stdout."""
+def test_binary_version_returns_stripped_stdout(monkeypatch: object) -> None:
+    """Verify binary_version returns stripped stdout."""
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout="2.1.0\n"))
-    assert ClaudeCodeAgent.probe_host_version() == "2.1.0"
+    assert ClaudeCodeAgent.for_host().binary_version() == "2.1.0"

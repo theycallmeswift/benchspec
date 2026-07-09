@@ -17,7 +17,7 @@ import shutil
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from evalspec.agents import agent_class, known_harnesses, make_agent
+from evalspec.agents import agent_class, known_harnesses
 from evalspec.arms import expand_env
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ def known_judge_harnesses() -> frozenset[str]:
 
 def judge_binary(harness: str) -> str:
     """The PATH binary name for a judge harness (e.g. 'claude-code' -> 'claude')."""
-    return agent_class(harness).host_bin
+    return agent_class(harness).for_host().agent_bin
 
 
 def preflight_judge_binary(config: JudgeConfig) -> None:
@@ -58,7 +58,7 @@ def run_judge(prompt: str, *, config: JudgeConfig) -> str:
     infra failures.
     """
     expanded = replace(config, env=expand_env(config.env, os.environ))
-    agent = make_agent(config.harness)
+    agent = agent_class(config.harness).for_host()
 
     return asyncio.run(agent.judge(prompt, expanded))
 
@@ -74,6 +74,6 @@ def probe_judge_version(harness: str) -> str | None:
     except RuntimeError:
         return None
     try:
-        return adapter.probe_host_version()
+        return adapter.for_host().binary_version()
     except Exception:
         return None
