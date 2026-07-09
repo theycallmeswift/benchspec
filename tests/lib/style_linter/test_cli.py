@@ -132,6 +132,48 @@ def test_cli_dry_run_uses_base_scope_and_never_calls_gemini(
     assert captured.err == ""
 
 
+def test_cli_dry_run_skips_gitignored_files_from_repo_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    style_lint_cli: ModuleType,
+) -> None:
+    """Preview only unignored Python files when scanning a full repository."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("ignored/\n")
+    included_file = tmp_path / "src/included.py"
+    included_file.parent.mkdir(parents=True, exist_ok=True)
+    included_file.write_text("value = 1\n")
+    ignored_file = tmp_path / "ignored/generated.py"
+    ignored_file.parent.mkdir(parents=True, exist_ok=True)
+    ignored_file.write_text("value = 2\n")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        style_lint_cli.style_lint,
+        "call_gemini",
+        lambda **_kwargs: pytest.fail("dry-run must not call Gemini"),
+    )
+
+    exit_code = style_lint_cli.main(["--dry-run", "."])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out == (
+        f"{included_file.resolve()}\n"
+        "files: 1\n"
+        "chunks: 1\n"
+        "detector_api_calls: 1\n"
+        "max_verifier_api_calls: 0\n"
+        "max_total_api_calls: 1\n"
+    )
+    assert ignored_file.resolve().as_posix() not in captured.out
+    assert captured.err == ""
+
+
 def test_cli_dry_run_verbose_logs_selected_paths_and_verifier_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
