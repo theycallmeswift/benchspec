@@ -89,7 +89,10 @@ docs/style/development.md
         ),
         Rule(
             id="dedented-multiline-strings",
-            description="Use textwrap.dedent for indented multiline strings.",
+            description=(
+                "Use textwrap.dedent for indented multiline string values. "
+                "Docstrings are exempt — indented multiline docstrings are correct."
+            ),
         ),
     ]
     ```
