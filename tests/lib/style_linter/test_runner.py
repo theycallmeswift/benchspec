@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -127,6 +128,47 @@ def test_run_advisory_lint_batches_detector_calls(
     assert progress_events == [(source.resolve(), 1, 1)]
     assert result.files_checked == 1
     assert result.chunks_checked == 3
+
+
+def test_run_advisory_lint_dry_run_skips_gitignored_files_from_repo_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Preview only unignored Python files when scanning a full repository."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("ignored/\n")
+    included_file = tmp_path / "src/included.py"
+    included_file.parent.mkdir(parents=True, exist_ok=True)
+    included_file.write_text("value = 1\n")
+    ignored_file = tmp_path / "ignored/generated.py"
+    ignored_file.parent.mkdir(parents=True, exist_ok=True)
+    ignored_file.write_text("value = 2\n")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    monkeypatch.chdir(tmp_path)
+
+    result = framework.run_advisory_lint(
+        framework.StyleLintConfig(
+            paths=[Path(".")],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            dry_run=True,
+        )
+    )
+
+    assert result.warning is None
+    assert result.plan is not None
+    assert result.plan.files == [included_file.resolve()]
+    assert ignored_file.resolve() not in result.plan.files
+    assert result.files_checked == 1
+    assert result.chunks_checked == 1
+    assert result.plan.detector_api_calls == 1
+    assert result.plan.max_verifier_api_calls == 0
+    assert result.plan.max_total_api_calls == 1
 
 
 def test_run_advisory_lint_aggregates_usage_metadata(
