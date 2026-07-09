@@ -5,7 +5,7 @@ call, parse it.
 The judge reasons only from supplied evidence (assertion list, resulting file tree, file
 contents, runner-computed SHA-256s, agent final message) — not from recall. One retry on
 malformed JSON, then all assertions are marked errored. Spawning the judge subprocess is
-`CodingAgent.judge`'s job; this module is agent-agnostic — only the prompt build and the
+evalspec.judges.run_judge's job; this module is agent-agnostic — only the prompt build and the
 parse live here.
 """
 
@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
+
+from evalspec.judges import JudgeConfig, run_judge
 
 
 def build_judge_prompt(
@@ -160,13 +162,12 @@ def grade_run(
     eval_id: object,
     config: object,
     *,
-    agent: object,
-    model: object = "sonnet",
-    timeout: object = 300,
+    judge_config: JudgeConfig | None = None,
     original_shas: object = None,
     process_facts: object = "",
 ) -> dict:
     """Grade one completed agent run against assertions."""
+    judge_config = judge_config or JudgeConfig()
     prompt = build_judge_prompt(
         assertions,
         tree,
@@ -178,7 +179,7 @@ def grade_run(
     )
     for attempt in (1, 2):
         try:
-            raw = agent.judge(prompt, model=model, timeout=timeout)
+            raw = run_judge(prompt, config=judge_config)
             outer = json.loads(raw)
             graded = parse_judge_json(outer.get("result", ""), eval_id, config)
             if len(graded["assertions"]) != len(assertions):
@@ -188,7 +189,7 @@ def grade_run(
             return graded
         except (
             # An infra-level judge failure (missing host CLI, nonzero exit, auth /
-            # rate-limit) reaches us as RuntimeError from agent.judge — deliberately
+            # rate-limit) reaches us as RuntimeError from judges.run_judge — deliberately
             # NOT caught here, so it propagates to run_eval_arm and marks the arm
             # errored rather than being laundered into fake JUDGE ERROR assertions.
             # These remaining cases are genuine "judge ran but the output is

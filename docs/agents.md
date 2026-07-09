@@ -21,7 +21,7 @@ src/evalspec/agents/
   __init__.py   # make_agent() factory + credential_preflight_error()
 ```
 
-`sandbox.py` and `judge.py` call only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) — trigger routing uses this run-level agent, so a multi-harness set's trigger numbers are single-harness.
+`sandbox.py` calls only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) — trigger routing uses this run-level agent, so a multi-harness set's trigger numbers are single-harness. `judge.py` does not call `make_agent()` — grading resolves its own `JudgeConfig` independent from the task agent (see [Grading is not an agent-protocol member](#grading-is-not-an-agent-protocol-member) below).
 
 ## The `CodingAgent` protocol
 
@@ -43,7 +43,6 @@ Implement every member (signatures in `base.py`):
 | `stage_project_assets(sb, project_mount)` | Copy project-side assets (canonically skills) into the guest. **Trigger path only** — output evals install per-cell via `setup.sh` + the skills-home bridge, so this no longer fires for them. No-op if nothing to stage. |
 | `build_command(prompt, *, plugin_dir, model, effort, resume_session_id, detect_skill, harness_args=None)` | Build the headless argv. With `detect_skill` set, emit a streamable format so firing is detectable; the in-tree agents stream unconditionally (both arms), so `detect_skill` gates only firing detection downstream, not the format. Validate `harness_args` against the adapter's reserved identity/control flags, append supported pass-through args in a position that preserves the CLI shape, and fail loudly if the adapter cannot support them. |
 | `invoke(sb, prompt, *, ..., extra_env=None, harness_args=None) -> RunResult` | Run one turn in the sandbox; parse stdout into a `RunResult` (see `runner.py`). Surface failures as `is_error=True`, not exceptions. `extra_env` (an arm's per-arm `env`, already `$VAR`-expanded) merges over `guest_env()` for the agent exec — arm keys win, so a set's leaky-OpenRouter arm reaches the agent and not just `setup.sh`. `harness_args` are the resolved set+arm pass-through tokens for the invocation layer, not environment mutation. |
-| `judge(prompt, *, model, timeout) -> str` | Host-side judge call — spawn the agent's CLI on the host, return raw stdout. `judge.grade_run` parses the JSON. Agents may share a judge (OpenCode delegates to Claude). |
 | `detect_dispatch(line, skill_name) -> bool` | Given one streamed line, return True if it shows a skill dispatch. Keeps `trigger.py` and `sandbox.py` agent-agnostic. |
 | `detect_fired(lines, skill_name) -> bool` | Given the whole routing stream, return True if *our* skill fired. `cases.py` passes this to the trigger run; pairs with `detect_dispatch` (single-line) for the full firing tally. |
 | `streamed_activity(lines) -> bool` | True if the model began a turn (an `assistant` event), distinguishing a clean non-fire from a retryable launch stall so a budget timeout isn't misread. |
@@ -60,6 +59,12 @@ Plus the class-level conveniences callers rely on:
 
 - `cls.from_env() -> CodingAgent` — build from host env (version pin + credential).
 - `cls.credential_error() -> str | None` — `None` if a usable credential is set, else a preflight remediation string.
+
+## Grading is not an agent-protocol member
+
+Judging is independent from the task agent. A run resolves one `JudgeConfig` (`evalspec.judges`, configured via `[tool.evalspec.judge]`; see [`configuration.md`](configuration.md)) naming a judge **harness** (`claude-code`, `codex`, or `opencode`) and model, launched as a fresh host process independent from every task arm's harness. `judge.py`'s `grade_run` calls `evalspec.judges.run_judge(prompt, config=judge_config)`, which dispatches to the selected harness's runner in `evalspec/judges/{claude_code,codex,opencode}.py`. Each runner returns the exact envelope `judge.py` parses — `{"result": "<judge-json-string>"}` — normalizing its own harness's output shape (Claude's `--output-format json` emits it natively; Codex/OpenCode extract their final agent-message/text events and wrap it) and raises `RuntimeError` for its own infra-failure shapes (missing binary, nonzero exit, auth/quota/rate-limit/overload).
+
+`binder.py`'s prose→checker classifier is a separate host-Claude call (`agents.judge_cli.run_host_judge`): it always uses Claude regardless of the configured judge harness.
 
 ## What `invoke` returns
 
@@ -95,8 +100,6 @@ The trajectory feeds **process facts**: `render_process_facts` collapses cross-t
 
 Why `bypassPermissions` over `acceptEdits`: the microVM is the containment boundary, so the agent runs with full autonomy. The `--allowedTools Bash` workaround the host-spawn version needed isn't required inside the VM.
 
-Why the judge stays on the host: grading needs host credentials and reasoning budget, and a fresh microVM per judge call doubles wall-clock and provider spend for no signal gain.
-
 ## `OpenCodeAgent` — worked example
 
 | Field | Value |
@@ -116,7 +119,6 @@ Why the judge stays on the host: grading needs host credentials and reasoning bu
 | Harness args | Inserted before the trailing prompt positional. Reserved: model, variant/effort, format, session controls (`-c`, `--continue`, `-s`, `--session`, `--fork`), and prompt-position controls (`--command`, `--prompt`). |
 | Project assets (trigger path) | `.opencode/skills` (native); also reads `.claude/skills` for repos that ship the Claude layout |
 | Detect dispatch | JSONL `tool_use` whose `name` is the skill (exact or namespaced); no generic Skill dispatcher today |
-| Judge | Delegates to Claude (host-side) — task arms differ; grading should not |
 
 `build_command` accepts `plugin_dir` and `resume_session_id` for protocol parity but ignores them — OpenCode v1 has no equivalents. Multi-turn evals under OpenCode therefore start a fresh session per turn; chained sessions are Claude-only. Non-empty `harness_args` are supported only when they can be placed before the prompt without changing evalspec-owned model, variant, format, or parsing semantics.
 
@@ -139,7 +141,6 @@ Why the judge stays on the host: grading needs host credentials and reasoning bu
 | Harness args | Inserted before the trailing prompt positional. Reserved: model, cwd, JSON/output controls, config/profile controls, sandbox/approval controls, `resume`, `review`, and prompt-position controls. |
 | Project assets (trigger path) | merges `skills`, `.agents/skills`, and `.claude/skills` into `/root/.codex/skills` |
 | Detect dispatch | Codex JSONL item skill-invocation shapes, plus `Skill` tool-call and namespaced-tool fallbacks |
-| Judge | Delegates to Claude (host-side) — task arms differ; grading should not |
 
 `build_command` accepts `plugin_dir`, `resume_session_id`, `effort`, and `detect_skill` for protocol parity, but only model, workdir, harness args, and prompt affect the current command. `capabilities.multi_turn=False` until Codex resume semantics are verified inside the eval sandbox. Use `CODEX_AUTH_JSON_PATH` when you want Codex runs to use an existing ChatGPT/Codex subscription login instead of an API-key billing path.
 

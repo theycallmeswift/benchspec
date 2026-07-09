@@ -16,7 +16,7 @@ evalspec runs each `(eval × arm)` as a parametrized pytest case. The agent runs
 - **Capabilities** — an agent's `AgentCapabilities` (`efforts`, `multi_turn`, `token_split`): what the harness can honestly do with it. See [`agents.md`](agents.md) for each field's consumer (`efforts` is documentation-only today — effort is no longer pre-validated).
 - **Trigger eval** — one routing query (`query` + `should_trigger`; polarity from section membership in `trigger-evals.md`). Tests whether the configured agent dispatches to the skill. Lives in `<skill>/evals/trigger-evals.md`.
 - **Iteration** — one full evalspec run. Artifacts land under `tmp/evals/iteration_NN/`, zero-padded and incrementing per run (e.g. `iteration_01`, `iteration_41`). The plugin picks the name once on the controller and shares it with xdist workers via `EVALSPEC_ITERATION`, so `-n 8` writes one iteration tree, not eight.
-- **meta.json** — the run manifest written at the iteration root (`tmp/evals/iteration_NN/meta.json`) once per run: `run_id`/`commit`/`config_hash` identity, agent + versions, the eval `set` name + per-arm `arms` roster (each arm's harness/model/effort/env/harness_args), the judge model, `trigger_effort`, trigger mode, start time, `format_version`. The join key for post-hoc aggregation across runs.
+- **meta.json** — the run manifest written at the iteration root (`tmp/evals/iteration_NN/meta.json`) once per run: `run_id`/`commit`/`config_hash` identity, agent + versions, the eval `set` name + per-arm `arms` roster (each arm's harness/model/effort/env/harness_args), the resolved `judge` object (harness/model/effort/timeout/env/harness_args), `trigger_effort`, trigger mode, start time, `format_version`. The join key for post-hoc aggregation across runs.
 - **index.jsonl** — flat per-sample results at the iteration root (`tmp/evals/iteration_NN/index.jsonl`): one line per (eval × arm × sample) and (trigger query × sample). The aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout.
 - **Label** — the benchmark's human-readable title, `"iteration_NN · <skill>"`. It's `benchmark["label"]` in the JSON and the `# Benchmark — …` heading in the Markdown. The arms it scores are keyed by their declared arm name under `benchmark["arms"]`.
 - **Fired** — an arm actually invoked the skill (didn't hand-roll the task). Each turn's stream is scanned via `agent.detect_dispatch`; the arm's dispatched-skills set drives the `skill_invoked` activation assertion. A trial arm normally fires; a baseline arm does not, and fails the activation assertion accordingly.
@@ -89,7 +89,7 @@ Benchmark aggregation (sessionfinish, controller only)
      N/M")  label: "iteration_NN · <skill>"
 ```
 
-`meta.json` is the run manifest at the iteration root (one per run, above `skills/`): `run_id`/`commit`/`config_hash` identity plus agent + versions, the eval `set` name + per-arm `arms` roster (including resolved `harness_args`), the judge model, `trigger_effort`, trigger mode, start time, and `format_version`. It's the join key a post-hoc aggregator uses to stitch separate runs back together on metadata alone.
+`meta.json` is the run manifest at the iteration root (one per run, above `skills/`): `run_id`/`commit`/`config_hash` identity plus agent + versions, the eval `set` name + per-arm `arms` roster (including resolved `harness_args`), the resolved `judge` object (harness/model/effort/timeout/env/harness_args), `trigger_effort`, trigger mode, start time, and `format_version`. It's the join key a post-hoc aggregator uses to stitch separate runs back together on metadata alone.
 
 `session.jsonl` is the lossless source for everything downstream, and the only persisted record of the agent's turn. Every arm streams, so every cell writes one — keeping the trajectory and the judge's process facts symmetric across arms (the only artifact a turn omits is one that never streamed, e.g. a launch error). The structured trajectory is **derived, not stored**: `evalspec.trajectory.trajectory_from_session` regenerates it deterministically from `session.jsonl`, and the run already folds its summary into `transcript.json` (`tool_call_count`, `skills_dispatched`) and the judge's process facts. `result_subtype` is the CLI result event's `subtype` (e.g. `success`, `error_max_turns`), not the API `stop_reason`.
 
@@ -109,12 +109,12 @@ Decomposition is an authoring convenience layered over this model, not a new ass
 
 ## Why the judge is on the host
 
-The judge spawns the host's agent CLI (`agent.judge(prompt, model)`), not a sandboxed call. Two reasons:
+The judge spawns a fresh host process for the configured judge harness (`evalspec.judges.run_judge`), not a sandboxed call. Two reasons:
 
 1. **Grading needs the host's reasoning budget.** The judge does real reading and evidence-checking; a fresh microVM per arm doubles wall-clock and provider spend for no signal benefit.
 2. **One consistent grader across harnesses.** Running the task under a different harness (`claude-code` vs `opencode`) leaves the rubric stable — only the *task* differs.
 
-The judge call is still an agent-protocol member (`CodingAgent.judge`) so each agent can choose its grader. OpenCode delegates to Claude by convention.
+The judge harness is resolved once per run (`[tool.evalspec.judge]`, `--evalspec-judge-*` — see [`configuration.md`](configuration.md)), independent from every task arm's own harness — grading a Codex or OpenCode matrix no longer requires Claude Code installed. `binder.py`'s prose→checker classifier is a separate, unrelated host-Claude call, unaffected by the configured judge harness.
 
 ## Activation is an assertion, not a gate
 

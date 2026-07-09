@@ -144,10 +144,6 @@ class CodingAgent(Protocol):
         """Run one prompt through the agent inside the guest."""
         ...
 
-    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Run the agent-backed judge prompt and return raw output."""
-        ...
-
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
         """Return whether one stream line shows a skill dispatch."""
         ...

@@ -8,7 +8,6 @@ import json
 import os
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.agents.judge_cli import run_host_judge
 from evalspec.runner import RunResult
 from evalspec.trajectory import iter_events
 
@@ -340,10 +339,6 @@ class CodexAgent(BaseAgent):
         if res.exit_code != 0:
             return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
         return parse_codex_jsonl(res.stdout_text, eval_id, config, detect_skill)
-
-    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Run the agent-backed judge prompt and return raw output."""
-        return run_host_judge(prompt, model=model, timeout=timeout)
 
 
 def _event_item(event: dict) -> dict:

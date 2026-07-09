@@ -34,8 +34,7 @@ def _grade_all_pass(
     eval_id: object,
     config: object,
     *,
-    agent: object = None,
-    model: object = "sonnet",
+    judge_config: object = None,
     original_shas: object = None,
     process_facts: object = "",
 ) -> object:
@@ -845,21 +844,22 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     assert [a["passed"] for a in outcome.grading["assertions"]] == [False, False]
 
 
-def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> None:
-    """Verify judge pinned to claude regardless of task model."""
-    # The judge always shells out to the host `claude` CLI, which only knows Claude-family
-    # aliases. An arm model like `google/gemini-3.5-flash` must not reach the judge.
-    from evalspec.execution import JUDGE_MODEL
+def test_default_judge_config_used_by_default(tmp_path: object) -> None:
+    """Verify the default JudgeConfig grades when no judge config is passed."""
+    # The judge is independent of the task arm: the arm can run any harness/model
+    # (here opencode/gemini) while the judge still grades with the default JudgeConfig
+    # (claude-code/sonnet) — grading never calls the task arm as judge.
+    from evalspec.judges import JudgeConfig
 
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
     ec = _case(tmp_path, {"slug": "mu", "prompt": "p", "assertions": ["a"]})
-    seen_models = []
+    seen_configs = []
 
-    def grade(assertions: object, *a: object, model: object, **k: object) -> object:
+    def grade(assertions: object, *a: object, judge_config: object, **k: object) -> object:
         """Grade."""
-        seen_models.append(model)
+        seen_configs.append(judge_config)
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
     run_eval_arm(
@@ -878,22 +878,25 @@ def test_judge_pinned_to_claude_regardless_of_task_model(tmp_path: object) -> No
         bind=_punt_all,
     )
 
-    assert seen_models == [JUDGE_MODEL]
+    assert seen_configs == [JudgeConfig()]
 
 
-def test_judge_model_param_overrides_default(tmp_path: object) -> None:
-    """Verify judge model param overrides default."""
+def test_judge_config_param_overrides_default(tmp_path: object) -> None:
+    """Verify a passed judge_config overrides the default."""
+    from evalspec.judges import JudgeConfig
+
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
     ec = _case(tmp_path, {"slug": "nu", "prompt": "p", "assertions": ["a"]})
-    seen_models = []
+    seen_configs = []
 
-    def grade(assertions: object, *a: object, model: object, **k: object) -> object:
+    def grade(assertions: object, *a: object, judge_config: object, **k: object) -> object:
         """Grade."""
-        seen_models.append(model)
+        seen_configs.append(judge_config)
         return {"assertions": [{"text": x, "passed": True, "evidence": "ok"} for x in assertions]}
 
+    custom = JudgeConfig(harness="codex", model="gpt-5.5")
     run_eval_arm(
         ec,
         TRIAL,
@@ -903,7 +906,7 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        judge_model="haiku",
+        judge_config=custom,
         session_factory=fake_session_factory(
             RunResult("nu", "trial", "done", 1, 1, False, session_id="s", fired=True)
         ),
@@ -911,7 +914,7 @@ def test_judge_model_param_overrides_default(tmp_path: object) -> None:
         bind=_punt_all,
     )
 
-    assert seen_models == ["haiku"]
+    assert seen_configs == [custom]
 
 
 def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
@@ -1228,8 +1231,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
         eval_id: object,
         config: object,
         *,
-        agent: object,
-        model: object,
+        judge_config: object = None,
         original_shas: object = None,
         process_facts: object = "",
     ) -> object:

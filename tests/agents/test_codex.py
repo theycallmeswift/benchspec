@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -715,27 +714,3 @@ def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
 
     assert res.is_error is True
     assert "copy failed" in res.result_text
-
-
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Provide the fake proc test helper."""
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
-
-
-def test_judge_delegates_to_host_claude(monkeypatch: object) -> None:
-    """Verify judge delegates to host claude."""
-    payload = json.dumps({"result": "ok", "is_error": False})
-    captured = {}
-
-    def fake_run(cmd: object, **kw: object) -> object:
-        """Fake run."""
-        captured["cmd"] = cmd
-        captured["kw"] = kw
-        return _fake_proc(stdout=payload)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    result = _agent().judge("grade this", model="sonnet")
-
-    assert result == payload
-    assert captured["cmd"][0] == "claude"

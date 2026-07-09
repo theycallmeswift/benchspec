@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 
 import pytest
 
@@ -499,62 +498,6 @@ def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
     agent = ClaudeCodeAgent.from_env()
     assert agent._auth_env == "ANTHROPIC_API_KEY"
     assert agent.version() == "9.9"
-
-
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Provide the fake proc test helper."""
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
-
-
-def test_judge_returns_stdout_on_healthy_run(monkeypatch: object) -> None:
-    """Verify judge returns stdout on healthy run."""
-    payload = json.dumps({"result": '{"assertions": []}', "is_error": False})
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: _fake_proc(stdout=payload),
-    )
-
-    out = _agent().judge("prompt", model="sonnet")
-
-    assert out == payload
-
-
-def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Verify judge raises for runtimeerror on nonzero exit."""
-    # A crashed/exited host CLI must not be laundered into fake JUDGE ERROR assertions.
-    # grade_run intentionally does NOT catch RuntimeError so the failure surfaces as
-    # arm-level errored=True via run_eval_arm's try/except.
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: _fake_proc(returncode=1, stderr="boom"),
-    )
-
-    with pytest.raises(RuntimeError, match="exited 1.*boom"):
-        _agent().judge("prompt", model="sonnet")
-
-
-def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> None:
-    """Verify judge raises for runtimeerror on is error envelope."""
-    # `claude -p` reports auth/rate-limit/quota failures with returncode=0 but
-    # is_error=true in the JSON envelope. Surface the real cause as RuntimeError;
-    # without this, the auth message gets laundered into parse_judge_json and the
-    # arm reports fake "JUDGE ERROR: unparseable output" assertions.
-    payload = json.dumps(
-        {
-            "result": "Not logged in · Please run /login",
-            "is_error": True,
-        }
-    )
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: _fake_proc(stdout=payload),
-    )
-
-    with pytest.raises(RuntimeError, match="is_error=true.*Not logged in"):
-        _agent().judge("prompt", model="sonnet")
 
 
 def test_credential_error_set_vs_unset(monkeypatch: object) -> None:
