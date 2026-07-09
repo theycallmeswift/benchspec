@@ -99,9 +99,29 @@ def test_run_advisory_lint_batches_detector_calls(
             ),
         )
     )
+    plan = framework.build_lint_plan(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[
+                framework.Rule(
+                    id="descriptive-names",
+                    description="Do not use single-letter bindings.",
+                )
+            ],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
 
     assert result.warning is None
     assert len(seen_prompts) == 2
+    assert plan.detector_api_calls == len(seen_prompts)
+    assert plan.files_checked == result.files_checked
+    assert plan.chunks_checked == result.chunks_checked
     assert progress_events == [(source.resolve(), 1, 1)]
     assert result.files_checked == 1
     assert result.chunks_checked == 3
