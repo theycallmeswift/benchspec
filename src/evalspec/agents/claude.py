@@ -12,7 +12,6 @@ import os
 from dataclasses import replace
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.agents.judge_cli import run_host_judge
 from evalspec.runner import RunResult, parse_stream_run
 from evalspec.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 
@@ -210,17 +209,10 @@ class ClaudeCodeAgent(BaseAgent):
             env={"HOME": self.guest_home},
         )
 
-    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Grade via the host's `claude -p` (NOT in the sandbox); see run_host_judge.
-
-        for the host-vs-VM asymmetry and the RuntimeError-on-infra-failure contract.
-        """
-        return run_host_judge(prompt, model=model, timeout=timeout)
-
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
-        """True if the stream-json line shows a skill dispatch in Claude Code's event.
+        """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
 
-        shape: a `Skill` tool_use, or a tool_use whose name is `skill_name` (the
+        A `Skill` tool_use, or a tool_use whose name is `skill_name` (the
         namespaced-tool fallback). Delegates to the shared `dispatches_skill` helper
         so the event-shape match lives in one place and `trigger.py` / `sandbox.py`
         stay agent-agnostic.

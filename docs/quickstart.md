@@ -138,7 +138,7 @@ tree tmp/evals/iteration_01
 
 ```
 tmp/evals/iteration_01
-├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, task & judge models, efforts, trigger mode, start time, format_version; the join key for cross-run aggregation
+├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, the resolved judge object (harness/model/effort/timeout/env/harness_args), efforts, trigger mode, start time, format_version; the join key for cross-run aggregation
 ├── index.jsonl                     # flat per-sample results — the aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout
 └── skills
     └── hello
@@ -168,6 +168,24 @@ Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run
 - **`microsandbox … database error: Migration file … is missing`.** The installed `microsandbox` package version doesn't match the migration state of the shared host store at `~/.microsandbox/db/` — usually because a newer microsandbox ran against it and applied migrations this version doesn't carry. Install the microsandbox version this evalspec pins (see `pip show microsandbox`), or reset the host store per microsandbox's own docs before re-running.
 - **Preflight: no Claude credential.** Run `claude setup-token` (sets `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. A repo-root `.env` with either is picked up automatically.
 - **The trial arm's `` Skill `hello` invoked `` assertion fails** — the agent hand-rolled the task instead of routing to the skill, so its activation assertion grades False. The skill's description or the eval's prompt isn't triggering routing. See [`agents.md`](agents.md) for the dispatch flow.
+
+## A cross-family judge
+
+By default the judge is `claude-code`/`sonnet` — same-family to this quickstart's Claude arms (`baseline`/`trial`, both `claude-code`/`sonnet`), which is fine for iterating. But a judge grading its own model family can be biased toward that family's outputs, so **for a benchmark you publish or compare across harnesses, prefer a cross-family judge** — here, an OpenAI-family one via Codex:
+
+```toml
+[tool.evalspec.judge]
+harness = "codex"
+model = "gpt-5.5"
+```
+
+Or override per run without editing `pyproject.toml`:
+
+```bash
+pytest --evalspec-judge-harness codex --evalspec-judge-model gpt-5.5
+```
+
+A Codex judge needs the `codex` CLI installed and on `PATH` with valid credentials (the run preflights the binary and fails loudly if it's missing). See [`configuration.md`](configuration.md#the-judge--toolevalspecjudge) for the full precedence chain and every `--evalspec-judge-*` flag.
 
 ## Next
 

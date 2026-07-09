@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -659,42 +658,6 @@ def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> Non
     # is NOT discovered (regression guard: skills staged there silently never fire).
     assert f"{OpenCodeAgent.guest_home}/.config/opencode/skills" in script
     assert f"{OpenCodeAgent.guest_home}/.opencode/skills" not in script
-
-
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> object:
-    """Provide the fake proc test helper."""
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
-
-
-def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Verify judge raises for runtimeerror on nonzero exit."""
-    # OpenCode delegates judging to the host `claude` CLI; a crashed CLI must
-    # surface as RuntimeError (caught upstream as arm-level errored), not as
-    # fake JUDGE ERROR assertions. Same masking trap as ClaudeCodeAgent.judge.
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: _fake_proc(returncode=1, stderr="connection reset"),
-    )
-
-    with pytest.raises(RuntimeError, match="exited 1.*connection reset"):
-        _agent().judge("prompt", model="sonnet")
-
-
-def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> None:
-    """Verify judge raises for runtimeerror on is error envelope."""
-    # `claude -p` wraps auth/rate-limit/quota errors in a 0-exit envelope with
-    # is_error=true. Without surfacing as RuntimeError, the message gets laundered
-    # into parse_judge_json and the arm reports fake "JUDGE ERROR" gradings.
-    payload = json.dumps({"result": "Invalid API key", "is_error": True})
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: _fake_proc(stdout=payload),
-    )
-
-    with pytest.raises(RuntimeError, match="is_error=true.*Invalid API key"):
-        _agent().judge("prompt", model="sonnet")
 
 
 def test_provision_script_verifies_warmed_db() -> None:

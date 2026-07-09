@@ -32,6 +32,7 @@ from evalspec.discovery import (
     resolve_eval_roots,
     resolve_repo_root,
 )
+from evalspec.judges import JudgeConfig, resolve_judge_config
 from evalspec.schema import SchemaError
 from evalspec.trigger import xfail_applies
 
@@ -153,14 +154,53 @@ def pytest_addoption(parser: object) -> None:
         ),
     )
     group.addoption(
+        "--evalspec-judge-harness",
+        default=None,
+        help="scalar override of the judge harness (default: claude-code, or "
+             "[tool.evalspec.judge] harness). One of claude-code, codex, opencode.",
+    )
+    group.addoption(
         "--evalspec-judge-model",
-        default="sonnet",
-        help=_help(
-            "model for the LLM judge (default: sonnet). Must be a Claude alias:",
-            "the judge shells out to the host `claude` CLI regardless of the task agent,",
-            "and a provider-qualified task model would 404 it. Recorded in meta.json",
-            "for cross-run comparisons.",
-        ),
+        default=None,
+        help="model for the LLM judge (default: sonnet, or [tool.evalspec.judge] "
+             "model). Precedence: this flag > --evalspec-config > "
+             "[tool.evalspec.judge] > built-in default. Recorded in meta.json under "
+             "`judge.model`. Must default to None (not a hardcoded model) so an "
+             "unset flag never shadows a project's [tool.evalspec.judge] model.",
+    )
+    group.addoption(
+        "--evalspec-judge-effort",
+        default=None,
+        help="scalar override of the judge reasoning effort (default: medium, or "
+             "[tool.evalspec.judge] effort).",
+    )
+    group.addoption(
+        "--evalspec-judge-timeout",
+        type=int,
+        default=None,
+        help="scalar override of the judge subprocess timeout in seconds (default: "
+             "300, or [tool.evalspec.judge] timeout).",
+    )
+    group.addoption(
+        "--evalspec-judge-harness-arg",
+        action="append",
+        default=[],
+        metavar="ARG",
+        help="raw CLI token appended to the judge harness invocation (repeatable). "
+             "When given at all, fully REPLACES [tool.evalspec.judge] harness_args "
+             "(not merged/appended) — unlike set/arm harness_args, which append. "
+             "A value starting with '-' needs the '--evalspec-judge-harness-arg=VALUE' "
+             "form (argparse otherwise reads it as a new flag).",
+    )
+    group.addoption(
+        "--evalspec-judge-env",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="add/override a judge env entry (repeatable); shallow-merges over "
+             "[tool.evalspec.judge] env, CLI keys winning. A $VAR value expands "
+             "from the host environment at judge EXECUTION time (never at "
+             "collection); an unset referenced var raises.",
     )
     group.addoption(
         "--evalspec-fail-under",
@@ -199,15 +239,15 @@ def _parse_env_pairs(pairs: list) -> dict:
     return out
 
 
-def _layer_config_sets(table: dict, config_path: str | None) -> dict:
-    """Merge a scratch --evalspec-config file's [tool.evalspec.sets.*] over pyproject's.
+def _read_scratch_evalspec_table(config_path: str | None) -> dict:
+    """The raw `[tool.evalspec]` table from an untracked --evalspec-config scratch file.
 
-    The scratch file uses one shape — a `[tool.evalspec]` table, like pyproject: a file
-    missing it errors rather than mixing its top-level keys into the sets table.
+    Or {} if none was passed. Shared by `_layer_config_sets` (sets/default-set)
+    and `resolved_judge_config` ([tool.evalspec.judge]) so there's one TOML read and
+    one error-reporting path for a malformed scratch file.
     """
     if not config_path:
-        return table
-
+        return {}
     if sys.version_info >= (3, 11):
         import tomllib
     else:
@@ -225,8 +265,20 @@ def _layer_config_sets(table: dict, config_path: str | None) -> dict:
     if not isinstance(scratch, dict):
         raise pytest.UsageError(
             f"--evalspec-config {config_path}: expected a [tool.evalspec] table "
-            "with [tool.evalspec.sets.<name>]"
+            "with [tool.evalspec.sets.<name>] and/or [tool.evalspec.judge]"
         )
+    return scratch
+
+
+def _layer_config_sets(table: dict, config_path: str | None) -> dict:
+    """Merge a scratch --evalspec-config file's [tool.evalspec.sets.*] over pyproject's.
+
+    The scratch file uses one shape — a `[tool.evalspec]` table, like pyproject: a file
+    missing it errors rather than mixing its top-level keys into the sets table.
+    """
+    scratch = _read_scratch_evalspec_table(config_path)
+    if not scratch:
+        return table
     merged = dict(table)
     merged["sets"] = {**table.get("sets", {}), **scratch.get("sets", {})}
     if scratch.get("default-set"):
@@ -256,6 +308,67 @@ def resolved_run_set(config: object) -> EvalSet:
             effort=config.getoption("evalspec_effort"),
             env=_parse_env_pairs(config.getoption("evalspec_env")),
             models=models,
+        )
+    except SchemaError as e:
+        raise pytest.UsageError(str(e)) from None
+
+
+def _parse_judge_cli_table(config: object) -> dict:
+    """The CLI-override layer for resolve_judge_config.
+
+    Only the `--evalspec-judge-*` flags the user actually passed. Scalar flags signal
+    "unset" with None (an explicit empty value is kept, to fail validation loudly); the
+    repeatable flags signal "unset" with an empty list.
+    """
+    cli_table: dict = {}
+    for option, key in (
+        ("evalspec_judge_harness", "harness"),
+        ("evalspec_judge_model", "model"),
+        ("evalspec_judge_effort", "effort"),
+        ("evalspec_judge_timeout", "timeout"),
+    ):
+        if (value := config.getoption(option)) is not None:
+            cli_table[key] = value
+
+    if harness_args := config.getoption("evalspec_judge_harness_arg"):
+        cli_table["harness_args"] = harness_args
+    if env_pairs := config.getoption("evalspec_judge_env"):
+        cli_table["env"] = _parse_env_pairs(env_pairs)
+    return cli_table
+
+
+def resolved_judge_config(config: object) -> JudgeConfig:
+    """The single JudgeConfig this run uses.
+
+    Layers `--evalspec-config`'s [tool.evalspec.judge] over pyproject's, applies CLI
+    overrides, and preflights structurally (known harness, reserved harness_args,
+    opencode provider-qualified model). Binary-on-PATH is NOT checked here — see
+    cases.py's judge preflight — so this stays safe to call under `--collect-only` and
+    from every existing pytester-based collection test.
+    """
+    repo_root = resolve_repo_root(config)
+    pyproject_judge = pyproject_table(repo_root).get("judge")
+    scratch = _read_scratch_evalspec_table(config.getoption("evalspec_config"))
+    scratch_judge = scratch.get("judge")
+    # A present-but-non-dict `judge` key is a malformed config, not "no judge table" —
+    # coercing it to None here would silently skip _validate_judge_table entirely and
+    # fall through to defaults. Raise loudly instead, same as any other structural
+    # judge-config defect (caught below and turned into pytest.UsageError).
+    if pyproject_judge is not None and not isinstance(pyproject_judge, dict):
+        raise pytest.UsageError(
+            "[tool.evalspec.judge] must be a table, got "
+            f"{type(pyproject_judge).__name__}"
+        )
+    if scratch_judge is not None and not isinstance(scratch_judge, dict):
+        raise pytest.UsageError(
+            f"--evalspec-config {config.getoption('evalspec_config')}: "
+            f"[tool.evalspec.judge] must be a table, got {type(scratch_judge).__name__}"
+        )
+    try:
+        return resolve_judge_config(
+            pyproject_table=pyproject_judge,
+            scratch_table=scratch_judge,
+            cli_table=_parse_judge_cli_table(config),
         )
     except SchemaError as e:
         raise pytest.UsageError(str(e)) from None
@@ -346,14 +459,38 @@ def build_manifest(
     }
 
 
+def _judge_meta(judge_config: JudgeConfig) -> dict:
+    """The resolved judge, structurally shaped for meta.json."""
+    return {
+        "harness": judge_config.harness,
+        "model": judge_config.model,
+        "effort": judge_config.effort,
+        "timeout": judge_config.timeout,
+        "env": report.redact_env(judge_config.env),
+        "harness_args": judge_config.harness_args,
+    }
+
+
 def _write_manifest(
     config: object,
     iteration_root: Path,
     iteration: str,
     repo_root: Path,
     run_set: EvalSet | None,
+    judge_meta: dict,
 ) -> None:
-    """Write the run manifest artifact for a pytest session."""
+    """What produced this run — identity + resolved config, so artifacts self-describe.
+
+    Identity is run_id/commit/config_hash; an aggregator can join multi-arm runs on
+    metadata alone. Thin shell: read nondeterministic identity, hand off to pure
+    `build_manifest`.
+
+    Run-level `agent`/`agent_version` come from the default harness, so they name only one
+    harness even for a multi-harness set; the per-arm roster records each arm's own
+    `harness`/`model`/`effort`/`env` (env redacted). Per-arm agent versions aren't probed.
+    `run_set` is None for a trigger-only run with no eval set — `set`/`arms` degrade to
+    null/empty. `judge_meta` is the already-resolved judge object (see `_judge_meta`).
+    """
     agent_version = token_split = None
     try:
         agent = make_agent()
@@ -381,7 +518,7 @@ def _write_manifest(
         ]
         if run_set
         else [],
-        "judge_model": config.getoption("evalspec_judge_model"),
+        "judge": judge_meta,
         "trigger_effort": config.getoption("evalspec_trigger_effort"),
         "trigger_mode": config.getoption("evalspec_trigger_mode"),
     }
@@ -425,7 +562,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         for child_dir in skill_dir.iterdir()
     )
     run_set = resolved_run_set(config) if needs_set else None
-    _write_manifest(config, skills_root.parent, iteration, repo_root, run_set)
+    judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
+    judge_meta = _judge_meta(judge_config)
+    _write_manifest(config, skills_root.parent, iteration, repo_root, run_set, judge_meta)
     lines = []
     index_lines = []
     fail_under = config.getoption("evalspec_fail_under")
@@ -505,6 +644,11 @@ def pytest_generate_tests(metafunc: object) -> None:
         # Resolve the set only when there are eval cases to cross with — a trigger-only
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
         arms = resolved_run_set(metafunc.config).arms if cases else []
+        if cases:
+            # Structural judge preflight — before ANY paid task arm runs. Raises
+            # pytest.UsageError at collection on a bad config; binary-on-PATH is
+            # checked separately, later, only when tests actually execute.
+            resolved_judge_config(metafunc.config)
         pairs = []
         ids = []
         for case in cases:

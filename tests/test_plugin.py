@@ -7,6 +7,7 @@ runs; we assert on the parametrized node ids the plugin generates. Each project 
 
 import json
 import textwrap
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -62,6 +63,23 @@ baseline = "baseline"
 arms = [{name="baseline"}, {name="trial", model="opus"}]
 """
 )
+
+# Same as ARMS_TOML plus a [tool.evalspec.judge] env entry whose key is secret-shaped
+# (matches report._SECRET_KEY) — proves the judge env path is actually redacted, not
+# just presence-checked against an always-empty {} like every other judge test here.
+JUDGE_ENV_TOML = """\
+[tool.evalspec]
+default-set = "default"
+
+[tool.evalspec.sets.default]
+harness = "claude-code"
+model = "sonnet"
+baseline = "baseline"
+arms = [{name="baseline"}, {name="trial", model="opus"}]
+
+[tool.evalspec.judge]
+env = { OPENAI_API_KEY = "sk-live-supersecret123" }
+"""
 
 DUMMY_CASES = """
 def test_eval(eval_arm):
@@ -505,7 +523,12 @@ class _FakeConfig:
             "evalspec_effort": None,
             "evalspec_env": [],
             "evalspec_models": None,
-            "evalspec_judge_model": "sonnet",
+            "evalspec_judge_harness": None,
+            "evalspec_judge_model": None,
+            "evalspec_judge_effort": None,
+            "evalspec_judge_timeout": None,
+            "evalspec_judge_harness_arg": [],
+            "evalspec_judge_env": [],
             "evalspec_trigger_effort": "low",
             "evalspec_trigger_mode": "asymmetric",
             "evalspec_fail_under": self._fail_under,
@@ -610,7 +633,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     assert terminal_reporter.events.count(("sep", "evalspec benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    # trigger-only skill now reports too
+    # trigger-only skill now reports too.
     assert len(lines) == 3
     assert any("trigger-only" in message and "trigger 0/1" in message for message in lines)
     assert (trigger_only_dir / "benchmark.md").exists()
@@ -628,7 +651,8 @@ def test_build_manifest_assembles_shape_by_value() -> None:
         "agent": "claude-code",
         "agent_version": "9.9.9",
         "model": "sonnet",
-        "judge_model": "sonnet",
+        "judge": {"harness": "claude-code", "model": "sonnet", "effort": "medium",
+                  "timeout": 300, "env": {}, "harness_args": []},
         "eval_effort": "medium",
         "trigger_effort": "low",
         "trigger_mode": "asymmetric",
@@ -652,6 +676,8 @@ def test_build_manifest_assembles_shape_by_value() -> None:
     assert manifest["model"] == "sonnet"  # cfg spread in
     assert manifest["trigger_mode"] == "asymmetric"
     assert len(manifest["config_hash"]) == 12
+    assert manifest["judge"]["harness"] == "claude-code"  # nested judge spread in whole
+    assert manifest["judge"]["model"] == "sonnet"
 
 
 def test_build_manifest_config_hash_is_order_independent() -> None:
@@ -662,7 +688,8 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         "agent": "claude-code",
         "agent_version": None,
         "model": "sonnet",
-        "judge_model": "sonnet",
+        "judge": {"harness": "claude-code", "model": "sonnet", "effort": "medium",
+                  "timeout": 300, "env": {}, "harness_args": []},
         "eval_effort": "medium",
         "trigger_effort": "low",
         "trigger_mode": "asymmetric",
@@ -729,7 +756,13 @@ arms = [
     assert meta["arms"][0]["harness_args"] == ["--set-flag"]
     assert meta["arms"][1]["harness_args"] == ["--set-flag", "--plugin-dir", "/project"]
     assert meta["arms"][1]["model"] == "opus"  # trial arm declared its own model
-    assert meta["judge_model"] == "sonnet"
+    assert "judge_model" not in meta
+    assert meta["judge"]["harness"] == "claude-code"
+    assert meta["judge"]["model"] == "sonnet"
+    assert meta["judge"]["effort"] == "medium"
+    assert meta["judge"]["timeout"] == 300
+    assert meta["judge"]["env"] == {}
+    assert meta["judge"]["harness_args"] == []
     assert meta["trigger_effort"] == "low"
     assert meta["trigger_mode"] == "asymmetric"
     assert meta["token_split"] is True
@@ -746,6 +779,52 @@ arms = [
     ]
     md = (it / "benchmark.md").read_text()
     assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in md
+
+
+def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch: object) -> None:
+    """Verify sessionfinish writes nested judge object."""
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    # harness=claude-code, model=sonnet/opus arms
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(it, "alpha", "trial", passes=1, total=1)
+    seed_arm(it, "alpha", "baseline", passes=0, total=1)
+
+    _finish_and_summarize(tmp_path)
+
+    meta = json.loads((it.parent.parent / "meta.json").read_text())
+    assert "judge_model" not in meta
+    assert meta["judge"]["harness"] == "claude-code"
+    assert meta["judge"]["model"] == "sonnet"
+    assert meta["judge"]["effort"] == "medium"
+    assert meta["judge"]["timeout"] == 300
+    assert meta["judge"]["env"] == {}
+    assert meta["judge"]["harness_args"] == []
+    assert "warnings" not in meta["judge"]
+
+
+def test_sessionfinish_redacts_secret_shaped_judge_env(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify sessionfinish redacts secret shaped judge env."""
+    # Every other judge test here uses JudgeConfig.env == {}, so redact_env({}) == {}
+    # trivially passes even if the report.redact_env(...) call around the judge env
+    # were dropped. Use a secret-shaped key (matches report._SECRET_KEY) so this test
+    # only passes if the value is actually masked before it hits meta.json.
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(JUDGE_ENV_TOML)
+    workspace.set_current_iteration("iteration_01")
+    it = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(it, "alpha", "trial", passes=1, total=1)
+    seed_arm(it, "alpha", "baseline", passes=0, total=1)
+
+    _finish_and_summarize(tmp_path)
+
+    raw_text = (it.parent.parent / "meta.json").read_text()
+    meta = json.loads(raw_text)
+    assert meta["judge"]["env"]["OPENAI_API_KEY"] == "***"
+    assert "sk-live-supersecret123" not in raw_text
 
 
 def test_sessionfinish_trigger_only_without_eval_set(tmp_path: object, monkeypatch: object) -> None:
@@ -834,6 +913,189 @@ def test_judge_model_flag_is_accepted(pytester: object) -> None:
     assert result.ret == 0
 
 
+def test_judge_harness_flag_is_accepted(pytester: object) -> None:
+    """Verify judge harness flag is accepted."""
+    _make_project(pytester)
+    result = _collect(pytester, "--evalspec-judge-harness", "codex",
+                       "--evalspec-judge-model", "gpt-5.5")
+
+    assert result.ret == 0
+
+
+def test_judge_effort_and_timeout_flags_are_accepted(pytester: object) -> None:
+    """Verify judge effort and timeout flags are accepted."""
+    _make_project(pytester)
+    result = _collect(pytester, "--evalspec-judge-effort", "high",
+                       "--evalspec-judge-timeout", "120")
+
+    assert result.ret == 0
+
+
+def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
+    """Verify judge harness arg flag is repeatable."""
+    # `=` form (not two bare tokens): argparse's `action="append"` treats a bare
+    # token starting with `--` as a new option, not this option's value — a stock
+    # argparse gotcha, unrelated to this flag's own parsing.
+    _make_project(pytester)
+    result = _collect(pytester, "--evalspec-judge-harness-arg=--plugin-dir",
+                       "--evalspec-judge-harness-arg=/project")
+
+    assert result.ret == 0
+
+
+def test_judge_env_flag_is_repeatable(pytester: object) -> None:
+    """Verify judge env flag is repeatable."""
+    _make_project(pytester)
+    result = _collect(pytester, "--evalspec-judge-env", "A=1",
+                       "--evalspec-judge-env", "B=2")
+
+    assert result.ret == 0
+
+
+def test_eval_test_body_resolves_judge_config_fixture_without_error(pytester: object) -> None:
+    """Verify eval test body resolves judge config fixture without error."""
+    # A real (non --collect-only) run still needs a microVM to get past sandbox
+    # preflight, so this only proves collection succeeds with the fixture renamed —
+    # full execution is covered by tests/test_execution.py's run_eval_arm tests.
+    _make_project(pytester)
+    result = _collect(pytester)
+
+    assert result.ret == 0
+
+
+def test_judge_preflight_fixture_raises_when_binary_missing(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Verify judge preflight fixture raises when binary missing."""
+    import shutil
+
+    from evalspec import sandbox
+
+    _make_project(pytester)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    # No-op the sandbox preflight so it can't fail first for unrelated reasons (no
+    # microVM/credentials) and mask the judge-binary assertion below.
+    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
+    # test_eval"): `pytest_configure` only self-registers the real `evalspec/cases.py`
+    # (whose `judge_config` fixture runs the binary preflight under test) when
+    # `config.args_source` isn't `ARGS` — i.e. when no explicit positional is given.
+    # Passing "test_cases.py::test_eval" would instead collect _make_project's dummy
+    # `test_cases.py` stub (`def test_eval(eval_arm): pass`), which never requests
+    # `judge_config` and so could never exercise this preflight at all — see
+    # `test_plugin_self_registers_cases_without_positional` for the same mechanic.
+    # `-k test_eval` keeps this to the real (parametrized) test_eval items; the dummy
+    # project has no trigger-evals.md, so test_trigger collects zero items anyway.
+    result = pytester.runpytest(
+        "-p", "evalspec.plugin",
+        "--evalspec-repo-root", str(pytester.path),
+        "-k", "test_eval",
+    )
+    assert result.ret != 0
+    out = result.stdout.str() + result.stderr.str()
+    assert "not found on PATH" in out
+
+
+def test_judge_preflight_does_not_fire_on_trigger_only_session(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Verify judge preflight does not fire on trigger only session."""
+    # Regression guard: a trigger-only session (test_trigger, which doesn't request the
+    # judge_config fixture) must not be forced to have a judge binary on PATH — trigger
+    # runs never grade. No judge binary is "missing" here on purpose, so a failure can
+    # only mean the judge preflight fired when it shouldn't have.
+    import shutil
+
+    from evalspec import sandbox
+
+    evals = pytester.path / "skills" / "myskill" / "evals"
+    evals.mkdir(parents=True)
+    (evals / "trigger-evals.md").write_text(
+        "---\nskill_name: myskill\n---\n## Trigger\n\n- q1: do it\n\n## No Trigger\n\n- q2: nope\n"
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: None)  # no judge binary anywhere
+    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    # No output-eval fixtures exist in this project (no [tool.evalspec] sets, no
+    # skills/*/evals/*/prompt.md), so real cases.py's test_eval parametrizes to zero
+    # items and only test_trigger items are collected — proving the judge preflight is
+    # gated by the fixture dependency, not just that nothing executed. Stub the actual
+    # routing call so this stays a fast, hermetic unit-of-behavior check with no
+    # microVM/credentials required; the routing/detection logic itself is covered
+    # elsewhere (tests/test_trigger.py).
+    monkeypatch.setattr(sandbox, "route_in_sandbox", lambda *a, **kw: [])
+    # No explicit positional (same reasoning as the test above): self-registration
+    # must load the real cases.py so this exercises the real judge preflight gate.
+    result = pytester.runpytest(
+        "-p", "evalspec.plugin",
+        "--evalspec-repo-root", str(pytester.path),
+        "-k", "q1",
+    )
+    out = result.stdout.str() + result.stderr.str()
+    assert "not found on PATH" not in out
+
+
+def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(pytester: object) -> None:
+    """Verify judge model flag no longer shadows pyproject default when unset."""
+    # Regression guard for the precedence bug: --evalspec-judge-model must default to
+    # None so an unset flag never overrides [tool.evalspec.judge] model.
+    project_toml = ARMS_TOML + """
+[tool.evalspec.judge]
+harness = "codex"
+model = "gpt-5.5"
+"""
+    _make_project(pytester, arms_toml=project_toml)
+    result = _collect(pytester)  # no --evalspec-judge-model passed
+    assert result.ret == 0
+
+
+def test_unsupported_judge_harness_fails_at_collection(pytester: object) -> None:
+    """Verify unsupported judge harness fails at collection."""
+    project_toml = ARMS_TOML + """
+[tool.evalspec.judge]
+harness = "cursor"
+"""
+    _make_project(pytester, arms_toml=project_toml)
+    result = _collect(pytester)
+    assert result.ret != 0
+    out = result.stderr.str() + result.stdout.str()
+    assert "not a supported judge harness" in out
+
+
+def test_non_dict_pyproject_judge_table_fails_loudly(pytester: object) -> None:
+    """Verify non dict pyproject judge table fails loudly."""
+    # Regression guard: a present-but-non-dict [tool.evalspec.judge] (e.g. `judge =
+    # "codex"` from a fat-fingered TOML edit) must raise, not silently coerce to
+    # None and fall through to defaults. `judge` is inserted into the *existing*
+    # [tool.evalspec] table (not a re-opened header) — TOML forbids declaring the
+    # same table twice.
+    project_toml = ARMS_TOML.replace(
+        'default-set = "default"',
+        'default-set = "default"\njudge = "codex"',
+    )
+    _make_project(pytester, arms_toml=project_toml)
+    result = _collect(pytester)
+    assert result.ret != 0
+    out = result.stderr.str() + result.stdout.str()
+    assert "[tool.evalspec.judge] must be a table" in out
+
+
+def test_non_dict_scratch_judge_table_fails_loudly(pytester: object) -> None:
+    """Verify non dict scratch judge table fails loudly."""
+    # Same regression guard, but for a scratch --evalspec-config file's
+    # [tool.evalspec.judge] — a distinct code path (`_read_scratch_evalspec_table` +
+    # the scratch branch in `resolved_judge_config`) with its own error message.
+    _make_project(pytester)
+    scratch = pytester.path / "scratch.toml"
+    scratch.write_text('[tool.evalspec]\njudge = "codex"\n')
+
+    result = _collect(pytester, "--evalspec-config", str(scratch))
+
+    assert result.ret != 0
+    out = result.stderr.str() + result.stdout.str()
+    assert "[tool.evalspec.judge] must be a table" in out
+    assert "--evalspec-config" in out
+
+
 def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes index jsonl."""
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
@@ -907,3 +1169,52 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 0
+
+
+# ---------------------------------------------------------------------------
+# --evalspec-config verification fixtures (tests/fixtures/judge/), each driven
+# end-to-end through the real plugin hooks at collection time.
+# ---------------------------------------------------------------------------
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "judge"
+
+
+def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> None:
+    """Verify unsupported judge harness fixture exits nonzero."""
+    _make_project(pytester)
+    result = pytester.runpytest(
+        "-p", "evalspec.plugin", "--collect-only", "-q",
+        "--evalspec-repo-root", str(pytester.path),
+        "--evalspec-config", str(_FIXTURES / "unsupported-judge-harness.toml"),
+        "test_cases.py::test_eval",
+    )
+    assert result.ret != 0
+    assert "not a supported judge harness" in (result.stdout.str() + result.stderr.str())
+
+
+def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time() -> None:
+    """Verify unset judge env fixture passes collection but fails at judge exec time."""
+    # Collection-time only: proves the fixture's env value is structurally valid
+    # (a string) and does NOT raise until evalspec.judges.run_judge actually expands
+    # it. Full end-to-end (a real arm run reaching the judge) needs live credentials
+    # and a microVM — out of scope for `make test`; see tests/judges/test_judge_registry.py
+    # ::test_run_judge_env_unset_var_raises_schemaerror for the unit-level proof, and
+    # tests/test_arms.py for expand_env's own unset-var coverage (the same function).
+    import tomllib
+
+    from evalspec.judges import resolve_judge_config
+
+    with (_FIXTURES / "unset-judge-env.toml").open("rb") as f:
+        raw = tomllib.load(f)
+    judge_table = raw["tool"]["evalspec"]["judge"]
+    config = resolve_judge_config(pyproject_table=judge_table)  # no raise — structural only
+    assert config.env == {"SOME_JUDGE_KEY": "$EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"}
+
+    import os
+
+    from evalspec.judges.registry import run_judge
+    from evalspec.schema import SchemaError
+
+    os.environ.pop("EVALSPEC_JUDGE_FIXTURE_UNSET_VAR", None)
+    with pytest.raises(SchemaError, match="EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"):
+        run_judge("prompt", config=config)

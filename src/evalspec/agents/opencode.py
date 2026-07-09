@@ -23,7 +23,6 @@ from pathlib import Path
 from textwrap import dedent
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.agents.judge_cli import run_host_judge
 from evalspec.runner import RunResult
 from evalspec.trajectory import iter_events
 
@@ -412,10 +411,6 @@ class OpenCodeAgent(BaseAgent):
         if res.exit_code != 0:
             return RunResult(eval_id, config, res.stderr_text[-2000:], 0, 0, is_error=True)
         return parse_opencode_jsonl(res.stdout_text, eval_id, config, detect_skill)
-
-    def judge(self: object, prompt: str, *, model: str, timeout: int = 300) -> str:
-        """Delegate judging to the host's Claude CLI."""
-        return run_host_judge(prompt, model=model, timeout=timeout)
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
         """Return true when a line shows any skill route."""

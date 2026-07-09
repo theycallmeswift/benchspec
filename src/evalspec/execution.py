@@ -23,17 +23,16 @@ from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
+from evalspec.judges import JudgeConfig
 from evalspec.room import gather_facts, merge_facts, render_seed
 from evalspec.runner import substitute_assertions, substitute_prompt
 from evalspec.sandbox import DEFAULT_PROJECT_MARKER, arm_session, ensure_snapshot
 from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 
-# The judge always shells out to the host `claude` CLI (see agents/judge_cli.py), which
-# knows only Claude-family aliases. The arm's `model` selects the TASK model and can be a
-# provider-qualified name like `google/gemini-3.5-flash` for OpenCode, which would 404 the
-# host claude CLI. Pin the judge to a Claude alias so cross-agent matrices grade correctly.
-# Overridable via `--evalspec-judge-model`, which must also be a Claude alias.
-JUDGE_MODEL = "sonnet"
+# The judge is a run-level concern, independent of the task arm's own harness/model
+# (which can be a provider-qualified name like `google/gemini-3.5-flash` for OpenCode).
+# The default judge is JudgeConfig() (harness=claude-code, model=sonnet); callers pass
+# a resolved JudgeConfig (see evalspec.judges.config.resolve_judge_config) to override.
 
 
 @dataclass
@@ -98,8 +97,7 @@ def _grade_via_judge(
     shas: object,
     result_text: object,
     grade: object,
-    agent: object,
-    judge_model: object,
+    judge_config: object,
     eval_id: object,
     arm_name: object,
     pre_run_shas: object,
@@ -117,8 +115,7 @@ def _grade_via_judge(
             result_text,
             eval_id,
             arm_name,
-            agent=agent,
-            model=judge_model,
+            judge_config=judge_config,
             original_shas=pre_run_shas,
             process_facts=process_facts,
         )
@@ -150,8 +147,7 @@ def _grade_mixed(
     grade: object,
     workdir: object,
     grade_context: object,
-    agent: object,
-    judge_model: object,
+    judge_config: object,
     eval_id: object,
     arm_name: object,
     pre_run_shas: object,
@@ -188,8 +184,7 @@ def _grade_mixed(
         shas=shas,
         result_text=result_text,
         grade=grade,
-        agent=agent,
-        judge_model=judge_model,
+        judge_config=judge_config,
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
@@ -286,12 +281,13 @@ def run_eval_arm(
     sample: int,
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
-    judge_model: str = JUDGE_MODEL,
+    judge_config: JudgeConfig | None = None,
     session_factory: object = arm_session,
     grade: object = grade_run,
     bind: object = binder.bind,
 ) -> ArmOutcome:
     """Run all cases for one eval arm and write result artifacts."""
+    judge_config = judge_config or JudgeConfig()
     eval_id = eval_case.eval_id
     # Every downstream sink keys on the arm NAME string (artifact paths, grading["arm"],
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.
@@ -355,8 +351,7 @@ def run_eval_arm(
         grade=grade,
         workdir=workdir,
         grade_context=grade_context,
-        agent=agent,
-        judge_model=judge_model,
+        judge_config=judge_config,
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,

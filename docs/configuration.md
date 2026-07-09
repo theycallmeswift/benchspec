@@ -20,18 +20,48 @@ Each `[tool.evalspec.sets.<name>]` declares one self-contained eval set. A run r
 
 Validation is **trust + record**: structure only (registered harness, unique arm names, `env` is a table, `harness_args` is a list of strings, `baseline`/`default-set` name declared things), no harness×model semantic policing. Any structural defect raises `SchemaError` at config-read time (surfaced as a pytest `UsageError` at collection), never a silent no-op mid-run. A pre-migration flat config (`[[tool.evalspec.arms]]` + top-level `reference`, no `[tool.evalspec.sets.*]`) is rejected fail-fast with a pointer to the eval-sets shape. Reserved `harness_args` fail later at agent invocation, where the selected adapter knows its CLI surface.
 
+## The judge — `[tool.evalspec.judge]`
+
+One run resolves exactly one **judge**: the host-side harness + model that grades every arm's assertions, independent from the task arms under test (grading a Codex or OpenCode run no longer requires installing Claude Code). Declare it under top-level `[tool.evalspec]`, never under a set or an arm — a fixed grader is what makes arm deltas comparable.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `harness` | string | `claude-code` | One of `claude-code`, `codex`, `opencode`. Unsupported values fail at collection, before any paid task arm runs. |
+| `model` | string | `sonnet` | Harness-specific, like an arm's `model`. Core does not validate the model against the harness (models change too fast for a useful allow-list); a wrong or fake model surfaces as a loud infra error when the judge harness rejects it at run time. One structural exception: a `harness = "opencode"` judge requires a provider-qualified model (e.g. `anthropic/claude-sonnet-4-6`, not bare `sonnet`), which fails at collection. |
+| `effort` | string | `medium` | Passed through to the judge harness's reasoning-effort flag where one exists (Codex has none — accepted for parity, unused). |
+| `timeout` | integer | `300` | Judge subprocess timeout in seconds. Must be a positive integer. |
+| `harness_args` | string[] | `[]` | Raw CLI tokens appended to the judge invocation. Reserved (evalspec-owned) flags are rejected per harness, same rule as an arm's `harness_args`. |
+| `env` | table | `{}` | Judge-only env, injected at judge **execution** time (never at collection). `$VAR`/`${VAR}` values expand from the host environment via the same rule as arm `env` (`evalspec.arms.expand_env`) — an unset referenced var raises, literals pass through. |
+
+```toml
+[tool.evalspec.judge]
+harness = "codex"
+model = "gpt-5.5"
+effort = "medium"
+timeout = 300
+harness_args = ["--color", "never"]
+env = { CODEX_HOME = "$CODEX_HOME" }
+```
+
+> **Best practice: judge cross-family.** Prefer a judge whose model family differs from the arms it grades — an Anthropic judge (`claude-code`/`sonnet`) grading Anthropic arms can be biased toward its own family's outputs. evalspec does not enforce this (the default judge is `claude-code`/`sonnet`, same-family with the common Claude-arm setup, which is fine for iterating), but for a benchmark you publish or compare across harnesses, pick a judge from a different family than the arms under test. See [the quickstart's cross-family example](quickstart.md#a-cross-family-judge).
+
 ## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--evalspec-set` | (`default-set`) | Name of the eval set to resolve for this run. Defaults to the pyproject `default-set`. An unknown name fails fast. |
 | `--evalspec-config` | (none) | Path to an untracked TOML file whose `[tool.evalspec.sets.*]` layer over pyproject's — a scratch set for a one-off comparison without editing tracked config. The file uses the same `[tool.evalspec]` shape as pyproject; pair with `--evalspec-set` to pick the scratch set. |
-| `--evalspec-model` | (none) | Scalar override of the resolved set's `model` **default** — every arm that inherited it picks up the new value; arms that declared their own `model` keep it. Also the model used for **trigger-routing** runs (falling back to `sonnet` when unset). Agent-specific: Claude Code takes aliases (`sonnet`/`haiku`/`opus`); OpenCode takes provider-qualified names; Codex takes the names accepted by `codex exec -m`. The judge always uses Claude. Core doesn't validate; the agent rejects at invoke time. For trigger evals this also selects the gated tier (`fails-on` relaxes the gate for its listed tiers; vary this to verify routing per tier — see `evalspec-trigger/v1` in schema.md). |
+| `--evalspec-model` | (none) | Scalar override of the resolved set's `model` **default** — every arm that inherited it picks up the new value; arms that declared their own `model` keep it. Also the model used for **trigger-routing** runs (falling back to `sonnet` when unset). Agent-specific: Claude Code takes aliases (`sonnet`/`haiku`/`opus`); OpenCode takes provider-qualified names; Codex takes the names accepted by `codex exec -m`. This does not affect the judge — see `--evalspec-judge-model` below. Core doesn't validate; the agent rejects at invoke time. For trigger evals this also selects the gated tier (`fails-on` relaxes the gate for its listed tiers; vary this to verify routing per tier — see `evalspec-trigger/v1` in schema.md). |
 | `--evalspec-harness` | (none) | Scalar override of the resolved set's `harness` default (same inherit-vs-declared rule as `--evalspec-model`). An unknown harness fails fast at collection. |
 | `--evalspec-effort` | (none) | Scalar override of the resolved set's `effort` default. Trust+record — passed through unvalidated. |
 | `--evalspec-env` | (none) | `KEY=VAL` env entry added to / overriding the resolved set's `env` default (repeatable). A `$VAR` value expands from the host environment at arm execution. |
 | `--evalspec-models` | (none) | Comma-separated model **sweep** — expand the resolved set into one arm per value (each arm named by its model, all inheriting the set defaults), with baseline = the first value. A file-free single-axis comparison; overrides the set's declared arms. |
-| `--evalspec-judge-model` | `sonnet` | Model for the LLM judge. Must be a Claude alias: the judge always shells out to the host `claude` CLI regardless of the task agent, and a provider-qualified task model would 404 it. Recorded in meta.json — cross-run comparisons need a constant judge. |
+| `--evalspec-judge-harness` | (none) | Scalar override of the judge `harness`. Precedence: this flag > `--evalspec-config` `[tool.evalspec.judge]` > project `[tool.evalspec.judge]` > built-in default (`claude-code`). |
+| `--evalspec-judge-model` | (none, resolves to `sonnet`) | Scalar override of the judge `model`. **Defaults to `None`, not `sonnet`** — a hardcoded flag default would always beat `[tool.evalspec.judge]`, breaking precedence. Recorded in `meta.json["judge"]["model"]`. |
+| `--evalspec-judge-effort` | (none, resolves to `medium`) | Scalar override of the judge `effort`. |
+| `--evalspec-judge-timeout` | (none, resolves to `300`) | Scalar override of the judge subprocess timeout in seconds. |
+| `--evalspec-judge-harness-arg` | (none) | Repeatable. When given at all, **fully replaces** `[tool.evalspec.judge] harness_args` — unlike a set/arm's `harness_args`, which append, the judge's CLI override is a full swap per precedence layer. |
+| `--evalspec-judge-env` | (none) | Repeatable `KEY=VAL`. Shallow-merges over `[tool.evalspec.judge] env` (CLI keys win), same merge rule across every layer (pyproject → scratch → CLI). |
 | `--evalspec-repo-root` | (rootdir) | Project root whose `skills/` tree to test. Precedence: flag > `$PROJECT_ROOT` > pytest rootdir. |
 | `--evalspec-agent` | `claude-code` | The coding agent for **trigger-routing** runs. Precedence: this flag > `EVALSPEC_AGENT` > `[tool.evalspec] agent` in `pyproject.toml` > `claude-code`. Output-eval task arms select their harness per arm (each arm's `harness`), so this flag no longer governs them. Unknown values fail at startup naming the source. |
 | `--evalspec-trigger-mode` | `asymmetric` | Trigger scoring. `majority` = >half of 3 (reliable routing); `best-of` = ≥1 of 3 (lenient positives, strict negatives); `asymmetric` = best-of for should-trigger, majority for should-not. |
@@ -79,6 +109,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | `base_image` | string | OCI image ref for the eval sandbox; default `ubuntu:latest`. Swaps the pre-baked base before the agent provisions. Must be a Debian/apt-family image with glibc — the agent's provision step runs `apt-get` and installs glibc-linked CLIs. Folds into the snapshot cache identity: changing it auto-rebuilds. Opt-in; absent ⇒ `ubuntu:latest`. |
 | `environment_script` | string | Repo-relative path to a shell script run AFTER the agent installs (the escape hatch for extra tools/config). Resolved to bytes at config-read time; a missing/unreadable file fails fast with `SchemaError`. Runs under `set -e` (the guest `/bin/sh` is dash) — the first failing command aborts the build loudly. Folds into the snapshot cache identity by CONTENT: an in-place edit (same path, new bytes) forces a rebuild. Opt-in; absent ⇒ no extra step. |
 | `opencode_version` | string | Default OpenCode version when `EVALSPEC_OPENCODE_VERSION` is unset. |
+| `judge` | table | The run's judge — `harness`/`model`/`effort`/`timeout`/`harness_args`/`env`. See [The judge](#the-judge--toolevalspecjudge) above. |
 
 Example:
 
@@ -87,6 +118,10 @@ Example:
 default-set = "default"
 base_image = "python:3.12-slim"        # still top-level
 environment_script = "evals/setup.sh"  # still top-level
+
+[tool.evalspec.judge]
+harness = "claude-code"   # built-in default; explicit here for illustration
+model = "sonnet"
 
 [tool.evalspec.sets.default]
 harness = "claude-code"   # set-level default; arms with no `harness` inherit it
@@ -129,9 +164,9 @@ CLI flag  >  environment variable  >  pyproject.toml  >  built-in default
 
 This applies uniformly: `--evalspec-agent` > `EVALSPEC_AGENT` > `[tool.evalspec] agent` > `claude-code`; `--evalspec-eval-roots` > `[tool.evalspec] eval_roots` > built-in default — each setting has its own column in the chain. Not every setting exposes every channel: `eval_roots` has no env var, so its chain is flag > pyproject > default.
 
-Not every knob has every channel. `--evalspec-judge-model` and `--evalspec-fail-under` are **flag-only** — no env var, no `[tool.evalspec]` key. The judge model is recorded in `meta.json` and a constant judge is what makes cross-run deltas comparable, so it's set per-run at the CLI, not defaulted in a config file; the fail-under gate is a CI decision, set by the CI command. Pass them on the `pytest` / `make evals EVAL_ARGS=…` line.
+Not every knob has every channel. `--evalspec-fail-under` is **flag-only** — no env var, no `[tool.evalspec]` key; it's a CI decision, set by the CI command. The judge knobs (`--evalspec-judge-harness`/`-model`/`-effort`/`-timeout`/`-harness-arg`/`-env`) follow the full `CLI > scratch --evalspec-config > pyproject [tool.evalspec.judge] > built-in default` chain, unlike the flag-only knobs above.
 
-Model and effort are validated by the *selected agent*, not core — a value valid for `claude-code` may be rejected under `EVALSPEC_AGENT=opencode`.
+For **task arms**, model and effort are validated by the *selected agent*, not core — a value valid for `claude-code` may be rejected under `EVALSPEC_AGENT=opencode`. The **judge** follows the same trust-and-record philosophy (its model is validated by the judge harness at run time, not core), with one structural exception enforced at collection — an `opencode` judge requires a provider-qualified model. See [The judge](#the-judge--toolevalspecjudge).
 
 ## Filter interactions
 

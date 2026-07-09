@@ -11,6 +11,8 @@ from typing import NoReturn
 
 import pytest
 
+from evalspec import binder
+from evalspec.agents.judge_cli import run_host_judge
 from evalspec.binder import _BINDING_PROMPT, bind
 
 
@@ -181,3 +183,8 @@ def test_prompt_carries_load_bearing_pieces() -> None:
     ):
         assert name in p
     assert "not duplicated" in p  # A9 rule encoded
+
+
+def test_binder_still_imports_the_original_run_host_judge() -> None:
+    """Verify binder still imports the original run_host_judge."""
+    assert binder.run_host_judge is run_host_judge

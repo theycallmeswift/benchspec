@@ -23,6 +23,9 @@ from evalspec import runner, sandbox, workspace
 from evalspec.agents import make_agent
 from evalspec.discovery import resolve_repo_root
 from evalspec.execution import run_eval_arm
+from evalspec.judges import JudgeConfig
+from evalspec.judges.registry import preflight_judge_binary
+from evalspec.plugin import resolved_judge_config
 from evalspec.room import seed_room
 from evalspec.trigger import count_fires, fire_threshold, trigger_record
 
@@ -51,9 +54,16 @@ def eval_set_name(request: object) -> str:
 
 
 @pytest.fixture
-def judge_model(request: object) -> str:
-    """Return the model used for judge-graded assertions."""
-    return request.config.getoption("evalspec_judge_model")
+def judge_config(request: object) -> JudgeConfig:
+    """Resolve the run's judge and preflight its binary before any arm grades."""
+    # Only test_eval requests this fixture, so the binary-on-PATH preflight (which is
+    # environment-dependent, unlike resolved_judge_config's structural checks already
+    # run at collection) fires exactly when a run will grade — never for a trigger-only
+    # session, which doesn't request judge_config. Fixture setup is skipped under
+    # --collect-only, so this stays collection-safe without an autouse gate.
+    config = resolved_judge_config(request.config)
+    preflight_judge_binary(config)
+    return config
 
 
 @pytest.fixture
@@ -120,7 +130,7 @@ def test_eval(
     today: object,
     eval_set_name: object,
     project_marker: object,
-    judge_model: object,
+    judge_config: object,
     sample_index: object,
 ) -> None:
     """Run one output eval case through its selected arm."""
@@ -142,7 +152,7 @@ def test_eval(
         sample=sample_index,
         eval_set=eval_set_name,
         project_marker=project_marker,
-        judge_model=judge_model,
+        judge_config=judge_config,
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a
