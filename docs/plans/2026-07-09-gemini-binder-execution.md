@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"` is a fixed module constant in `binder.py` — no `[tool.evalspec.binder]` table, no CLI flag. `EVALSPEC_BINDER_MODEL` is read *inside* `_call_gemini` via `os.environ.get("EVALSPEC_BINDER_MODEL", GEMINI_BINDER_MODEL)` so it overrides the model for every caller (production and corpus) without threading a model parameter through `bind()`.
+- `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"` is a fixed module constant in `binder.py` — no `[tool.evalspec.binder]` table, no CLI flag. `_call_gemini` takes the model as an explicit keyword parameter (`model: str = GEMINI_BINDER_MODEL`) and never reads any environment variable itself — production code has no env override. Only the corpus suite's recording `call_model` wrapper (Task 7, `evals/binder/conftest.py`) reads `EVALSPEC_BINDER_MODEL` via `os.environ.get("EVALSPEC_BINDER_MODEL", GEMINI_BINDER_MODEL)` and passes it through as `_call_gemini(..., model=...)`; `bind()` itself never threads a model parameter.
 - The failure taxonomy is total: no raw `urllib`/socket/JSON exception may escape `_call_gemini`. Every failure normalizes to `BinderAuthError` (HTTP 401, 403, or 400 with `API_KEY_INVALID` in the body) or `RuntimeError` (every other HTTP status, transport failure, or degenerate 200 — no candidates, empty parts, `finishReason` `SAFETY`/`MAX_TOKENS`, `promptFeedback` block).
 - `BinderAuthError` is deliberately **not** a `RuntimeError` subclass. Every `except RuntimeError` / `except (RuntimeError, ...)` site this plan touches (execution.py's degrade path, the corpus retry loop) must let it propagate unchanged.
 - `bind()` keeps its `dict | None` outward contract; `_parse_binding` never raises.
@@ -32,9 +32,9 @@
 | `src/evalspec/judges/__init__.py` | Module docstring's `judge_cli` reference rewritten. |
 | `src/evalspec/cases.py` | `judge_config` fixture calls `binder.preflight_gemini_key()` before the binary preflight. |
 | `evals/binder/corpus.yaml` | Renamed from `evals/binder_corpus.yaml`. |
-| `evals/binder/conftest.py` | Renamed from `evals/conftest.py`; gains a `GEMINI_API_KEY` preflight in `pytest_configure`. |
-| `evals/binder/test_corpus.py` | Renamed from `evals/test_binder_corpus.py`; retry tuple narrows to `RuntimeError`; draws record `source`/`attempts`/`latency_ms`/tokens via a recording `call_model`. |
-| `evals/binder/test_corpus_integrity.py` | Renamed from `evals/test_binder_corpus_integrity.py`; `CORPUS_PATH` points at the renamed `corpus.yaml`. |
+| `evals/binder/conftest.py` | Renamed from `evals/conftest.py`; gains a `GEMINI_API_KEY` preflight in `pytest_configure`, the `_recording_call_model` Gemini-call recorder (reads `EVALSPEC_BINDER_MODEL`), and `_latency_cost_summary` (session-summary latency/cost aggregation over `source == "gemini"` rows from both live tests); `pytest_sessionfinish`'s leak/retention/mismatch/infra-guard math scopes to `test: "leak"` rows only. |
+| `evals/binder/test_corpus.py` | Renamed from `evals/test_binder_corpus.py`; retry tuple narrows to `RuntimeError`; `_bind_resilient` returns `(binding, attempts)` with a real per-iteration attempt counter; both live tests (`test_binder_corpus_blocks_punt_leaks` and `test_binder_corpus_preserves_expected_checker_fields`) record `test`/`source`/`attempts`/`latency_ms`/tokens via `conftest.py`'s recording `call_model`. |
+| `evals/binder/test_corpus_integrity.py` | Renamed from `evals/test_binder_corpus_integrity.py`; `CORPUS_PATH` points at the renamed `corpus.yaml`; gains offline unit tests for `conftest.py`'s `_latency_cost_summary` and `_recording_call_model`. |
 | `evals/test_binder_corpus.py`, `evals/test_binder_corpus_integrity.py`, `evals/binder_corpus.yaml`, `evals/conftest.py` | **Deleted** (relocated above). |
 | `Makefile` | `evals` target's positional arg → `evals/binder`; `BINDER_WORKERS` comment updated. |
 | `pyproject.toml` | `binder_corpus` marker wording drops "Haiku". |
@@ -55,7 +55,7 @@
 - Modify: `tests/test_binder.py` (near-total rewrite)
 
 **Interfaces:**
-- Produces: `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"`, `class BinderAuthError(Exception)`, `@dataclass(frozen=True) class GeminiReply: text: str; prompt_tokens: int; output_tokens: int; latency_ms: float`, `_call_gemini(prompt: str, *, timeout: float = 60.0) -> GeminiReply`, `bind(assertion_text: str, *, call_model: object = _call_gemini) -> dict | None` (renamed `call_host` → `call_model`, `model` param dropped), `_parse_binding(text: str) -> dict | None` (envelope-unwrap removed — takes reply text directly).
+- Produces: `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"`, `class BinderAuthError(Exception)`, `@dataclass(frozen=True) class GeminiReply: text: str; prompt_tokens: int; output_tokens: int; latency_ms: float`, `_call_gemini(prompt: str, *, timeout: float = 60.0, model: str = GEMINI_BINDER_MODEL) -> GeminiReply` (no env read — `model` is a plain keyword, defaulting to the fixed production constant), `bind(assertion_text: str, *, call_model: object = _call_gemini) -> dict | None` (renamed `call_host` → `call_model`, `model` param dropped), `_parse_binding(text: str) -> dict | None` (envelope-unwrap removed — takes reply text directly).
 - Consumes: `os`, `time`, `urllib.request`, `urllib.error` (new imports); existing `_balanced_objects`, `_validate_checker_obj`, `SchemaError`, `_bind_bare_exists` unchanged.
 
 - [ ] **Step 1: Write the failing tests**
@@ -205,8 +205,13 @@ def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
     assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
-def test_call_gemini_honors_evalspec_binder_model_env_override(monkeypatch: object) -> None:
-    """Verify EVALSPEC_BINDER_MODEL overrides the fixed production model."""
+def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: object) -> None:
+    """Verify _call_gemini's `model` keyword controls the request URL — no env var involved.
+
+    The env-var override behavior itself is a corpus-suite concern, not a production one
+    (see Global Constraints); it is tested at the corpus wrapper level in Task 7's
+    `test_recording_call_model_honors_evalspec_binder_model_env_override`, not here.
+    """
     captured = {}
 
     def fake_urlopen(request: object, timeout: object) -> object:
@@ -215,13 +220,22 @@ def test_call_gemini_honors_evalspec_binder_model_env_override(monkeypatch: obje
             request, timeout
         )
 
-    monkeypatch.setenv("EVALSPEC_BINDER_MODEL", "gemini-3.1-flash")
+    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
     monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
 
-    binder._call_gemini("prompt")
+    binder._call_gemini("prompt", model="gemini-3.1-flash")
 
     assert "gemini-3.1-flash" in captured["url"]
     assert "gemini-3.1-flash-lite" not in captured["url"]
+
+
+def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
+    """Verify the `model` keyword's default is the fixed production constant, not an env read."""
+    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
+    assert (
+        inspect.signature(binder._call_gemini).parameters["model"].default
+        == binder.GEMINI_BINDER_MODEL
+    )
 
 
 @pytest.mark.parametrize("code,body", [(401, "unauthorized"), (403, "forbidden")])
@@ -285,6 +299,28 @@ def test_call_gemini_raises_runtimeerror_on_degenerate_200(
     monkeypatch.setattr(binder.urllib.request, "urlopen", _http_response(payload))
     with pytest.raises(RuntimeError):
         binder._call_gemini("prompt")
+
+
+def test_call_gemini_raises_runtimeerror_on_malformed_json_body(monkeypatch: object) -> None:
+    """Verify a non-JSON 200 response body normalizes to RuntimeError, not a raw ValueError.
+
+    `json.loads(response.read().decode("utf-8"))` runs inside the same try block as the
+    `urlopen` call — the taxonomy is only total if `ValueError` (json.JSONDecodeError's base)
+    is in the transport-failure except tuple alongside URLError/TimeoutError/OSError.
+    """
+    class _Resp:
+        def __enter__(self) -> object:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"not json"
+
+    monkeypatch.setattr(binder.urllib.request, "urlopen", lambda request, timeout: _Resp())
+    with pytest.raises(RuntimeError):
+        binder._call_gemini("prompt")
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -325,12 +361,18 @@ class GeminiReply:
     latency_ms: float
 
 
-def _call_gemini(prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS) -> GeminiReply:
-    """Call the fixed Gemini binder model and return its reply.
+def _call_gemini(
+    prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS, model: str = GEMINI_BINDER_MODEL,
+) -> GeminiReply:
+    """Call the Gemini binder model and return its reply.
 
     Args:
         prompt: The rendered binding prompt.
         timeout: Request timeout in seconds.
+        model: The Gemini model name. Defaults to the fixed production constant;
+            no environment variable is read here — only the corpus suite's own
+            recording `call_model` wrapper (`evals/binder/conftest.py`) reads
+            `EVALSPEC_BINDER_MODEL` and passes it through this keyword.
 
     Returns:
         The model's text plus token usage and measured latency.
@@ -340,7 +382,6 @@ def _call_gemini(prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS) -> Ge
             naming API_KEY_INVALID).
         RuntimeError: every other transport, HTTP, or degenerate-response failure.
     """
-    model = os.environ.get("EVALSPEC_BINDER_MODEL", GEMINI_BINDER_MODEL)
     api_key = os.environ.get("GEMINI_API_KEY", "")
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
@@ -364,7 +405,10 @@ def _call_gemini(prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS) -> Ge
                 f"Gemini API rejected the credential (HTTP {error.code}): {error_body[:500]}"
             ) from error
         raise RuntimeError(f"Gemini API HTTP {error.code}: {error_body[:500]}") from error
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        # ValueError catches json.JSONDecodeError (its subclass) and the rare
+        # UnicodeDecodeError-as-ValueError case — the taxonomy is total: nothing
+        # raised inside this try may escape as a raw, unnormalized exception.
         raise RuntimeError(f"Gemini API transport failure: {error}") from error
     latency_ms = (time.perf_counter() - started) * 1000
 
@@ -1195,8 +1239,11 @@ markers = [
 Run: `uv run pytest evals/binder/test_corpus_integrity.py -v`
 Expected: PASS — deterministic, no network, no `GEMINI_API_KEY` needed (this file carries no `binder_corpus` marker).
 
-Run: `make evals EVAL_ARGS="--collect-only -q"`
-Expected: Collection succeeds and lists `evals/binder/test_corpus.py` items — no `GEMINI_API_KEY` required for `--collect-only` (the corpus preflight only fires when `_binder_selected`, which it is here, but collection-time `pytest_configure` firing on a *present* key in the developer's shell is expected; run `env -u GEMINI_API_KEY make evals EVAL_ARGS="--collect-only -q"` separately and expect a clean `UsageError` naming `GEMINI_API_KEY`, proving the fail-fast-before-any-draw contract).
+Run: `GEMINI_API_KEY=test-key make evals EVAL_ARGS="--collect-only -q"`
+Expected: Collection succeeds and lists `evals/binder/test_corpus.py` items. The corpus-side `GEMINI_API_KEY` preflight (Task 6 Step 3) runs in `pytest_configure`, which fires whenever `-m binder_corpus` is selected (which `make evals` always passes) — *before* collection happens, regardless of `--collect-only`. With the key present (even a fake, cost-free one — `--collect-only` never makes a network call), preflight passes and collection proceeds normally.
+
+Run: `env -u GEMINI_API_KEY make evals EVAL_ARGS="--collect-only -q"`
+Expected: FAILS with a clean `pytest.UsageError` naming `GEMINI_API_KEY`, raised at `pytest_configure` time before any collection happens — `--collect-only` does not skip the preflight, since the preflight is gated on marker selection, not on whether any draw will actually execute. This proves the fail-fast-before-any-draw contract.
 
 Run: `make test && make lint`
 Expected: PASS — `testpaths = ["tests", "evals"]` still recurses into `evals/binder/`.
@@ -1215,11 +1262,15 @@ git commit -m "chore(evals): relocate the binder corpus suite to evals/binder/"
 
 **Files:**
 - Modify: `evals/binder/test_corpus.py`
+- Modify: `evals/binder/conftest.py`
+- Modify: `evals/binder/test_corpus_integrity.py`
 
 **Interfaces:**
-- Produces: a recording `call_model` wrapper (module-private, e.g. `_recording_call_model(sink: list) -> object`) that calls `binder._call_gemini`, appends each `GeminiReply` (plus its wall-clock invocation) to `sink`, and lets exceptions propagate unchanged — this is how `EVALSPEC_BINDER_MODEL` still reaches the model (the wrapper delegates to `_call_gemini`, which reads the env var itself) and how the corpus observes `latency_ms`/token counts without `bind()` exposing them.
-- Changes: each `record(...)` call in `test_binder_corpus_blocks_punt_leaks` gains `source` (`"regex"` if the wrapper was never invoked for this draw, else `"gemini"`), `attempts` (len of the sink, 0 for a regex-fast-path bind), and the Gemini-sourced draw's `latency_ms`/`prompt_tokens`/`output_tokens` (omitted/`None` for a regex draw).
-- Changes: `evals/binder/conftest.py`'s `pytest_sessionfinish` aggregates latency (mean, p95) and token totals over Gemini-sourced draws only, an estimated cost from an in-suite pricing constant, and reports the regex fast-path count as its own line — the existing leak/retention/over-punt/mismatch/infra-error-guard math is unchanged.
+- Produces: `evals/binder/conftest.py`'s `_recording_call_model(sink: list) -> object` — reads `EVALSPEC_BINDER_MODEL` itself (`os.environ.get("EVALSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)`), calls `binder._call_gemini(prompt, timeout=timeout, model=model)`, appends each `GeminiReply` to `sink`, and lets exceptions propagate unchanged. This is the *only* place `EVALSPEC_BINDER_MODEL` is read — `_call_gemini` itself (Task 1) takes `model` as a plain keyword with no env fallback. It lives in `conftest.py`, not `test_corpus.py`, specifically so `evals/binder/test_corpus_integrity.py` (unmarked, runs under `make test`) can import and unit-test it directly, without a circular import back through `test_corpus.py`'s existing `from test_corpus_integrity import CORPUS`.
+- Produces: `evals/binder/test_corpus.py`'s `_bind_resilient(text, *, sink: list) -> tuple[object, int]` — now returns `(binding, attempts)`, where `attempts` is a real per-iteration counter incremented once per retry-loop pass regardless of outcome (not `len(sink)`, which undercounts whenever a retry raises before `_call_gemini` produces a reply).
+- Changes: each `record(...)` call in `test_binder_corpus_blocks_punt_leaks` gains `test: "leak"`, `source` (`"regex"` if `_bind_bare_exists` matched, else `"gemini"`), `attempts` (the real counter above — 0 for a regex-fast-path bind, since the retry loop is never entered), and the Gemini-sourced draw's `latency_ms`/`prompt_tokens`/`output_tokens` (omitted/`None` for a regex draw).
+- Changes: `test_binder_corpus_preserves_expected_checker_fields` now takes the `record` fixture, threads its own `sink` through `_bind_resilient`, and appends a `test: "fields"` row with the same `source`/`attempts`/`latency_ms`/token fields — so the latency/cost summary meters both live tests that call the paid Gemini API, not only the leak test.
+- Changes: `evals/binder/conftest.py`'s `pytest_sessionfinish` scopes the existing leak/retention/over-punt/mismatch/infra-error-guard math to `test: "leak"` rows only (the field-preservation test's rows carry no `gold`/`result`/`cohort` keys and must not shift those rates or the infra-guard's denominator), while `_latency_cost_summary` aggregates latency/token/cost over *all* rows from both tests (filtered internally to `source == "gemini"`). It reports the regex fast-path count as its own line.
 
 - [ ] **Step 1: Write/extend the corpus's own tests**
 
@@ -1248,55 +1299,106 @@ def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     assert summary["latency_ms_mean"] == pytest.approx(130.0)
     assert summary["total_prompt_tokens"] == 1000
     assert summary["total_output_tokens"] == 40
+
+
+def test_recording_call_model_honors_evalspec_binder_model_env_override(
+    monkeypatch: object,
+) -> None:
+    """Verify the corpus's recording call_model reads EVALSPEC_BINDER_MODEL, not `_call_gemini`.
+
+    This is where F1's env-override behavior lives now — `_call_gemini` itself (Task 1)
+    takes `model` as a plain keyword with no env fallback; only this corpus-side wrapper
+    reads the variable, and only this wrapper needs a test for it.
+    """
+    from conftest import _recording_call_model
+
+    from evalspec import binder
+
+    captured = {}
+
+    def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        captured["model"] = model
+        return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setenv("EVALSPEC_BINDER_MODEL", "gemini-3.1-flash")
+    monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
+
+    call_model = _recording_call_model([])
+    call_model("prompt", timeout=60)
+
+    assert captured["model"] == "gemini-3.1-flash"
 ```
 
-(Import path note: `evals/` has no `__init__.py`, so cross-file imports inside the suite use bare module names via pytest's `prepend` import mode, matching `test_corpus.py`'s existing `from test_corpus_integrity import CORPUS` — adjust the test import above to `from conftest import _latency_cost_summary`.)
+(Import path note: `evals/` has no `__init__.py`, so cross-file imports inside the suite use bare module names via pytest's `prepend` import mode, matching `test_corpus.py`'s existing `from test_corpus_integrity import CORPUS` — adjust the test imports above to `from conftest import _latency_cost_summary` / `from conftest import _recording_call_model`. Patching `evalspec.binder._call_gemini` directly — rather than a name imported into `conftest.py` — works because `conftest.py`'s `_recording_call_model` calls it as `binder._call_gemini(...)`, an attribute lookup at call time, matching Task 1's own `monkeypatch.setattr(binder.urllib.request, "urlopen", ...)` idiom.)
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `uv run pytest evals/binder/test_corpus_integrity.py -k latency_cost_summary -v`
-Expected: FAIL — `_latency_cost_summary` doesn't exist yet.
+Run: `uv run pytest evals/binder/test_corpus_integrity.py -k "latency_cost_summary or recording_call_model_honors" -v`
+Expected: FAIL — `_latency_cost_summary` and `_recording_call_model` don't exist yet.
 
-- [ ] **Step 3: Implement the recording wrapper in `test_corpus.py`**
+- [ ] **Step 3: Implement the recording wrapper in `conftest.py`; update `test_corpus.py`'s import and `_bind_resilient`**
+
+In `evals/binder/conftest.py` (which already has `from evalspec import binder` from Task 6 Step 3):
 
 ```python
-from evalspec.binder import _bind_bare_exists, _call_gemini
-
-
 def _recording_call_model(sink: list) -> object:
     """Build a call_model that delegates to _call_gemini and records every reply.
 
-    Exceptions propagate unchanged (a retry in _bind_resilient still sees the real
-    failure) — this wrapper only observes successful replies, so `attempts` on a
-    record that ultimately errored reflects how many replies were actually captured
-    before the retry loop gave up, not how many attempts were made.
+    Reads EVALSPEC_BINDER_MODEL itself (falling back to GEMINI_BINDER_MODEL) and passes
+    it through as _call_gemini's `model` keyword — this is the corpus suite's *only*
+    model override; _call_gemini's production default takes no env input at all (see
+    Global Constraints). Exceptions propagate unchanged (a retry in _bind_resilient
+    still sees the real failure) — this wrapper only appends successful replies to
+    `sink`. The per-draw `attempts` count is tracked separately, by _bind_resilient's
+    retry loop, since a retry that raises before producing a reply must still count
+    as an attempt — `len(sink)` alone would undercount that case.
     """
+    model = os.environ.get("EVALSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
+
     def call(prompt: str, *, timeout: int = 60) -> object:
-        reply = _call_gemini(prompt, timeout=timeout)
+        reply = binder._call_gemini(prompt, timeout=timeout, model=model)
         sink.append(reply)
         return reply
+
     return call
-
-
-def _bind_resilient(text: object, *, sink: list) -> object:
-    """Bind one assertion with one retry for a transient Gemini infra failure."""
-    call_model = _recording_call_model(sink)
-    for _ in range(2):
-        try:
-            return bind(text, call_model=call_model)
-        except RuntimeError:
-            continue
-    return _ERROR
 ```
 
-Update `test_binder_corpus_blocks_punt_leaks` to thread a per-draw sink and extend the record:
+In `evals/binder/test_corpus.py`, drop `_call_gemini` from the `evalspec.binder` import (it's no longer called directly here — only `_bind_bare_exists` is), add the cross-file import, and give `_bind_resilient` a real attempt counter:
+
+```python
+from evalspec.binder import _bind_bare_exists
+
+from conftest import _recording_call_model
+
+...
+
+def _bind_resilient(text: object, *, sink: list) -> tuple:
+    """Bind one assertion with one retry for a transient Gemini infra failure.
+
+    Returns (binding, attempts): attempts counts each retry-loop iteration entered,
+    regardless of whether it succeeded, raised, or was the final abandoned try —
+    unlike `len(sink)`, which only counts replies _call_gemini actually returned and
+    undercounts whenever a retry raises before producing one.
+    """
+    call_model = _recording_call_model(sink)
+    attempts = 0
+    for _ in range(2):
+        attempts += 1
+        try:
+            return bind(text, call_model=call_model), attempts
+        except RuntimeError:
+            continue
+    return _ERROR, attempts
+```
+
+Update `test_binder_corpus_blocks_punt_leaks` to thread a per-draw sink, unpack the `(binding, attempts)` tuple, and extend the record:
 
 ```python
 @pytest.mark.parametrize("entry", _draws())
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
     replies: list = []
-    binding = _bind_resilient(entry["text"], sink=replies)
+    binding, attempts = _bind_resilient(entry["text"], sink=replies)
     # Derive source from the same predicate bind() itself uses to skip call_model,
     # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
     # never appends to `replies` either, and mislabeling it "regex" would inflate
@@ -1304,6 +1406,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
 
     record({
+        "test": "leak",
         "gold": entry["gold"],
         "cohort": entry["cohort"],
         "expect_checker": entry.get("expect_checker"),
@@ -1313,7 +1416,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
         "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
         "checker": binding.get("checker") if isinstance(binding, dict) else None,
         "source": source,
-        "attempts": len(replies),
+        "attempts": attempts,
         "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
         "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
         "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
@@ -1327,7 +1430,35 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
         )
 ```
 
-Update `test_binder_corpus_preserves_expected_checker_fields` to pass a throwaway `sink=[]` to `_bind_resilient` (it doesn't call `record`, so no metrics change needed there beyond the new required keyword).
+Update `test_binder_corpus_preserves_expected_checker_fields` to take `record`, thread its own sink, and append a comparable `test: "fields"` row — this is how F4 gets both live-Gemini tests metered, not just the leak test:
+
+```python
+@pytest.mark.parametrize("entry", _field_expectation_draws())
+def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: object) -> None:
+    """Ensure bound checker specs preserve expected fields from the corpus."""
+    replies: list = []
+    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+
+    record({
+        "test": "fields",
+        "source": source,
+        "attempts": attempts,
+        "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
+        "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
+        "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
+    })
+
+    if binding is _ERROR:
+        pytest.skip("infra failure after retry")
+
+    assert isinstance(binding, dict), f"expected bind for {entry['text']!r}, got punt"
+    assert all(binding.get(key) == value for key, value in entry["expect"].items()), (
+        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {binding!r}"
+    )
+```
+
+The `test: "leak"` / `test: "fields"` tag is what lets `conftest.py`'s `pytest_sessionfinish` (Step 4) scope the leak/retention/mismatch/infra-guard math to the leak test's rows only, while `_latency_cost_summary` still aggregates both tests' rows.
 
 - [ ] **Step 4: Implement `_latency_cost_summary` and wire it into the session summary**
 
@@ -1365,9 +1496,32 @@ def _latency_cost_summary(rows: list) -> dict:
     }
 ```
 
-Append its output to `pytest_sessionfinish`'s `lines` list (after the existing `determinism_retention=...` line, before the infra-error-guard `FAIL` check):
+`test_binder_corpus_preserves_expected_checker_fields`'s new rows carry no `gold`/`result`/`cohort` keys (Step 3), so the existing leak/retention/over-punt/mismatch/infra-guard math — which indexes those keys directly and divides by `len(rows)` — must be scoped to `test: "leak"` rows, while `_latency_cost_summary` keeps aggregating over every row from both tests (it already filters internally on `source == "gemini"` and uses `.get()`, so it needs no change). Replace `pytest_sessionfinish`'s body from the `if not rows: return` guard onward:
 
 ```python
+    if not rows:
+        return
+
+    leak_rows = [r for r in rows if r["test"] == "leak"]
+    lines: list = []
+    if leak_rows:
+        errored = sum(1 for r in leak_rows if r["result"] == "error")
+        binds = [r for r in leak_rows if r["gold"] == "bind" and r["result"] != "error"]
+        retention = _rate(
+            binds, lambda r: r["result"] == "bound" and r["checker"] == r["expect_checker"]
+        )
+        over_punt = _rate(binds, lambda r: r["result"] == "punt")
+        mismatch = _rate(
+            binds, lambda r: r["result"] == "bound" and r["checker"] != r["expect_checker"]
+        )
+        lines += [
+            f"binder corpus: {len(leak_rows)} draws, {errored} infra errors",
+            f"determinism_retention={retention:.3f} (no floor)  "
+            f"over_punt_rate={over_punt:.3f}  bind_mismatch={mismatch:.3f}",
+        ]
+
+    # Both live tests (leak + field-preservation) meter latency/cost; the leak-only
+    # gate above is unaffected — it only ever read leak_rows.
     cost_summary = _latency_cost_summary(rows)
     lines.append(
         f"latency_ms: mean={cost_summary['latency_ms_mean']} p95={cost_summary['latency_ms_p95']} "
@@ -1375,7 +1529,18 @@ Append its output to `pytest_sessionfinish`'s `lines` list (after the existing `
         f"tokens: prompt={cost_summary['total_prompt_tokens']} output={cost_summary['total_output_tokens']}  "
         f"est_cost_usd~{cost_summary['estimated_cost_usd']:.4f}"
     )
+
+    # 0 leaks is meaningless if most draws errored, so a broadly-broken infra run fails loud.
+    # Guarded on leak_rows: a `-k`-filtered run that selects only the field-preservation
+    # test has no leak rows to divide by, and must not crash sessionfinish over it.
+    if leak_rows and errored / len(leak_rows) >= 0.05:
+        lines.append(f"FAIL: too many infra errors ({errored}/{len(leak_rows)}) — gate unmeasurable")
+        if session.exitstatus == 0:
+            session.exitstatus = 1
+    config.stash[_SUMMARY] = lines
 ```
+
+This replaces the whole tail of the pre-existing `pytest_sessionfinish` (the `errored`/`binds`/`retention`/`over_punt`/`mismatch`/`lines`/`FAIL`-guard block already in `evals/conftest.py` today) — not just an append.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
