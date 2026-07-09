@@ -15,10 +15,6 @@ from evalspec.runner import (
     utc_today,
 )
 
-# ---------------------------------------------------------------------------
-# utc_today — host {TODAY} must match the guest's UTC clock
-# ---------------------------------------------------------------------------
-
 
 def test_utc_today_uses_utc_calendar_date_not_local() -> None:
     """Verify utc today uses utc calendar date not local."""
@@ -41,9 +37,6 @@ def test_utc_today_passthrough_utc_instant() -> None:
 # dropped. The injected-`now` cases above cover all the date-math behavior.
 
 
-# ---------------------------------------------------------------------------
-# sum_tokens
-# ---------------------------------------------------------------------------
 
 
 def test_sum_tokens_adds_all_token_fields() -> None:
@@ -69,9 +62,6 @@ def test_sum_tokens_none_guard() -> None:
     assert sum_tokens({"input_tokens": None}) == 0
 
 
-# ---------------------------------------------------------------------------
-# substitute_prompt
-# ---------------------------------------------------------------------------
 
 
 def test_substitute_prompt_relative_paths_untouched() -> None:
@@ -118,9 +108,6 @@ def test_substitute_prompt_today_none_no_token_still_works() -> None:
     assert out == "work in ./vault"
 
 
-# ---------------------------------------------------------------------------
-# substitute_assertions
-# ---------------------------------------------------------------------------
 
 
 def test_substitute_assertions_replaces_today() -> None:
@@ -181,9 +168,6 @@ def test_substitute_assertions_rejects_residual_placeholder_in_typed_value() -> 
         )
 
 
-# ---------------------------------------------------------------------------
-# parse_run_json
-# ---------------------------------------------------------------------------
 
 
 def test_parse_run_json_extracts_fields() -> None:
@@ -215,9 +199,6 @@ def test_parse_run_json_session_id_defaults_empty_when_absent() -> None:
     assert r.session_id == ""
 
 
-# ---------------------------------------------------------------------------
-# parse_stream_run (with-skill arm: stream-json + skill-fired detection)
-# ---------------------------------------------------------------------------
 
 
 def _skill_event(skill_value: str) -> str:

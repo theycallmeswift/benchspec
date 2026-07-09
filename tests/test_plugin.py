@@ -474,9 +474,6 @@ def test_eval(eval_arm, sample_index):
     assert sorted(observed) == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
-# ---------------------------------------------------------------------------
-# pytest_sessionfinish / pytest_terminal_summary — manifest + benchmark glue
-# ---------------------------------------------------------------------------
 
 
 class _FakeConfig:

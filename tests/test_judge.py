@@ -34,9 +34,6 @@ class FakeAgent:
         return self.stdout
 
 
-# ---------------------------------------------------------------------------
-# build_judge_prompt
-# ---------------------------------------------------------------------------
 
 
 def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
@@ -75,9 +72,6 @@ def test_judge_prompt_no_original_shas_omits_block() -> None:
     assert "ORIGINAL FILES" not in p
 
 
-# ---------------------------------------------------------------------------
-# parse_judge_json
-# ---------------------------------------------------------------------------
 
 
 def test_parse_judge_json_builds_grading() -> None:
@@ -140,9 +134,6 @@ def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
     assert g["assertions"][0]["passed"] is True
 
 
-# ---------------------------------------------------------------------------
-# grade_run (agent.judge boundary stubbed via FakeAgent)
-# ---------------------------------------------------------------------------
 
 
 def test_grade_run_timeout_records_error_not_raises() -> None:

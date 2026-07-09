@@ -56,12 +56,7 @@ class RunResult:
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:
-    """Today's date (YYYY-MM-DD) in UTC.
-
-    The substituted {TODAY} (host side) and the agent's in-VM `date` (guest runs TZ=UTC)
-    must name the same day, or dated-path assertions fail spuriously. A host-local date
-    skews by a day from an evening timezone behind UTC, so anchor both sides to UTC.
-    """
+    """Return today's date in UTC as YYYY-MM-DD."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     return now.astimezone(datetime.timezone.utc).date().isoformat()
 
@@ -72,12 +67,7 @@ def sum_tokens(usage: dict) -> int:
 
 
 def substitute_prompt(prompt: str, today: str | None = None) -> str:
-    """Substitute {TODAY} in a prompt. Paths are cwd-relative (the agent runs with.
-
-    cwd = the workdir mount), so there is no path placeholder to substitute. Any
-    residual `{UPPER_CASE}` placeholder is rejected, so a stray legacy path token is
-    caught rather than passed through to the agent verbatim.
-    """
+    """Substitute {TODAY} in a prompt and reject unknown placeholders."""
     result = prompt
     if today is not None:
         result = result.replace("{TODAY}", today)
@@ -145,17 +135,7 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
 
 
 def parse_stream_run(stdout: str, eval_id: str, config: str, skill_name: str | None) -> RunResult:
-    """Parse a `--output-format stream-json` run.
-
-    Every arm streams, so `raw` and the structured trajectory are always captured.
-
-    `skill_name` gates fired-detection: the suite's skill is passed on every arm to
-    report whether it was invoked (activation is graded symmetrically — a
-    `skill_invoked` assertion the trial arm passes and the baseline arm fails), or None
-    to skip detection and leave `fired` False. The final `type: "result"` event carries
-    the same fields as the single-object `--output-format json` payload, so
-    `parse_run_json` reads it.
-    """
+    """Parse a streamed JSON run and preserve raw trajectory evidence."""
     lines = stdout.splitlines()
     fired = bool(skill_name) and detect_skill_fired(lines, skill_name)
     for line in reversed(lines):

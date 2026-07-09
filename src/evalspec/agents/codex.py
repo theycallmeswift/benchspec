@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import json
 import os
+from textwrap import dedent
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
 from evalspec.agents.judge_cli import run_host_judge
@@ -101,12 +102,12 @@ class CodexAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
     capabilities = AgentCapabilities(efforts=(), multi_turn=False, token_split=True)
-    PROVISION_SCRIPT = (
-        "apt-get update && apt-get install -y curl ca-certificates nodejs npm && "
-        "export CODEX_NON_INTERACTIVE=1 && "
-        'npm i -g "@openai/codex@${EVALSPEC_CODEX_VERSION:-latest}" && '
-        "test -x /usr/local/bin/codex"
-    )
+    PROVISION_SCRIPT = dedent("""\
+        apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
+        export CODEX_NON_INTERACTIVE=1 &&
+        npm i -g "@openai/codex@${EVALSPEC_CODEX_VERSION:-latest}" &&
+        test -x /usr/local/bin/codex
+    """)
 
     def __init__(
         self: object,

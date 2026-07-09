@@ -248,12 +248,7 @@ def _pct(value: object) -> str:
 
 
 def delta_noise_pp(arm_a: dict, arm_b: dict) -> float | None:
-    """Sampling-noise band for the delta between two arms, in percentage points.
-
-    Uses the standard error of the difference of their per-sample pass rates. An approximation
-    (macro-mean over eval×sample pairs, not a paired test) — enough to keep a one-sample
-    wiggle from reading as a win. None until both arms have ≥2 samples.
-    """
+    """Return the sampling-noise band for the delta between two arms."""
     # `is None`, not falsy: a zero-variance arm (stdev 0.0) is a real measurement
     # and must not suppress the band the other arm contributes.
     if arm_a.get("pass_rate_stdev") is None or arm_b.get("pass_rate_stdev") is None:
@@ -270,11 +265,7 @@ def _md_cell(text: str, limit: int = 48) -> str:
 
 
 def _headline_lines(benchmark: dict) -> list[str]:
-    """The benchmark headline: with a baseline arm, one Δ line per contrast arm.
-
-    (`baseline <ref%> → <arm> <pct%> (Δpp)`); with no baseline, each arm's absolute pass
-    rate.
-    """
+    """Return benchmark headline lines."""
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     if baseline is None:
@@ -303,11 +294,7 @@ def _headline_lines(benchmark: dict) -> list[str]:
 
 
 def _matrix_table(benchmark: dict) -> list[str]:
-    """The primary eval×arm matrix: evals down the left, arms across the top.
-
-    (`<arm> (<harness>)`). The baseline column comes first with absolute rates; every
-    other column shows its ±pp delta against the baseline for that eval.
-    """
+    """Return the primary eval-by-arm matrix."""
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     # baseline column first, then the rest in declared order (dict preserves it).
@@ -516,10 +503,7 @@ def write_benchmark(
 
 
 def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
-    """One-line summary for the pytest terminal summary: per-arm Δ vs the baseline.
-
-    (absolute rates when there's no baseline), then trigger.
-    """
+    """Return one terminal-summary line for a benchmark."""
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     parts = []

@@ -124,10 +124,7 @@ def sha_snapshot_script(dirs: list[str]) -> str:
 
 
 def parse_sha_stream(stdout: str) -> dict[str, str]:
-    """Parse `sha_snapshot_script` stdout into {abs-path: sha}.
-
-    `sha256sum` separates the digest from the path with exactly two spaces.
-    """
+    """Parse `sha_snapshot_script` stdout into {abs-path: sha}."""
     out: dict[str, str] = {}
     for line in stdout.splitlines():
         sha, sep, path = line.partition("  ")
@@ -147,11 +144,7 @@ _ARTIFACT_RE = re.compile("\x1e\x1eARTIFACT\x1e\x1e(.*?)\x1e\x1e\n")
 
 
 def read_files_script(paths: list[str]) -> str:
-    r"""POSIX-sh that prints each path in `paths` as an RS-framed record:.
-
-    `\\x1e\\x1eARTIFACT\\x1e\\x1e<abs-path>\\x1e\\x1e\\n` then the file's exact bytes.
-    `parse_artifact_stream` reverses this. Pass only the changed paths `changed_paths` found.
-    """
+    r"""Return POSIX shell that prints each path as an RS-framed record."""
     body = "".join(
         f"printf '\\036\\036ARTIFACT\\036\\036%s\\036\\036\\n' {shlex.quote(p)}; "
         f"cat {shlex.quote(p)} 2>/dev/null; "
@@ -184,10 +177,7 @@ def to_display_paths(mapping: dict[str, str], guest_home: str) -> dict[str, str]
 def merge_facts(
     tree: str, contents: dict, shas: dict, extra: dict[str, str], max_bytes: int = 20000
 ) -> object:
-    """Append `extra` ({display-path: content}) to a `gather_facts` triple, so captured.
-
-    artifacts grade alongside the workdir tree.
-    """
+    """Append captured artifact facts to a `gather_facts` triple."""
     tree_lines = [ln for ln in tree.split("\n") if ln] if tree else []
     contents, shas = dict(contents), dict(shas)
     for path in sorted(extra):

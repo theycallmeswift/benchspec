@@ -12,10 +12,6 @@ from evalspec.room import (
     to_display_paths,
 )
 
-# ---------------------------------------------------------------------------
-# seed_room
-# ---------------------------------------------------------------------------
-
 
 def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
     """Verify seed room copies fixture and records shas."""
@@ -71,9 +67,6 @@ def test_seed_room_substitutes_today_in_path_names_and_content(
     assert shas[article_rel] == expected_sha
 
 
-# ---------------------------------------------------------------------------
-# gather_facts
-# ---------------------------------------------------------------------------
 
 
 def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
@@ -88,9 +81,6 @@ def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
     assert len(shas["0. Inbox/a.md"]) == 64
 
 
-# ---------------------------------------------------------------------------
-# artifact capture (skills dir outside the workdir mount)
-# ---------------------------------------------------------------------------
 
 
 def _stream(*pairs: object) -> object:

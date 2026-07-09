@@ -27,8 +27,6 @@ def test_run_host_judge_raises_runtimeerror_on_nonzero_exit(
     monkeypatch: object,
 ) -> None:
     """Verify run host judge raises for runtimeerror on nonzero exit."""
-    # A crashed/exited host CLI must surface as RuntimeError (caught upstream as
-    # arm-level errored), not be laundered into fake JUDGE ERROR assertions.
     monkeypatch.setattr(
         judge_cli.subprocess,
         "run",
@@ -43,8 +41,6 @@ def test_run_host_judge_raises_runtimeerror_on_is_error_envelope(
     monkeypatch: object,
 ) -> None:
     """Verify run host judge raises for runtimeerror on is error envelope."""
-    # `claude -p` reports auth/rate-limit/quota failures with returncode=0 but
-    # is_error=true in the JSON envelope; surface the real cause as RuntimeError.
     payload = json.dumps({"result": "Not logged in · Please run /login", "is_error": True})
     monkeypatch.setattr(judge_cli.subprocess, "run", lambda *a, **k: _fake_proc(stdout=payload))
 
@@ -56,10 +52,6 @@ def test_run_host_judge_raises_runtimeerror_when_binary_missing(
     monkeypatch: object,
 ) -> None:
     """Verify run host judge raises for runtimeerror when binary missing."""
-
-    # A1: a missing host `claude` (FileNotFoundError from subprocess) must normalize to
-    # RuntimeError so the arm is marked errored — not caught as OSError and counted as an
-    # honest 0% pass rate. Reachable via EVALSPEC_AGENT=opencode on a host without claude.
     def raise_missing_binary(*command_args: object, **command_kwargs: object) -> NoReturn:
         """Simulate the host judge binary missing from PATH."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")

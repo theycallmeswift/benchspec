@@ -125,7 +125,7 @@ def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
     # Primary OpenCode shape: `skill` tool dispatcher with `state.input.name`. This
     # is what fires when the agent uses OpenCode's native `skill` tool to load a
     # discovered skill from ~/.config/opencode/skills/<name>/SKILL.md.
-    a = _agent()
+    agent = _agent()
     line = json.dumps(
         {
             "type": "tool_use",
@@ -136,7 +136,7 @@ def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
             },
         }
     )
-    assert a.detect_dispatch(line, "archive") is True
+    assert agent.detect_dispatch(line, "archive") is True
     ns_line = json.dumps(
         {
             "type": "tool_use",
@@ -147,20 +147,20 @@ def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
             },
         }
     )
-    assert a.detect_dispatch(ns_line, "archive") is True
+    assert agent.detect_dispatch(ns_line, "archive") is True
 
 
 def test_detect_dispatch_matches_tool_use_by_part_tool_fallback() -> None:
     """Verify detect dispatch matches tool use by part tool fallback."""
     # Fallback shape: tool name IS the skill name (some agents register skills
     # directly as tools instead of going through a dispatcher).
-    a = _agent()
+    agent = _agent()
     line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
-    assert a.detect_dispatch(line, "archive") is True
+    assert agent.detect_dispatch(line, "archive") is True
     ns_line = json.dumps(
         {"type": "tool_use", "part": {"type": "tool", "tool": "knowledge-base:archive"}}
     )
-    assert a.detect_dispatch(ns_line, "archive") is True
+    assert agent.detect_dispatch(ns_line, "archive") is True
 
 
 def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
@@ -169,7 +169,7 @@ def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
     # is decided, so don't wait out the turn. The our-skill distinction no longer
     # lives here — it lives in detect_fired, which stays strict (see the dedicated
     # test_detect_dispatch_early_stops_on_any_skill test).
-    a = _agent()
+    agent = _agent()
     line = json.dumps(
         {
             "type": "tool_use",
@@ -180,7 +180,7 @@ def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
             },
         }
     )
-    assert a.detect_dispatch(line, "archive") is True
+    assert agent.detect_dispatch(line, "archive") is True
 
 
 def test_detect_dispatch_false_for_other_tool_names() -> None:
@@ -192,10 +192,10 @@ def test_detect_dispatch_false_for_other_tool_names() -> None:
 
 def test_detect_dispatch_false_for_non_json_input() -> None:
     """Verify detect dispatch false for non json input."""
-    a = _agent()
+    agent = _agent()
 
-    assert a.detect_dispatch("not json", "archive") is False
-    assert a.detect_dispatch("", "archive") is False
+    assert agent.detect_dispatch("not json", "archive") is False
+    assert agent.detect_dispatch("", "archive") is False
 
 
 def test_detect_dispatch_false_when_skill_name_none() -> None:

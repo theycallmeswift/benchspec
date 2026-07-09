@@ -20,6 +20,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from textwrap import dedent
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
 from evalspec.agents.judge_cli import run_host_judge
@@ -196,14 +197,16 @@ class OpenCodeAgent(BaseAgent):
     )
     OPENCODE_BIN = "/usr/local/bin/opencode"  # npm i -g installs the symlink here
     PROVISION_SCRIPT = (
-        "apt-get update && apt-get install -y curl ca-certificates nodejs npm && "
-        'npm i -g "opencode-ai@${EVALSPEC_OPENCODE_VERSION:-latest}" && '
+        dedent("""\
+        apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
+        """)
+        + 'npm i -g "opencode-ai@${EVALSPEC_OPENCODE_VERSION:-latest}" && '
         # Bake the evalspec bootstrap plugin into the snapshot, plus a global
         # opencode.json that registers it. Mirrors superpowers' approach so the
         # `skill` tool is actually considered by models that wouldn't reach for
         # it unprompted (e.g. Gemini Flash).
         "mkdir -p /root/.config/opencode/plugins/evalspec-bootstrap && "
-        "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
+        + "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
         + _BOOTSTRAP_PACKAGE_JSON
         + "\nEOF_PKG\n"
         "cat > /root/.config/opencode/plugins/evalspec-bootstrap/index.js <<'EOF_JS'\n"
@@ -294,18 +297,10 @@ class OpenCodeAgent(BaseAgent):
 
     def artifact_dirs(self: object) -> list[str]:
         """Return guest directories that may contain agent-authored artifacts."""
-        # OpenCode discovers (and the agent scaffolds) personal skills under
-        # $HOME/.config/opencode/skills — outside the workdir mount. Snapshot it so a skill
-        # the agent writes here reaches the judge; the staged skills drop out of the
-        # session's baseline diff, leaving only the agent's own work.
         return [f"{self.guest_home}/.config/opencode/skills"]
 
     def guest_env(self: object) -> dict:
         """Return environment variables passed to guest agent commands."""
-        # HOME so OpenCode finds its config dir; TZ=UTC pins the guest clock to the
-        # zone the host computes {TODAY} in. EVALSPEC_OPENCODE_VERSION feeds the
-        # provision script's `npm i -g opencode-ai@${EVALSPEC_OPENCODE_VERSION}` at
-        # snapshot-build time.
         return {
             "HOME": self.guest_home,
             "TZ": "UTC",
@@ -369,20 +364,6 @@ class OpenCodeAgent(BaseAgent):
 
     async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
-        # OpenCode auto-discovers personal skills from $HOME/.config/opencode/skills/<skill>/
-        # and project skills from <project>/.opencode/skills/<skill>/. Staging to the
-        # personal location guarantees discovery regardless of the agent's cwd.
-        #
-        # Stage from ALL three plugin-shaped layouts (merging into one dest):
-        #   <project>/skills/             — canonical Claude Code plugin layout
-        #                                   (no leading dot; lives under plugin root)
-        #   <project>/.opencode/skills/   — OpenCode's project-skills convention
-        #   <project>/.claude/skills/     — repos that put non-plugin skills here
-        #
-        # Claude's stage_project_assets only copies .claude/skills/ because Claude
-        # plugins use --plugin-dir to surface the canonical skills/. OpenCode has no
-        # equivalent plugin-dir flag, so we copy everything ourselves. Same
-        # per-arm isolation: a copy, not a mount.
         dest = f"{self.guest_home}/.config/opencode/skills"
         await sb.shell(
             f"mkdir -p {dest} && "
@@ -422,13 +403,15 @@ class OpenCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+
         try:
+            env = {**self.guest_env(), **(extra_env or {})}
+
             res = await sb.exec(
-                # Per-arm extra_env merges over guest_env(), arm env winning.
                 cmd[0],
                 cmd[1:],
                 cwd=workdir,
-                env={**self.guest_env(), **(extra_env or {})},
+                env=env,
                 timeout=timeout,
                 # Force EOF on stdin: `opencode run` blocks reading stdin forever
                 # without it (microsandbox's default leaves a pipe open), which
@@ -659,25 +642,21 @@ def parse_opencode_jsonl(
             # detect_fired stays status-agnostic on purpose: routing is decided at
             # dispatch, not completion.
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
+
             if state.get("status") == "completed" and _tool_dispatches_skill(part, detect_skill):
                 fired = True
 
     duration_ms = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else 0
+    result_text = "\n\n".join(text_parts) or _debug_tail(events)
+    is_error = total_tokens == 0
+
     return RunResult(
         eval_id=eval_id,
         config=config,
-        # No text event isn't a failure — concise models (e.g. Gemini) often skip a wrap-up
-        # when tool calls accomplished the goal, and the judge can still grade from the
-        # workdir. Fall back to the last few PARSED events (re-serialized as JSON, always
-        # valid UTF-8) for debugging — never a raw stdout slice, which can cut mid-frame into
-        # binary bytes (snapshot diffs, etc.) and poison any assertion that reads the message.
-        result_text="\n\n".join(text_parts) or _debug_tail(events),
+        result_text=result_text,
         duration_ms=duration_ms,
         total_tokens=total_tokens,
-        # Errored ⇒ the agent never made an API call (auth failure, launch crash,
-        # immediate exit). `total_tokens > 0` proves at least one model call hit
-        # the wire, regardless of whether it produced a final summary text.
-        is_error=(total_tokens == 0),
+        is_error=is_error,
         session_id=session_id,
         fired=fired,
         raw=stdout,

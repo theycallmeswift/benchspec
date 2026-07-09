@@ -612,9 +612,6 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     assert res.artifacts == {}  # the staged tree was NOT dumped as authored
 
 
-# ---------------------------------------------------------------------------
-# per-cell setup.sh runner + provision-time skills-home bridge
-# ---------------------------------------------------------------------------
 
 
 class _SetupShellSandbox:
@@ -1001,9 +998,6 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
     assert fake.sealed is False
 
 
-# ---------------------------------------------------------------------------
-# build layer: base image + environment script
-# ---------------------------------------------------------------------------
 
 
 def _patch_build_primitives(monkeypatch: object, fake: object) -> None:

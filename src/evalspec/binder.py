@@ -24,10 +24,9 @@ _COMPOUND_AFTER_EXISTS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# LOAD-BEARING and TUNABLE: this wording is the binder's whole accuracy budget. The
-# A9 / semantic / conjunction rules below are what stop a surface check from
-# producing a false-positive on wrong output — do not trim them. Keep `{assertion}` as
-# the only format field.
+# LOAD-BEARING and TUNABLE: this wording is the binder's accuracy budget. The
+# semantic and conjunction rules below keep surface checks from accepting wrong output.
+# Keep `{assertion}` as the only format field.
 _BINDING_PROMPT = textwrap.dedent(
     """\
     <role> You convert exactly ONE eval assertion into a deterministic checker

@@ -58,8 +58,6 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 def _arm_name_from_model(model: str) -> str:
     """Derive a stable arm name from a model identifier."""
-    # Replace path-unsafe chars with `-`; arm names are single filesystem path segments
-    # (artifact dirs and report discovery break when a `/` creates unexpected nesting).
     return _UNSAFE_NAME_CHARS.sub("-", model)
 
 
@@ -110,26 +108,31 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         raw_arms = body.get("arms")
         if not raw_arms or not isinstance(raw_arms, list):
             raise SchemaError(f"{where}: needs at least one arm in `arms`")
+
         seen: set[str] = set()
         for i, entry in enumerate(raw_arms):
             at = f"{where} arms[{i}]"
             if not isinstance(entry, dict):
                 raise SchemaError(f"{at}: expected a table")
+
             name = entry.get("name")
             if not (isinstance(name, str) and name):
                 raise SchemaError(f"{at}: missing or non-string `name`")
             if name in seen:
                 raise SchemaError(f"{at}: duplicate arm name `{name}`")
             seen.add(name)
+
             harness = entry.get("harness", defaults.get("harness"))
             if not (isinstance(harness, str) and harness):
                 raise SchemaError(f"{at}: missing `harness` (no arm value, no set default)")
             if harness not in known:
                 raise SchemaError(f"{at}: unknown harness `{harness}` (known: {sorted(known)})")
+
             if "env" in entry:
                 _validate_env_table(f"{at}: arm-level `env`", entry["env"])
             if "harness_args" in entry:
                 _validate_harness_args(f"{at}: arm-level `harness_args`", entry["harness_args"])
+
         baseline = body.get("baseline")
         if baseline is not None:
             if not isinstance(baseline, str):
@@ -187,6 +190,7 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
     effort = raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
     merged = {**defaults.get("env", {}), **raw.get("env", {})}  # arm keys win
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
+
     # Env merged but NOT $VAR-expanded — expansion is deferred to exec time (run_eval_arm)
     # so collection never needs a secret a deselected arm references.
     return Arm(name, harness, model, effort, merged, harness_args)
@@ -219,8 +223,6 @@ def resolve_set(
         raise SchemaError(f"no eval set named `{chosen}` (declared: {sorted(rawsets)})")
     where = f"[tool.evalspec.sets.{rs.name}]"
 
-    # CLI scalar overrides replace the SET DEFAULT, so arms that inherited pick up the
-    # new value while arms that declared their own keep it.
     defaults = dict(rs.defaults)
     if model is not None:
         defaults["model"] = model
@@ -235,6 +237,7 @@ def resolve_set(
         safe = [_arm_name_from_model(model) for model in models]
         used: set[str] = set()
         unique: list[str] = []
+
         for safe_name in safe:
             candidate = safe_name
             suffix = 2
