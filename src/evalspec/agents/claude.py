@@ -194,20 +194,20 @@ class ClaudeCodeAgent(BaseAgent):
         cmd += _validate_harness_args(harness_args)
         return cmd
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sb.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
+        res = await sandbox.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
         if res.exit_code != 0:
             raise RuntimeError(
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
         # the project's local skills there for a clean per-run tree. The agent-neutral
         # name covers other agents that stage more than just .claude/skills.
-        await sb.shell(
+        await sandbox.shell(
             f"mkdir -p {self.guest_home}/.claude && "
             f"if [ -d {project_mount}/.claude/skills ]; then "
             f"cp -r {project_mount}/.claude/skills {self.guest_home}/.claude/skills; fi",
@@ -264,7 +264,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: object,
         *,
         eval_id: object,
@@ -292,7 +292,7 @@ class ClaudeCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
         try:
-            res = await GuestSandbox(sb).exec(
+            res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
                 # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over

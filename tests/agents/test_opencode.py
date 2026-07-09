@@ -616,11 +616,11 @@ def test_credential_error_none_when_anthropic_key_set(monkeypatch: object) -> No
 
 def test_provision_runs_install_script() -> None:
     """Verify provision runs install script."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().provision(sb))
+    asyncio.run(_agent().provision(sandbox))
 
-    kind, script, _ = sb.calls[0]
+    kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
     assert "npm i -g" in script
     assert "opencode-ai" in script
@@ -635,18 +635,18 @@ def test_secrets_raises_on_unmapped_auth_env() -> None:
 
 def test_provision_raises_on_failure() -> None:
     """Verify provision raises for on failure."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
-        asyncio.run(_agent().provision(sb))
+        asyncio.run(_agent().provision(sandbox))
 
 
 def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> None:
     """Verify stage project assets copies skills into opencode discovery dir."""
-    sb = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
 
-    asyncio.run(_agent().stage_project_assets(sb, "/project"))
+    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
 
-    kind, script, _ = sb.calls[0]
+    kind, script, _ = sandbox.calls[0]
     assert kind == "shell"
     # Stage from all three plugin-shaped layouts (merged into one dest dir).
     # `skills/` (no leading dot) is the canonical Claude Code plugin layout; leaving it
@@ -669,11 +669,11 @@ def test_provision_script_verifies_warmed_db() -> None:
 
 def test_invoke_nonzero_exit_is_error() -> None:
     """Verify invoke nonzero exit is error."""
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=2, stderr_text="bad")])
 
     res = asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="without_skill",
@@ -862,11 +862,11 @@ def test_build_command_rejects_reserved_prompt_flag() -> None:
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
     """Verify invoke threads harness args into build command."""
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text="")])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text="")])
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "do the thing",
             eval_id="e1",
             config="without_skill",
@@ -880,7 +880,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _cmd, args, _kw = sb.calls[0]
+    _, _cmd, args, _kw = sandbox.calls[0]
     assert args[-2:] == ["--print-logs", "do the thing"]
 
 
@@ -1121,11 +1121,11 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
             "part": {"type": "step-finish", "tokens": {"total": 10}},
         }
     )
-    sb = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=stream)])
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=stream)])
 
     asyncio.run(
         _agent().invoke(
-            sb,
+            sandbox,
             "p",
             eval_id="e1",
             config="trial",
@@ -1142,7 +1142,7 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _cmd, _args, kw = sb.calls[0]
+    _, _cmd, _args, kw = sandbox.calls[0]
     assert kw["env"]["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert kw["env"]["HOME"] == OpenCodeAgent.guest_home  # guest_env still present

@@ -367,15 +367,15 @@ class OpenCodeAgent(BaseAgent):
             prompt,
         ]
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sb.shell(self.PROVISION_SCRIPT, env=self.guest_env())
+        res = await sandbox.shell(self.PROVISION_SCRIPT, env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         # OpenCode auto-discovers personal skills from $HOME/.config/opencode/skills/<skill>/
         # and project skills from <project>/.opencode/skills/<skill>/. Staging to the
@@ -392,7 +392,7 @@ class OpenCodeAgent(BaseAgent):
         # equivalent plugin-dir flag, so we copy everything ourselves. Same
         # per-arm isolation: a copy, not a mount.
         dest = f"{self.guest_home}/.config/opencode/skills"
-        await sb.shell(
+        await sandbox.shell(
             f"mkdir -p {dest} && "
             f"for src in {project_mount}/skills {project_mount}/.opencode/skills "
             f"{project_mount}/.claude/skills; do "
@@ -403,7 +403,7 @@ class OpenCodeAgent(BaseAgent):
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: object,
         *,
         eval_id: object,
@@ -431,7 +431,7 @@ class OpenCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
         try:
-            res = await GuestSandbox(sb).exec(
+            res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
                 # Per-arm extra_env merges over guest_env(), arm env winning.

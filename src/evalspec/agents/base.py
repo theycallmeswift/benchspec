@@ -143,17 +143,17 @@ class CodingAgent(Protocol):
         """Build the guest command used to invoke the agent."""
         ...
 
-    async def provision(self: object, sb: object) -> None:
+    async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
         ...
 
-    async def stage_project_assets(self: object, sb: object, project_mount: str) -> None:
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         ...
 
     async def invoke(
         self: object,
-        sb: object,
+        sandbox: object,
         prompt: str,
         *,
         eval_id: str,

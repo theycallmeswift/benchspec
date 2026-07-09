@@ -655,10 +655,12 @@ class _SetupAgent:
 
 def test_run_setup_sh_uses_skill_cwd_and_env() -> None:
     """Verify run setup sh uses skill cwd and env."""
-    sb, agent = _SetupShellSandbox(), _SetupAgent()
-    asyncio.run(sandbox.run_setup_sh(sb, agent, skill="ingest", arm="trial", model="opus"))
+    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
+    asyncio.run(
+        sandbox.run_setup_sh(fake_sandbox, agent, skill="ingest", arm="trial", model="opus")
+    )
 
-    call = sb.calls[-1]
+    call = fake_sandbox.calls[-1]
     # cwd is the mount root; the script itself `cd`s into whichever eval root holds the
     # suite (skills/ or .claude/skills/), so `.claude/skills/<name>` suites resolve too.
     assert call["cwd"] == sandbox.PROJECT_MOUNT
@@ -672,10 +674,10 @@ def test_run_setup_sh_uses_skill_cwd_and_env() -> None:
 def test_run_setup_sh_passes_set_and_arm_env() -> None:
     """Verify run setup sh passes set and arm env."""
     # The stub agent's cell_env stamps EVALSPEC_SET from eval_set; arm_env merges over it.
-    sb, agent = _SetupShellSandbox(), _SetupAgent()
+    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
     asyncio.run(
         sandbox.run_setup_sh(
-            sb,
+            fake_sandbox,
             agent,
             skill="ingest",
             arm="trial",
@@ -684,16 +686,18 @@ def test_run_setup_sh_passes_set_and_arm_env() -> None:
             arm_env={"ANTHROPIC_BASE_URL": "https://o"},
         )
     )
-    env = sb.calls[-1]["env"]
+    env = fake_sandbox.calls[-1]["env"]
     assert env["EVALSPEC_SET"] == "popular-harnesses"
     assert env["ANTHROPIC_BASE_URL"] == "https://o"
 
 
 def test_run_setup_sh_nonzero_exit_raises() -> None:
     """Verify run setup sh nonzero exit raises."""
-    sb, agent = _SetupShellSandbox(exit_code=2, stderr="boom"), _SetupAgent()
+    fake_sandbox, agent = _SetupShellSandbox(exit_code=2, stderr="boom"), _SetupAgent()
     with pytest.raises(RuntimeError, match="setup.sh"):
-        asyncio.run(sandbox.run_setup_sh(sb, agent, skill="ingest", arm="trial", model="opus"))
+        asyncio.run(
+        sandbox.run_setup_sh(fake_sandbox, agent, skill="ingest", arm="trial", model="opus")
+    )
 
 
 class _LocalShellSandbox:
@@ -721,18 +725,22 @@ class _LocalShellSandbox:
 def test_run_setup_sh_absent_file_is_noop(tmp_path: object) -> None:
     """Verify run setup sh absent file is noop."""
     # cwd has no ./evals/setup.sh → clean exit 0, no raise.
-    sb = _LocalShellSandbox(tmp_path)
-    asyncio.run(sandbox.run_setup_sh(sb, _SetupAgent(), skill="ingest", arm="trial", model="opus"))
+    fake_sandbox = _LocalShellSandbox(tmp_path)
+    asyncio.run(
+        sandbox.run_setup_sh(fake_sandbox, _SetupAgent(), skill="ingest", arm="trial", model="opus")
+    )
 
 
 def test_run_setup_sh_present_but_failing_propagates(tmp_path: object) -> None:
     """Verify run setup sh present but failing propagates."""
     (tmp_path / "evals").mkdir()
     (tmp_path / "evals" / "setup.sh").write_text("exit 2\n")
-    sb = _LocalShellSandbox(tmp_path)
+    fake_sandbox = _LocalShellSandbox(tmp_path)
     with pytest.raises(RuntimeError, match="setup.sh"):
         asyncio.run(
-            sandbox.run_setup_sh(sb, _SetupAgent(), skill="ingest", arm="trial", model="opus")
+            sandbox.run_setup_sh(
+                fake_sandbox, _SetupAgent(), skill="ingest", arm="trial", model="opus"
+            )
         )
 
 

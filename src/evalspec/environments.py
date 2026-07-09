@@ -87,9 +87,9 @@ class Host:
 class GuestSandbox:
     """Run harness processes inside a live microsandbox guest (the task arms' environment)."""
 
-    def __init__(self: object, sb: object) -> None:
+    def __init__(self: object, sandbox: object) -> None:
         """Wrap a live sandbox session's exec surface."""
-        self._sb = sb
+        self._sandbox = sandbox
 
     async def exec(
         self: object,
@@ -101,7 +101,7 @@ class GuestSandbox:
         stdin: object = None,
     ) -> ProcResult:
         """Run `command` inside the guest via the sandbox's exec primitive."""
-        res = await self._sb.exec(
+        res = await self._sandbox.exec(
             command[0], command[1:], cwd=cwd, env=env, timeout=timeout, stdin=stdin,
         )
         return ProcResult(command, res.exit_code, res.stdout_text, res.stderr_text)
