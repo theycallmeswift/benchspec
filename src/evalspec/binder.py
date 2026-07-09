@@ -239,44 +239,57 @@ def _parse_gemini_payload(payload: object, *, latency_ms: float) -> GeminiReply:
     """
     if not isinstance(payload, dict):
         raise RuntimeError("Gemini API returned a non-object payload")
+
     feedback = payload.get("promptFeedback")
     if isinstance(feedback, dict) and feedback.get("blockReason"):
         raise RuntimeError(f"Gemini API blocked the prompt: {feedback['blockReason']}")
-    candidates = payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise RuntimeError("Gemini API response had no candidates")
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        raise RuntimeError("Gemini API candidate was not an object")
-    finish_reason = candidate.get("finishReason")
-    if finish_reason in ("SAFETY", "MAX_TOKENS"):
-        raise RuntimeError(f"Gemini API candidate finished with {finish_reason}")
-    content = candidate.get("content")
-    parts = content.get("parts") if isinstance(content, dict) else None
-    if not isinstance(parts, list) or not parts:
-        raise RuntimeError("Gemini API response had no content parts")
-    texts: list[str] = []
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        part_text = part.get("text")
-        if part_text is None:
-            continue
-        if not isinstance(part_text, str):
-            raise RuntimeError("Gemini API response part text must be a string")
-        texts.append(part_text)
-    text = "".join(texts)
-    if not text:
-        raise RuntimeError("Gemini API response had empty text")
 
+    text = _candidate_text(payload)
     usage = payload.get("usageMetadata")
     usage = usage if isinstance(usage, dict) else {}
+
     return GeminiReply(
         text=text,
         prompt_tokens=_usage_int(usage.get("promptTokenCount")),
         output_tokens=_usage_int(usage.get("candidatesTokenCount")),
         latency_ms=latency_ms,
     )
+
+
+def _candidate_text(payload: dict) -> str:
+    """Return the first candidate's joined text, raising RuntimeError on degenerate shapes."""
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise RuntimeError("Gemini API response had no candidates")
+
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        raise RuntimeError("Gemini API candidate was not an object")
+    finish_reason = candidate.get("finishReason")
+    if finish_reason in ("SAFETY", "MAX_TOKENS"):
+        raise RuntimeError(f"Gemini API candidate finished with {finish_reason}")
+
+    content = candidate.get("content")
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list) or not parts:
+        raise RuntimeError("Gemini API response had no content parts")
+
+    text = "".join(_part_text(part) for part in parts)
+    if not text:
+        raise RuntimeError("Gemini API response had empty text")
+    return text
+
+
+def _part_text(part: object) -> str:
+    """Return one content part's text ("" for non-text parts), raising on non-string text."""
+    if not isinstance(part, dict):
+        return ""
+    value = part.get("text")
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise RuntimeError("Gemini API response part text must be a string")
+    return value
 
 
 def _usage_int(value: object) -> int:
