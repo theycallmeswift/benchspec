@@ -51,6 +51,10 @@ def _collect_python_files_from_filesystem(roots: tuple[Path, ...]) -> set[Path]:
 
 def _collect_python_files_with_git(roots: tuple[Path, ...]) -> set[Path] | None:
     """Collect Python files using Git's tracked and unignored file set."""
+    repo_root = _git_repo_root()
+    if repo_root is None:
+        return None
+
     try:
         completed_process = subprocess.run(
             [
@@ -62,6 +66,7 @@ def _collect_python_files_with_git(roots: tuple[Path, ...]) -> set[Path] | None:
                 "--",
                 "*.py",
             ],
+            cwd=repo_root,
             capture_output=True,
             check=False,
             text=True,
@@ -72,11 +77,11 @@ def _collect_python_files_with_git(roots: tuple[Path, ...]) -> set[Path] | None:
     if completed_process.returncode != 0:
         return None
 
-    cwd = Path.cwd()
     git_paths = {
-        (cwd / relative_path).resolve()
+        path
         for relative_path in completed_process.stdout.splitlines()
-        if relative_path
+        for path in [(repo_root / relative_path).resolve()]
+        if relative_path and path.is_file()
     }
     explicit_files = _collect_explicit_python_files(roots)
     directory_roots = _collect_directory_roots(roots)
@@ -86,6 +91,24 @@ def _collect_python_files_with_git(roots: tuple[Path, ...]) -> set[Path] | None:
         if any(_is_relative_to(git_path, directory_root) for directory_root in directory_roots)
     }
     return explicit_files | matched_git_paths
+
+
+def _git_repo_root() -> Path | None:
+    """Return the current Git repository root, or None outside Git."""
+    try:
+        completed_process = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return None
+
+    if completed_process.returncode != 0:
+        return None
+
+    return Path(completed_process.stdout.strip()).resolve()
 
 
 def _collect_explicit_python_files(roots: tuple[Path, ...]) -> set[Path]:

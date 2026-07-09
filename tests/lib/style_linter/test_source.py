@@ -149,6 +149,59 @@ def test_collect_python_files_uses_git_discovery_without_rglob_ignored_trees(
     assert ignored_file.resolve() not in targets
 
 
+def test_collect_python_files_matches_repo_root_paths_from_subdirectory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Resolve Git-discovered paths from the repository root."""
+    source = tmp_path / "src/included.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("value = 1\n")
+    nested_directory = tmp_path / "lib"
+    nested_directory.mkdir()
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    monkeypatch.chdir(nested_directory)
+
+    targets = framework.collect_python_files(
+        [Path("..")],
+        default_paths=(Path("src"),),
+    )
+
+    assert targets == [source.resolve()]
+
+
+def test_collect_python_files_skips_deleted_tracked_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: ModuleType,
+) -> None:
+    """Ignore tracked Python paths that no longer exist in the worktree."""
+    source = tmp_path / "src/included.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("value = 1\n")
+    deleted_source = tmp_path / "src/deleted.py"
+    deleted_source.write_text("value = 2\n")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "src/included.py", "src/deleted.py"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    deleted_source.unlink()
+
+    monkeypatch.chdir(tmp_path)
+
+    targets = framework.collect_python_files(
+        [Path("src")],
+        default_paths=(Path("src"),),
+    )
+
+    assert targets == [source.resolve()]
+
+
 def test_chunk_source_formats_numbered_source_lines(
     tmp_path: Path,
     framework: ModuleType,
