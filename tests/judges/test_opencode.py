@@ -8,32 +8,40 @@ import pytest
 from evalspec.judges import opencode as opencode_judge
 
 
-def _fake_proc(stdout: object = "", stderr: object = "", returncode: object = 0) -> object:
+def _fake_proc(
+    stdout: str = "", stderr: str = "", returncode: int = 0
+) -> subprocess.CompletedProcess:
     """A CompletedProcess stand-in for a monkeypatched subprocess.run."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def _jsonl(*events: object) -> object:
+def _stream(*events: dict) -> str:
     """Serialize events as a newline-terminated JSONL stream."""
-    return "\n".join(json.dumps(e) for e in events) + "\n"
+    return "\n".join(json.dumps(event) for event in events) + "\n"
+
+
+def _successful_stream(verdict: str) -> str:
+    """A JSONL stream for a run that reached the model: verdict text plus a token total.
+
+    parse_opencode_jsonl treats a zero-token run as an infra failure, so a genuine
+    success must carry a nonzero token count.
+    """
+    return _stream(
+        {"type": "step_start"},
+        {"type": "text", "part": {"text": verdict}},
+        {"type": "step_finish", "part": {"tokens": {"total": 42}}},
+    )
 
 
 def test_run_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> None:
     """Verify run wraps the final text events in a result envelope."""
-    stdout = _jsonl(
-        {"type": "step_start"},
-        {
-            "type": "text",
-            "part": {"text": '{"assertions": [{"text": "a", "passed": false, "evidence": "no"}]}'},
-        },
-        {"type": "step_finish", "part": {"tokens": {"total": 42}}},
-    )
+    verdict = '{"assertions": [{"text": "a", "passed": false, "evidence": "no"}]}'
     captured = {}
 
-    def fake_run(cmd: object, **kw: object) -> object:
-        """Capture the command and return a fake process."""
-        captured["cmd"] = cmd
-        return _fake_proc(stdout=stdout)
+    def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
+        """Capture the command and return a successful process."""
+        captured["command"] = command
+        return _fake_proc(stdout=_successful_stream(verdict))
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -42,54 +50,58 @@ def test_run_wraps_final_text_events_in_result_envelope(monkeypatch: object) -> 
         harness_args=[], env={},
     )
 
-    envelope = json.loads(out)
-    assert (
-        envelope["result"]
-        == '{"assertions": [{"text": "a", "passed": false, "evidence": "no"}]}'
-    )
-    assert captured["cmd"][:2] == ["opencode", "run"]
-    assert "--variant" in captured["cmd"]  # high -> thorough
-    assert "thorough" in captured["cmd"]
-    assert captured["cmd"][-1] == "grade this"
+    assert json.loads(out)["result"] == verdict
+    assert captured["command"][:2] == ["opencode", "run"]
+    assert "--variant" in captured["command"]  # high -> thorough
+    assert "thorough" in captured["command"]
+    assert captured["command"][-1] == "grade this"
 
 
 def test_run_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on nonzero exit."""
+    """Verify run raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(
-        subprocess, "run", lambda *a, **k: _fake_proc(returncode=1, stderr="connection reset"),
+        subprocess, "run",
+        lambda *args, **kwargs: _fake_proc(returncode=1, stderr="connection reset"),
     )
+
     with pytest.raises(RuntimeError, match="exited 1.*connection reset"):
         opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                            harness_args=[], env={})
+                           harness_args=[], env={})
 
 
-def test_run_raises_runtimeerror_on_infra_looking_stderr(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on infra-looking stderr."""
+def test_run_raises_runtimeerror_when_no_model_call_was_made(monkeypatch: object) -> None:
+    """Verify a zero-token run (no successful model call) raises, surfacing stderr.
+
+    Infra detection is the same zero-token signal the task arm uses, not a stderr
+    scan — so an auth/quota failure that exits 0 but never reaches the model still
+    errors, with the stderr detail carried into the message.
+    """
     monkeypatch.setattr(
         subprocess, "run",
-        lambda *a, **k: _fake_proc(
-            stdout="", stderr="401 Unauthorized: invalid API key", returncode=0
+        lambda *args, **kwargs: _fake_proc(
+            stdout=_stream({"type": "step_start"}),
+            stderr="401 Unauthorized: invalid API key",
+            returncode=0,
         ),
     )
-    with pytest.raises(RuntimeError, match="Unauthorized"):
+
+    with pytest.raises(RuntimeError, match="no successful model call.*Unauthorized"):
         opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                            harness_args=[], env={})
+                           harness_args=[], env={})
 
 
-def test_run_does_not_raise_on_successful_run_with_innocuous_auth_substring(
-    monkeypatch: object,
-) -> None:
-    """Verify run does not raise on a successful run with an innocuous auth substring."""
-    stdout = _jsonl(
-        {
-            "type": "text",
-            "part": {"text": '{"assertions": [{"text": "a", "passed": true, "evidence": "ok"}]}'},
-        },
-    )
+def test_run_does_not_consult_stderr_when_the_run_succeeded(monkeypatch: object) -> None:
+    """Verify a successful (nonzero-token) run returns its verdict despite noisy stderr.
+
+    Because success is decided by tokens spent rather than stderr contents, benign
+    stderr like "authenticated as user; author: ..." can never be mistaken for a
+    failure — the false-positive that a stderr scan was prone to.
+    """
+    verdict = '{"assertions": [{"text": "a", "passed": true, "evidence": "ok"}]}'
     monkeypatch.setattr(
         subprocess, "run",
-        lambda *a, **k: _fake_proc(
-            stdout=stdout,
+        lambda *args, **kwargs: _fake_proc(
+            stdout=_successful_stream(verdict),
             stderr="authenticated as user; author: jane@example.com",
             returncode=0,
         ),
@@ -100,48 +112,20 @@ def test_run_does_not_raise_on_successful_run_with_innocuous_auth_substring(
         harness_args=[], env={},
     )
 
-    envelope = json.loads(out)
-    assert envelope["result"] == '{"assertions": [{"text": "a", "passed": true, "evidence": "ok"}]}'
-
-
-def test_run_raises_runtimeerror_on_reordered_quota_message(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError on a reordered quota message."""
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda *a, **k: _fake_proc(
-            stdout="",
-            stderr=(
-                "You have exceeded your current quota, please check your plan and "
-                "billing details."
-            ),
-            returncode=0,
-        ),
-    )
-    with pytest.raises(RuntimeError, match="quota"):
-        opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                            harness_args=[], env={})
-
-
-def test_run_raises_runtimeerror_on_authorization_header_missing(monkeypatch: object) -> None:
-    """Verify run raises RuntimeError when the Authorization header is missing."""
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda *a, **k: _fake_proc(stdout="", stderr="Authorization header missing", returncode=0),
-    )
-    with pytest.raises(RuntimeError, match="Authorization"):
-        opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                            harness_args=[], env={})
+    assert json.loads(out)["result"] == verdict
 
 
 def test_run_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
     """Verify run raises RuntimeError when the binary is missing."""
-    def boom(*a: object, **k: object) -> object:
+    def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
         """Raise to simulate a missing binary."""
-        raise FileNotFoundError()
-    monkeypatch.setattr(subprocess, "run", boom)
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", raise_not_found)
+
     with pytest.raises(RuntimeError, match="not found on PATH"):
         opencode_judge.run("p", model="anthropic/claude-sonnet-4-6", effort="medium", timeout=300,
-                            harness_args=[], env={})
+                           harness_args=[], env={})
 
 
 def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
@@ -151,18 +135,22 @@ def test_run_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
     # laundered into a passing grade.
     monkeypatch.setattr(
         subprocess, "run",
-        lambda *a, **k: _fake_proc(
+        lambda *args, **kwargs: _fake_proc(
             returncode=1, stderr="error: unknown model 'anthropic/not-a-real-model'"
         ),
     )
+
     with pytest.raises(RuntimeError, match="unknown model"):
         opencode_judge.run("p", model="anthropic/not-a-real-model", effort="medium", timeout=300,
-                            harness_args=[], env={})
+                           harness_args=[], env={})
 
 
 def test_probe_version_best_effort_none_on_failure(monkeypatch: object) -> None:
     """Verify probe_version returns None on failure."""
-    monkeypatch.setattr(
-        subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError())
-    )
+    def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        """Raise to simulate a missing binary."""
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", raise_not_found)
+
     assert opencode_judge.probe_version() is None
