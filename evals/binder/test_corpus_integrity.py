@@ -8,8 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
+from conftest import _latency_cost_summary, _recording_call_model
 
+from evalspec import binder
 from evalspec.checkers import derive_text
 
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
@@ -200,3 +203,47 @@ def test_index_compound_punts_with_decomposed_children() -> None:
         f"expected >=2 decomposed regex children for the index.md punt, "
         f"got {len(index_regex_children)}"
     )
+
+
+def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
+    """Verify regex-sourced rows are excluded from latency/token/cost aggregates."""
+    rows = [
+        {"source": "regex", "attempts": 0, "latency_ms": None,
+         "prompt_tokens": None, "output_tokens": None},
+        {"source": "gemini", "attempts": 1, "latency_ms": 120.0,
+         "prompt_tokens": 500, "output_tokens": 20},
+        {"source": "gemini", "attempts": 1, "latency_ms": 140.0,
+         "prompt_tokens": 500, "output_tokens": 20},
+    ]
+
+    summary = _latency_cost_summary(rows)
+
+    assert summary["regex_fast_path_count"] == 1
+    assert summary["gemini_count"] == 2
+    assert summary["latency_ms_mean"] == pytest.approx(130.0)
+    assert summary["total_prompt_tokens"] == 1000
+    assert summary["total_output_tokens"] == 40
+
+
+def test_recording_call_model_honors_evalspec_binder_model_env_override(
+    monkeypatch: object,
+) -> None:
+    """Verify the corpus's recording call_model reads EVALSPEC_BINDER_MODEL, not `_call_gemini`.
+
+    This is where the model env-override behavior lives — `_call_gemini` itself takes
+    `model` as a plain keyword with no env fallback; only this corpus-side wrapper
+    reads the variable, and only this wrapper needs a test for it.
+    """
+    captured = {}
+
+    def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        captured["model"] = model
+        return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setenv("EVALSPEC_BINDER_MODEL", "gemini-3.1-flash")
+    monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
+
+    call_model = _recording_call_model([])
+    call_model("prompt", timeout=60)
+
+    assert captured["model"] == "gemini-3.1-flash"

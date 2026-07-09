@@ -14,9 +14,10 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import _recording_call_model
 from test_corpus_integrity import CORPUS
 
-from evalspec.binder import bind
+from evalspec.binder import _bind_bare_exists, bind
 
 pytestmark = pytest.mark.binder_corpus
 
@@ -36,17 +37,32 @@ def _samples_for(entry: object) -> object:
     return max(SAMPLES, 20) if heavy else SAMPLES
 
 
-def _bind_resilient(text: object) -> object:
-    """Bind one assertion with one retry for a transient Gemini infra failure."""
-    # RuntimeError is the total normalization every _call_gemini failure funnels
-    # through except BinderAuthError (never caught — a bad key must fail the corpus
-    # session, not masquerade as one more "infra error" data point).
+def _bind_resilient(text: object, *, sink: list) -> tuple:
+    """Bind one assertion with one retry for a transient Gemini infra failure.
+
+    Returns (binding, attempts): attempts counts each retry-loop iteration entered,
+    regardless of whether it succeeded, raised, or was the final abandoned try —
+    unlike `len(sink)`, which only counts replies _call_gemini actually returned and
+    undercounts whenever a retry raises before producing one.
+
+    Args:
+        text: The assertion text to bind.
+        sink: List that the recording call_model appends each GeminiReply to.
+
+    Returns:
+        A (binding, attempts) tuple. `binding` is a checker spec dict, None (punt),
+        or `_ERROR` (infra failure after retry). `attempts` is 1 for a regex
+        fast-path bind (one loop pass, no API call).
+    """
+    call_model = _recording_call_model(sink)
+    attempts = 0
     for _ in range(2):
+        attempts += 1
         try:
-            return bind(text)
+            return bind(text, call_model=call_model), attempts
         except RuntimeError:
             continue
-    return _ERROR
+    return _ERROR, attempts
 
 
 def _draws() -> object:
@@ -71,10 +87,17 @@ def _field_expectation_draws() -> object:
 @pytest.mark.parametrize("entry", _draws())
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
-    binding = _bind_resilient(entry["text"])
+    replies: list = []
+    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    # Derive source from the same predicate bind() itself uses to skip call_model,
+    # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
+    # never appends to `replies` either, and mislabeling it "regex" would inflate
+    # regex_fast_path_count and deflate gemini_count.
+    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
 
     record(
         {
+            "test": "leak",
             "gold": entry["gold"],
             "cohort": entry["cohort"],
             "expect_checker": entry.get("expect_checker"),
@@ -84,6 +107,11 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
             else None,
             "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
             "checker": binding.get("checker") if isinstance(binding, dict) else None,
+            "source": source,
+            "attempts": attempts,
+            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
+            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
+            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
         }
     )
 
@@ -97,9 +125,22 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
 
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
-def test_binder_corpus_preserves_expected_checker_fields(entry: object) -> None:
+def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: object) -> None:
     """Ensure bound checker specs preserve expected fields from the corpus."""
-    binding = _bind_resilient(entry["text"])
+    replies: list = []
+    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+
+    record(
+        {
+            "test": "fields",
+            "source": source,
+            "attempts": attempts,
+            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
+            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
+            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
+        }
+    )
 
     if binding is _ERROR:
         pytest.skip("infra failure after retry")
