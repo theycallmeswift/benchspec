@@ -1059,7 +1059,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
         """Boom."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
-    monkeypatch.setattr("evalspec.agents.judge_cli.subprocess.run", boom)
+    monkeypatch.setattr("evalspec.environments.subprocess.run", boom)
 
     outcome = run_eval_arm(
         eval_case,

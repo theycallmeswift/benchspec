@@ -8,12 +8,12 @@ command, and parses its output through the shared helpers in `runner.py`.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.agents.judge_cli import raise_for_is_error_envelope
 from evalspec.environments import ExecutionEnv, GuestSandbox, Host
 from evalspec.runner import RunResult, parse_stream_run
 from evalspec.trigger import detect_skill_fired, dispatches_skill, streamed_activity
@@ -73,6 +73,22 @@ def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | N
     for harness_arg in harness_args:
         if harness_arg == "--plugin-dir" or harness_arg.startswith("--plugin-dir="):
             raise ValueError("plugin_dir cannot be combined with harness_args --plugin-dir")
+
+
+def _raise_for_is_error_envelope(stdout: str) -> None:
+    """Raise RuntimeError when a 0-exit `claude -p` envelope carries is_error=true.
+
+    This is how `claude -p` reports auth, rate-limit, quota, and overload failures.
+    Unparseable stdout is deliberately NOT an error here (a transient streaming
+    glitch isn't a CLI failure); the caller's own JSON parsing surfaces that case.
+    """
+    try:
+        outer = json.loads(stdout)
+    except json.JSONDecodeError:
+        return
+    if isinstance(outer, dict) and outer.get("is_error"):
+        msg = str(outer.get("result") or "").strip() or "(no error message)"
+        raise RuntimeError(f"host claude CLI returned is_error=true: {msg[:1000]}")
 
 
 class ClaudeCodeAgent(BaseAgent):
@@ -232,8 +248,7 @@ class ClaudeCodeAgent(BaseAgent):
 
         The output is already the {"result": ..., "is_error": ...} envelope judge.py
         parses, so it is returned as-is after infra checks. RuntimeError on a missing
-        binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota — the
-        same contract binder.py's host call relies on via judge_cli).
+        binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota).
         """
         command = [self.agent_bin, "-p", prompt, "--output-format", "json",
                    "--model", config.model, "--effort", config.effort,
@@ -241,7 +256,7 @@ class ClaudeCodeAgent(BaseAgent):
         proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
 
         proc.require_success()
-        raise_for_is_error_envelope(proc.stdout)
+        _raise_for_is_error_envelope(proc.stdout)
         return proc.stdout
 
     def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
