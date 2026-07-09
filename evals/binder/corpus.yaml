@@ -31,6 +31,33 @@ binds:
     so the skill did not emit a confident hollow one
   - Exactly one spec file exists under './docs/specs/'
   - No spec file under './docs/specs/' carries a '-design' suffix
+  # decomposed child of the six-template-files compound punts below (the
+  # `./.meta/templates/ contains all six template files named exactly: …` line
+  # and its "previously-missing … now exists and contains all six template
+  # files" restatement under semantic): the flat lines punt, this count check
+  # binds. (entity-person.md's own file_exists/regex children below already
+  # demonstrate the per-file check.)
+  - text: Exactly six files match ./.meta/templates/*.md
+    expect:
+      glob: ./.meta/templates/*.md
+      count: 6
+  # decomposed child of the dated-log-file compound punt below (the
+  # `A dated log file named YYYY-MM-DD.md exists under ./.meta/logs/ and
+  # contains a header of the form '## [<ISO datetime>] bootstrap | <title>'`
+  # line under semantic): the flat line punts, this count check binds.
+  - text: At least one file matches ./.meta/logs/*.md
+    expect:
+      glob: ./.meta/logs/*.md
+      min: 1
+  # decomposed child of the full-skim-first-spec compound punt below (the
+  # `A spec file was written at './docs/specs/{TODAY}-<slug>.md' with the
+  # full skim-first section set` line under semantic): the flat line punts,
+  # this count check binds. (Distinct from the two other spec-path glob_count
+  # binds above, which decompose a different punt about filename/slug shape.)
+  - text: At least one file matches './docs/specs/{TODAY}-*.md'
+    expect:
+      glob: ./docs/specs/{TODAY}-*.md
+      min: 1
   file_exists:
   - The folder no longer exists at ./0. Inbox/pycon-keynote/ — it was moved out of the Inbox
   - The capture now lives at ./9. Archive/Sources/{TODAY}/openai-o1-launch.md — a flat markdown
@@ -47,6 +74,9 @@ binds:
   - The 5. Resources/ directory exists under ./
   # seventh atom: the nested `9. Archive/Sources/` from the flat punt, as a directory check
   - The 9. Archive/Sources/ directory exists under ./
+  # the "previously-missing PARA folders now all exist: …" compound punt below
+  # reuses these same five directory children (2. Entities/, 3. Projects/, 4.
+  # Areas/, 5. Resources/, 9. Archive/Sources/) above — no new children needed.
   # file_exists child of the index.md compound punt below (the
   # `./.meta/index.md exists, opens with a '# Index' heading, …` line under
   # semantic): the flat line punts, this atomic existence check binds.
@@ -54,6 +84,20 @@ binds:
   - text: ./.meta/templates/entity-person.md exists
     expect:
       path: ./.meta/templates/entity-person.md
+  # file_exists children of the ./.meta/-contents compound punt below (the
+  # `./.meta/ exists and contains index.md (a file), logs/ (a directory), and
+  # templates/ (a directory)` line under semantic): the flat line punts, these
+  # atomic single-directory checks bind. (./.meta/index.md exists above already
+  # covers the index.md child; the "previously-missing ./.meta/templates/ now
+  # exists" restatement below reuses the templates/ child here.)
+  - The ./.meta/logs/ directory exists
+  - The ./.meta/templates/ directory exists
+  # file_exists child of the whoami frontmatter compound punt below (the
+  # `./1. Profile/whoami.md exists and its frontmatter created and updated
+  # fields are concrete ISO 8601 datetimes …` line under semantic): the flat
+  # line punts (the ISO-format/placeholder half stays judge territory), this
+  # atomic existence check binds.
+  - ./1. Profile/whoami.md exists
   regex:
   - ./.meta/index.md now exists with a '# Index' heading
   # the two regex children of the index.md compound punt: phrased so the
@@ -63,6 +107,39 @@ binds:
   - text: ./.meta/templates/entity-person.md has a line beginning 'aliases:'
     expect:
       path: ./.meta/templates/entity-person.md
+  # decomposed regex child of the dated-log-file compound punt below (the
+  # `A dated log file named YYYY-MM-DD.md exists under ./.meta/logs/ and
+  # contains a header of the form '## [<ISO datetime>] bootstrap | <title>'`
+  # line under semantic): the flat line punts, this line-content check binds.
+  - text: ./.meta/logs/{TODAY}.md has a line containing 'bootstrap | '
+    expect:
+      path: ./.meta/logs/{TODAY}.md
+  # decomposed regex child of the spec-H2-sections compound punt below (the
+  # `The spec opens with a one-line TL;DR and contains all of these H2
+  # sections: Problem, Solution, …` line under semantic): the flat line punts
+  # (the full section SET is compound), this single-section check binds.
+  - text: ./docs/specs/{TODAY}-<slug>.md has a line matching '## Problem'
+    expect:
+      path: ./docs/specs/{TODAY}-<slug>.md
+  frontmatter_has:
+  # decomposed child of the whoami frontmatter compound punt below (the
+  # `./1. Profile/whoami.md exists and its frontmatter created and updated
+  # fields are concrete ISO 8601 datetimes …` line under semantic): the flat
+  # line punts (the ISO-format/placeholder half stays judge territory), this
+  # atomic key-presence check binds.
+  - text: ./1. Profile/whoami.md frontmatter has a 'created' key
+    expect:
+      path: ./1. Profile/whoami.md
+      key: created
+  # decomposed child of the six-template-files-frontmatter compound punt below
+  # (the `Each of the six template files begins with YAML frontmatter
+  # declaring at least the keys title, aliases, tags, created, and updated`
+  # line under semantic): the flat line punts (all six files, all five keys is
+  # compound), this single-file single-key check binds as a demonstrator.
+  - text: ./.meta/templates/entity-person.md frontmatter has a 'title' key
+    expect:
+      path: ./.meta/templates/entity-person.md
+      key: title
 
 # punts — gold:punt. The binder must defer to the judge.
 punts:
