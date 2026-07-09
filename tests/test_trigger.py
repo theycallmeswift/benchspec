@@ -141,11 +141,6 @@ def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
     assert detect_skill_fired(_malformed_shape_lines(), "bootstrap") is False
 
 
-# ---------------------------------------------------------------------------
-# count_fires (3×/majority routing loop, with an injected router)
-# ---------------------------------------------------------------------------
-
-
 def _route_seq(*per_pass_lines: object) -> object:
     """Route seq."""
     it = iter(per_pass_lines)
@@ -422,11 +417,6 @@ def test_first_dispatched_skill_skips_malformed_lines() -> None:
     """Verify first dispatched skill skips malformed lines."""
     lines = ["not json", "", _skill_line("bootstrap")]
     assert first_dispatched_skill(lines) == "bootstrap"
-
-
-# ---------------------------------------------------------------------------
-# dispatches_skill (routing-decided signal)
-# ---------------------------------------------------------------------------
 
 
 def test_dispatches_skill_true_for_any_skill_tool_use() -> None:

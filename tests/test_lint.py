@@ -1,6 +1,6 @@
 """Lint rules over assertion text.
 
-Rules are heuristics: each test pins one. true-positive and one near-miss that must NOT
+Rules are heuristics: each test pins one true-positive and one near-miss that must not
 fire.
 """
 

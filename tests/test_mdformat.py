@@ -487,14 +487,13 @@ def test_parse_trigger_xfail_subbullet_and_continuation(tmp_path: object) -> Non
         ---
         ## Trigger
         - inbox-process: process the source and add it to the wiki
-          - fails-on [sonnet, haiku]: routing boundary; routes on opus.
-            Cross-verified 2026-05-30.
+          - fails-on [sonnet, haiku]: routing boundary; routes on the strongest model.
     """,
     )
     doc = mdformat.parse_trigger(p)
     assert doc["queries"][0]["xfail"] == {
         "models": ["sonnet", "haiku"],
-        "reason": "routing boundary; routes on opus. Cross-verified 2026-05-30.",
+        "reason": "routing boundary; routes on the strongest model.",
     }
 
 
