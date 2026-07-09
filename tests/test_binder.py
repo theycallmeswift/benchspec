@@ -8,6 +8,7 @@ one place that monkeypatches urllib — the network transport is the painful edg
 from __future__ import annotations
 
 import inspect
+import io
 import json
 import urllib.error
 from typing import NoReturn
@@ -183,6 +184,7 @@ def test_prompt_carries_load_bearing_pieces() -> None:
 
 def test_infra_error_propagates() -> None:
     """Verify infra error propagates."""
+
     def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
         raise RuntimeError("gemini transient failure")
 
@@ -192,6 +194,7 @@ def test_infra_error_propagates() -> None:
 
 def test_bind_propagates_binder_auth_error() -> None:
     """Verify a BinderAuthError from call_model is never swallowed as a punt."""
+
     def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
         raise BinderAuthError("gemini api key rejected")
 
@@ -206,23 +209,32 @@ def test_bind_default_call_model_is_call_gemini() -> None:
 
 def _http_response(body: dict) -> object:
     """Build a urlopen-context-manager stub returning body as JSON."""
+
     class _Resp:
         def __enter__(self) -> object:
             return self
+
         def __exit__(self, *exc: object) -> None:
             return None
+
         def read(self) -> bytes:
             return json.dumps(body).encode("utf-8")
+
     return lambda request, timeout: _Resp()
 
 
 def _http_error(code: int, body: str) -> object:
     """Build a urlopen stub raising HTTPError with the given status and body."""
+
     def raise_it(request: object, timeout: object) -> NoReturn:
         raise urllib.error.HTTPError(
-            "https://generativelanguage.googleapis.com/x", code, "err",
-            hdrs=None, fp=__import__("io").BytesIO(body.encode("utf-8")),
+            "https://generativelanguage.googleapis.com/x",
+            code,
+            "err",
+            hdrs=None,
+            fp=io.BytesIO(body.encode("utf-8")),
         )
+
     return raise_it
 
 
@@ -268,17 +280,15 @@ def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
 def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: object) -> None:
     """Verify _call_gemini's `model` keyword controls the request URL — no env var involved.
 
-    The env-var override behavior itself is a corpus-suite concern, not a production one
-    (see Global Constraints); it is tested at the corpus wrapper level in Task 7's
-    `test_recording_call_model_honors_evalspec_binder_model_env_override`, not here.
+    EVALSPEC_BINDER_MODEL is a corpus-suite knob, read only by the corpus's recording
+    wrapper; the production transport must stay env-independent.
     """
     captured = {}
 
     def fake_urlopen(request: object, timeout: object) -> object:
         captured["url"] = request.full_url
-        return _http_response({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})(
-            request, timeout
-        )
+        respond = _http_response({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})
+        return respond(request, timeout)
 
     monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
     monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
@@ -328,8 +338,10 @@ def test_call_gemini_raises_runtimeerror_on_other_400(monkeypatch: object) -> No
 
 def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: object) -> None:
     """Verify a transport-level URLError normalizes to RuntimeError."""
+
     def raise_it(request: object, timeout: object) -> NoReturn:
         raise urllib.error.URLError("connection refused")
+
     monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
     with pytest.raises(RuntimeError):
         binder._call_gemini("prompt")
@@ -337,8 +349,10 @@ def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: object) -> No
 
 def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: object) -> None:
     """Verify a socket timeout normalizes to RuntimeError."""
+
     def raise_it(request: object, timeout: object) -> NoReturn:
         raise TimeoutError("timed out")
+
     monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
     with pytest.raises(RuntimeError):
         binder._call_gemini("prompt")
@@ -362,12 +376,8 @@ def test_call_gemini_raises_runtimeerror_on_degenerate_200(
 
 
 def test_call_gemini_raises_runtimeerror_on_malformed_json_body(monkeypatch: object) -> None:
-    """Verify a non-JSON 200 response body normalizes to RuntimeError, not a raw ValueError.
+    """Verify a non-JSON 200 body normalizes to RuntimeError, not a raw ValueError."""
 
-    `json.loads(response.read().decode("utf-8"))` runs inside the same try block as the
-    `urlopen` call — the taxonomy is only total if `ValueError` (json.JSONDecodeError's base)
-    is in the transport-failure except tuple alongside URLError/TimeoutError/OSError.
-    """
     class _Resp:
         def __enter__(self) -> object:
             return self

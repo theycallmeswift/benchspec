@@ -79,14 +79,11 @@ def _rate(rows: object, hit: object) -> object:
 def _recording_call_model(sink: list) -> object:
     """Build a call_model that delegates to _call_gemini and records every reply.
 
-    Reads EVALSPEC_BINDER_MODEL itself (falling back to GEMINI_BINDER_MODEL) and passes
-    it through as _call_gemini's `model` keyword — this is the corpus suite's *only*
-    model override; _call_gemini's production default takes no env input at all (see
-    the plan's Global Constraints). Exceptions propagate unchanged (a retry in
-    _bind_resilient still sees the real failure) — this wrapper only appends successful
-    replies to `sink`. The per-draw `attempts` count is tracked separately, by
-    _bind_resilient's retry loop, since a retry that raises before producing a reply
-    must still count as an attempt — `len(sink)` alone would undercount that case.
+    Reads EVALSPEC_BINDER_MODEL here, not in _call_gemini — the override is a
+    corpus-suite knob and the production transport takes no env input. Exceptions
+    propagate unchanged and only successful replies land in `sink`, so per-draw
+    `attempts` is tracked by _bind_resilient's retry loop instead: `len(sink)`
+    would undercount a retry that raised before producing a reply.
 
     Args:
         sink: List to append each successful GeminiReply to.

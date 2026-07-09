@@ -173,7 +173,10 @@ class GeminiReply:
 
 
 def _call_gemini(
-    prompt: str, *, timeout: float = _GEMINI_TIMEOUT_SECONDS, model: str = GEMINI_BINDER_MODEL,
+    prompt: str,
+    *,
+    timeout: float = _GEMINI_TIMEOUT_SECONDS,
+    model: str = GEMINI_BINDER_MODEL,
 ) -> GeminiReply:
     """Call the Gemini binder model and return its reply.
 
