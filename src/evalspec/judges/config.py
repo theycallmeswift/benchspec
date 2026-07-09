@@ -23,7 +23,46 @@ DEFAULT_MODEL = "sonnet"
 DEFAULT_EFFORT = "medium"
 DEFAULT_TIMEOUT = 300
 
-_JUDGE_KEYS = ("harness", "model", "effort", "timeout", "harness_args", "env")
+def _validated_non_empty_str(where: str, key: str, value: object) -> str:
+    """Return value when it is a non-empty string, else raise SchemaError."""
+    if not isinstance(value, str) or not value:
+        raise SchemaError(f"{where}: `{key}` must be a non-empty string")
+    return value
+
+
+def _validated_positive_int(where: str, key: str, value: object) -> int:
+    """Return value when it is a positive integer (bool excluded), else raise SchemaError."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise SchemaError(f"{where}: `{key}` must be a positive integer")
+    return value
+
+
+def _validated_str_list(where: str, key: str, value: object) -> list:
+    """Return value when it is a list of strings, else raise SchemaError."""
+    if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
+        raise SchemaError(f"{where}: `{key}` must be a list of strings")
+    return value
+
+
+def _validated_str_dict(where: str, key: str, value: object) -> dict:
+    """Return value when it is a table with string values, else raise SchemaError."""
+    if not isinstance(value, dict) or not all(
+        isinstance(entry, str) for entry in value.values()
+    ):
+        raise SchemaError(f"{where}: `{key}` must be a table of strings")
+    return value
+
+
+# Each judge field maps to the validator that both checks its type and returns the
+# cleaned value; the keys double as the set of recognized judge keys.
+_FIELD_VALIDATORS = {
+    "harness": _validated_non_empty_str,
+    "model": _validated_non_empty_str,
+    "effort": _validated_non_empty_str,
+    "timeout": _validated_positive_int,
+    "harness_args": _validated_str_list,
+    "env": _validated_str_dict,
+}
 
 
 @dataclass(frozen=True)
@@ -48,43 +87,16 @@ def _validate_judge_table(where: str, table: dict) -> dict:
     Return only the keys it declared (partial — callers merge over prior layers).
     Raises SchemaError naming the defect, never a silent no-op.
     """
-    out: dict = {}
-    if "harness" in table:
-        value = table["harness"]
-        if not isinstance(value, str) or not value:
-            raise SchemaError(f"{where}: `harness` must be a non-empty string")
-        out["harness"] = value
-    if "model" in table:
-        value = table["model"]
-        if not isinstance(value, str) or not value:
-            raise SchemaError(f"{where}: `model` must be a non-empty string")
-        out["model"] = value
-    if "effort" in table:
-        value = table["effort"]
-        if not isinstance(value, str) or not value:
-            raise SchemaError(f"{where}: `effort` must be a non-empty string")
-        out["effort"] = value
-    if "timeout" in table:
-        value = table["timeout"]
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise SchemaError(f"{where}: `timeout` must be a positive integer")
-        out["timeout"] = value
-    if "harness_args" in table:
-        value = table["harness_args"]
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise SchemaError(f"{where}: `harness_args` must be a list of strings")
-        out["harness_args"] = value
-    if "env" in table:
-        value = table["env"]
-        if not isinstance(value, dict) or not all(
-            isinstance(item, str) for item in value.values()
-        ):
-            raise SchemaError(f"{where}: `env` must be a table of strings")
-        out["env"] = value
-    unknown = sorted(set(table) - set(_JUDGE_KEYS))
+    unknown = sorted(set(table) - set(_FIELD_VALIDATORS))
     if unknown:
-        raise SchemaError(f"{where}: unknown judge key(s) {unknown} (known: {list(_JUDGE_KEYS)})")
-    return out
+        raise SchemaError(
+            f"{where}: unknown judge key(s) {unknown} (known: {list(_FIELD_VALIDATORS)})"
+        )
+    return {
+        key: validate(where, key, table[key])
+        for key, validate in _FIELD_VALIDATORS.items()
+        if key in table
+    }
 
 
 _HARNESS_ARG_VALIDATORS = {
@@ -108,10 +120,10 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
         )
     try:
         _HARNESS_ARG_VALIDATORS[config.harness](config.harness_args)
-    except ValueError as e:
+    except ValueError as error:
         raise SchemaError(
-            f"[tool.evalspec.judge] harness_args invalid for `{config.harness}`: {e}"
-        ) from e
+            f"[tool.evalspec.judge] harness_args invalid for `{config.harness}`: {error}"
+        ) from error
     if config.harness == "opencode" and "/" not in config.model:
         raise SchemaError(
             "judge harness `opencode` needs a provider-qualified model "
