@@ -223,14 +223,12 @@ def test_bad_set_fails_collection(pytester: object) -> None:
     assert "nope" in out
 
 
-# ---------------------------------------------------------------------------
-# resolved_run_set — unit-level (no pytester collect): drives the pyproject read +
-# resolve_set wiring by value.
-# ---------------------------------------------------------------------------
-
-
 class _SetConfig:
-    """Config stub for resolved_run_set: repo root + the eval-set CLI options."""
+    """Config stub for resolved_run_set: repo root + the eval-set CLI options.
+
+    Backs the unit-level resolved_run_set tests (no pytester collect) that drive the
+    pyproject read + resolve_set wiring by value.
+    """
 
     def __init__(
         self: object,
@@ -499,10 +497,12 @@ def test_eval(eval_arm, sample_index):
     assert sorted(observed) == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
-
-
 class _FakeConfig:
-    """Provide a fake config for tests."""
+    """Fake config for the pytest_sessionfinish / pytest_terminal_summary tests.
+
+    Those hooks are the manifest + benchmark glue; this stub supplies the option
+    surface they read.
+    """
 
     def __init__(self: object, repo_root: object, fail_under: object = None) -> None:
         """Initialize the instance."""
@@ -1171,11 +1171,8 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     assert session.exitstatus == 0
 
 
-# ---------------------------------------------------------------------------
-# --evalspec-config verification fixtures (tests/fixtures/judge/), each driven
-# end-to-end through the real plugin hooks at collection time.
-# ---------------------------------------------------------------------------
-
+# On-disk --evalspec-config judge fixtures; each is driven end-to-end through the
+# real plugin hooks at collection time by the tests below.
 _FIXTURES = Path(__file__).parent / "fixtures" / "judge"
 
 

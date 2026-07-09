@@ -10,10 +10,9 @@ from evalspec.judge import build_judge_prompt, grade_run, parse_judge_json
 from evalspec.judges import JudgeConfig
 
 
-
 def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
     """Verify the prompt carries assertions, facts, and the output contract."""
-    p = build_judge_prompt(
+    prompt = build_judge_prompt(
         assertions=["the file X exists", "Y is byte-identical"],
         tree="vault/\n  a.md",
         file_contents={"a.md": "hello"},
@@ -21,32 +20,30 @@ def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
         final_message="I archived it.",
         original_shas={"a.md": "deadbeef01"},
     )
-    assert "the file X exists" in p
-    assert "Y is byte-identical" in p
-    assert "vault/" in p
-    assert "abc123" in p
-    assert "I archived it." in p
+    assert "the file X exists" in prompt
+    assert "Y is byte-identical" in prompt
+    assert "vault/" in prompt
+    assert "abc123" in prompt
+    assert "I archived it." in prompt
     # must instruct strict JSON output with the grading shape
-    assert "passed" in p
-    assert "evidence" in p
-    assert "JSON" in p or "json" in p
+    assert "passed" in prompt
+    assert "evidence" in prompt
+    assert "JSON" in prompt or "json" in prompt
     # original SHA block must be present
-    assert "ORIGINAL FILES" in p
-    assert "deadbeef01" in p
+    assert "ORIGINAL FILES" in prompt
+    assert "deadbeef01" in prompt
 
 
 def test_judge_prompt_no_original_shas_omits_block() -> None:
     """Verify the ORIGINAL FILES block is omitted when no original SHAs given."""
-    p = build_judge_prompt(
+    prompt = build_judge_prompt(
         assertions=["the file X exists"],
         tree="vault/",
         file_contents={},
         shas={},
         final_message="done",
     )
-    assert "ORIGINAL FILES" not in p
-
-
+    assert "ORIGINAL FILES" not in prompt
 
 
 def test_parse_judge_json_builds_grading() -> None:
@@ -110,11 +107,6 @@ def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
     raw = '{"assertions":[{"text":"a","passed":"true","evidence":"e"}]}'
     g = parse_judge_json(raw, eval_id="e1", config="with_skill")
     assert g["assertions"][0]["passed"] is True
-
-
-# ---------------------------------------------------------------------------
-# grade_run (evalspec.judge.run_judge boundary monkeypatched)
-# ---------------------------------------------------------------------------
 
 
 def test_grade_run_calls_run_judge_with_the_resolved_config(monkeypatch: object) -> None:
