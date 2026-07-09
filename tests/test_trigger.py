@@ -299,11 +299,6 @@ def test_count_fires_raises_when_routing_keeps_failing() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# fire_threshold + threshold-based short-circuit
-# ---------------------------------------------------------------------------
-
-
 def test_fire_threshold_majority_ignores_should_trigger() -> None:
     """Verify fire threshold majority ignores should trigger."""
     assert fire_threshold("majority", True, 3) == 2
@@ -392,11 +387,6 @@ def test_count_fires_on_pass_records_each_pass() -> None:
         (True, "bootstrap"),
     ]
     assert all(isinstance(ms, int) and ms >= 0 for ms, _, _ in records)
-
-
-# ---------------------------------------------------------------------------
-# first_dispatched_skill (routed-skill observability)
-# ---------------------------------------------------------------------------
 
 
 def test_first_dispatched_skill_returns_skill_tool_value() -> None:
@@ -513,11 +503,6 @@ def test_count_fires_uses_injected_detect_fired() -> None:
     assert n == 3
 
 
-# ---------------------------------------------------------------------------
-# trigger_record — persisted per-sample trigger artifact
-# ---------------------------------------------------------------------------
-
-
 def test_trigger_record_persists_verdict_and_query() -> None:
     """Verify trigger record persists verdict and query."""
     from evalspec.trigger import trigger_record
@@ -622,11 +607,6 @@ def test_trigger_record_carries_slug_and_model() -> None:
     assert "query_id" not in rec
     assert rec["fired"] is True
     assert rec["passed"] is True
-
-
-# ---------------------------------------------------------------------------
-# xfail_applies (tier-scoped gate)
-# ---------------------------------------------------------------------------
 
 
 def test_xfail_applies_when_model_is_a_listed_tier() -> None:
