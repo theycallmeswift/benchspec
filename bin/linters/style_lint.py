@@ -38,15 +38,16 @@ RULES = [
     style_lint.Rule(
         id="provenance-comments",
         description=(
-            "Do not reference PRs, issues, commits, callers, or planning docs "
-            "in source comments."
+            "Do not reference PRs, issues, commits, callers, or planning docs in source comments."
         ),
     ),
     style_lint.Rule(
         id="descriptive-names",
         description=(
             "Do not use single-letter bindings except `_` for intentionally "
-            "unused values."
+            "unused values. Do not flag leading underscores on private "
+            "function, class, method, or module-level helper names; only flag "
+            "the actual bound identifier."
         ),
     ),
     style_lint.Rule(
@@ -61,6 +62,11 @@ RULES = [
 
 POLICY_INSTRUCTIONS = dedent("""\
     Apply evalspec's local Python style guide from docs/style/development.md.
+    For descriptive-names, private helper prefixes such as `_helper`,
+    `_FakeClass`, or `_module_constant` are allowed. The underscore prefix is
+    not a single-letter binding by itself. Also allow Python protocol names
+    like `self` and `cls`; report only the concrete variable, parameter,
+    comprehension target, or assignment target that is too terse.
 """)
 
 

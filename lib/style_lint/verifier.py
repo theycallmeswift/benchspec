@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
+import tokenize
 from dataclasses import dataclass
+from io import StringIO
 
 from lib.style_lint.detector import DEFAULT_SYSTEM_PROMPT, _strict_int
 from lib.style_lint.types import (
@@ -59,10 +62,7 @@ def verify_findings(
             "task": "Verify proposed advisory lint findings.",
             "system_prompt": system_prompt,
             "policy_instructions": instructions,
-            "rules": [
-                {"id": rule.id, "description": rule.description}
-                for rule in rules
-            ],
+            "rules": [{"id": rule.id, "description": rule.description} for rule in rules],
             "decision_rubric": [
                 (
                     'Return a JSON object exactly like {"keep_indexes": [0]}. '
@@ -75,8 +75,10 @@ def verify_findings(
                 (
                     "For descriptive-names, keep only if the reported source "
                     "line visibly binds a single-character name other than `_`. "
-                    "Reject kwargs, args, function calls, and helper function "
-                    "definitions."
+                    "Reject kwargs, args, self, cls, function calls, and helper "
+                    "function/class definitions. Reject private-name prefixes "
+                    "such as `_helper`, `_FakeClass`, or `_module_constant`; "
+                    "the leading underscore is not a binding by itself."
                 ),
                 (
                     "For semantic-block-newlines, keep only if the source has "
@@ -102,9 +104,7 @@ def verify_findings(
         indent=2,
         sort_keys=True,
     )
-    response = _response_parts(
-        _call_gemini(prompt=prompt, api_key=api_key, model=model)
-    )
+    response = _response_parts(_call_gemini(prompt=prompt, api_key=api_key, model=model))
     payload = json.loads(response.text)
 
     keep_indexes = _keep_indexes(payload)
@@ -114,15 +114,28 @@ def verify_findings(
     verified_findings: list[Finding] = []
     for keep_index in keep_indexes:
         parsed_keep_index = _strict_int(keep_index)
-        if (
-            parsed_keep_index is None
-            or parsed_keep_index < 0
-            or parsed_keep_index >= len(findings)
-        ):
+        if parsed_keep_index is None or parsed_keep_index < 0 or parsed_keep_index >= len(findings):
             raise ValueError(f"Malformed finding reference: {keep_index!r}")
-        verified_findings.append(findings[parsed_keep_index])
+        finding = findings[parsed_keep_index]
+        if _verified_finding_still_supported(finding=finding, chunks=chunks):
+            verified_findings.append(finding)
 
     return VerificationResult(findings=verified_findings, usage=response.usage)
+
+
+def _verified_finding_still_supported(*, finding: Finding, chunks: list[SourceChunk]) -> bool:
+    """Apply deterministic guardrails after model verification."""
+    if finding.rule_id != "descriptive-names":
+        return True
+
+    reported_names = re.findall(r"'([^']+)'", finding.message)
+    if not any(len(name) == 1 and name != "_" for name in reported_names):
+        return False
+
+    chunk = _chunk_for_finding(chunks=chunks, finding=finding)
+    if chunk is None:
+        return False
+    return not _line_is_inside_string(chunk=chunk, line=finding.line)
 
 
 def _call_gemini(**kwargs: object) -> object:
@@ -155,15 +168,43 @@ def _keep_indexes(payload: object) -> object:
 
 def _line_context(*, chunks: list[SourceChunk], finding: Finding) -> str:
     """Return nearby numbered source lines for one finding."""
+    chunk = _chunk_for_finding(chunks=chunks, finding=finding)
+    if chunk is None:
+        return ""
+
+    selected_lines = []
+    for numbered_line in chunk.numbered_source.splitlines():
+        line_number = int(numbered_line.split(" | ", 1)[0])
+        if finding.line - 2 <= line_number <= finding.line + 2:
+            selected_lines.append(numbered_line)
+    return "\n".join(selected_lines)
+
+
+def _chunk_for_finding(*, chunks: list[SourceChunk], finding: Finding) -> SourceChunk | None:
+    """Return the source chunk containing a finding."""
     for chunk in chunks:
         if chunk.path != finding.path:
             continue
         if not chunk.line_start <= finding.line <= chunk.line_end:
             continue
-        selected_lines = []
-        for numbered_line in chunk.numbered_source.splitlines():
-            line_number = int(numbered_line.split(" | ", 1)[0])
-            if finding.line - 2 <= line_number <= finding.line + 2:
-                selected_lines.append(numbered_line)
-        return "\n".join(selected_lines)
-    return ""
+        return chunk
+    return None
+
+
+def _line_is_inside_string(*, chunk: SourceChunk, line: int) -> bool:
+    """Return whether a source line falls inside a string token."""
+    source_text = "\n".join(
+        numbered_line.split(" | ", 1)[1] for numbered_line in chunk.numbered_source.splitlines()
+    )
+    try:
+        tokens = tokenize.generate_tokens(StringIO(source_text).readline)
+        for token in tokens:
+            if token.type != tokenize.STRING:
+                continue
+            start_line = chunk.line_start + token.start[0] - 1
+            end_line = chunk.line_start + token.end[0] - 1
+            if start_line <= line <= end_line:
+                return True
+    except tokenize.TokenError:
+        return False
+    return False
