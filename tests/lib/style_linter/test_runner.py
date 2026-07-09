@@ -208,3 +208,61 @@ def test_run_advisory_lint_drops_invalid_individual_findings(
     assert result.diagnostics == [
         f"{source.resolve()}:1:1: descriptive-names Use a descriptive binding name."
     ]
+
+
+def test_build_lint_plan_predicts_detector_and_max_verifier_calls(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Plan detector batches and verifier upper bounds from real chunking."""
+    source = tmp_path / "sample.py"
+    source.write_text("one = 1\ntwo = 2\nthree = 3\n")
+
+    plan = framework.build_lint_plan(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            verify_findings=True,
+            max_lines=1,
+            chunk_batch_size=2,
+        )
+    )
+
+    assert plan.files == [source.resolve()]
+    assert plan.files_checked == 1
+    assert plan.chunks_checked == 3
+    assert plan.detector_api_calls == 2
+    assert plan.max_verifier_api_calls == 1
+    assert plan.max_total_api_calls == 3
+
+
+def test_build_lint_plan_skips_verifier_when_no_chunks(
+    tmp_path: Path,
+    framework: ModuleType,
+) -> None:
+    """Skip verifier planning when chunking produces no detector work."""
+    source = tmp_path / "empty.py"
+    source.write_text("")
+
+    plan = framework.build_lint_plan(
+        framework.StyleLintConfig(
+            paths=[source],
+            default_paths=(Path("src"),),
+            rules=[],
+            policy_instructions="Use the repository style guide.",
+            api_key="unused-in-dry-run",
+            model="gemini-test",
+            verify_findings=True,
+        )
+    )
+
+    assert plan.files == [source.resolve()]
+    assert plan.files_checked == 1
+    assert plan.chunks_checked == 0
+    assert plan.detector_api_calls == 0
+    assert plan.max_verifier_api_calls == 0
+    assert plan.max_total_api_calls == 0

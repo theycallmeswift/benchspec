@@ -57,6 +57,40 @@ class StyleLintResult:
     chunks_checked: int = 0
 
 
+@dataclass(frozen=True)
+class StyleLintPlan:
+    """Planned work for one advisory lint run without model calls."""
+
+    files: list[Path]
+    files_checked: int
+    chunks_checked: int
+    detector_api_calls: int
+    max_verifier_api_calls: int
+    max_total_api_calls: int
+
+
+def build_lint_plan(config: StyleLintConfig) -> StyleLintPlan:
+    """Plan file, chunk, and API-call counts for an advisory lint run."""
+    targets = collect_python_files(
+        config.paths,
+        default_paths=config.default_paths,
+    )
+    chunks = chunk_source_files(targets, max_lines=config.max_lines)
+    detector_api_calls = len(_chunk_batches(chunks, size=config.chunk_batch_size))
+    max_verifier_api_calls = (
+        1 if config.verify_findings and detector_api_calls > 0 else 0
+    )
+
+    return StyleLintPlan(
+        files=targets,
+        files_checked=len(targets),
+        chunks_checked=len(chunks),
+        detector_api_calls=detector_api_calls,
+        max_verifier_api_calls=max_verifier_api_calls,
+        max_total_api_calls=detector_api_calls + max_verifier_api_calls,
+    )
+
+
 def run_advisory_lint(config: StyleLintConfig) -> StyleLintResult:
     """Run the advisory lint pipeline.
 

@@ -11,7 +11,9 @@ from lib.style_lint.detector import (
 from lib.style_lint.gemini import GEMINI_TIMEOUT_SECONDS, call_gemini, urllib
 from lib.style_lint.runner import (
     StyleLintConfig,
+    StyleLintPlan,
     StyleLintResult,
+    build_lint_plan,
     run_advisory_lint,
 )
 from lib.style_lint.source import chunk_source_files, collect_python_files
@@ -32,8 +34,10 @@ __all__ = [
     "Rule",
     "SourceChunk",
     "StyleLintConfig",
+    "StyleLintPlan",
     "StyleLintResult",
     "UsageMetadata",
+    "build_lint_plan",
     "build_detector_prompt",
     "call_gemini",
     "chunk_source_files",
