@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import runner, sandbox, workspace
+from evalspec import binder, runner, sandbox, workspace
 from evalspec.agents import make_agent
 from evalspec.discovery import resolve_repo_root
 from evalspec.execution import run_eval_arm
@@ -55,12 +55,13 @@ def eval_set_name(request: object) -> str:
 
 @pytest.fixture
 def judge_config(request: object) -> JudgeConfig:
-    """Resolve the run's judge and preflight its binary before any arm grades."""
-    # Only test_eval requests this fixture, so the binary-on-PATH preflight (which is
-    # environment-dependent, unlike resolved_judge_config's structural checks already
-    # run at collection) fires exactly when a run will grade — never for a trigger-only
-    # session, which doesn't request judge_config. Fixture setup is skipped under
-    # --collect-only, so this stays collection-safe without an autouse gate.
+    """Resolve the run's judge and preflight its binary and the binder's Gemini credential."""
+    # Only test_eval requests this fixture, so both preflights (environment-dependent,
+    # unlike resolved_judge_config's structural checks already run at collection) fire
+    # exactly when a run will grade — never for a trigger-only session, which doesn't
+    # request judge_config. Fixture setup is skipped under --collect-only, so this stays
+    # collection-safe without an autouse gate.
+    binder.preflight_gemini_key()
     config = resolved_judge_config(request.config)
     preflight_judge_binary(config)
     return config

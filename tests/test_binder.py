@@ -380,3 +380,23 @@ def test_call_gemini_raises_runtimeerror_on_malformed_json_body(monkeypatch: obj
     monkeypatch.setattr(binder.urllib.request, "urlopen", lambda request, timeout: _Resp())
     with pytest.raises(RuntimeError):
         binder._call_gemini("prompt")
+
+
+def test_preflight_gemini_key_raises_when_unset(monkeypatch: object) -> None:
+    """Verify preflight raises RuntimeError when GEMINI_API_KEY is unset."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        binder.preflight_gemini_key()
+
+
+def test_preflight_gemini_key_raises_when_empty(monkeypatch: object) -> None:
+    """Verify a set-but-empty GEMINI_API_KEY counts as missing."""
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        binder.preflight_gemini_key()
+
+
+def test_preflight_gemini_key_passes_when_set(monkeypatch: object) -> None:
+    """Verify preflight passes with a non-empty key."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    binder.preflight_gemini_key()  # no raise

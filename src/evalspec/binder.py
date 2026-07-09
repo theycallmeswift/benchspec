@@ -275,6 +275,21 @@ def _usage_int(value: object) -> int:
     return 0
 
 
+def preflight_gemini_key() -> None:
+    """Raise RuntimeError if GEMINI_API_KEY is missing or empty.
+
+    A GEMINI_API_KEY set to the empty string counts as missing — python-dotenv
+    never overrides an already-set environment variable, so `GEMINI_API_KEY=
+    make evals:binder` can't be silently repopulated from `.env`; this makes that
+    invocation fail fast, before any paid call, exactly as intended.
+    """
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise RuntimeError(
+            "GEMINI_API_KEY is required — the binder calls the Gemini API for every "
+            "graded run. Set it in the environment or a repo-root .env."
+        )
+
+
 def bind(
     assertion_text: str,
     *,

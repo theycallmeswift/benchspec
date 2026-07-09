@@ -1056,6 +1056,60 @@ def test_judge_preflight_does_not_fire_on_trigger_only_session(
     assert "not found on PATH" not in out
 
 
+def test_gemini_key_preflight_fixture_raises_when_missing(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Verify the judge_config fixture fails fast on a missing GEMINI_API_KEY."""
+    import shutil
+
+    from evalspec import sandbox
+
+    _make_project(pytester)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude")  # binary IS present
+    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    # A dev-machine repo-root .env can otherwise repopulate GEMINI_API_KEY inside the
+    # inner run's own pytest_configure (plugin.py calls load_dotenv() unconditionally) —
+    # no-op it so this test is deterministic regardless of local .env contents.
+    monkeypatch.setattr(plugin, "load_dotenv", lambda *args: None)
+
+    result = pytester.runpytest(
+        "-p",
+        "evalspec.plugin",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "-k",
+        "test_eval",
+    )
+    assert result.ret != 0
+    out = result.stdout.str() + result.stderr.str()
+    assert "GEMINI_API_KEY" in out
+
+
+def test_gemini_key_preflight_does_not_fire_on_trigger_only_session(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Verify a trigger-only session (no judge_config fixture request) needs no key."""
+    from evalspec import sandbox
+
+    evals = pytester.path / "skills" / "myskill" / "evals"
+    evals.mkdir(parents=True)
+    (evals / "trigger-evals.md").write_text(
+        "---\nskill_name: myskill\n---\n## Trigger\n\n- q1: do it\n\n## No Trigger\n\n- q2: nope\n"
+    )
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+
+    result = pytester.runpytest(
+        "-p",
+        "evalspec.plugin",
+        "--collect-only",
+        "--evalspec-repo-root",
+        str(pytester.path),
+    )
+    assert result.ret == 0
+
+
 def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(pytester: object) -> None:
     """Verify judge model flag no longer shadows pyproject default when unset."""
     # Regression guard for the precedence bug: --evalspec-judge-model must default to
