@@ -421,11 +421,7 @@ def test_route_reassembles_jsonl_split_across_stream_chunks(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Verify route reassembles jsonl split across stream chunks."""
-    # Regression: exec_stream delivers stdout in arbitrary chunks that do NOT align to
-    # newlines. OpenCode's skill `tool_use` event embeds the full skill output, so it's
-    # multi-KB and always spans chunks. The router must line-buffer (reassemble complete
-    # JSONL lines before detecting) — otherwise json.loads fails on every partial chunk,
-    # the dispatch is invisible, early-stop never fires, and the fire tallies 0.
+    # Stream chunks can split JSONL records; routing must reassemble complete lines.
     skill_line = json.dumps(
         {
             "type": "tool_use",
@@ -556,10 +552,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
 
 def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
     """Verify snapshot artifact shas returns none on shell failure."""
-    # A3 root cause: a failed snapshot shell must propagate as None — distinct from {}
-    # (genuinely-empty success) — so _read_authored can tell "capture nothing this arm"
-    # from "nothing to capture". Collapsing both to {} makes changed_paths read an empty
-    # baseline as "everything is newly authored".
+    # Failed snapshots return None, while genuinely empty successful snapshots return {}.
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     failing = FakeSandbox(shell_output=FakeExecOutput(exit_code=1))
@@ -573,11 +566,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Verify baseline snapshot failure captures no artifacts."""
-    # A3: when the BASELINE artifact snapshot shell fails, the staged-skills tree must NOT
-    # be surfaced as agent-authored. The failed baseline returns None, so _read_authored
-    # captures nothing — never grading staged (given) skills as if the agent wrote them,
-    # and never the 296KB-per-turn transfer the hash-first design exists to avoid. The
-    # queued post-turn + read outputs would, if the fix regressed, dump the whole tree.
+    # Failed baseline snapshots capture no authored artifacts.
     staged = "/root/.claude/skills/writing-agent-skills/SKILL.md"
     fake = _QueuedShellSandbox(
         shell_queue=[
