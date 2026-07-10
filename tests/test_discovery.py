@@ -159,12 +159,44 @@ def test_discover_history_and_workspace(tmp_path: object) -> None:
     assert case.workspace_dir == group_dir / "workspace"
 
 
+def test_discover_does_not_descend_into_nested_evals_dir(tmp_path: object) -> None:
+    """Verify a nested evals/ dir under a workspace/ fixture is not itself collected."""
+    _write_eval(tmp_path, "skills/foo", "bar")
+    nested_dir = (
+        tmp_path
+        / "skills"
+        / "foo"
+        / "evals"
+        / "bar"
+        / "workspace"
+        / "project"
+        / "evals"
+        / "baz"
+    )
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "eval.md").write_text(
+        "---\n{}\n---\n\n## Prompt\n\nx\n\n## Assertions\n\n- [ ] a\n", encoding="utf-8"
+    )
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["bar-bar"]
+
+
 def test_discover_raises_on_duplicate_group_eval_pair(tmp_path: object) -> None:
     """Verify discover raises on duplicate (group, eval_id)."""
     _write_eval(tmp_path, "a", "happy", "eval.md")
     _write_eval(tmp_path, "b", "happy", "eval.md")
 
     with pytest.raises(schema.SchemaError, match="happy"):
+        discover_eval_cases(tmp_path)
+
+
+def test_discover_non_kebab_dunder_group_fails_loudly(tmp_path: object) -> None:
+    """Verify a non-kebab `__`-prefixed group raises instead of being silently skipped."""
+    _write_eval(tmp_path, "skills/foo", "__bad__")
+
+    with pytest.raises(schema.SchemaError, match="kebab"):
         discover_eval_cases(tmp_path)
 
 

@@ -302,6 +302,9 @@ def run_eval_arm(
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.
     arm_name = arm.name
     # setup.sh lives in the eval folder, located by its path relative to the mount.
+    # Assumes `project` is an ancestor of `eval_case.eval_dir` — currently guaranteed
+    # because the sole caller (cases.py) passes project=repo_root. A future caller that
+    # mounts a staged project distinct from repo_root must address this.
     setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
     # Stream the skill name on both arms so fired-detection runs unconditionally.
     detect_skill = eval_case.skill
