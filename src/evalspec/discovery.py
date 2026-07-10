@@ -129,7 +129,7 @@ def _pyproject_eval_roots(repo_root: Path) -> list[str] | None:
 
 
 def resolve_eval_roots(config: object) -> list[str]:
-    """Where to look for eval-bearing skill dirs, in precedence order:.
+    """Where to look for eval-bearing skill dirs, in precedence order.
 
     --evalspec-eval-roots (comma-separated CLI flag) > [tool.evalspec] eval_roots in
     pyproject.toml > built-in default (skills, .claude/skills). Lets external consumers
@@ -156,7 +156,7 @@ def _pyproject_eval_paths(repo_root: Path) -> list[str] | None:
 
 
 def resolve_eval_paths(config: object) -> list[str]:
-    """Where to search for output evals, in precedence order:.
+    """Where to search for output evals, in precedence order.
 
     --evalspec-eval-paths (comma-separated CLI flag) > [tool.evalspec] eval_paths in
     pyproject.toml > built-in default (skills, tests, evals, benchmarks). Each path is
