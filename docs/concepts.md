@@ -4,7 +4,7 @@ evalspec runs each `(eval × arm)` as a parametrized pytest case. The agent runs
 
 ## Glossary
 
-- **Eval** — one task definition (prompt + prose assertions, optionally a `history:` prefix). Each is one self-contained file `<skill>/evals/<group>/eval.md` (or a `<stem>.eval.md` sibling); the eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`, and `workspace/` beside it holds starting files. There is no suite header. See [`schema.md`](schema.md).
+- **Eval** — one task definition (prompt + prose assertions, optionally a `history:` prefix). Each is one self-contained file under any `**/evals/<group>/` directory: `eval.md` or a `<stem>.eval.md` sibling. The eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`, and `workspace/` beside it holds starting files. There is no suite header. See [`schema.md`](schema.md).
 - **Suite** — the `eval.md` plus any `*.eval.md` siblings inside one eval folder. Suite identity is that folder's **group** — the value that lands in the `<skill>` artifact-path slot and test id, which need not match the name of an enclosing `skills/<name>/` dir. Each file is validated independently at discovery, not assembled into one combined doc.
 - **Arm** — a `harness × model` cell: one column of the resolved set, declared as an inline table in the set's `arms` (`name` + any of `harness`/`model`/`effort`/`env`/`harness_args`, inheriting the set-level defaults for the rest) and carried verbatim into one parametrized `(eval × arm)` test. The arm's `harness` names the coding agent; its `model` is the **task** model. Same prompt, same eval — arms differ in harness and/or model, environment, and invocation-layer pass-through args. A set's columns may span harnesses (each output-eval arm runs on its own `harness`); trigger routing still resolves to the single run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`). See [`configuration.md`](configuration.md).
 - **Set** — a named, self-contained `[tool.evalspec.sets.<name>]` carrying its own `arms` (the columns), set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults each arm inherits, and a `baseline` arm. A run resolves exactly one set — `default-set`, `--evalspec-set`, or a scratch `--evalspec-config` file — and that set's arms are the same columns for every skill in the run (one eval×arm matrix). See [`configuration.md`](configuration.md).
@@ -41,7 +41,7 @@ Set resolution (once per run, at collection)
      default-set); apply scalar overrides (--evalspec-model/-harness/-effort/-env) to
      its defaults, or expand --evalspec-models into one arm per value; materialize arms
      with inheritance + env merge + resolved harness args (set args, then arm args) →
-     the resolved set's columns (same for every skill).
+     the resolved set's columns (same for every output eval).
         │
 Snapshot resolve (per run, per harness)
   └─ cache hit → reuse
@@ -52,7 +52,7 @@ Per (eval × arm × sample) test
   └─ Seed clean room: copy workspace/ (if any), substitute {TODAY} in
      file contents + paths, snapshot original SHAs for the judge.
   └─ Boot VM from snapshot (fresh per cell), bind /workspace (rw) + /project (ro).
-  └─ Run the eval's own evals/<group>/setup.sh with cwd=/project/skills/<skill>/evals/<group>
+  └─ Run /project/<eval-dir-relative-to-repo>/setup.sh with cwd there
      under the cell env (`EVALSPEC_ARM`, `EVALSPEC_MODEL`, `EVALSPEC_HARNESS`,
      `EVALSPEC_SET`); it branches on $EVALSPEC_ARM or $EVALSPEC_SET to install the skill
      into the fixed home (trial) or no-op (baseline). A non-zero exit aborts the cell.

@@ -70,12 +70,12 @@ A transient binder infra failure degrades that one assertion to judge grading ra
 | `--evalspec-judge-timeout` | (none, resolves to `300`) | Scalar override of the judge subprocess timeout in seconds. |
 | `--evalspec-judge-harness-arg` | (none) | Repeatable. When given at all, **fully replaces** `[tool.evalspec.judge] harness_args` — unlike a set/arm's `harness_args`, which append, the judge's CLI override is a full swap per precedence layer. |
 | `--evalspec-judge-env` | (none) | Repeatable `KEY=VAL`. Shallow-merges over `[tool.evalspec.judge] env` (CLI keys win), same merge rule across every layer (pyproject → scratch → CLI). |
-| `--evalspec-repo-root` | (rootdir) | Project root whose `skills/` tree to test. Precedence: flag > `$PROJECT_ROOT` > pytest rootdir. |
+| `--evalspec-repo-root` | (rootdir) | Repository root used for repo-wide output-eval discovery and to resolve project-relative trigger and sandbox paths. Precedence: flag > `$PROJECT_ROOT` > pytest rootdir. |
 | `--evalspec-agent` | `claude-code` | The coding agent for **trigger-routing** runs. Precedence: this flag > `EVALSPEC_AGENT` > `[tool.evalspec] agent` in `pyproject.toml` > `claude-code`. Output-eval task arms select their harness per arm (each arm's `harness`), so this flag no longer governs them. Unknown values fail at startup naming the source. |
 | `--evalspec-trigger-mode` | `asymmetric` | Trigger scoring. `majority` = >half of 3 (reliable routing); `best-of` = ≥1 of 3 (lenient positives, strict negatives); `asymmetric` = best-of for should-trigger, majority for should-not. |
 | `--evalspec-trigger-effort` | `low` | Effort for trigger routing — a snap "which skill fires?" decision, so the model dispatches fast. Agent-specific and passed through unvalidated: an unsupported value surfaces as an error from the agent CLI, not a pre-run `UsageError`. |
 | `--evalspec-trigger-timeout` | `20` (seconds) | Per-pass routing budget. Streamed activity without dispatch = non-fire (agent worked, didn't route in time). No stream at all = launch stall, retried as `RoutingError`. |
-| `--evalspec-eval-roots` | (default Claude layout) | Comma-separated paths (relative to repo root) to scan for eval-bearing skill dirs. Default `skills,.claude/skills`. Also settable via `[tool.evalspec] eval_roots`. |
+| `--evalspec-eval-roots` | (default Claude layout) | **Trigger evals only.** Comma-separated paths (relative to repo root) to scan for skill dirs containing `evals/trigger-evals.md`. Default `skills,.claude/skills`; also settable via `[tool.evalspec] eval_roots`. Output evals ignore this setting and are discovered repo-wide. |
 | `--evalspec-project-marker` | `.claude-plugin/plugin.json` | Marker file (relative to repo root) used by trigger routing to find the real plugin surface. Output evals do not infer plugin exposure from this marker; opt in per set or arm with `harness_args = ["--plugin-dir", "/project"]`. Override for OpenCode (`opencode.json`) or other layouts. |
 | `--evalspec-fail-under` | (off) | CI gate: minimum acceptable arm-vs-baseline Δ in percentage points. Any skill whose Δ falls below it fails the run with exit 1. Example: `--evalspec-fail-under 0` means every contrast arm must at least match the baseline. Uses the **raw Δ** — check the `within noise` label in `benchmark.md` before treating small numbers as meaningful. Skills with no baseline Δ (trigger-only runs, or a set with no baseline arm) are exempt — the gate requires a finite Δ. |
 
@@ -91,7 +91,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | `EVALSPEC_OPENCODE_VERSION` | Pinned OpenCode version. Precedence: env > `[tool.evalspec] opencode_version` > `latest`. |
 | `EVALSPEC_CODEX_VERSION` | Pinned Codex CLI version (default `latest`). Bumping produces a new microsandbox snapshot. |
 | `EVALSPEC_ITERATION` | Internal. Iteration name (`iteration_NN`, e.g. `iteration_01`) chosen by the controller and inherited by workers; don't set by hand. |
-| `EVALSPEC_ARM` | Per-cell. The arm name for this cell. Set by the harness adapter **inside the sandbox** (`cell_env`), read by the suite's `setup.sh` to decide whether to install the skill (trial) or no-op (baseline). Don't set by hand. |
+| `EVALSPEC_ARM` | Per-cell. The arm name for this cell. Set by the harness adapter **inside the sandbox** (`cell_env`), read by the eval group's `setup.sh` to decide whether to install the skill (trial) or no-op (baseline). Don't set by hand. |
 | `EVALSPEC_MODEL` | Per-cell. The arm's task model — **informational** for `setup.sh`; it does NOT route the task model (the harness already routes that). Set by the adapter inside the sandbox. |
 | `EVALSPEC_HARNESS` | Per-cell. The harness that ran this cell (`self.id` — the agent owns it): the arm's `harness` for output-eval task cells, the resolved agent for trigger cells. Set by the adapter inside the sandbox; read by `setup.sh`. |
 | `EVALSPEC_SET` | Per-cell. Names the explicitly-selected set (`--evalspec-set` / `make evals SET=`), so `setup.sh` can branch on which set is running (alongside `EVALSPEC_ARM`); empty when the run falls back to the pyproject `default-set`. Set by the adapter inside the sandbox; read by `setup.sh`. |
@@ -113,7 +113,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | `default-set` | string | Names the eval set a plain run resolves (the one `make evals` uses). Required. `--evalspec-set` overrides it per run. A `default-set` naming an undeclared set fails fast. |
 | `sets.<name>` | table | One eval set — `arms` + set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults + `baseline`. See [Eval sets](#eval-sets--toolevalspecsetsname) above. |
 | `agent` | string | Default coding agent for **trigger-routing** runs (output-eval task arms select their harness per arm). Below `EVALSPEC_AGENT` and `--evalspec-agent`, above the built-in default (`claude-code`). Use to make a project default to `opencode` without setting env vars. |
-| `eval_roots` | string[] | Where to scan for eval-bearing skill dirs. Below `--evalspec-eval-roots`, above the built-in default. Use to make a non-Claude layout the repo default. |
+| `eval_roots` | string[] | **Trigger evals only.** Where to scan for skill dirs containing `evals/trigger-evals.md`. Below `--evalspec-eval-roots`, above the built-in default. Output evals ignore this setting and are discovered repo-wide. |
 | `base_image` | string | OCI image ref for the eval sandbox; default `ubuntu:latest`. Swaps the pre-baked base before the agent provisions. Must be a Debian/apt-family image with glibc — the agent's provision step runs `apt-get` and installs glibc-linked CLIs. Folds into the snapshot cache identity: changing it auto-rebuilds. Opt-in; absent ⇒ `ubuntu:latest`. |
 | `environment_script` | string | Repo-relative path to a shell script run AFTER the agent installs (the escape hatch for extra tools/config). Resolved to bytes at config-read time; a missing/unreadable file fails fast with `SchemaError`. Runs under `set -e` (the guest `/bin/sh` is dash) — the first failing command aborts the build loudly. Folds into the snapshot cache identity by CONTENT: an in-place edit (same path, new bytes) forces a rebuild. Opt-in; absent ⇒ no extra step. |
 | `opencode_version` | string | Default OpenCode version when `EVALSPEC_OPENCODE_VERSION` is unset. |
@@ -170,7 +170,7 @@ Every knob that appears in multiple places follows the same chain — resolved o
 CLI flag  >  environment variable  >  pyproject.toml  >  built-in default
 ```
 
-This applies uniformly: `--evalspec-agent` > `EVALSPEC_AGENT` > `[tool.evalspec] agent` > `claude-code`; `--evalspec-eval-roots` > `[tool.evalspec] eval_roots` > built-in default — each setting has its own column in the chain. Not every setting exposes every channel: `eval_roots` has no env var, so its chain is flag > pyproject > default.
+This applies uniformly: `--evalspec-agent` > `EVALSPEC_AGENT` > `[tool.evalspec] agent` > `claude-code`; for trigger discovery, `--evalspec-eval-roots` > `[tool.evalspec] eval_roots` > built-in default. Not every setting exposes every channel: `eval_roots` has no env var, so its chain is flag > pyproject > default. Output-eval discovery is repo-wide and does not use that chain.
 
 Not every knob has every channel. `--evalspec-fail-under` is **flag-only** — no env var, no `[tool.evalspec]` key; it's a CI decision, set by the CI command. The judge knobs (`--evalspec-judge-harness`/`-model`/`-effort`/`-timeout`/`-harness-arg`/`-env`) follow the full `CLI > scratch --evalspec-config > pyproject [tool.evalspec.judge] > built-in default` chain, unlike the flag-only knobs above.
 
@@ -178,8 +178,8 @@ For **task arms**, model and effort are validated by the *selected agent*, not c
 
 ## Filter interactions
 
-- `pytest -k <expr>` matches test ids: `<skill>-<slug>-<arm>` for output evals (`<arm>` is the declared arm name), `<skill>-<slug>` for trigger evals. Examples:
-  - `-k "archive and claude-sonnet"` — one skill's `claude-sonnet` arm.
+- `pytest -k <expr>` matches test ids: `<group>-<eval_id>-<arm>` for output evals (`<arm>` is the declared arm name), `<skill>-<slug>` for trigger evals. Examples:
+  - `-k "archive and claude-sonnet"` — output cases whose group or eval id matches `archive`, limited to the `claude-sonnet` arm.
   - `-k "ingest-article or inbox-process"` — trigger queries by slug.
 - `pytest -n N` — xdist workers. The controller picks one iteration and shares it via `EVALSPEC_ITERATION`.
 - `pytest -x` — stop on first failure. Partial `benchmark.md` still writes for completed arms.
