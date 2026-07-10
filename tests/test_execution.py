@@ -649,6 +649,39 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     assert call_kwargs["eval_set"] == "trial-set"
 
 
+def test_run_eval_arm_threads_setup_reldir(tmp_path: object) -> None:
+    """Verify run_eval_arm passes the eval-dir-relative path as setup_reldir."""
+    # setup.sh lives in the eval folder; the sandbox locates it by its path relative to
+    # the mounted project root (here, repo_root == project == tmp_path).
+    workspace.set_current_iteration("iteration_01")
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    eval_case = _case(
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+    )
+    session_factory = fake_session_factory(
+        RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True),
+    )
+
+    run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=session_factory,
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert session_factory.calls[0]["setup_reldir"] == "skills/myskill/evals/alpha"
+
+
 def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
     """Verify run eval arm threads harness args."""
     workspace.set_current_iteration("iteration_01")

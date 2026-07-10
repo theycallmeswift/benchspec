@@ -240,6 +240,11 @@ def _evals_dirs(repo_root: Path) -> list[Path]:
         )
         if Path(dirpath).name == "evals":
             found.append(Path(dirpath))
+            # Don't descend below a found `evals` dir — a fixture's own nested `evals/`
+            # (e.g. under a `workspace/` project mirror) is never an intended eval root.
+            # This only stops descent below THIS dir; sibling `evals/` dirs elsewhere in
+            # the walk are unaffected since `dirnames` is per-directory.
+            dirnames[:] = []
     return sorted(found)
 
 
@@ -270,7 +275,7 @@ def discover_eval_cases(repo_root: Path) -> list[EvalCase]:
     for evals_dir in _evals_dirs(repo_root):
         for group_dir in sorted(path for path in evals_dir.iterdir() if path.is_dir()):
             group = group_dir.name
-            if group.startswith(".") or group.startswith("__"):
+            if group.startswith(".") or group == "__pycache__":
                 continue
             for eval_file in _eval_files(group_dir):
                 parsed = mdformat.parse_eval_md(eval_file)
