@@ -33,11 +33,11 @@ Each eval is one self-contained file, `skills/<skill>/evals/<slug>/prompt.md`; t
 
 ```markdown
 ---
-seed:
+history:
 - role: user
-  text: Here's a capture for later — ./Inbox/openai-o1-launch.md.
+  content: Here's a capture for later — ./Inbox/openai-o1-launch.md.
 - role: assistant
-  text: Got it — say the word and I'll file it.
+  content: Got it — say the word and I'll file it.
 ---
 
 ## Prompt
@@ -53,7 +53,7 @@ into the vault's archive as a dated source, and record the move in the activity 
 - [ ] Skill `archive` invoked
 ```
 
-Every assertion is one plain-prose `- [ ]` line — you write no checker syntax. The `seed:` frontmatter (optional, the only key) renders as a transcript prefix of prior context before the graded prompt. At grade time the **binder** classifies each assertion: when confident it maps the prose to a deterministic **checker** (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`) run on the host — zero variance, zero judge cost; otherwise it **punts** the line to the LLM judge. The split is invisible from the suite.
+Every assertion is one plain-prose `- [ ]` line — you write no checker syntax. The `history:` frontmatter (optional, the only key) renders as a transcript prefix of prior context before the graded prompt. At grade time the **binder** classifies each assertion: when confident it maps the prose to a deterministic **checker** (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`) run on the host — zero variance, zero judge cost; otherwise it **punts** the line to the LLM judge. The split is invisible from the suite.
 
 The judge never grades from recall: it reasons from the agent's final message, the workdir file tree, file contents, SHA-256s, and process facts (the tools and sub-skills the agent invoked).
 

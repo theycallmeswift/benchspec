@@ -60,21 +60,21 @@ def test_parse_eval_md_minimal(tmp_path: object) -> None:
         "a Resource page was created",
         "the activity log names the move",  # H3 group flattened in order
     ]
-    assert "seed" not in ev
+    assert "history" not in ev
 
 
-def test_parse_eval_md_with_seed(tmp_path: object) -> None:
-    """Verify parse eval md with seed."""
+def test_parse_eval_md_with_history(tmp_path: object) -> None:
+    """Verify parse eval md with history."""
     eval_path = _write_slug(
         tmp_path,
         "catch-all-pose",
         """\
         ---
-        seed:
+        history:
           - role: user
-            text: scope my plan
+            content: scope my plan
           - role: assistant
-            text: which part?
+            content: which part?
         ---
 
         ## Prompt
@@ -88,21 +88,21 @@ def test_parse_eval_md_with_seed(tmp_path: object) -> None:
     )
     ev = mdformat.parse_eval_md(eval_path)
 
-    assert ev["seed"] == [
-        {"role": "user", "text": "scope my plan"},
-        {"role": "assistant", "text": "which part?"},
+    assert ev["history"] == [
+        {"role": "user", "content": "scope my plan"},
+        {"role": "assistant", "content": "which part?"},
     ]
 
 
-def test_parse_eval_md_malformed_seed_rejected(tmp_path: object) -> None:
-    """Verify parse eval md malformed seed rejected."""
-    # A bare parse_eval_md call must validate seed itself, not defer to load_suite_dir.
+def test_parse_eval_md_malformed_history_rejected(tmp_path: object) -> None:
+    """Verify parse eval md malformed history rejected."""
+    # A bare parse_eval_md call must validate history itself, not defer to load_suite_dir.
     eval_path = _write_slug(
         tmp_path,
         "a",
         """\
         ---
-        seed:
+        history:
           - role: user
         ---
 
@@ -114,7 +114,7 @@ def test_parse_eval_md_malformed_seed_rejected(tmp_path: object) -> None:
         - [ ] x
     """,
     )
-    with pytest.raises(schema.SchemaError, match="seed"):
+    with pytest.raises(schema.SchemaError, match="history"):
         mdformat.parse_eval_md(eval_path)
 
 

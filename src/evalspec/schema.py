@@ -153,16 +153,16 @@ def _validate_checker_obj(item: dict, path: str) -> None:
         raise SchemaError(f"{path}.text: must be non-empty")
 
 
-def _validate_seed(seed: object, path: str) -> None:
-    """Validate seed conversation turns."""
-    if not isinstance(seed, list):
-        raise SchemaError(f"{path}: expected list, got {type(seed).__name__}")
-    for index, turn in enumerate(seed):
+def _validate_history(history: object, path: str) -> None:
+    """Validate history conversation turns."""
+    if not isinstance(history, list):
+        raise SchemaError(f"{path}: expected list, got {type(history).__name__}")
+    for index, turn in enumerate(history):
         turn_path = f"{path}[{index}]"
         if not isinstance(turn, dict):
             raise SchemaError(f"{turn_path}: expected object, got {type(turn).__name__}")
-        _reject_extra_keys(turn, {"role", "text"}, turn_path)
-        for key in ("role", "text"):
+        _reject_extra_keys(turn, {"role", "content"}, turn_path)
+        for key in ("role", "content"):
             value = _require(turn, key, str, turn_path)
             if not value.strip():
                 raise SchemaError(f"{turn_path}.{key}: must be non-empty")
@@ -182,7 +182,7 @@ def _validate_evals_v1(data: dict) -> None:
         raise SchemaError("root.evals: must be non-empty")
 
     seen: set[str] = set()
-    allowed_eval = {"slug", "seed", "prompt", "assertions"}
+    allowed_eval = {"slug", "history", "prompt", "assertions"}
     for eval_index, item in enumerate(evals):
         path = f"root.evals[{eval_index}]"
         if not isinstance(item, dict):
@@ -196,8 +196,8 @@ def _validate_evals_v1(data: dict) -> None:
             raise SchemaError(f"{path}.slug: duplicate slug `{slug}`")
         seen.add(slug)
 
-        if "seed" in item:
-            _validate_seed(item["seed"], f"{path}.seed")
+        if "history" in item:
+            _validate_history(item["history"], f"{path}.history")
 
         prompt = _require(
             item,

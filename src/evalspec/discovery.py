@@ -23,7 +23,7 @@ class EvalCase:
     """Store eval case data."""
 
     skill_dir: Path
-    eval: dict  # one per-slug dict from load_suite_dir: {slug, prompt, assertions, seed?}
+    eval: dict  # one per-slug dict from load_suite_dir: {slug, prompt, assertions, history?}
 
     @property
     def skill(self: object) -> str:
@@ -58,9 +58,9 @@ class EvalCase:
         return self.eval["assertions"]
 
     @property
-    def seed(self: object) -> list[dict]:
-        """Return seed turns for this discovered case."""
-        return self.eval.get("seed", [])
+    def history(self: object) -> list[dict]:
+        """Return history turns for this discovered case."""
+        return self.eval.get("history", [])
 
     @property
     def fixtures_dir(self: object) -> Path | None:

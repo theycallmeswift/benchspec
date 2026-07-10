@@ -141,7 +141,7 @@ def test_discover_eval_cases_self_contained(tmp_path: object) -> None:
     assert case.param_id == "ingest-single-article"
     assert case.prompt == "Use `ingest`."
     assert case.assertions == ["Skill `ingest` invoked"]
-    assert case.seed == []
+    assert case.history == []
     assert case.fixtures_dir is None
 
 
@@ -151,7 +151,7 @@ def test_discover_eval_cases_seed_and_fixtures(tmp_path: object) -> None:
         tmp_path,
         "archive",
         "clobber",
-        "---\nseed:\n  - role: user\n    text: hi\n---\n\n"
+        "---\nhistory:\n  - role: user\n    content: hi\n---\n\n"
         "## Prompt\n\nArchive ./x.\n\n## Assertions\n\n- [ ] it refused\n",
     )
     fixtures_dir = base / "skills" / "archive" / "evals" / "clobber" / "fixtures"
@@ -160,7 +160,7 @@ def test_discover_eval_cases_seed_and_fixtures(tmp_path: object) -> None:
 
     [case] = discover_eval_cases(tmp_path)
 
-    assert case.seed == [{"role": "user", "text": "hi"}]
+    assert case.history == [{"role": "user", "content": "hi"}]
     assert case.fixtures_dir == fixtures_dir
 
 

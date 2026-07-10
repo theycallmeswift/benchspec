@@ -49,17 +49,17 @@ def test_checks_key_rejected() -> None:
         )
 
 
-def test_seed_ok() -> None:
-    """Verify seed ok."""
+def test_history_ok() -> None:
+    """Verify history ok."""
     _validate(
         _doc(
             [
                 {
                     "slug": "seeded",
                     "prompt": "continue",
-                    "seed": [
-                        {"role": "user", "text": "hi"},
-                        {"role": "assistant", "text": "ok"},
+                    "history": [
+                        {"role": "user", "content": "hi"},
+                        {"role": "assistant", "content": "ok"},
                     ],
                     "assertions": ["the reply continued"],
                 }
@@ -68,25 +68,16 @@ def test_seed_ok() -> None:
     )
 
 
-def test_seed_missing_text_rejected() -> None:
-    """Verify seed missing text rejected."""
-    with pytest.raises(SchemaError, match="text"):
+def test_history_missing_content_rejected() -> None:
+    """Verify history missing content rejected."""
+    with pytest.raises(SchemaError, match="content"):
         _validate(
-            _doc(
-                [
-                    {
-                        "slug": "a",
-                        "prompt": "p",
-                        "assertions": ["x"],
-                        "seed": [{"role": "user"}],
-                    }
-                ]
-            )
+            _doc([{"slug": "a", "prompt": "p", "assertions": ["x"], "history": [{"role": "user"}]}])
         )
 
 
-def test_seed_extra_key_rejected() -> None:
-    """Verify seed extra key rejected."""
+def test_history_extra_key_rejected() -> None:
+    """Verify history extra key rejected."""
     with pytest.raises(SchemaError, match="unknown field"):
         _validate(
             _doc(
@@ -95,7 +86,7 @@ def test_seed_extra_key_rejected() -> None:
                         "slug": "a",
                         "prompt": "p",
                         "assertions": ["x"],
-                        "seed": [{"role": "user", "text": "hi", "name": "alice"}],
+                        "history": [{"role": "user", "content": "hi", "name": "alice"}],
                     }
                 ]
             )

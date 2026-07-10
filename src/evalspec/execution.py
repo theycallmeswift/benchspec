@@ -1,6 +1,6 @@
 """Orchestrate one `(eval, arm)`: run the agent, grade it, write the artifacts.
 
-The eval is single-turn: a `seed:` transcript block (context) is prepended to the one
+The eval is single-turn: a `history:` transcript block (context) is prepended to the one
 graded prompt. Both arms grade identically — there is no with-skill invocation gate.
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
@@ -23,7 +23,7 @@ from evalspec.arms import Arm, expand_env
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
-from evalspec.room import gather_facts, merge_facts, render_seed
+from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
 from evalspec.sandbox import DEFAULT_PROJECT_MARKER, arm_session, ensure_snapshot
 from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
@@ -310,9 +310,9 @@ def run_eval_arm(
     agent = make_agent(arm.harness)
     snapshot = ensure_snapshot(agent, repo_root=repo_root)
 
-    # Seed block (context) first, then the one graded prompt — both rendered with the
-    # same `today`. render_seed emits a trailing blank line, so the prompt follows cleanly.
-    prompt = render_seed(eval_case.seed, today) + substitute_prompt(eval_case.prompt, today)
+    # History block (context) first, then the one graded prompt — both rendered with the
+    # same `today`. render_history emits a trailing blank line, so the prompt follows cleanly.
+    prompt = render_history(eval_case.history, today) + substitute_prompt(eval_case.prompt, today)
     # Substitute the assertions here too, before the run — a stray-placeholder typo must fail
     # pre-run like the prompt does, not at grade time after the agent already spent tokens
     # (a raise there would unwind before the artifact writes and discard the completed run).
@@ -348,7 +348,7 @@ def run_eval_arm(
     fired_skills = tuple(skills_dispatched(arm_run.trajectory, eval_case.skill))
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
-    # {TODAY} resolves in the prompt, seed, and fixtures; the assertions were substituted
+    # {TODAY} resolves in the prompt, history, and fixtures; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
     merged, judge_ms, judge_errored, binder_degraded = _grade_mixed(
         assertions=graded_assertions,
