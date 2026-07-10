@@ -112,6 +112,7 @@ repo_root ──► discovery.discover_eval_cases
 - Real multi-turn `history` replay — `history` flattens into the prompt prefix as `seed` did; genuine turn-by-turn execution is not introduced.
 - Authoring new README-shaped contract suites in this layout — Phase 9; this phase makes the layout discoverable, not populated.
 - `evalspec lint` / `evalspec run` CLI surfaces — Phase 5, though `lint.py`'s internal path is updated here to keep it working.
+- Migrating evals that live under `.claude/skills/**`. The dot-dir prune drops that subtree from the crawl, so downstream consumers with real output evals there lose eval discovery with no migration path (trigger discovery under `.claude/` is unaffected — it stays on the old skill-root path).
 
 ## References
 

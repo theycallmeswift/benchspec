@@ -234,9 +234,11 @@ Rename the transcript-context block from `seed:[{role, text}]` to `history:[{rol
 
 ---
 
-## Task 2: Recursive `**/evals/` crawl, filename ids, `(group, eval_id)` identity, `workspace/`
+## Task 2: Recursive `**/evals/` crawl, filename ids, `(group, eval_id)` identity, `workspace/`, and per-eval `setup.sh`
 
-Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval.md`/`*.eval.md`; derive `(group, eval_id)`; rename `fixtures/`→`workspace/`; move every in-repo consumer to the new `EvalCase` in the same commit so the tree stays green.
+Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval.md`/`*.eval.md`; derive `(group, eval_id)`; rename `fixtures/`→`workspace/`; move every in-repo consumer — including the `setup.sh` locator — to the new `EvalCase` in the same commit so the tree stays green.
+
+This task is large by necessity: the no-compat-shim rule couples `EvalCase` identity to every consumer (discovery, workspace, setup, lint, plugin), so they must change atomically — a `setup.sh` locator or caller left on the old `skill`-keyed lookup after `EvalCase.skill` becomes an alias for `group` would search a nonexistent `skills/<group>/` dir. Mid-task steps are red outside their own `-k` slice (e.g. after the schema `slug`→`id` change but before the parse/discovery rewrite); the authoritative gate is the full `make test`/`make lint` run at Step 24, immediately before the single commit in Step 25.
 
 **Files:**
 - Modify `src/evalspec/schema.py` (add `is_kebab`; `slug`→`id` in `_validate_evals_v1` at `schema.py:185-197`)
@@ -246,7 +248,9 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
 - Modify `src/evalspec/lint.py` (`lint_repo` at `lint.py:69-85`; `run` at `lint.py:88-99`)
 - Modify `src/evalspec/cases.py` (`seeded_workdir` at `cases.py:111-117`)
 - Modify `src/evalspec/plugin.py` (eval discovery at `plugin.py:658-659`)
-- Test: `tests/test_discovery.py`, `tests/test_mdformat.py`, `tests/test_execution.py`, `tests/test_lint.py`, `tests/test_plugin.py`, `tests/test_readme_examples.py`
+- Modify `src/evalspec/sandbox.py` (`run_setup_sh` at `sandbox.py:251-279`; `SandboxSession.__init__`/`__aenter__` at `sandbox.py:318-379`; `arm_session` at `sandbox.py:410-443`)
+- Modify `src/evalspec/execution.py` (`_run_arm_turns` params at `execution.py:208-247`; `run_eval_arm` wiring at `execution.py:321-341`)
+- Test: `tests/test_discovery.py`, `tests/test_mdformat.py`, `tests/test_execution.py`, `tests/test_lint.py`, `tests/test_plugin.py`, `tests/test_readme_examples.py`, `tests/test_sandbox.py`
 
 **Interfaces:**
 - Consumes: `schema.is_kebab`, `schema._validate_history`, `mdformat.parse_eval_md`.
@@ -256,6 +260,9 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
   - `discovery.EvalCase(group: str, eval_dir: Path, eval_file: Path, eval: dict)` with properties: `eval_id -> str` (`eval["id"]`), `skill -> str` (alias of `group`), `param_id -> str` (`f"{group}-{eval_id}"`), `prompt -> str`, `assertions -> list[str]`, `history -> list[dict]`, `workspace_dir -> Path | None` (`eval_dir / "workspace"` when it is a dir).
   - `discovery.discover_eval_cases(repo_root: Path) -> list[EvalCase]` — crawls `**/evals/<group>/`, raises `schema.SchemaError` on a duplicate `(group, eval_id)` or a non-kebab `group`/`eval_id`, returns cases sorted by `(group, eval_id)`.
   - `room.seed_room(workspace_dir: Path | None, workdir: Path, today: str | None = None) -> dict` (param renamed; behavior unchanged).
+  - `sandbox.run_setup_sh(sandbox, agent, *, setup_reldir: str, arm: str, model: str, eval_set: str = "", arm_env: dict | None = None) -> None` — runs `PROJECT_MOUNT/<setup_reldir>/setup.sh` if it exists (absent ⇒ no-op; nonzero exit ⇒ `RuntimeError`).
+  - `sandbox.arm_session(*, …, setup_reldir: str | None = None, …)` and `SandboxSession(setup_reldir=…)` — `setup_reldir=None` skips setup.
+  - `execution.run_eval_arm` computes `setup_reldir = str(eval_case.eval_dir.relative_to(project))` when `project` is not None, else `None`, and threads it through `_run_arm_turns(setup_reldir=…)`.
 
 - [ ] **Step 1: Write failing `schema.is_kebab` test.**
   In `tests/test_schema.py` add:
@@ -352,7 +359,7 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
           result["history"] = fm["history"]
   ```
   (The `## Prompt` / `## Assertions` parsing below `mdformat.py:197-223` is unchanged; the final `result["prompt"]`/`result["assertions"]` lines stay.)
-  Delete `NON_EVAL_MD` (`mdformat.py:41-44`) and `load_suite_dir` (`mdformat.py:299-317`). Update the module docstring's `evals/<slug>/prompt.md` references (final wording in Task 4; here a minimal edit so lint passes — see Task 4 for the full docstring rewrite).
+  Delete `NON_EVAL_MD` (`mdformat.py:41-44`) and `load_suite_dir` (`mdformat.py:299-317`). Update the module docstring's `evals/<slug>/prompt.md` references (final wording in Task 3; here a minimal edit so lint passes — see Task 3 for the full docstring rewrite).
 - [ ] **Step 7: Run to confirm pass.**
   `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_mdformat.py -q` → pass.
 - [ ] **Step 8: Write failing discovery tests for the crawl.**
@@ -396,7 +403,7 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
 
       cases = discover_eval_cases(tmp_path)
 
-      assert [case.param_id for case in cases] == ["real-kept"]
+      assert [case.param_id for case in cases] == ["kept-kept"]
 
 
   def test_discover_shared_workspace_for_sibling_evals(tmp_path: object) -> None:
@@ -451,7 +458,7 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
       (tmp_path / "evals" / "binder" / "corpus.yaml").write_text("x: 1")
       _write_eval(tmp_path, "skills/real", "kept")
 
-      assert [case.param_id for case in discover_eval_cases(tmp_path)] == ["real-kept"]
+      assert [case.param_id for case in discover_eval_cases(tmp_path)] == ["kept-kept"]
   ```
   Delete the now-obsolete eval-discovery tests: `test_discover_eval_cases_self_contained`, `test_discover_eval_cases_seed_and_fixtures`, `test_skill_with_only_triggers_still_discovers_no_eval_cases` (rewrite: assert `discover_eval_cases(tmp_path) == []` and one trigger case), `test_discover_rejects_legacy_flat_eval_file*`, `test_discover_eval_cases_one_per_slug`, `test_discover_eval_cases_sorted_by_skill`, `test_discover_eval_cases_no_skills_root`, `test_discover_eval_cases_skips_skill_without_evals`, `test_discover_eval_cases_raises_on_bad_schema` (rewrite to write `eval.md`), `test_discover_eval_cases_finds_both_roots`, `test_discover_eval_cases_local_only`, `test_discover_eval_cases_skips_local_skill_without_evals`, `test_discover_raises_on_duplicate_name_across_roots`, `test_output_and_trigger_evals_coexist` (rewrite: output eval as `evals/myskill/eval.md`, still one trigger case). Keep all trigger-discovery tests unchanged.
 - [ ] **Step 9: Run to confirm fail.**
@@ -643,32 +650,7 @@ Replace the `eval_roots`-driven slug-dir discovery with a global crawl for `eval
       )
   ```
   Across `test_execution.py` change every `eval_obj` literal's `"slug"` key to `"id"` (e.g. `{"id": "alpha", "prompt": …, "assertions": […]}`) and `"seed"`→`"history"`/`"text"`→`"content"` (already done for the one seed test in Task 1 — verify the `id` rename here). Artifact-path assertions (`workspace.arm_dir(tmp_path, "myskill", "alpha", …)`) are unchanged because `group`="myskill".
-- [ ] **Step 15: Run the full unit suite to confirm pass.**
-  `make test` → green.
-  `make lint` → green (fixes any docstring/line-length nits from the edits).
-- [ ] **Step 16: Commit.**
-  `git add src/evalspec/schema.py src/evalspec/mdformat.py src/evalspec/discovery.py src/evalspec/room.py src/evalspec/lint.py src/evalspec/cases.py src/evalspec/plugin.py tests/test_schema.py tests/test_mdformat.py tests/test_discovery.py tests/test_lint.py tests/test_plugin.py tests/test_readme_examples.py tests/test_execution.py`
-  `git commit -m "feat(evals): crawl **/evals for eval.md, key cases on (group, eval_id), workspace/"`
-
----
-
-## Task 3: Per-eval `setup.sh` located by the eval dir's relative path
-
-Move `setup.sh` from a suite-level script found by skill name to a per-eval script at `PROJECT_MOUNT/<eval_dir_relpath>/setup.sh`, threading the relative dir through the sandbox session.
-
-**Files:**
-- Modify `src/evalspec/sandbox.py` (`run_setup_sh` at `sandbox.py:251-279`; `SandboxSession.__init__`/`__aenter__` at `sandbox.py:318-379`; `arm_session` at `sandbox.py:410-443`)
-- Modify `src/evalspec/execution.py` (`_run_arm_turns` params at `execution.py:208-247`; `run_eval_arm` wiring at `execution.py:321-341`)
-- Test: `tests/test_sandbox.py`, `tests/test_execution.py`
-
-**Interfaces:**
-- Consumes: `EvalCase.eval_dir` (from Task 2).
-- Produces:
-  - `sandbox.run_setup_sh(sandbox, agent, *, setup_reldir: str, arm: str, model: str, eval_set: str = "", arm_env: dict | None = None) -> None` — runs `PROJECT_MOUNT/<setup_reldir>/setup.sh` if it exists (absent ⇒ no-op; nonzero exit ⇒ `RuntimeError`).
-  - `sandbox.arm_session(*, …, setup_reldir: str | None = None, …)` and `SandboxSession(setup_reldir=…)` — `setup_reldir=None` skips setup.
-  - `execution.run_eval_arm` computes `setup_reldir = str(eval_case.eval_dir.relative_to(project))` when `project` is not None, else `None`, and threads it through `_run_arm_turns(setup_reldir=…)`.
-
-- [ ] **Step 1: Write failing `run_setup_sh` tests.**
+- [ ] **Step 15: Write failing `run_setup_sh` tests.**
   In `tests/test_sandbox.py` replace `test_run_setup_sh_uses_skill_cwd_and_env` / `test_run_setup_sh_passes_set_and_arm_env` / `test_run_setup_sh_nonzero_exit_raises` and the two `_LocalShellSandbox` tests with:
   ```python
   def test_run_setup_sh_runs_reldir_script_and_env() -> None:
@@ -754,10 +736,10 @@ Move `setup.sh` from a suite-level script found by skill name to a per-eval scri
           )
   ```
   `_LocalShellSandbox` runs the script under a temp cwd; its `PROJECT_MOUNT` in the script must resolve to `tmp_path`. Update `_LocalShellSandbox.shell` to substitute the mount: since the script hardcodes `/project`, run it with cwd `tmp_path` and pre-seed `PROJECT_MOUNT`→`tmp_path` by having `run_setup_sh` build the path from `PROJECT_MOUNT`. Simplest: in these two real-shell tests set the script's mount by monkeypatching `sandbox.PROJECT_MOUNT` to `str(tmp_path)` via `monkeypatch.setattr(sandbox, "PROJECT_MOUNT", str(tmp_path))` and add `monkeypatch` to the signatures.
-- [ ] **Step 2: Run to confirm fail.**
+- [ ] **Step 16: Run to confirm fail.**
   `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_sandbox.py -k run_setup_sh -q`
   Expect: `TypeError: run_setup_sh() got an unexpected keyword argument 'setup_reldir'`.
-- [ ] **Step 3: Rewrite `run_setup_sh` in `sandbox.py`.**
+- [ ] **Step 17: Rewrite `run_setup_sh` in `sandbox.py`.**
   Replace `sandbox.py:251-279` with:
   ```python
   async def run_setup_sh(
@@ -790,14 +772,14 @@ Move `setup.sh` from a suite-level script found by skill name to a per-eval scri
               f"(exit {res.exit_code}): {res.stderr_text[-2000:]}"
           )
   ```
-- [ ] **Step 4: Run to confirm pass.**
+- [ ] **Step 18: Run to confirm pass.**
   `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_sandbox.py -k run_setup_sh -q` → pass.
-- [ ] **Step 5: Write failing `arm_session` tests for `setup_reldir`.**
+- [ ] **Step 19: Write failing `arm_session` tests for `setup_reldir`.**
   In `tests/test_sandbox.py`, update `test_arm_session_runs_setup_sh_when_skill_set` → `..._when_reldir_set` (pass `setup_reldir="skills/ingest/evals/x"` to `arm_session`, assert the recorded `run_setup_sh` call carried that reldir) and `test_arm_session_skips_setup_sh_when_no_skill` → assert `setup_reldir=None` skips setup. Change every `arm_session(... skill=...)` call in this file to `setup_reldir=...`.
-- [ ] **Step 6: Run to confirm fail.**
+- [ ] **Step 20: Run to confirm fail.**
   `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_sandbox.py -k arm_session -q`
   Expect: `TypeError: __init__() got an unexpected keyword argument 'setup_reldir'`.
-- [ ] **Step 7: Rewrite `SandboxSession`/`arm_session` in `sandbox.py`.**
+- [ ] **Step 21: Rewrite `SandboxSession`/`arm_session` in `sandbox.py`.**
   In `SandboxSession.__init__` (`sandbox.py:318-352`) replace the `skill: str | None = None` param with `setup_reldir: str | None = None`, store `self._setup_reldir = setup_reldir`, and drop the `self._skill` line. In `__aenter__` (`sandbox.py:363-377`) replace the `if self._skill is not None:` block:
   ```python
           # Install before the artifact baseline so only later agent-authored files surface.
@@ -817,31 +799,31 @@ Move `setup.sh` from a suite-level script found by skill name to a per-eval scri
                   raise
   ```
   In `arm_session` (`sandbox.py:410-443`) replace the `skill=` param and pass-through with `setup_reldir=`.
-- [ ] **Step 8: Run to confirm pass.**
+- [ ] **Step 22: Run to confirm pass.**
   `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/test_sandbox.py -q` → pass.
-- [ ] **Step 9: Thread `setup_reldir` through `execution.py`.**
+- [ ] **Step 23: Thread `setup_reldir` through `execution.py`.**
   In `run_eval_arm` after `arm_name = arm.name` (`execution.py:303`) add:
   ```python
       # setup.sh lives in the eval folder, located by its path relative to the mount.
       setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
   ```
   In the `_run_arm_turns(...)` call (`execution.py:322-341`) replace `skill=eval_case.skill,` with `setup_reldir=setup_reldir,` (keep `detect_skill=detect_skill,` — dispatch detection still keys on the group). In `_run_arm_turns` signature (`execution.py:208-226`) rename the `skill` param to `setup_reldir` and, in the `session_factory(...)` call (`execution.py:232-247`), replace `skill=skill,` with `setup_reldir=setup_reldir,`. The `_turn_transcript(..., skill=skill)` call at `execution.py:274` must keep the group name — change it to `skill=detect_skill` (both equal `eval_case.skill`; pass the value `_run_arm_turns` still has, so also keep a `skill` param OR pass `detect_skill`). Concretely: keep `_run_arm_turns` receiving `detect_skill` (already a param) and use it for `_turn_transcript(skill=detect_skill)`.
-- [ ] **Step 10: Update `test_execution.py` factory-kwarg assertions and run.**
+- [ ] **Step 24: Update `test_execution.py` factory-kwarg assertions and run the full unit suite to confirm pass.**
   In `tests/test_execution.py` any assertion on `factory_kwargs["skill"]` becomes `factory_kwargs["setup_reldir"]` (e.g. equal to `str((tmp_path / "skills" / "myskill" / "evals" / "alpha"))` relative to `tmp_path` = `"skills/myskill/evals/alpha"`). `fake_session_factory` accepts `**kwargs`, so no factory change needed.
-  `make test` → green. `make lint` → green.
-- [ ] **Step 11: Commit.**
-  `git add src/evalspec/sandbox.py src/evalspec/execution.py tests/test_sandbox.py tests/test_execution.py`
-  `git commit -m "feat(evals): run per-eval setup.sh located by the eval dir relpath"`
+  `make test` → green (this is the authoritative gate for the whole task: discovery, workspace, setup, lint, and plugin consumers all land together). `make lint` → green (fixes any docstring/line-length nits from the edits).
+- [ ] **Step 25: Commit.**
+  `git add src/evalspec/schema.py src/evalspec/mdformat.py src/evalspec/discovery.py src/evalspec/room.py src/evalspec/lint.py src/evalspec/cases.py src/evalspec/plugin.py src/evalspec/sandbox.py src/evalspec/execution.py tests/test_schema.py tests/test_mdformat.py tests/test_discovery.py tests/test_lint.py tests/test_plugin.py tests/test_readme_examples.py tests/test_execution.py tests/test_sandbox.py`
+  `git commit -m "feat(evals): crawl **/evals for eval.md, key cases on (group, eval_id), workspace/, and per-eval setup.sh"`
 
 ---
 
-## Task 4: Documentation — schema.md, module docstrings, README, quickstart
+## Task 3: Documentation — schema.md, module docstrings, README, quickstart
 
 Rewrite every doc surface that describes the old `skills/<skill>/evals/<slug>/prompt.md` / `seed:` / `fixtures/` shape to the crawl-based layout. No code changes.
 
 **Files:**
 - Modify `docs/schema.md`
-- Modify `src/evalspec/discovery.py` (module docstring `discovery.py:1-8`), `src/evalspec/mdformat.py` (module docstring `mdformat.py:1-19`), `src/evalspec/room.py` (module docstring `room.py:1-9`), `src/evalspec/sandbox.py` (`run_setup_sh` docstring — done in Task 3; here the module-level intent comment at `sandbox.py:293-294`), `src/evalspec/__init__.py` (docstring `__init__.py:1-8`)
+- Modify `src/evalspec/discovery.py` (module docstring `discovery.py:1-8`), `src/evalspec/mdformat.py` (module docstring `mdformat.py:1-19`), `src/evalspec/room.py` (module docstring `room.py:1-9`), `src/evalspec/sandbox.py` (`run_setup_sh` docstring — done in Task 2; here the module-level intent comment at `sandbox.py:293-294`), `src/evalspec/__init__.py` (docstring `__init__.py:1-8`)
 - Modify `README.md`, `docs/quickstart.md`
 - Test: `tests/test_readme_examples.py` (already writes `eval.md` from Task 2 — re-run to confirm the reworded README block still parses)
 
@@ -856,7 +838,7 @@ Rewrite every doc surface that describes the old `skills/<skill>/evals/<slug>/pr
   **/evals/<group>/setup.sh         # optional per-eval sandbox setup
   skills/<skill>/evals/trigger-evals.md  # evalspec-trigger/v1 (unchanged this phase)
   ```
-  Rewrite the surrounding prose: discovery is a recursive `**/evals/` crawl (pruning `tmp/`, `.git`, `__pycache__`, dot-dirs), decoupled from `eval_roots`; identity is `(group, eval_id)` where `eval.md`→`group`=`eval_id`=folder name and `<stem>.eval.md`→`group`=folder, `eval_id`=stem; the full test id is `<group>-<eval_id>-<arm>` and artifact paths read `<group>/eval-<eval_id>/`; a duplicate `(group, eval_id)` fails loudly at collection naming both files. Rename the "Output evals — the `evals/<slug>/prompt.md` format" section to the `eval.md` / `*.eval.md` format; change the frontmatter table row and the example to `history:` / `content:`; rename the `fixtures/` paragraph (`docs/schema.md:67`) to `workspace/`; rename the "### Seed" section to "### History" (`{role, content}`). Update "Validation rules" (`docs/schema.md:164-171`): the only output-eval frontmatter key is `history`; a history turn needs non-empty `role` and `content`; both `group` and `eval_id` must be kebab-case. Note per-eval `setup.sh` replaces the suite-level script.
+  Rewrite the surrounding prose: discovery is a recursive `**/evals/` crawl (pruning `tmp/`, `.git`, `__pycache__`, dot-dirs), decoupled from `eval_roots`; identity is `(group, eval_id)` where `eval.md`→`group`=`eval_id`=folder name and `<stem>.eval.md`→`group`=folder, `eval_id`=stem; the full test id is `<group>-<eval_id>-<arm>` and artifact paths read `<group>/eval-<eval_id>/`; a duplicate `(group, eval_id)` fails loudly at collection naming both files. Call out explicitly that the dot-dir prune excludes `.claude/`, so any output evals under `.claude/skills/**/evals/` are no longer discovered (trigger discovery there is unaffected). Rename the "Output evals — the `evals/<slug>/prompt.md` format" section to the `eval.md` / `*.eval.md` format; change the frontmatter table row and the example to `history:` / `content:`; rename the `fixtures/` paragraph (`docs/schema.md:67`) to `workspace/`; rename the "### Seed" section to "### History" (`{role, content}`). Update "Validation rules" (`docs/schema.md:164-171`): the only output-eval frontmatter key is `history`; a history turn needs non-empty `role` and `content`; both `group` and `eval_id` must be kebab-case. Note per-eval `setup.sh` replaces the suite-level script.
 - [ ] **Step 2: Rewrite module docstrings.**
   `discovery.py:1-8`: describe the recursive `**/evals/` crawl (deny-list pruning), `eval.md`/`*.eval.md` collection, `(group, eval_id)` identity + duplicate guard, and that trigger discovery still uses the skill-root path.
   `mdformat.py:1-19`: `eval.md` / `*.eval.md` (id from folder/stem), `history:` frontmatter, `## Prompt` + `## Assertions`; drop the `evals/<slug>/prompt.md` and `seed:` wording.
@@ -875,7 +857,7 @@ Rewrite every doc surface that describes the old `skills/<skill>/evals/<slug>/pr
 
 ---
 
-## Final verification (run after Task 4)
+## Final verification (run after Task 3)
 
 - [ ] `make test` — full offline suite green.
 - [ ] `make lint` — package + docs pass.
