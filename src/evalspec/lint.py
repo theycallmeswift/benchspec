@@ -66,28 +66,19 @@ def lint_assertion(text: str) -> list[tuple[str, str]]:
     return findings
 
 
-def lint_repo(repo_root: Path, eval_roots: list[str] | None = None) -> list[Finding]:
+def lint_repo(repo_root: Path) -> list[Finding]:
     """Lint discovered eval assertions for unjudgeable wording."""
     findings: list[Finding] = []
-    for case in discovery.discover_eval_cases(repo_root, eval_roots):
-        prompt_md = case.skill_dir / "evals" / case.slug / "prompt.md"
+    for case in discovery.discover_eval_cases(repo_root):
         for text in case.assertions:
             for rule, message in lint_assertion(text):
-                findings.append(
-                    Finding(
-                        prompt_md,
-                        case.eval_id,
-                        text,
-                        rule,
-                        message,
-                    )
-                )
+                findings.append(Finding(case.eval_file, case.eval_id, text, rule, message))
     return findings
 
 
-def run(repo_root: Path, eval_roots: list[str] | None = None) -> int:
+def run(repo_root: Path) -> int:
     """Print findings grouped by file; exit 1 on any finding (all are warnings)."""
-    findings = lint_repo(repo_root, eval_roots)
+    findings = lint_repo(repo_root)
     current = None
     for finding in findings:
         if finding.file != current:

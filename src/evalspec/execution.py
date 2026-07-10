@@ -218,7 +218,7 @@ async def _run_arm_turns(
     effort: object,
     prompt: object,
     project_marker: object,
-    skill: object,
+    setup_reldir: object,
     detect_skill: object,
     arm_env: object = None,
     eval_set: object = "",
@@ -238,7 +238,7 @@ async def _run_arm_turns(
         host_repo_root=project,
         model=model,
         effort=effort,
-        skill=skill,
+        setup_reldir=setup_reldir,
         arm=arm_name,
         project_marker=project_marker,
         arm_env=arm_env,
@@ -271,7 +271,7 @@ async def _run_arm_turns(
         run_acc.result_text = result.result_text
         run_acc.trajectory = result.trajectory
         run_acc.transcript.append(
-            _turn_transcript(prompt=prompt, result=result, tree=tree, skill=skill)
+            _turn_transcript(prompt=prompt, result=result, tree=tree, skill=detect_skill)
         )
         run_acc.raw = result.raw
 
@@ -301,6 +301,8 @@ def run_eval_arm(
     # Every downstream sink keys on the arm NAME string (artifact paths, grading["arm"],
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.
     arm_name = arm.name
+    # setup.sh lives in the eval folder, located by its path relative to the mount.
+    setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
     # Stream the skill name on both arms so fired-detection runs unconditionally.
     detect_skill = eval_case.skill
 
@@ -331,7 +333,7 @@ def run_eval_arm(
             effort=arm.effort,
             prompt=prompt,
             project_marker=project_marker,
-            skill=eval_case.skill,
+            setup_reldir=setup_reldir,
             detect_skill=detect_skill,
             # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
             # actually runs, never at collection (a deselected arm's secret is never read).

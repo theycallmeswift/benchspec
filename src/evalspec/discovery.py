@@ -1,10 +1,11 @@
 """Discover skill eval files under a repo root and resolve the root itself.
 
-For each `<name>/` under `<repo_root>/skills/` and `<repo_root>/.claude/skills/`, reads
-the self-contained output evals (`evals/<slug>/prompt.md`) and `evals/trigger-evals.md`,
-validating each at discovery so a malformed eval fails pytest collection loudly. Output
-evals become `EvalCase`s (one per slug dir); trigger evals become `TriggerCase`s (one
-per query).
+Output evals are found by crawling every `evals/<group>/` folder under `repo_root`
+(scratch/mirror subtrees pruned) for `eval.md` / `*.eval.md`, keyed on the folder-derived
+`(group, eval_id)` pair — one `EvalCase` per eval file. Trigger evals still resolve per
+skill dir under `skills/` and `.claude/skills/` (`evals/trigger-evals.md`), one
+`TriggerCase` per query. Each file is validated at discovery so a malformed eval fails
+pytest collection loudly.
 """
 
 from __future__ import annotations
@@ -20,32 +21,27 @@ from evalspec import mdformat, schema
 
 @dataclass
 class EvalCase:
-    """Store eval case data."""
+    """One discovered Markdown output eval, keyed on (group, eval_id)."""
 
-    skill_dir: Path
-    eval: dict  # one per-slug dict from load_suite_dir: {slug, prompt, assertions, history?}
+    group: str  # the evals/<group>/ folder name — the artifact-path slot Phase 3 keeps
+    eval_dir: Path  # evals/<group>/ — holds the eval file(s), workspace/, setup.sh
+    eval_file: Path  # eval.md or <stem>.eval.md
+    eval: dict  # {id, prompt, assertions, history?} from parse_eval_md
 
     @property
     def skill(self: object) -> str:
-        """Return the skill name for this discovered case."""
-        # The skill-dir name — the suite identity used for artifact paths, test ids,
-        # and `[tool.evalspec.skills.<name>]` override matching.
-        return self.skill_dir.name
-
-    @property
-    def slug(self: object) -> str:
-        """Return the eval slug for this discovered case."""
-        return self.eval["slug"]
+        """The group name — kept in the `<skill>` artifact-path slot this phase."""
+        return self.group
 
     @property
     def eval_id(self: object) -> str:
-        """Return the stable eval identifier used in reports."""
-        return self.slug  # artifact paths read eval-<eval_id>/
+        """Return the stable eval identifier used in reports and artifact paths."""
+        return self.eval["id"]
 
     @property
     def param_id(self: object) -> str:
         """Return the pytest parameter id for this case."""
-        return f"{self.skill}-{self.slug}"
+        return f"{self.group}-{self.eval_id}"
 
     @property
     def prompt(self: object) -> str:
@@ -59,14 +55,14 @@ class EvalCase:
 
     @property
     def history(self: object) -> list[dict]:
-        """Return history turns for this discovered case."""
+        """Return prior-context turns for this discovered case."""
         return self.eval.get("history", [])
 
     @property
-    def fixtures_dir(self: object) -> Path | None:
-        """Return the fixtures directory for this eval when present."""
-        fixtures_dir = self.skill_dir / "evals" / self.slug / "fixtures"
-        return fixtures_dir if fixtures_dir.is_dir() else None
+    def workspace_dir(self: object) -> Path | None:
+        """Return the per-eval workspace directory when present."""
+        workspace_dir = self.eval_dir / "workspace"
+        return workspace_dir if workspace_dir.is_dir() else None
 
 
 @dataclass
@@ -101,6 +97,8 @@ def resolve_repo_root(config: object) -> Path:
 
 
 _DEFAULT_EVAL_ROOTS = ["skills", ".claude/skills"]
+
+_PRUNE_DIRS = frozenset({"tmp", ".git", "__pycache__"})
 
 
 def pyproject_table(repo_root: Path) -> dict:
@@ -226,36 +224,76 @@ def _skill_dirs(repo_root: Path, eval_roots: list[str] | None = None) -> list[Pa
     return sorted(seen.values(), key=lambda skill_path: skill_path.name)
 
 
-def discover_eval_cases(repo_root: Path, eval_roots: list[str] | None = None) -> list[EvalCase]:
-    """Discover Markdown-authored eval cases from configured roots."""
+def _evals_dirs(repo_root: Path) -> list[Path]:
+    """Every directory named `evals` under `repo_root`, scratch/mirror subtrees pruned.
+
+    Prunes `tmp/` (the artifact root), `.git`, `__pycache__`, and every dot-prefixed
+    dir before descending — the fixed deny-list that lets the crawl replace the old
+    explicit `eval_roots`.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, _files in os.walk(repo_root):
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if name not in _PRUNE_DIRS and not name.startswith(".")
+        )
+        if Path(dirpath).name == "evals":
+            found.append(Path(dirpath))
+    return sorted(found)
+
+
+def _eval_files(group_dir: Path) -> list[Path]:
+    """The `eval.md` and sorted `*.eval.md` files directly under one group dir."""
+    files: list[Path] = []
+    canonical = group_dir / "eval.md"
+    if canonical.is_file():
+        files.append(canonical)
+    files.extend(
+        sorted(
+            path
+            for path in group_dir.iterdir()
+            if path.is_file() and path.name.endswith(".eval.md")
+        )
+    )
+    return files
+
+
+def discover_eval_cases(repo_root: Path) -> list[EvalCase]:
+    """Discover Markdown output evals by crawling every `evals/<group>/` folder.
+
+    Raises `schema.SchemaError` on a non-kebab `group`/`eval_id` or a duplicate
+    `(group, eval_id)` pair, naming both source files.
+    """
+    seen: dict[tuple[str, str], Path] = {}
     cases: list[EvalCase] = []
-    for skill_dir in _skill_dirs(repo_root, eval_roots):
-        evals_dir = skill_dir / "evals"
-        if not evals_dir.is_dir():
-            continue
-        # A flat `*.md` eval file is the retired legacy shape (only trigger-evals.md is a
-        # reserved non-eval). A stray file beside slug dirs is a half-migrated suite whose
-        # flat evals load_suite_dir would silently drop, so fail loudly regardless of how
-        # many slug dirs the suite has.
-        stray = sorted(
-            path.name
-            for path in evals_dir.iterdir()
-            if path.is_file() and path.suffix == ".md" and path.name not in mdformat.NON_EVAL_MD
-        )
-        if stray:
-            raise schema.SchemaError(
-                f"{evals_dir}: legacy flat eval file(s) {stray} — explode each into its "
-                f"own evals/<slug>/prompt.md dir or delete it."
-            )
-        has_slug = any(
-            path.is_dir() and (path / "prompt.md").is_file() for path in evals_dir.iterdir()
-        )
-        if not has_slug:
-            continue  # trigger-only suite (just trigger-evals.md) — no output evals
-        data = mdformat.load_suite_dir(evals_dir)
-        for eval_data in data["evals"]:
-            cases.append(EvalCase(skill_dir=skill_dir, eval=eval_data))
-    return cases
+    for evals_dir in _evals_dirs(repo_root):
+        for group_dir in sorted(path for path in evals_dir.iterdir() if path.is_dir()):
+            group = group_dir.name
+            if group.startswith(".") or group.startswith("__"):
+                continue
+            for eval_file in _eval_files(group_dir):
+                parsed = mdformat.parse_eval_md(eval_file)
+                eval_id = parsed["id"]
+                if not schema.is_kebab(group):
+                    raise schema.SchemaError(
+                        f"{eval_file}: group `{group}` is not kebab-case ({schema._KEBAB_HINT})"
+                    )
+                if not schema.is_kebab(eval_id):
+                    raise schema.SchemaError(
+                        f"{eval_file}: eval id `{eval_id}` is not kebab-case "
+                        f"({schema._KEBAB_HINT})"
+                    )
+                key = (group, eval_id)
+                if key in seen:
+                    raise schema.SchemaError(
+                        f"duplicate eval {group}/{eval_id}: {seen[key]} and {eval_file}"
+                    )
+                seen[key] = eval_file
+                cases.append(
+                    EvalCase(group=group, eval_dir=group_dir, eval_file=eval_file, eval=parsed)
+                )
+    return sorted(cases, key=lambda case: (case.group, case.eval_id))
 
 
 def discover_trigger_cases(

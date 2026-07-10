@@ -655,8 +655,7 @@ def pytest_generate_tests(metafunc: object) -> None:
         # One eval set per run — uniform columns across every skill (resolved once, not
         # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
         repo_root = resolve_repo_root(metafunc.config)
-        eval_roots = resolve_eval_roots(metafunc.config)
-        cases = discover_eval_cases(repo_root, eval_roots)
+        cases = discover_eval_cases(repo_root)
         # Resolve the set only when there are eval cases to cross with — a trigger-only
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
         arms = resolved_run_set(metafunc.config).arms if cases else []

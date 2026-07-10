@@ -51,24 +51,25 @@ def _write_eval(
     tmp_path: object, assertions: object, *, skill: object = "demo", slug: object = "a"
 ) -> object:
     """Write eval."""
-    slug_dir = tmp_path / "skills" / skill / "evals" / slug
-    slug_dir.mkdir(parents=True, exist_ok=True)
+    group_dir = tmp_path / "skills" / skill / "evals" / slug
+    group_dir.mkdir(parents=True, exist_ok=True)
     body = "".join(f"- [ ] {a}\n" for a in assertions)
-    (slug_dir / "prompt.md").write_text(
+    (group_dir / "eval.md").write_text(
         f"---\n{{}}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n{body}"
     )
-    return slug_dir
+    return group_dir
 
 
 def test_lint_repo_walks_suites(tmp_path: object) -> None:
     """Verify lint repo walks suites."""
-    _write_eval(tmp_path, ["the agent properly handles the edge case"])
+    group_dir = _write_eval(tmp_path, ["the agent properly handles the edge case"])
 
     findings = lint.lint_repo(tmp_path)
 
     assert len(findings) == 1
     assert findings[0].rule == "vague-adverb"
     assert findings[0].eval_id == "a"
+    assert findings[0].file == group_dir / "eval.md"
 
 
 def test_main_exit_codes(tmp_path: object, capsys: object) -> None:

@@ -48,6 +48,11 @@ _CHECKER_KEY_TYPES = {
 _KEBAB_HINT = "lowercase alphanumerics separated by hyphens, e.g. `happy-path`"
 
 
+def is_kebab(value: str) -> bool:
+    """Return whether a string is a kebab-case identifier."""
+    return bool(_ID_KEBAB.match(value))
+
+
 class SchemaError(ValueError):
     """Signal schema failures."""
 
@@ -176,25 +181,25 @@ def _validate_evals_v1(data: dict) -> None:
         "evals",
         list,
         "root",
-        example='"evals": [{"slug": "happy-path", "prompt": "…", "assertions": ["…"]}]',
+        example='"evals": [{"id": "happy-path", "prompt": "…", "assertions": ["…"]}]',
     )
     if not evals:
         raise SchemaError("root.evals: must be non-empty")
 
     seen: set[str] = set()
-    allowed_eval = {"slug", "history", "prompt", "assertions"}
+    allowed_eval = {"id", "history", "prompt", "assertions"}
     for eval_index, item in enumerate(evals):
         path = f"root.evals[{eval_index}]"
         if not isinstance(item, dict):
             raise SchemaError(f"{path}: expected object, got {type(item).__name__}")
         _reject_extra_keys(item, allowed_eval, path)
 
-        slug = _require(item, "slug", str, path, example='"slug": "happy-path"')
-        if not _ID_KEBAB.match(slug):
-            raise SchemaError(f"{path}.slug: `{slug}` is not kebab-case ({_KEBAB_HINT})")
-        if slug in seen:
-            raise SchemaError(f"{path}.slug: duplicate slug `{slug}`")
-        seen.add(slug)
+        eval_id = _require(item, "id", str, path, example='"id": "happy-path"')
+        if not _ID_KEBAB.match(eval_id):
+            raise SchemaError(f"{path}.id: `{eval_id}` is not kebab-case ({_KEBAB_HINT})")
+        if eval_id in seen:
+            raise SchemaError(f"{path}.id: duplicate id `{eval_id}`")
+        seen.add(eval_id)
 
         if "history" in item:
             _validate_history(item["history"], f"{path}.history")

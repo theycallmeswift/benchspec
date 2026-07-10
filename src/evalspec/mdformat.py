@@ -1,4 +1,4 @@
-"""Markdown eval format: one self-contained `evals/<slug>/prompt.md` per output eval.
+"""Markdown eval format: one self-contained `evals/<group>/eval.md` per output eval.
 
 Parses into the exact dict shape `schema._validate` checks — schema stays the single
 validation truth; this module owns only Markdown structure. Strict and loud: unknown
@@ -7,11 +7,12 @@ are hard errors. A `- [ ]` item with indented `- [ ]` children is a display-only
 whose children flatten to standalone assertions in document order (one nesting level
 only); a childless item is one assertion.
 
-Eval file `evals/<slug>/prompt.md`: YAML frontmatter (`seed:` only — an optional list of
-`{role, text}` turns) + `## Prompt` prose (required) + `## Assertions` checklist
-(required, all prose; H3 subheadings are display-only groups, flattened in document
-order). The slug is the parent directory name. Single-turn only: `seed:` carries any
-prior context; there is no `## Turn` syntax.
+Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
+(`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
+(required) + `## Assertions` checklist (required, all prose; H3 subheadings are
+display-only groups, flattened in document order). The eval id is the parent folder name
+for `eval.md`, or the `<stem>` for `<stem>.eval.md`. Single-turn only: `history:` carries
+any prior context; there is no `## Turn` syntax.
 
 Trigger evals: `trigger-evals.md` — frontmatter `skill_name` + optional `## Description`
 + `## Trigger`/`## No Trigger` sections of `- <slug>: <query>` lines, each with an
@@ -37,11 +38,6 @@ _TRIG_FM = {"skill_name"}
 _TRIGGER_TITLES = {"Trigger": True, "No Trigger": False}
 
 _EVAL_FM = {"history"}
-
-# *.md filenames inside an evals/ dir that are NOT per-slug output evals. Output
-# evals are `evals/<slug>/prompt.md` dirs; the slug-dir glob ignores stray files,
-# so this only documents the reserved trigger-evals.md name.
-NON_EVAL_MD = frozenset({"trigger-evals.md"})
 
 
 class MdFormatError(schema.SchemaError):
@@ -183,10 +179,20 @@ def _collect_assertions(
 
 
 def parse_eval_md(path: Path) -> dict:
-    """Parse one eval prompt.md file into schema input."""
+    """Parse one `eval.md` / `*.eval.md` file into schema input.
+
+    The eval id is the parent folder name for `eval.md`, or the file stem for
+    `<stem>.eval.md`. Any other filename is a hard error.
+    """
+    if path.name == "eval.md":
+        eval_id = path.parent.name
+    elif path.name.endswith(".eval.md"):
+        eval_id = path.name[: -len(".eval.md")]
+    else:
+        raise MdFormatError(f"{path}: eval files must be named `eval.md` or `*.eval.md`")
     fm, body_lines = _split_frontmatter(path.read_text(encoding="utf-8"), path)
     _check_fm_keys(fm, _EVAL_FM, path)
-    result: dict = {"slug": path.parent.name}
+    result: dict = {"id": eval_id}
     if "history" in fm:
         # Validate here so the single-file path is as strict as discovery: a bare
         # parse_eval_md call (linter, per-file tooling) must still reject a malformed
@@ -293,25 +299,4 @@ def parse_trigger(path: Path) -> dict:
         schema._validate(doc)
     except schema.SchemaError as e:
         raise MdFormatError(str(e)) from e
-    return doc
-
-
-def load_suite_dir(evals_dir: Path) -> dict:
-    """Assemble one skill's `evals/<slug>/prompt.md` dirs into a validated.
-
-    evalspec/v1 doc. No suite file.
-    """
-    evals = []
-    for slug_dir in sorted(p for p in evals_dir.iterdir() if p.is_dir()):
-        if slug_dir.name.startswith(".") or slug_dir.name.startswith("__"):
-            # hidden/tooling dirs (.git, .pytest_cache, __pycache__) are not evals
-            continue
-        prompt_md = slug_dir / "prompt.md"
-        if not prompt_md.is_file():
-            # A slug dir with no prompt.md is a half-authored or misnamed eval.
-            # Fail loud rather than collect zero cases.
-            raise schema.SchemaError(f"{slug_dir} has no prompt.md")
-        evals.append(parse_eval_md(prompt_md))
-    doc = {"$schema": "evalspec/v1", "evals": evals}
-    schema._validate(doc)
     return doc

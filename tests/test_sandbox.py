@@ -645,39 +645,44 @@ class _SetupAgent:
         }
 
 
-def test_run_setup_sh_uses_skill_cwd_and_env() -> None:
-    """Verify run setup sh uses skill cwd and env."""
+def test_run_setup_sh_runs_reldir_script_and_env() -> None:
+    """Verify run setup sh runs the eval-dir script with cell env."""
     fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
-    asyncio.run(
-        sandbox.run_setup_sh(fake_sandbox, agent, skill="ingest", arm="trial", model="opus")
-    )
 
-    call = fake_sandbox.calls[-1]
-    # cwd is the mount root; the script itself `cd`s into whichever eval root holds the
-    # suite (skills/ or .claude/skills/), so `.claude/skills/<name>` suites resolve too.
-    assert call["cwd"] == sandbox.PROJECT_MOUNT
-    assert "skills .claude/skills" in call["script"]
-    assert f'{sandbox.PROJECT_MOUNT}/$root/"ingest' in call["script"]
-    assert call["env"]["EVALSPEC_ARM"] == "trial"
-    assert call["env"]["EVALSPEC_MODEL"] == "opus"
-    assert "setup.sh" in call["script"]
-
-
-def test_run_setup_sh_passes_set_and_arm_env() -> None:
-    """Verify run setup sh passes set and arm env."""
-    # The stub agent's cell_env stamps EVALSPEC_SET from eval_set; arm_env merges over it.
-    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
     asyncio.run(
         sandbox.run_setup_sh(
             fake_sandbox,
             agent,
-            skill="ingest",
+            setup_reldir="skills/ingest/evals/single-article",
+            arm="trial",
+            model="opus",
+        )
+    )
+
+    call = fake_sandbox.calls[-1]
+    assert call["cwd"] == sandbox.PROJECT_MOUNT
+    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/single-article/setup.sh" in call["script"]
+    assert "bash ./setup.sh" in call["script"]
+    assert call["env"]["EVALSPEC_ARM"] == "trial"
+    assert call["env"]["EVALSPEC_MODEL"] == "opus"
+
+
+def test_run_setup_sh_passes_set_and_arm_env() -> None:
+    """Verify run setup sh passes set and arm env."""
+    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
+
+    asyncio.run(
+        sandbox.run_setup_sh(
+            fake_sandbox,
+            agent,
+            setup_reldir="skills/ingest/evals/x",
             arm="trial",
             model="opus",
             eval_set="popular-harnesses",
             arm_env={"ANTHROPIC_BASE_URL": "https://o"},
         )
     )
+
     env = fake_sandbox.calls[-1]["env"]
     assert env["EVALSPEC_SET"] == "popular-harnesses"
     assert env["ANTHROPIC_BASE_URL"] == "https://o"
@@ -686,10 +691,13 @@ def test_run_setup_sh_passes_set_and_arm_env() -> None:
 def test_run_setup_sh_nonzero_exit_raises() -> None:
     """Verify run setup sh nonzero exit raises."""
     fake_sandbox, agent = _SetupShellSandbox(exit_code=2, stderr="boom"), _SetupAgent()
+
     with pytest.raises(RuntimeError, match="setup.sh"):
         asyncio.run(
-        sandbox.run_setup_sh(fake_sandbox, agent, skill="ingest", arm="trial", model="opus")
-    )
+            sandbox.run_setup_sh(
+                fake_sandbox, agent, setup_reldir="skills/ingest/evals/x", arm="trial", model="opus"
+            )
+        )
 
 
 class _LocalShellSandbox:
@@ -714,33 +722,41 @@ class _LocalShellSandbox:
         return FakeExecOutput(exit_code=proc.returncode, stderr_text=proc.stderr)
 
 
-def test_run_setup_sh_absent_file_is_noop(tmp_path: object) -> None:
+def test_run_setup_sh_absent_file_is_noop(tmp_path: object, monkeypatch: object) -> None:
     """Verify run setup sh absent file is noop."""
-    # cwd has no ./evals/setup.sh → clean exit 0, no raise.
+    # A real /bin/sh under a project mount with no <reldir>/setup.sh → clean exit 0.
+    monkeypatch.setattr(sandbox, "PROJECT_MOUNT", str(tmp_path))
+    (tmp_path / "evals" / "x").mkdir(parents=True)
     fake_sandbox = _LocalShellSandbox(tmp_path)
+
     asyncio.run(
-        sandbox.run_setup_sh(fake_sandbox, _SetupAgent(), skill="ingest", arm="trial", model="opus")
+        sandbox.run_setup_sh(
+            fake_sandbox, _SetupAgent(), setup_reldir="evals/x", arm="trial", model="opus"
+        )
     )
 
 
-def test_run_setup_sh_present_but_failing_propagates(tmp_path: object) -> None:
+def test_run_setup_sh_present_but_failing_propagates(tmp_path: object, monkeypatch: object) -> None:
     """Verify run setup sh present but failing propagates."""
-    (tmp_path / "evals").mkdir()
-    (tmp_path / "evals" / "setup.sh").write_text("exit 2\n")
+    monkeypatch.setattr(sandbox, "PROJECT_MOUNT", str(tmp_path))
+    eval_dir = tmp_path / "evals" / "x"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "setup.sh").write_text("exit 2\n")
     fake_sandbox = _LocalShellSandbox(tmp_path)
+
     with pytest.raises(RuntimeError, match="setup.sh"):
         asyncio.run(
             sandbox.run_setup_sh(
-                fake_sandbox, _SetupAgent(), skill="ingest", arm="trial", model="opus"
+                fake_sandbox, _SetupAgent(), setup_reldir="evals/x", arm="trial", model="opus"
             )
         )
 
 
-def test_arm_session_runs_setup_sh_when_skill_set(monkeypatch: object, tmp_path: object) -> None:
-    """Verify arm session runs setup sh when skill set."""
-    # When a session carries `skill`, __aenter__ installs the skill via setup.sh BEFORE
-    # the artifact baseline. The first shell on the cell is the setup.sh run, issued under
-    # cwd /project (the mount root); the script itself cds into the suite's eval root.
+def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path: object) -> None:
+    """Verify arm session runs setup sh when reldir set."""
+    # When a session carries `setup_reldir`, __aenter__ installs the eval's setup.sh
+    # BEFORE the artifact baseline. The first shell on the cell is the setup.sh run,
+    # issued under cwd /project (the mount root); the script cds into the eval dir.
     fake = _QueuedShellSandbox(
         shell_queue=[
             FakeExecOutput(0),  # setup.sh
@@ -773,7 +789,7 @@ def test_arm_session_runs_setup_sh_when_skill_set(monkeypatch: object, tmp_path:
             host_repo_root=tmp_path,
             model="opus",
             effort="medium",
-            skill="ingest",
+            setup_reldir="skills/ingest/evals/x",
             arm="trial",
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
@@ -783,7 +799,7 @@ def test_arm_session_runs_setup_sh_when_skill_set(monkeypatch: object, tmp_path:
     assert setup_call[0] == "shell"
     assert "setup.sh" in setup_call[1]
     assert setup_call[2]["cwd"] == sandbox.PROJECT_MOUNT
-    assert f'{sandbox.PROJECT_MOUNT}/$root/"ingest' in setup_call[1]
+    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/x/setup.sh" in setup_call[1]
     assert setup_call[2]["env"]["EVALSPEC_ARM"] == "trial"
     assert setup_call[2]["env"]["EVALSPEC_MODEL"] == "opus"
 
@@ -828,7 +844,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
             host_repo_root=tmp_path,
             model="opus",
             effort="medium",
-            skill="ingest",
+            setup_reldir="skills/ingest/evals/x",
             arm="trial",
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
@@ -872,7 +888,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
             host_repo_root=tmp_path,
             model="opus",
             effort="medium",
-            skill="ingest",
+            setup_reldir="skills/ingest/evals/x",
             arm="trial",
             harness_args=["--plugin-dir", "/project"],
         ) as run:
@@ -884,9 +900,9 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
 
 
 def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path: object) -> None:
-    """Verify arm session skips setup sh when no skill."""
-    # No `skill` ⇒ no per-cell install: the only shells are the artifact snapshots, never
-    # a setup.sh run. (A non-skill cell — baseline of a non-skill suite, or a trigger path.)
+    """Verify arm session skips setup sh when setup_reldir is None."""
+    # No `setup_reldir` ⇒ no per-cell install: the only shells are the artifact snapshots,
+    # never a setup.sh run. (A cell whose eval dir isn't located relative to a mount.)
     fake = _QueuedShellSandbox(
         shell_queue=[
             FakeExecOutput(0, ""),
@@ -952,7 +968,7 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
             host_repo_root=tmp_path,
             model="opus",
             effort="medium",
-            skill="ingest",
+            setup_reldir="skills/ingest/evals/x",
             arm="trial",
         ) as run:
             await run("prompt", resume_session_id=None, detect_skill="ingest")
