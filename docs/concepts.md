@@ -4,12 +4,12 @@ evalspec runs each `(eval × arm)` as a parametrized pytest case. The agent runs
 
 ## Glossary
 
-- **Eval** — one task definition (prompt + prose assertions, optionally a `seed:` prefix). Each is one self-contained file `<skill>/evals/<slug>/prompt.md`; the parent dir name is the slug, and `fixtures/` beside it holds starting files. There is no suite header. See [`schema.md`](schema.md).
-- **Suite** — one skill's output evals: every `evals/<slug>/prompt.md` under the skill dir. Suite identity is the skill-dir basename. Assembled and validated into one `evalspec/v1` doc at collection.
+- **Eval** — one task definition (prompt + prose assertions, optionally a `history:` prefix). Each is one self-contained file `<skill>/evals/<group>/eval.md` (or a `<stem>.eval.md` sibling); the eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`, and `workspace/` beside it holds starting files. There is no suite header. See [`schema.md`](schema.md).
+- **Suite** — the `eval.md` plus any `*.eval.md` siblings inside one eval folder. Suite identity is that folder's **group** — the value that lands in the `<skill>` artifact-path slot and test id, which need not match the name of an enclosing `skills/<name>/` dir. Each file is validated independently at discovery, not assembled into one combined doc.
 - **Arm** — a `harness × model` cell: one column of the resolved set, declared as an inline table in the set's `arms` (`name` + any of `harness`/`model`/`effort`/`env`/`harness_args`, inheriting the set-level defaults for the rest) and carried verbatim into one parametrized `(eval × arm)` test. The arm's `harness` names the coding agent; its `model` is the **task** model. Same prompt, same eval — arms differ in harness and/or model, environment, and invocation-layer pass-through args. A set's columns may span harnesses (each output-eval arm runs on its own `harness`); trigger routing still resolves to the single run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`). See [`configuration.md`](configuration.md).
 - **Set** — a named, self-contained `[tool.evalspec.sets.<name>]` carrying its own `arms` (the columns), set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults each arm inherits, and a `baseline` arm. A run resolves exactly one set — `default-set`, `--evalspec-set`, or a scratch `--evalspec-config` file — and that set's arms are the same columns for every skill in the run (one eval×arm matrix). See [`configuration.md`](configuration.md).
 - **Baseline** — the arm every other arm's Δ is measured against (`baseline = "<arm-name>"` in the set). Δ = arm − baseline, in percentage points. Optional: with no `baseline` declared, each arm reports its absolute pass rate and no Δ is computed.
-- **Baseline / trial (install model)** — the two-layer install model. **Layer 1** is the system + task every arm shares (empty workdir + fixtures + prompt). **Layer 2** is the skill install, performed per cell by the suite's `setup.sh` (which branches on `$EVALSPEC_ARM`). A **baseline** cell installs nothing in Layer 2 (`setup.sh` exits 0); a **trial** cell installs the skill into the fixed skills home. Pointing the set's `baseline` key at the install-nothing arm (conventionally named `baseline`) makes Δ = trial − baseline.
+- **Baseline / trial (install model)** — the two-layer install model. **Layer 1** is the system + task every arm shares (empty workdir + workspace + prompt). **Layer 2** is the skill install, performed per cell by the eval's own `setup.sh` (which branches on `$EVALSPEC_ARM`). A **baseline** cell installs nothing in Layer 2 (`setup.sh` exits 0); a **trial** cell installs the skill into the fixed skills home. Pointing the set's `baseline` key at the install-nothing arm (conventionally named `baseline`) makes Δ = trial − baseline.
 - **Assertion type** — every checklist item is plain prose; the author types nothing. The **binder** decides at grade time whether each assertion is graded **deterministically** (mapped to a checker on the host) or **semantically** (punted to the LLM judge). See [`schema.md`](schema.md).
 - **Checker** — a host-side deterministic grader (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`) the binder maps an assertion to — zero variance, zero judge cost. Writes a grading entry interchangeable with a judged one. Five grade against the workdir; `skill_invoked` is the exception, grading against process facts (which skills the arm dispatched, via `GradeContext`) rather than files.
 - **Binder** — an author-invisible, cheap (`gemini-3.1-flash-lite`, a direct Gemini API call) classifier that maps each plain-prose assertion to one of the deterministic **checkers** at grade time when confident, else **punts** to the judge. Wired into the grading path (`execution._grade_mixed`): every output-eval assertion goes through it. Tuned for false-negatives — over-punting is free (the judge was already going to grade it), while a false-positive (a surface check passing on wrong output) is the one outcome worse than judging. Presence/persistence/negation assertions ("still present", "not duplicated") always punt. Shipped with its own labeled-corpus eval (`make evals:binder`, gate: `false_positive_rate` → 0). See **The binder** below.
@@ -49,14 +49,14 @@ Snapshot resolve (per run, per harness)
      file-locked, one-shot per concurrent run)
         │
 Per (eval × arm × sample) test
-  └─ Seed clean room: copy fixtures/ (if any), substitute {TODAY} in
+  └─ Seed clean room: copy workspace/ (if any), substitute {TODAY} in
      file contents + paths, snapshot original SHAs for the judge.
   └─ Boot VM from snapshot (fresh per cell), bind /workspace (rw) + /project (ro).
-  └─ Run the suite's evals/setup.sh with cwd=/project/skills/<skill> under the cell env
-     (`EVALSPEC_ARM`, `EVALSPEC_MODEL`, `EVALSPEC_HARNESS`, `EVALSPEC_SET`); it
-     branches on $EVALSPEC_ARM or $EVALSPEC_SET to install the skill into the fixed
-     home (trial) or no-op (baseline). A non-zero exit aborts the cell.
-  └─ Render the prompt: seed transcript block (if any) + {TODAY}-substituted ## Prompt.
+  └─ Run the eval's own evals/<group>/setup.sh with cwd=/project/skills/<skill>/evals/<group>
+     under the cell env (`EVALSPEC_ARM`, `EVALSPEC_MODEL`, `EVALSPEC_HARNESS`,
+     `EVALSPEC_SET`); it branches on $EVALSPEC_ARM or $EVALSPEC_SET to install the skill
+     into the fixed home (trial) or no-op (baseline). A non-zero exit aborts the cell.
+  └─ Render the prompt: history transcript block (if any) + {TODAY}-substituted ## Prompt.
   └─ Invoke agent (cwd=/workspace, paths ./-relative) with evalspec-managed identity
      flags plus the arm's resolved `harness_args`. These are invocation-layer config;
      they do not mutate the setup.sh environment.
@@ -70,7 +70,7 @@ Grading (on host, AFTER the run)
      the remainder to the judge in one call. Merge back in assertion order.
         │
 Artifacts per (eval × arm × sample)
-  └─ <repo_root>/tmp/evals/iteration_NN/skills/<skill>/eval-<slug>/<arm>/sample-<k>/
+  └─ <repo_root>/tmp/evals/iteration_NN/skills/<skill>/eval-<eval_id>/<arm>/sample-<k>/
      ├─ grading.json     # {eval_id, skill, arm, sample, errored, assertions: [{text, passed, evidence, type}]}
      ├─ timing.json      # {duration_ms, judge_ms, total_tokens, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens}
      ├─ transcript.json  # [{turn, prompt, result, is_error, fired, result_subtype, tool_call_count, workdir_tree, skills_dispatched?}]
@@ -93,7 +93,7 @@ Benchmark aggregation (sessionfinish, controller only)
 
 `session.jsonl` is the lossless source for everything downstream, and the only persisted record of the agent's turn. Every arm streams, so every cell writes one — keeping the trajectory and the judge's process facts symmetric across arms (the only artifact a turn omits is one that never streamed, e.g. a launch error). The structured trajectory is **derived, not stored**: `evalspec.trajectory.trajectory_from_session` regenerates it deterministically from `session.jsonl`, and the run already folds its summary into `transcript.json` (`tool_call_count`, `skills_dispatched`) and the judge's process facts. `result_subtype` is the CLI result event's `subtype` (e.g. `success`, `error_max_turns`), not the API `stop_reason`.
 
-Trigger evals follow a simpler lifecycle: no fixture, no workdir, no setup.sh, no grading. The agent runs against `query`; the stream is scanned for dispatch; `fired == should_trigger` is asserted. Timing lands at `tmp/evals/iteration_NN/skills/<skill>/trigger-<slug>/sample-<k>/timing.json`, persisting `fired`, `passed`, and the `query` text — so a report never reimplements the threshold rule and a failing query is diagnosable from artifacts alone. At session end, all `trigger-<slug>` dirs aggregate into `benchmark.json` (under `trigger`) and `benchmark.md` (`## Trigger routing — N/M queries as expected`). Skills with only trigger evals (no `eval-*` dirs) get a benchmark and a terminal line without the Δ segment: `<skill>: trigger N/M  -> benchmark.md`.
+Trigger evals follow a simpler lifecycle: no workspace, no workdir, no setup.sh, no grading. The agent runs against `query`; the stream is scanned for dispatch; `fired == should_trigger` is asserted. Timing lands at `tmp/evals/iteration_NN/skills/<skill>/trigger-<slug>/sample-<k>/timing.json`, persisting `fired`, `passed`, and the `query` text — so a report never reimplements the threshold rule and a failing query is diagnosable from artifacts alone. At session end, all `trigger-<slug>` dirs aggregate into `benchmark.json` (under `trigger`) and `benchmark.md` (`## Trigger routing — N/M queries as expected`). Skills with only trigger evals (no `eval-*` dirs) get a benchmark and a terminal line without the Δ segment: `<skill>: trigger N/M  -> benchmark.md`.
 
 ## The binder
 
