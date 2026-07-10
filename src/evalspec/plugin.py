@@ -60,7 +60,8 @@ def pytest_addoption(parser: object) -> None:
     group.addoption(
         "--evalspec-repo-root",
         default=None,
-        help="project root whose skills/ tree to test (default: $PROJECT_ROOT, else rootdir)",
+        help="repository root for repo-wide output-eval discovery and project-relative paths "
+        "(default: $PROJECT_ROOT, else rootdir)",
     )
     group.addoption(
         "--evalspec-models",
@@ -129,9 +130,10 @@ def pytest_addoption(parser: object) -> None:
         "--evalspec-eval-roots",
         default=None,
         help=_help(
-            "comma-separated paths (relative to repo root) to scan for eval-bearing skill dirs",
-            "(default: skills, .claude/skills; also overridable via",
-            "[tool.evalspec] eval_roots in pyproject.toml)",
+            "trigger evals only: comma-separated paths (relative to repo root) to scan for",
+            "skill dirs containing evals/trigger-evals.md (default: skills, .claude/skills;",
+            "also overridable via [tool.evalspec] eval_roots in pyproject.toml).",
+            "Output evals are discovered repo-wide.",
         ),
     )
     group.addoption(

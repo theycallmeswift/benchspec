@@ -28,3 +28,11 @@ def test_readme_eval_example_parses(tmp_path: object) -> None:
     (eval_dir / "eval.md").write_text(block, encoding="utf-8")
 
     parse_eval_md(eval_dir / "eval.md")  # must not raise
+
+
+def test_readme_filters_output_evals_by_group_or_eval_id() -> None:
+    """Verify README filtering follows output-eval identity."""
+    markdown = README.read_text(encoding="utf-8")
+
+    assert "pytest -k archive-source-from-inbox" in markdown
+    assert "pytest -k <skill-name>" not in markdown

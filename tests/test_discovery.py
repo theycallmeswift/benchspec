@@ -1,5 +1,6 @@
 """Tests for discovery."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,20 @@ def _write_eval(
     return group_dir
 
 
+def _init_git_repo(repo_root: Path) -> None:
+    """Initialize a quiet Git worktree for discovery tests."""
+    subprocess.run(["git", "init", "--quiet", str(repo_root)], check=True)
+
+
+def _git(repo_root: Path, *args: str) -> None:
+    """Run one Git command in a discovery-test worktree."""
+    subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        check=True,
+        capture_output=True,
+    )
+
+
 def test_discover_finds_eval_md_and_dot_eval_md(tmp_path: object) -> None:
     """Verify discover finds eval.md and *.eval.md at any depth."""
     _write_eval(tmp_path, "skills/ingest", "summarize-transcript", "eval.md")
@@ -112,6 +127,60 @@ def test_discover_finds_eval_md_and_dot_eval_md(tmp_path: object) -> None:
     }
     assert by_id["to-spec-activation-write-spec"].eval_id == "write-spec"
     assert by_id["summarize-transcript-summarize-transcript"].skill == "summarize-transcript"
+
+
+def test_git_discovery_finds_tracked_and_nonignored_untracked_evals(tmp_path: object) -> None:
+    """Verify Git discovery includes index entries and nonignored worktree files."""
+    _init_git_repo(tmp_path)
+    tracked_dir = _write_eval(tmp_path, "source", "tracked")
+    _git(tmp_path, "add", str((tracked_dir / "eval.md").relative_to(tmp_path)))
+    _write_eval(tmp_path, "source", "untracked")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["tracked-tracked", "untracked-untracked"]
+
+
+def test_git_discovery_excludes_ignored_build_mirror(tmp_path: object) -> None:
+    """Verify an ignored generated mirror cannot duplicate a source eval."""
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("build/\n", encoding="utf-8")
+    source_dir = _write_eval(tmp_path, "source", "my-case")
+    _write_eval(tmp_path, "build/copied", "my-case")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.eval_file for case in cases] == [source_dir / "eval.md"]
+
+
+def test_git_discovery_preserves_fixed_prunes(tmp_path: object) -> None:
+    """Verify Git enumeration still prunes scratch, cache, and dot directories."""
+    _init_git_repo(tmp_path)
+    _write_eval(tmp_path, "tmp/evals-mirror", "hidden-a")
+    _write_eval(tmp_path, "src/__pycache__", "hidden-b")
+    _write_eval(tmp_path, ".claude/skills/loc", "hidden-c")
+    _write_eval(tmp_path, "skills/real", "kept")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["kept-kept"]
+
+
+@pytest.mark.parametrize("git_backed", [False, True], ids=["filesystem", "git"])
+def test_discover_does_not_cross_embedded_git_repo(
+    tmp_path: object, git_backed: bool
+) -> None:
+    """Verify nested Git repositories remain discovery boundaries."""
+    if git_backed:
+        _init_git_repo(tmp_path)
+    _write_eval(tmp_path, "source", "kept")
+    embedded_root = tmp_path / "vendor"
+    _init_git_repo(embedded_root)
+    _write_eval(embedded_root, "package", "hidden")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["kept-kept"]
 
 
 def test_discover_prunes_tmp_git_pycache_and_dot_dirs(tmp_path: object) -> None:
@@ -181,6 +250,77 @@ def test_discover_does_not_descend_into_nested_evals_dir(tmp_path: object) -> No
     cases = discover_eval_cases(tmp_path)
 
     assert [case.param_id for case in cases] == ["bar-bar"]
+
+
+def test_git_discovery_excludes_nested_workspace_evals(tmp_path: object) -> None:
+    """Verify Git candidates below an eval workspace are excluded."""
+    _init_git_repo(tmp_path)
+    _write_eval(tmp_path, "skills/foo", "bar")
+    _write_eval(tmp_path, "skills/foo/evals/bar/workspace/project", "nested")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["bar-bar"]
+
+
+@pytest.mark.parametrize("git_backed", [False, True], ids=["filesystem", "git"])
+def test_discover_finds_nested_non_workspace_evals(
+    tmp_path: object, git_backed: bool
+) -> None:
+    """Verify a nested evals root outside workspace remains discoverable."""
+    if git_backed:
+        _init_git_repo(tmp_path)
+    _write_eval(tmp_path, "examples/evals/sample-project", "smoke")
+
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["smoke-smoke"]
+
+
+@pytest.mark.parametrize("git_backed", [False, True], ids=["filesystem", "git"])
+def test_discover_rejects_symlinked_group_outside_repo(
+    tmp_path: object, git_backed: bool
+) -> None:
+    """Verify a symlink cannot move an eval group outside the repository."""
+    repo_root = tmp_path / "repo"
+    evals_dir = repo_root / "source" / "evals"
+    evals_dir.mkdir(parents=True)
+    if git_backed:
+        _init_git_repo(repo_root)
+    outside_group = _write_eval(tmp_path, "outside", "escaped")
+    (evals_dir / "escaped").symlink_to(outside_group, target_is_directory=True)
+
+    with pytest.raises(schema.SchemaError, match="symlink"):
+        discover_eval_cases(repo_root)
+
+
+@pytest.mark.parametrize("git_backed", [False, True], ids=["filesystem", "git"])
+def test_discover_rejects_dangling_symlinked_group(
+    tmp_path: object, git_backed: bool
+) -> None:
+    """Verify a dangling kebab-case group symlink fails loudly."""
+    repo_root = tmp_path / "repo"
+    evals_dir = repo_root / "source" / "evals"
+    evals_dir.mkdir(parents=True)
+    if git_backed:
+        _init_git_repo(repo_root)
+    (evals_dir / "missing-group").symlink_to(
+        tmp_path / "does-not-exist", target_is_directory=True
+    )
+
+    with pytest.raises(schema.SchemaError, match="symlink"):
+        discover_eval_cases(repo_root)
+
+
+def test_discover_allows_symlinked_trigger_file(tmp_path: object) -> None:
+    """Verify output discovery ignores a symlinked trigger file beside groups."""
+    evals_dir = tmp_path / "skills" / "demo" / "evals"
+    evals_dir.mkdir(parents=True)
+    trigger_source = tmp_path / "trigger-source.md"
+    trigger_source.write_text("trigger data", encoding="utf-8")
+    (evals_dir / "trigger-evals.md").symlink_to(trigger_source)
+
+    assert discover_eval_cases(tmp_path) == []
 
 
 def test_discover_raises_on_duplicate_group_eval_pair(tmp_path: object) -> None:
