@@ -1,31 +1,36 @@
 # Schema reference
 
-Output evals and trigger (routing) evals are both **Markdown**. Per skill:
+Output evals and trigger (routing) evals are both **Markdown**.
 
 ```
-<skill-dir>/evals/<slug>/prompt.md     # one self-contained output eval per slug dir
-<skill-dir>/evals/<slug>/fixtures/      # optional starting files for that eval
-<skill-dir>/evals/trigger-evals.md     # evalspec-trigger/v1 (routing queries)
-<skill-dir>/evals/setup.sh             # per-cell skill installer (see configuration.md / agents.md)
+**/evals/<group>/eval.md          # id = folder name
+**/evals/<group>/<stem>.eval.md   # id = file stem (siblings share the folder)
+**/evals/<group>/workspace/       # optional starting files, copied into /workspace
+**/evals/<group>/setup.sh         # optional per-eval sandbox setup
+skills/<skill>/evals/trigger-evals.md  # evalspec-trigger/v1 (unchanged this phase)
 ```
 
-`<skill-dir>` is any directory under the configured eval roots (default `skills/` and `.claude/skills/`; override via `--evalspec-eval-roots` or `[tool.evalspec] eval_roots`). The suite identity is the directory's basename — there is no `skill_name` frontmatter and no suite header.
+Output-eval discovery is a recursive `**/evals/` crawl from the repo root: every directory literally named `evals` is found, pruning `tmp/` (the artifact root), `.git`, `__pycache__`, and every dot-prefixed directory before descending. Each immediate subdirectory of a discovered `evals/` dir is a `<group>`, scanned for `eval.md` and `*.eval.md`. This crawl is decoupled from `eval_roots` (below) — it runs regardless of where `eval_roots` points. **The dot-dir prune excludes `.claude/`, so output evals placed under `.claude/skills/**/evals/` are never discovered** — only `skills/` (or any other non-dot path) works for output evals. Trigger discovery is unaffected by this prune: it still resolves `evals/trigger-evals.md` per skill dir under the configured eval roots (default `skills/` and `.claude/skills/`), so a skill's trigger evals under `.claude/skills/` keep working even though output evals there would not.
 
-Each output eval is one `evals/<slug>/prompt.md` file; its parent dir name is the `slug`. `mdformat.py` owns the Markdown structure, `schema.py` owns validation. Both are strict and loud: unknown headings, plain `-` bullets, indented non-checkbox lines, prose outside known sections, grandchild or ragged assertion nesting, and unknown frontmatter keys all fail at pytest collection with the offending path quoted.
+Case identity is the pair `(group, eval_id)`. For `eval.md`, `group` and `eval_id` are both the parent folder's name. For `<stem>.eval.md`, `group` is the parent folder's name and `eval_id` is the file stem — so several `<stem>.eval.md` files can share one folder. The full test id is `<group>-<eval_id>-<arm>`; artifact paths read `<group>/eval-<eval_id>/`. A duplicate `(group, eval_id)` pair fails loudly at collection, naming both source files.
+
+`<skill-dir>` (for trigger evals) is any directory under the configured eval roots (default `skills/` and `.claude/skills/`; override via `--evalspec-eval-roots` or `[tool.evalspec] eval_roots`). There is no `skill_name` frontmatter for output evals and no suite header — group identity comes entirely from the folder layout above.
+
+`mdformat.py` owns the Markdown structure, `schema.py` owns validation. Both are strict and loud: unknown headings, plain `-` bullets, indented non-checkbox lines, prose outside known sections, grandchild or ragged assertion nesting, and unknown frontmatter keys all fail at pytest collection with the offending path quoted.
 
 ---
 
-## Output evals — the `evals/<slug>/prompt.md` format
+## Output evals — the `eval.md` / `*.eval.md` format
 
-One file per eval. The parent directory name is the `slug` (kebab-case, unique within the suite); it appears in test ids (the full id is `<skill>-<slug>-<arm>`) and artifact paths (`eval-<slug>/`). Optional YAML frontmatter carries `seed:` only, then a required `## Prompt` and a required `## Assertions` checklist.
+One file per eval, named `eval.md` or `<stem>.eval.md`. The eval id is the parent folder name for `eval.md`, or the file stem for `<stem>.eval.md` (both kebab-case); it appears in test ids (the full id is `<group>-<eval_id>-<arm>`) and artifact paths (`<group>/eval-<eval_id>/`). Optional YAML frontmatter carries `history:` only, then a required `## Prompt` and a required `## Assertions` checklist.
 
 ```markdown
 ---
-seed:
+history:
 - role: user
-  text: I dropped a clipping in ./Inbox earlier.
+  content: I dropped a clipping in ./Inbox earlier.
 - role: assistant
-  text: Got it — say the word and I'll file it.
+  content: Got it — say the word and I'll file it.
 ---
 
 ## Prompt
@@ -58,27 +63,29 @@ Children stay plain prose; the binder derives each child's checker exactly as fo
 
 | Part | Required | Notes |
 |---|---|---|
-| `seed` (frontmatter) | no | A list of `{role, text}` turns rendered as a transcript prefix before the graded prompt — prior context. See [Seed](#seed). The **only** frontmatter key. |
+| `history` (frontmatter) | no | A list of `{role, content}` turns rendered as a transcript prefix before the graded prompt — prior context. See [History](#history). The **only** frontmatter key. |
 | `## Prompt` | yes | The agent instruction. `{TODAY}` is substituted; paths are `./`-relative to the working directory. |
 | `## Assertions` | yes | A `- [ ]` checklist; each line's text (after the checkbox) is plain **prose**. Non-empty. A top-level item with indented `- [ ]` children is a display-only header (never graded) whose children flatten to standalone assertions in document order — one nesting level only. H3 subheadings are display-only groups, also flattened in document order; no semantics ride on the H3 title. |
 
 There is no `checks:` field, no `skill_name`, and no `background.md`. Every assertion is plain prose; the **binder** derives the deterministic check at grade time (see [Assertions](#assertions) and `concepts.md`). A `- [ ]` item with indented `- [ ]` children decomposes into one graded atom per child, in document order; the parent line is a display-only header. One nesting level only — a grandchild (any indent deeper than the first child), a ragged child indent, an indented non-checkbox line, an orphan child with no parent, and a plain `-` bullet without a checkbox are all hard errors. A parent and its children must share one `## Assertions` body or one `###` group.
 
-`fixtures/` (a sibling of `prompt.md` under the slug dir) holds the eval's starting files; its contents are copied into the per-cell clean room mounted at `/workspace` before the prompt runs. No fixtures ⇒ an empty workdir.
+`workspace/` (a sibling of the eval file under the group dir) holds the eval's starting files; its contents are copied into the per-cell clean room mounted at `/workspace` before the prompt runs. No `workspace/` ⇒ an empty workdir.
 
-### Seed
+`setup.sh` (also a sibling under the group dir) is this eval's own sandbox setup script — it installs the skill under test, branching on `$EVALSPEC_ARM`, and runs with `cwd` at the group dir. It is per-eval, replacing the old suite-level `evals/setup.sh`; see `configuration.md` / `agents.md`.
 
-`seed:` is an optional list of `{role, text}` turns. It renders into a `<transcript>…</transcript>` block prepended to the graded prompt — render-into-prompt, so prior context works on any agent without session injection. Only the final (graded) prompt is graded; the seed is context.
+### History
+
+`history:` is an optional list of `{role, content}` turns. It renders into a `<transcript>…</transcript>` block prepended to the graded prompt — render-into-prompt, so prior context works on any agent without session injection. Only the final (graded) prompt is graded; the history is context.
 
 ```yaml
-seed:
+history:
 - role: user
-  text: Here's the deadline — Friday.
+  content: Here's the deadline — Friday.
 - role: assistant
-  text: Noted.
+  content: Noted.
 ```
 
-Each turn needs a non-empty `role` and `text`. `{TODAY}` is substituted in `text`; any other `{UPPERCASE}` placeholder is rejected, symmetric with the graded prompt, so a stray token fails the eval rather than leaking to the agent. A malformed seed (non-list, missing/empty field) fails at collection.
+Each turn needs a non-empty `role` and `content`. `{TODAY}` is substituted in `content`; any other `{UPPERCASE}` placeholder is rejected, symmetric with the graded prompt, so a stray token fails the eval rather than leaking to the agent. A malformed history (non-list, missing/empty field) fails at collection.
 
 ### Assertions
 
@@ -98,15 +105,15 @@ Applied before the agent sees the content.
 
 | Placeholder | Substituted as | Where |
 |---|---|---|
-| `{TODAY}` | ISO `YYYY-MM-DD` from the host clock (UTC, for guest agreement) | Prompt, assertions, seed text, fixture files, fixture filenames |
+| `{TODAY}` | ISO `YYYY-MM-DD` from the host clock (UTC, for guest agreement) | Prompt, assertions, history content, workspace files, workspace filenames |
 
-Paths are `./`-relative: the agent runs with its current working directory set to the workdir mount (`/workspace`), so `./Inbox/x` resolves there. Hidden-directory assertions preserve the hidden path component, for example `./.meta/templates/entity-person.md exists` binds to that full relative path. Any `{UPPERCASE_PLACEHOLDER}` other than `{TODAY}` in a prompt or seed fails fast — eval prompts must be spec-free to keep baselines honest. Put the value in the fixture.
+Paths are `./`-relative: the agent runs with its current working directory set to the workdir mount (`/workspace`), so `./Inbox/x` resolves there. Hidden-directory assertions preserve the hidden path component, for example `./.meta/templates/entity-person.md exists` binds to that full relative path. Any `{UPPERCASE_PLACEHOLDER}` other than `{TODAY}` in a prompt or history turn fails fast — eval prompts must be spec-free to keep baselines honest. Put the value in the workspace.
 
 ---
 
 ## `evalspec-trigger/v1` — trigger evals
 
-Trigger evals live in `trigger-evals.md`. Each query becomes one parametrized routing test: invoke the agent against `query` (no fixtures, no judge), assert whether the skill was dispatched. `mdformat.parse_trigger` owns parsing; `schema` validates it.
+Trigger evals live in `trigger-evals.md`. Each query becomes one parametrized routing test: invoke the agent against `query` (no workspace, no judge), assert whether the skill was dispatched. `mdformat.parse_trigger` owns parsing; `schema` validates it.
 
 Structure: YAML frontmatter (`skill_name`), an optional `## Description`, then `## Trigger` and `## No Trigger` sections. Each query is `- <slug>: <query>`; polarity comes from section membership (`## Trigger` → `should_trigger=true`; `## No Trigger` → `should_trigger=false`). An optional `  - fails-on [tiers]: reason` indented under a query marks a known miss or over-fire.
 
@@ -163,10 +170,11 @@ Each rule is a heuristic with an honest level:
 
 ## Validation rules
 
-- A `slug` (the output eval's parent dir) and `skill_name` (trigger frontmatter) must match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case); the query `slug` must be kebab-case and unique within its file.
+- Both `group` and `eval_id` (the output eval's folder name and id) and `skill_name` (trigger frontmatter) must match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case); the query `slug` must be kebab-case and unique within its file.
 - Assertion strings must be non-empty after stripping whitespace; `## Assertions` itself must be non-empty.
-- A seed turn needs a non-empty `role` and `text`; the seed must be a list.
-- The only output-eval frontmatter key is `seed`; the only trigger frontmatter key is `skill_name`. Unknown frontmatter keys, top-level keys, or per-item fields are rejected. Add functionality via a new `$schema` version or a documented field, not by sneaking one in.
+- A history turn needs a non-empty `role` and `content`; `history` must be a list.
+- The only output-eval frontmatter key is `history`; the only trigger frontmatter key is `skill_name`. Unknown frontmatter keys, top-level keys, or per-item fields are rejected. Add functionality via a new `$schema` version or a documented field, not by sneaking one in.
+- A duplicate `(group, eval_id)` pair fails loudly at collection, naming both source files. Per-eval `setup.sh` replaces the old suite-level `evals/setup.sh` script.
 
 Authoritative validator: `evalspec.schema` (plus `evalspec.mdformat` for Markdown structure). When this document drifts, the code wins.
 

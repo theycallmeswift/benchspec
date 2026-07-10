@@ -350,7 +350,7 @@ def run_eval_arm(
     fired_skills = tuple(skills_dispatched(arm_run.trajectory, eval_case.skill))
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
-    # {TODAY} resolves in the prompt, history, and fixtures; the assertions were substituted
+    # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
     merged, judge_ms, judge_errored, binder_degraded = _grade_mixed(
         assertions=graded_assertions,

@@ -68,27 +68,20 @@ arms = [
 ]
 ```
 
-The skill is installed per cell by `skills/hello/evals/setup.sh` — **auto-discovered** at `./evals/setup.sh` (no config key wires it; that's the build-time `environment_script` escape hatch, a different mechanism). It runs once per cell with `cwd` at the skill dir (`/project/skills/hello`) inside the VM and branches on `$EVALSPEC_ARM`: the trial arm copies the skill into the fixed skills home (`/home/evalspec/skills`, which the agent's skill dir symlinks to); the baseline arm no-ops.
-
-`skills/hello/evals/setup.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -e
-if [ "$EVALSPEC_ARM" = "baseline" ]; then
-  exit 0   # baseline installs nothing — measures what the agent already knows
-fi
-mkdir -p /home/evalspec/skills/hello
-cp SKILL.md /home/evalspec/skills/hello/SKILL.md
-```
-
 ## Step 3 — Write the eval
 
-Each output eval is one self-contained file `skills/<skill>/evals/<slug>/prompt.md`; the parent dir name is the slug, and a sibling `fixtures/` (none needed here) holds starting files. There is no suite header.
+Each output eval is one self-contained file, `eval.md` (id = its folder name) or a `<stem>.eval.md` sibling (id = the stem) — a folder can hold several `<stem>.eval.md` files, sharing one `workspace/` and one `setup.sh`. That folder — the eval's **group** — is also the report/artifact-path slot: it's what shows up as `<group>-<eval_id>-<arm>` in test ids and `<group>/eval-<eval_id>/` in artifact paths, so name it after the skill when you want every eval under one skill to land in the same benchmark row. There is no suite header.
 
-`skills/hello/evals/greets-by-name/prompt.md`:
+```bash
+mkdir -p skills/hello/evals/hello
+```
+
+`skills/hello/evals/hello/greets-by-name.eval.md` (group `hello`, eval id `greets-by-name`):
 
 ```markdown
+---
+---
+
 ## Prompt
 
 You are working in a vault rooted at your current working directory. Greet Alice in ./Greetings.
@@ -99,7 +92,21 @@ You are working in a vault rooted at your current working directory. Greet Alice
 - [ ] Skill `hello` invoked
 ```
 
-The agent runs with its current working directory set to the workdir mount (`/workspace`) inside the microVM, so paths are `./`-relative. The agent writes there; the host reads the same dir for grading. Each `- [ ]` line is one plain-prose assertion (a line with indented `- [ ]` children is a display-only header whose children flatten to one assertion each) — keep the `./` anchor so the path reads as a workdir fact (`evalspec lint` warns on a bare, unanchored path). At grade time the binder maps each line to a deterministic host-side checker when confident (the file-content line binds to a checker; the `` Skill `hello` invoked `` line binds to `skill_invoked`), else punts to the judge — you write no checker syntax. See [`schema.md`](schema.md).
+The `---`/`---` frontmatter delimiters are required even with nothing between them — this eval needs no `history:` prefix. The agent runs with its current working directory set to the workdir mount (`/workspace`) inside the microVM, so paths are `./`-relative. The agent writes there; the host reads the same dir for grading. Each `- [ ]` line is one plain-prose assertion (a line with indented `- [ ]` children is a display-only header whose children flatten to one assertion each) — keep the `./` anchor so the path reads as a workdir fact (`evalspec lint` warns on a bare, unanchored path). At grade time the binder maps each line to a deterministic host-side checker when confident (the file-content line binds to a checker; the `` Skill `hello` invoked `` line binds to `skill_invoked`), else punts to the judge — you write no checker syntax. See [`schema.md`](schema.md).
+
+The skill is installed per cell by `skills/hello/evals/hello/setup.sh` — **auto-discovered** relative to the eval group's own directory (no config key wires it; that's the build-time `environment_script` escape hatch, a different mechanism). It runs once per cell with `cwd` at the group dir (`/project/skills/hello/evals/hello`) inside the VM and branches on `$EVALSPEC_ARM`: the trial arm copies the skill into the fixed skills home (`/home/evalspec/skills`, which the agent's skill dir symlinks to); the baseline arm no-ops.
+
+`skills/hello/evals/hello/setup.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -e
+if [ "$EVALSPEC_ARM" = "baseline" ]; then
+  exit 0   # baseline installs nothing — measures what the agent already knows
+fi
+mkdir -p /home/evalspec/skills/hello
+cp ../../SKILL.md /home/evalspec/skills/hello/SKILL.md
+```
 
 Validate the suite parses before booting a VM — `--collect-only` runs discovery without running anything. The `pip install` registered evalspec as a pytest plugin, so plain `pytest` already loads it (no `-p` flag needed):
 
@@ -190,7 +197,7 @@ A Codex judge needs the `codex` CLI installed and on `PATH` with valid credentia
 
 ## Next
 
-- [`schema.md`](schema.md) — the Markdown eval format in full: prose assertions and the binder, the `seed:` prefix, trigger routing, and `evalspec lint`.
+- [`schema.md`](schema.md) — the Markdown eval format in full: prose assertions and the binder, the `history:` prefix, trigger routing, and `evalspec lint`.
 - [`concepts.md`](concepts.md) — vocabulary (arm/set/baseline/fired/errored), lifecycle, artifact layout, honesty contract.
 - [`configuration.md`](configuration.md) — every `--evalspec-*` flag, env var, and `[tool.evalspec]` key.
 - [`agents.md`](agents.md) — `CodingAgent` protocol, switching to OpenCode (`EVALSPEC_AGENT=opencode`), running one suite against both.

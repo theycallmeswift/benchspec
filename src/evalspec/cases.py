@@ -4,8 +4,9 @@ Run via `make evals` (loads `-p evalspec.plugin`), never by `make test`. — thi
 lives outside `tests/`, so the unit run never spawns `claude -p`.
 
 The plugin parametrizes the single `eval_arm` fixture over `(case, arm)` pairs; fixtures
-build the clean room and seed the fixture. The project is mounted for both arms (per-
-cell setup.sh installs the skill), so there is no arm asymmetry at this layer.
+build the clean room and seed the eval's workspace. The project is mounted for both arms
+(the eval's own per-cell setup.sh installs the skill), so there is no arm asymmetry at
+this layer.
 Orchestration lives in `execution.run_eval_arm`; the test body wires fixtures and
 asserts only that the arm ran without an infra error — per-assertion pass/fail is the
 recorded measurement, not a gate.
@@ -110,7 +111,7 @@ def clean_room() -> object:
 
 @pytest.fixture
 def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> object:
-    """Return the workdir prepared from eval fixtures."""
+    """Return the workdir prepared from the eval's workspace."""
     eval_case, _arm = eval_arm
     workdir = clean_room / "workdir"
     pre_run_shas = seed_room(eval_case.workspace_dir, workdir, today)
