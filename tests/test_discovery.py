@@ -150,15 +150,24 @@ def test_discover_ignores_evals_outside_search_paths(tmp_path: object) -> None:
     assert [case.param_id for case in cases] == ["kept-kept"]
 
 
-def test_discover_honors_eval_paths_argument(tmp_path: object) -> None:
-    """Verify an explicit eval_paths list overrides the defaults."""
+def test_discover_defaults_search_skills_not_arbitrary_dirs(tmp_path: object) -> None:
+    """Verify the default search paths find `skills/` evals but not a `probes/` dir."""
     _write_eval(tmp_path, "probes", "custom")
     _write_eval(tmp_path, "skills/real", "kept")
 
-    assert [case.param_id for case in discover_eval_cases(tmp_path)] == ["kept-kept"]
-    assert [case.param_id for case in discover_eval_cases(tmp_path, ["probes"])] == [
-        "custom-custom"
-    ]
+    cases = discover_eval_cases(tmp_path)
+
+    assert [case.param_id for case in cases] == ["kept-kept"]
+
+
+def test_discover_explicit_eval_paths_argument_overrides_defaults(tmp_path: object) -> None:
+    """Verify an explicit eval_paths list replaces the defaults."""
+    _write_eval(tmp_path, "probes", "custom")
+    _write_eval(tmp_path, "skills/real", "kept")
+
+    cases = discover_eval_cases(tmp_path, ["probes"])
+
+    assert [case.param_id for case in cases] == ["custom-custom"]
 
 
 def test_discover_reads_eval_paths_from_pyproject(tmp_path: object) -> None:
@@ -373,20 +382,27 @@ def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
     assert str(bad) in str(exc_info.value)  # the offending file is named
 
 
-def test_resolve_eval_paths_flag_over_pyproject_over_default(tmp_path: object) -> None:
-    """Verify resolve_eval_paths precedence: flag > pyproject > default."""
-    assert discovery.resolve_eval_paths(_FakeConfig(repo_root=str(tmp_path))) == [
-        "skills",
-        "tests",
-        "evals",
-        "benchmarks",
-    ]
+def test_resolve_eval_paths_defaults_when_unset(tmp_path: object) -> None:
+    """Verify resolve_eval_paths falls back to the built-in default paths."""
+    config = _FakeConfig(repo_root=str(tmp_path))
 
+    assert discovery.resolve_eval_paths(config) == ["skills", "tests", "evals", "benchmarks"]
+
+
+def test_resolve_eval_paths_reads_pyproject(tmp_path: object) -> None:
+    """Verify resolve_eval_paths reads [tool.evalspec] eval_paths when no flag is set."""
     (tmp_path / "pyproject.toml").write_text('[tool.evalspec]\neval_paths = ["probes"]\n')
-    assert discovery.resolve_eval_paths(_FakeConfig(repo_root=str(tmp_path))) == ["probes"]
+    config = _FakeConfig(repo_root=str(tmp_path))
 
-    flagged = _FakeConfig(repo_root=str(tmp_path), eval_paths="a, b ,c")
-    assert discovery.resolve_eval_paths(flagged) == ["a", "b", "c"]
+    assert discovery.resolve_eval_paths(config) == ["probes"]
+
+
+def test_resolve_eval_paths_flag_overrides_pyproject(tmp_path: object) -> None:
+    """Verify the CLI flag wins over pyproject and is split on commas."""
+    (tmp_path / "pyproject.toml").write_text('[tool.evalspec]\neval_paths = ["probes"]\n')
+    config = _FakeConfig(repo_root=str(tmp_path), eval_paths="a, b ,c")
+
+    assert discovery.resolve_eval_paths(config) == ["a", "b", "c"]
 
 
 # ---------------------------------------------------------------------------
