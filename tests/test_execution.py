@@ -714,7 +714,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
 
 def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
     """Verify seed block prepended to graded prompt."""
-    # Seed turns are prepended to the graded prompt.
+    # History turns are prepended to the graded prompt.
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -725,9 +725,9 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
         {
             "slug": "seeded",
             "prompt": "the deeper question",
-            "seed": [
-                {"role": "user", "text": "scope my plan"},
-                {"role": "assistant", "text": "which part?"},
+            "history": [
+                {"role": "user", "content": "scope my plan"},
+                {"role": "assistant", "content": "which part?"},
             ],
             "assertions": ["a"],
         },

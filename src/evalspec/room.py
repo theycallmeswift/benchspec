@@ -63,20 +63,20 @@ def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None)
     return shas
 
 
-def render_seed(seed: list[dict] | None, today: str | None = None) -> str:
-    """Render seed turns into the transcript prefix for an agent prompt."""
-    if not seed:
+def render_history(history: list[dict] | None, today: str | None = None) -> str:
+    """Render history turns into the transcript prefix for an agent prompt."""
+    if not history:
         return ""
     lines = ["<transcript>"]
-    for turn_index, turn in enumerate(seed):
+    for turn_index, turn in enumerate(history):
         if not isinstance(turn, dict):
-            raise SchemaError(f"seed[{turn_index}]: turn must be a mapping with role/text")
-        for key in ("role", "text"):
+            raise SchemaError(f"history[{turn_index}]: turn must be a mapping with role/content")
+        for key in ("role", "content"):
             val = turn.get(key)
             if not isinstance(val, str) or not val.strip():
-                raise SchemaError(f"seed[{turn_index}]: missing or non-string `{key}`")
-        text = substitute_prompt(turn["text"], today)
-        lines.append(f"{turn['role']}: {text}")
+                raise SchemaError(f"history[{turn_index}]: missing or non-string `{key}`")
+        content = substitute_prompt(turn["content"], today)
+        lines.append(f"{turn['role']}: {content}")
     lines.append("</transcript>")
     return "\n".join(lines) + "\n\n"
 

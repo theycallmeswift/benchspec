@@ -36,7 +36,7 @@ _TRIG_XFAIL = re.compile(r"^  - fails-on \[([^\]]+)\]: (\S.*)$")
 _TRIG_FM = {"skill_name"}
 _TRIGGER_TITLES = {"Trigger": True, "No Trigger": False}
 
-_EVAL_FM = {"seed"}
+_EVAL_FM = {"history"}
 
 # *.md filenames inside an evals/ dir that are NOT per-slug output evals. Output
 # evals are `evals/<slug>/prompt.md` dirs; the slug-dir glob ignores stray files,
@@ -187,12 +187,12 @@ def parse_eval_md(path: Path) -> dict:
     fm, body_lines = _split_frontmatter(path.read_text(encoding="utf-8"), path)
     _check_fm_keys(fm, _EVAL_FM, path)
     result: dict = {"slug": path.parent.name}
-    if "seed" in fm:
-        # Validate here so the single-file path is as strict as load_suite_dir:
-        # a bare parse_eval_md call (linter, per-file tooling) must still reject a
-        # malformed seed, not defer that to schema._validate inside the suite path.
-        schema._validate_seed(fm["seed"], f"{path}: seed")
-        result["seed"] = fm["seed"]
+    if "history" in fm:
+        # Validate here so the single-file path is as strict as discovery: a bare
+        # parse_eval_md call (linter, per-file tooling) must still reject a malformed
+        # history block, not defer that to schema inside discovery.
+        schema._validate_history(fm["history"], f"{path}: history")
+        result["history"] = fm["history"]
 
     sections = _sections(body_lines, path)
     prompt = None
