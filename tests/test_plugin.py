@@ -95,11 +95,10 @@ def _make_project(
 ) -> None:
     """Create project."""
     (pytester.path / "pyproject.toml").write_text(arms_toml)
-    evals = pytester.path / "skills" / skill / "evals"
-    (evals / "alpha").mkdir(parents=True)
-    (evals / "alpha" / "prompt.md").write_text(ALPHA_MD)
-    (evals / "beta").mkdir(parents=True)
-    (evals / "beta" / "prompt.md").write_text(BETA_MD)
+    evals = pytester.path / "skills" / skill / "evals" / skill
+    evals.mkdir(parents=True)
+    (evals / "alpha.eval.md").write_text(ALPHA_MD)
+    (evals / "beta.eval.md").write_text(BETA_MD)
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
 
@@ -192,10 +191,10 @@ def test_models_flag_sweeps_arms(pytester: object) -> None:
 def test_malformed_schema_fails_collection(pytester: object) -> None:
     """Verify malformed schema fails collection."""
     (pytester.path / "pyproject.toml").write_text(ARMS_TOML)
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    (evals / "bad").mkdir(parents=True)
+    evals = pytester.path / "skills" / "myskill" / "evals" / "myskill"
+    evals.mkdir(parents=True)
     # an unknown `id` frontmatter key violates the self-contained eval schema
-    (evals / "bad" / "prompt.md").write_text(
+    (evals / "bad.eval.md").write_text(
         "---\nid: bad\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n"
     )
     pytester.makepyfile(test_cases=DUMMY_CASES)

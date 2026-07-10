@@ -25,6 +25,6 @@ def test_readme_eval_example_parses(tmp_path: object) -> None:
 
     eval_dir = tmp_path / "demo"
     eval_dir.mkdir()
-    (eval_dir / "prompt.md").write_text(block, encoding="utf-8")
+    (eval_dir / "eval.md").write_text(block, encoding="utf-8")
 
-    parse_eval_md(eval_dir / "prompt.md")  # must not raise
+    parse_eval_md(eval_dir / "eval.md")  # must not raise

@@ -16,12 +16,55 @@ def _write(tmp_path: object, name: object, body: object) -> object:
     return file_path
 
 
+def _write_eval_file(tmp_path: object, group: object, filename: object, body: object) -> object:
+    """Write one evals/<group>/<filename>."""
+    group_dir = tmp_path / group
+    group_dir.mkdir(parents=True, exist_ok=True)
+    (group_dir / filename).write_text(textwrap.dedent(body), encoding="utf-8")
+    return group_dir / filename
+
+
 def _write_slug(tmp_path: object, slug: object, body: object) -> object:
-    """Write slug."""
-    slug_dir = tmp_path / slug
-    slug_dir.mkdir(parents=True, exist_ok=True)
-    (slug_dir / "prompt.md").write_text(textwrap.dedent(body), encoding="utf-8")
-    return slug_dir / "prompt.md"
+    """Write one eval.md whose parent folder (and derived id) is `slug`."""
+    return _write_eval_file(tmp_path, slug, "eval.md", body)
+
+
+def test_parse_eval_md_id_from_folder_for_eval_md(tmp_path: object) -> None:
+    """Verify parse eval md id from folder for eval.md."""
+    path = _write_eval_file(
+        tmp_path,
+        "summarize-transcript",
+        "eval.md",
+        "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n",
+    )
+
+    ev = mdformat.parse_eval_md(path)
+
+    assert ev["id"] == "summarize-transcript"
+
+
+def test_parse_eval_md_id_from_stem_for_dot_eval_md(tmp_path: object) -> None:
+    """Verify parse eval md id from stem for *.eval.md."""
+    path = _write_eval_file(
+        tmp_path,
+        "to-spec-activation",
+        "write-spec.eval.md",
+        "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n",
+    )
+
+    ev = mdformat.parse_eval_md(path)
+
+    assert ev["id"] == "write-spec"
+
+
+def test_parse_eval_md_rejects_non_eval_filename(tmp_path: object) -> None:
+    """Verify parse eval md rejects non-eval filename."""
+    path = _write_eval_file(
+        tmp_path, "g", "prompt.md", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n"
+    )
+
+    with pytest.raises(mdformat.MdFormatError, match="eval.md"):
+        mdformat.parse_eval_md(path)
 
 
 def test_parse_eval_md_minimal(tmp_path: object) -> None:
@@ -52,7 +95,7 @@ def test_parse_eval_md_minimal(tmp_path: object) -> None:
     )
     ev = mdformat.parse_eval_md(eval_path)
 
-    assert ev["slug"] == "single-article"
+    assert ev["id"] == "single-article"
     assert ev["prompt"].startswith("Use the `ingest` skill")
     assert "Second paragraph" in ev["prompt"]
     assert ev["assertions"] == [
@@ -96,7 +139,7 @@ def test_parse_eval_md_with_history(tmp_path: object) -> None:
 
 def test_parse_eval_md_malformed_history_rejected(tmp_path: object) -> None:
     """Verify parse eval md malformed history rejected."""
-    # A bare parse_eval_md call must validate history itself, not defer to load_suite_dir.
+    # A bare parse_eval_md call must validate history itself, not defer to discovery.
     eval_path = _write_slug(
         tmp_path,
         "a",
@@ -265,55 +308,6 @@ def test_bad_yaml_frontmatter_is_loud(tmp_path: object) -> None:
     )
     with pytest.raises(mdformat.MdFormatError, match="frontmatter"):
         mdformat.parse_eval_md(eval_path)
-
-
-def test_load_suite_dir_assembles(tmp_path: object) -> None:
-    """Verify load suite dir assembles."""
-    evals = tmp_path / "evals"
-    _write_slug(evals, "one", "---\n{}\n---\n\n## Prompt\n\np1\n\n## Assertions\n\n- [ ] a1\n")
-    _write_slug(evals, "two", "---\n{}\n---\n\n## Prompt\n\np2\n\n## Assertions\n\n- [ ] a2\n")
-
-    doc = mdformat.load_suite_dir(evals)
-
-    assert doc["$schema"] == "evalspec/v1"
-    assert [e["slug"] for e in doc["evals"]] == ["one", "two"]
-    schema._validate(doc)  # already validated inside, but pin the contract
-
-
-def test_load_suite_dir_rejects_dir_without_prompt(tmp_path: object) -> None:
-    """Verify load suite dir rejects dir without prompt."""
-    # A top-level dir under evals/ with no prompt.md is a half-authored or misnamed
-    # eval — fail loud rather than silently collect zero cases for it.
-    evals = tmp_path / "evals"
-    _write_slug(evals, "real", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n")
-    (evals / "bare").mkdir()
-
-    with pytest.raises(schema.SchemaError, match="bare has no prompt.md"):
-        mdformat.load_suite_dir(evals)
-
-
-def test_load_suite_dir_skips_dunder_tooling_dirs(tmp_path: object) -> None:
-    """Verify load suite dir skips dunder tooling dirs."""
-    evals = tmp_path / "evals"
-    _write_slug(evals, "real", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n")
-    (evals / "__pycache__").mkdir()
-
-    doc = mdformat.load_suite_dir(evals)
-
-    assert [e["slug"] for e in doc["evals"]] == ["real"]
-
-
-def test_load_suite_dir_ignores_per_eval_fixtures_dir(tmp_path: object) -> None:
-    """Verify load suite dir ignores per eval fixtures dir."""
-    # A slug's own fixtures/ lives one level down (evals/<slug>/fixtures), so it is
-    # never iterated as a suite-level dir and never mistaken for an eval.
-    evals = tmp_path / "evals"
-    _write_slug(evals, "real", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n")
-    (evals / "real" / "fixtures").mkdir()
-
-    doc = mdformat.load_suite_dir(evals)
-
-    assert [e["slug"] for e in doc["evals"]] == ["real"]
 
 
 def test_mdformat_error_is_a_schema_error(tmp_path: object) -> None:

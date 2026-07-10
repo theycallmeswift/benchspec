@@ -252,29 +252,29 @@ async def run_setup_sh(
     sandbox: object,
     agent: object,
     *,
-    skill: str,
+    setup_reldir: str,
     arm: str,
     model: str,
     eval_set: str = "",
     arm_env: dict | None = None,
 ) -> None:
-    """Run an eval setup.sh script inside the arm sandbox when present."""
+    """Run an eval's own setup.sh inside the arm sandbox when present.
+
+    Locates the script at `PROJECT_MOUNT/<setup_reldir>/setup.sh` (the eval folder's
+    path relative to the repo root). Missing ⇒ no-op; present ⇒ runs under bash from
+    the eval dir and fails loudly on a nonzero exit. The `EVALSPEC_*` cell env reaches
+    the script.
+    """
     env = {**agent.cell_env(arm=arm, model=model, eval_set=eval_set), **(arm_env or {})}
-    # Missing setup scripts are no-ops; present scripts run under bash and fail loudly.
-    safe_skill = shlex.quote(skill)
+    eval_dir = shlex.quote(f"{PROJECT_MOUNT}/{setup_reldir}")
     script = (
         "set -e\n"
-        "for root in skills .claude/skills; do\n"
-        f'  if [ -d "{PROJECT_MOUNT}/$root/"{safe_skill} ]; then\n'
-        f'    cd "{PROJECT_MOUNT}/$root/"{safe_skill}; break\n'
-        "  fi\n"
-        "done\n"
-        "if [ -f ./evals/setup.sh ]; then bash ./evals/setup.sh; fi"
+        f"if [ -f {eval_dir}/setup.sh ]; then cd {eval_dir}; bash ./setup.sh; fi"
     )
     res = await sandbox.shell(script, env=env, cwd=PROJECT_MOUNT)
     if res.exit_code != 0:
         raise RuntimeError(
-            f"setup.sh failed for skill `{skill}` arm `{arm}` "
+            f"setup.sh failed for `{setup_reldir}` arm `{arm}` "
             f"(exit {res.exit_code}): {res.stderr_text[-2000:]}"
         )
 
@@ -326,7 +326,7 @@ class SandboxSession:
         host_repo_root: object,
         model: object,
         effort: object,
-        skill: str | None = None,
+        setup_reldir: str | None = None,
         arm: str | None = None,
         arm_env: dict | None = None,
         eval_set: str = "",
@@ -346,8 +346,8 @@ class SandboxSession:
         self._arm_env = arm_env
         self._eval_set = eval_set
         self._harness_args = harness_args
-        # Preserve explicit empty arm names; they should reach setup.sh unchanged.
-        self._skill = skill
+        # The eval folder's path relative to the mount; None skips per-cell setup.
+        self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
         self._project_marker = project_marker
 
@@ -361,12 +361,12 @@ class SandboxSession:
             host_repo_root=self._host_repo_root,
         )
         # Install before the artifact baseline so only later agent-authored files surface.
-        if self._skill is not None:
+        if self._setup_reldir is not None:
             try:
                 await run_setup_sh(
                     self._sandbox,
                     self._agent,
-                    skill=self._skill,
+                    setup_reldir=self._setup_reldir,
                     arm=self._arm,
                     model=self._model,
                     eval_set=self._eval_set,
@@ -417,7 +417,7 @@ def arm_session(
     host_repo_root: object,
     model: object,
     effort: object,
-    skill: str | None = None,
+    setup_reldir: str | None = None,
     arm: str | None = None,
     arm_env: dict | None = None,
     eval_set: str = "",
@@ -434,7 +434,7 @@ def arm_session(
         host_repo_root=host_repo_root,
         model=model,
         effort=effort,
-        skill=skill,
+        setup_reldir=setup_reldir,
         arm=arm,
         arm_env=arm_env,
         eval_set=eval_set,

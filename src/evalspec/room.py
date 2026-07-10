@@ -30,12 +30,12 @@ def _text_sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
-def seed_room(fixture_dir: Path | None, workdir: Path, today: str | None = None) -> dict:
-    """Create the clean-room workdir and record its baseline facts."""
+def seed_room(workspace_dir: Path | None, workdir: Path, today: str | None = None) -> dict:
+    """Create the clean-room workdir from the eval's workspace and record baseline facts."""
     workdir.mkdir(parents=True, exist_ok=True)
-    if fixture_dir is None:
+    if workspace_dir is None:
         return {}
-    shutil.copytree(fixture_dir, workdir, dirs_exist_ok=True)
+    shutil.copytree(workspace_dir, workdir, dirs_exist_ok=True)
     if today is not None:
         # 1. Substitute {TODAY} in file contents first (before any path renames).
         for path in sorted(workdir.rglob("*")):

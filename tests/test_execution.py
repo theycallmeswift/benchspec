@@ -54,8 +54,12 @@ def _punt_all(text: object) -> None:
 
 
 def _case(tmp_path: object, eval_obj: object, skill: object = "myskill") -> object:
-    """Build the case test fixture."""
-    return EvalCase(skill_dir=tmp_path / "skills" / skill, eval=eval_obj)
+    """Build the case test fixture — eval_obj is {id, prompt, assertions, history?}."""
+    eval_dir = tmp_path / "skills" / skill / "evals" / eval_obj["id"]
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    return EvalCase(
+        group=skill, eval_dir=eval_dir, eval_file=eval_dir / "eval.md", eval=eval_obj
+    )
 
 
 def fake_session_factory(result: object) -> object:
@@ -91,7 +95,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
     (workdir / "out.md").write_text("result")
     eval_case = _case(
         tmp_path,
-        {"slug": "alpha", "prompt": "work in ./vault", "assertions": ["a1", "a2"]},
+        {"id": "alpha", "prompt": "work in ./vault", "assertions": ["a1", "a2"]},
     )
     session_factory = fake_session_factory(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
@@ -138,7 +142,7 @@ def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> Non
     eval_case = _case(
         tmp_path,
         {
-            "slug": "alpha",
+            "id": "alpha",
             "prompt": "work",
             "assertions": ["file at ./9. Archive/Sources/{TODAY}/x.md"],
         },
@@ -176,7 +180,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     workdir.mkdir()
 
     prose = "the inbox capture is gone"
-    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": [prose]})
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": [prose]})
 
     def bind(text: object) -> object:
         """Bind."""
@@ -218,7 +222,7 @@ def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: object) -> Non
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
-    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a1"]})
 
     def bind(text: object) -> NoReturn:
         """Bind."""
@@ -273,7 +277,7 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
     wd_trial.mkdir()
     eval_case = _case(
         tmp_path,
-        {"slug": "single", "prompt": "perform the task", "assertions": assertions},
+        {"id": "single", "prompt": "perform the task", "assertions": assertions},
         skill="ingest",
     )
     traj = [
@@ -347,7 +351,7 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     wd_base.mkdir()
     eval_case = _case(
         tmp_path,
-        {"slug": "single", "prompt": "perform the task", "assertions": assertions},
+        {"id": "single", "prompt": "perform the task", "assertions": assertions},
         skill="ingest",
     )
 
@@ -395,7 +399,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
 
     eval_case = _case(
         tmp_path,
-        {"slug": "miss", "prompt": "perform the task", "assertions": ["Skill `ingest` invoked"]},
+        {"id": "miss", "prompt": "perform the task", "assertions": ["Skill `ingest` invoked"]},
         skill="ingest",
     )
 
@@ -445,7 +449,7 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
 
     eval_case = _case(
         tmp_path,
-        {"slug": "base", "prompt": "perform the task", "assertions": ["Skill `ingest` invoked"]},
+        {"id": "base", "prompt": "perform the task", "assertions": ["Skill `ingest` invoked"]},
         skill="ingest",
     )
 
@@ -507,7 +511,7 @@ def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
     # The session model comes from the eval_arm configuration.
     workspace.set_current_iteration("iteration_01")
 
-    eval_case = _case(tmp_path, {"slug": "m", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "m", "prompt": "perform the task", "assertions": ["a"]})
     seen = {}
     wd_o = tmp_path / "o"
     wd_o.mkdir()
@@ -533,7 +537,7 @@ def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
     """Verify run eval arm routes sonnet arm model."""
     workspace.set_current_iteration("iteration_01")
 
-    eval_case = _case(tmp_path, {"slug": "m", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "m", "prompt": "perform the task", "assertions": ["a"]})
     seen = {}
     wd_s = tmp_path / "s"
     wd_s.mkdir()
@@ -572,7 +576,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     eval_arm = Arm("trial", "opencode", "anthropic/claude-sonnet-4-6", "high", {})
 
@@ -608,7 +612,7 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     eval_arm = Arm(
         "trial",
@@ -653,7 +657,7 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     eval_arm = Arm("plugin", "claude-code", "opus", harness_args=["--plugin-dir", "/project"])
     session_factory = fake_session_factory(
@@ -686,7 +690,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
 
     run_eval_arm(
@@ -723,7 +727,7 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path,
         {
-            "slug": "seeded",
+            "id": "seeded",
             "prompt": "the deeper question",
             "history": [
                 {"role": "user", "content": "scope my plan"},
@@ -765,7 +769,7 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "noseed", "prompt": "just the prompt", "assertions": ["a"]}
+        tmp_path, {"id": "noseed", "prompt": "just the prompt", "assertions": ["a"]}
     )
     session_factory = fake_session_factory(
         RunResult("noseed", "trial", "out", 1, 1, False, session_id="session-alpha", fired=True),
@@ -798,7 +802,7 @@ def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
 
     eval_case = _case(
         tmp_path,
-        {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]},
+        {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]},
         skill="ingest",
     )
     session_factory = fake_session_factory(
@@ -830,7 +834,7 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "gamma", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "gamma", "prompt": "perform the task", "assertions": ["a"]}
     )
     session_factory = fake_session_factory(
         RunResult("gamma", "baseline", "<timeout>", 0, 0, True),
@@ -870,7 +874,7 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "fail", "prompt": "perform the task", "assertions": ["a1", "a2"]}
+        tmp_path, {"id": "fail", "prompt": "perform the task", "assertions": ["a1", "a2"]}
     )
 
     def grade_fail(assertions: object, *args: object, **kwargs: object) -> object:
@@ -915,7 +919,7 @@ def test_default_judge_config_used_by_default(tmp_path: object) -> None:
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
-    eval_case = _case(tmp_path, {"slug": "mu", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "mu", "prompt": "perform the task", "assertions": ["a"]})
     seen_configs = []
 
     def grade(assertions: object, *args: object, judge_config: object, **kwargs: object) -> object:
@@ -955,7 +959,7 @@ def test_judge_config_param_overrides_default(tmp_path: object) -> None:
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
-    eval_case = _case(tmp_path, {"slug": "nu", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "nu", "prompt": "perform the task", "assertions": ["a"]})
     seen_configs = []
 
     def grade(assertions: object, *args: object, judge_config: object, **kwargs: object) -> object:
@@ -997,7 +1001,7 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "kappa", "prompt": "perform the task", "assertions": ["a1", "a2"]}
+        tmp_path, {"id": "kappa", "prompt": "perform the task", "assertions": ["a1", "a2"]}
     )
 
     def grade_raises(*args: object, **kwargs: object) -> NoReturn:
@@ -1050,7 +1054,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "lam", "prompt": "perform the task", "assertions": ["a1", "a2"]}
+        tmp_path, {"id": "lam", "prompt": "perform the task", "assertions": ["a1", "a2"]}
     )
     agent = ClaudeCodeAgent(auth_value="test-key", version="test-version")
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
@@ -1094,7 +1098,7 @@ def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
 
     run_eval_arm(
@@ -1129,7 +1133,7 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     tool_use_line = json.dumps(
         {
@@ -1208,7 +1212,7 @@ def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
-    eval_case = _case(tmp_path, {"slug": "beta", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "beta", "prompt": "perform the task", "assertions": ["a"]})
 
     run_eval_arm(
         eval_case,
@@ -1243,7 +1247,7 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
 
     (workdir / "note.md").write_text("workdir file")
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     seen = {}
 
@@ -1307,7 +1311,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
 
     eval_case = _case(
         tmp_path,
-        {"slug": "alpha", "prompt": "perform the task", "assertions": ["uses writing-prompts"]},
+        {"id": "alpha", "prompt": "perform the task", "assertions": ["uses writing-prompts"]},
     )
     traj = [
         {
@@ -1378,7 +1382,7 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a1"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a1"]}
     )
     judged = []
 
@@ -1425,7 +1429,7 @@ def test_binder_degraded_counts_once_per_bind_cache_miss_not_per_assertion(
     workdir = tmp_path / "wd"
     workdir.mkdir()
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["dup", "dup"]}
+        tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["dup", "dup"]}
     )
     calls = []
 
@@ -1452,7 +1456,7 @@ def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
-    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a1"]})
 
     outcome = run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
@@ -1474,7 +1478,7 @@ def test_run_eval_arm_propagates_binder_auth_error(tmp_path: object) -> None:
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
-    eval_case = _case(tmp_path, {"slug": "alpha", "prompt": "work", "assertions": ["a1"]})
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a1"]})
 
     def bind(text: object) -> NoReturn:
         raise BinderAuthError("gemini api key rejected")
@@ -1503,7 +1507,7 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path,
         {
-            "slug": "alpha",
+            "id": "alpha",
             "prompt": "perform the task",
             "assertions": ["the file out.md exists", "the file out.md exists"],
         },
@@ -1546,7 +1550,7 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path,
         {
-            "slug": "alpha",
+            "id": "alpha",
             "prompt": "perform the task",
             "assertions": ["the file report.md exists"],
         },
@@ -1593,7 +1597,7 @@ def test_timing_json_contains_token_split(tmp_path: object) -> None:
     workdir.mkdir()
 
     eval_case = _case(
-        tmp_path, {"slug": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
 
     run_eval_arm(
@@ -1636,7 +1640,7 @@ def test_grading_is_self_describing(tmp_path: object) -> None:
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
-    eval_case = _case(tmp_path, {"slug": "rho", "prompt": "perform the task", "assertions": ["a"]})
+    eval_case = _case(tmp_path, {"id": "rho", "prompt": "perform the task", "assertions": ["a"]})
 
     run_eval_arm(
         eval_case,

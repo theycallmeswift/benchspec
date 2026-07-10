@@ -15,9 +15,16 @@ def _doc(evals: list[dict]) -> dict:
     return {"$schema": "evalspec/v1", "evals": evals}
 
 
+def test_is_kebab() -> None:
+    """Verify is kebab."""
+    assert v.is_kebab("write-spec") is True
+    assert v.is_kebab("Write Spec") is False
+    assert v.is_kebab("") is False
+
+
 def test_minimal_eval_ok() -> None:
     """Verify minimal eval ok."""
-    _validate(_doc([{"slug": "happy", "prompt": "do X", "assertions": ["X happened"]}]))
+    _validate(_doc([{"id": "happy", "prompt": "do X", "assertions": ["X happened"]}]))
 
 
 def test_skill_name_rejected() -> None:
@@ -27,7 +34,7 @@ def test_skill_name_rejected() -> None:
             {
                 "$schema": "evalspec/v1",
                 "skill_name": "ingest",
-                "evals": [{"slug": "a", "prompt": "p", "assertions": ["x"]}],
+                "evals": [{"id": "a", "prompt": "p", "assertions": ["x"]}],
             }
         )
 
@@ -39,7 +46,7 @@ def test_checks_key_rejected() -> None:
             _doc(
                 [
                     {
-                        "slug": "a",
+                        "id": "a",
                         "prompt": "p",
                         "assertions": ["x"],
                         "checks": [{"checker": "file_exists", "path": "y"}],
@@ -55,7 +62,7 @@ def test_history_ok() -> None:
         _doc(
             [
                 {
-                    "slug": "seeded",
+                    "id": "seeded",
                     "prompt": "continue",
                     "history": [
                         {"role": "user", "content": "hi"},
@@ -72,7 +79,7 @@ def test_history_missing_content_rejected() -> None:
     """Verify history missing content rejected."""
     with pytest.raises(SchemaError, match="content"):
         _validate(
-            _doc([{"slug": "a", "prompt": "p", "assertions": ["x"], "history": [{"role": "user"}]}])
+            _doc([{"id": "a", "prompt": "p", "assertions": ["x"], "history": [{"role": "user"}]}])
         )
 
 
@@ -83,7 +90,7 @@ def test_history_extra_key_rejected() -> None:
             _doc(
                 [
                     {
-                        "slug": "a",
+                        "id": "a",
                         "prompt": "p",
                         "assertions": ["x"],
                         "history": [{"role": "user", "content": "hi", "name": "alice"}],
@@ -100,7 +107,7 @@ def test_assertions_must_be_strings() -> None:
             _doc(
                 [
                     {
-                        "slug": "a",
+                        "id": "a",
                         "prompt": "p",
                         "assertions": [{"checker": "file_exists", "path": "y"}],
                     }
@@ -112,7 +119,7 @@ def test_assertions_must_be_strings() -> None:
 def test_assertions_empty_string_rejected() -> None:
     """Verify assertions empty string rejected."""
     with pytest.raises(SchemaError, match="non-empty"):
-        _validate(_doc([{"slug": "a", "prompt": "p", "assertions": ["  "]}]))
+        _validate(_doc([{"id": "a", "prompt": "p", "assertions": ["  "]}]))
 
 
 def test_duplicate_slug_rejected() -> None:
@@ -121,8 +128,8 @@ def test_duplicate_slug_rejected() -> None:
         _validate(
             _doc(
                 [
-                    {"slug": "a", "prompt": "p", "assertions": ["x"]},
-                    {"slug": "a", "prompt": "q", "assertions": ["y"]},
+                    {"id": "a", "prompt": "p", "assertions": ["x"]},
+                    {"id": "a", "prompt": "q", "assertions": ["y"]},
                 ]
             )
         )
@@ -137,19 +144,19 @@ def test_empty_evals_rejected() -> None:
 def test_slug_must_be_kebab() -> None:
     """Verify slug must be kebab."""
     with pytest.raises(SchemaError, match="not kebab-case"):
-        _validate(_doc([{"slug": "Bad Slug", "prompt": "p", "assertions": ["x"]}]))
+        _validate(_doc([{"id": "Bad Slug", "prompt": "p", "assertions": ["x"]}]))
 
 
 def test_missing_prompt_rejected() -> None:
     """Verify missing prompt rejected."""
     with pytest.raises(SchemaError, match="prompt"):
-        _validate(_doc([{"slug": "a", "assertions": ["x"]}]))
+        _validate(_doc([{"id": "a", "assertions": ["x"]}]))
 
 
 def test_missing_assertions_shows_example() -> None:
     """Verify missing assertions shows example."""
     with pytest.raises(SchemaError) as ei:
-        _validate(_doc([{"slug": "a", "prompt": "p"}]))
+        _validate(_doc([{"id": "a", "prompt": "p"}]))
     assert 'e.g. "assertions": ["a Resource page was created"]' in str(ei.value)
 
 
@@ -303,17 +310,17 @@ def test_trigger_int_id_now_rejected() -> None:
 def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
     """Verify validate path returns parsed data."""
     f = tmp_path / "evals.json"
-    f.write_text(json.dumps(_doc([{"slug": "ok", "prompt": "p", "assertions": ["a"]}])))
+    f.write_text(json.dumps(_doc([{"id": "ok", "prompt": "p", "assertions": ["a"]}])))
 
     data = v.validate_path(f)
 
-    assert data["evals"][0]["slug"] == "ok"
+    assert data["evals"][0]["id"] == "ok"
 
 
 def test_validate_path_raises_on_bad_schema(tmp_path: object) -> None:
     """Verify validate path raises for on bad schema."""
     f = tmp_path / "evals.json"
-    f.write_text(json.dumps(_doc([{"slug": "Bad Slug", "prompt": "p", "assertions": ["a"]}])))
+    f.write_text(json.dumps(_doc([{"id": "Bad Slug", "prompt": "p", "assertions": ["a"]}])))
     with pytest.raises(v.SchemaError):
         v.validate_path(f)
 

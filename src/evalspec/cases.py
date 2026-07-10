@@ -113,7 +113,7 @@ def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> objec
     """Return the workdir prepared from eval fixtures."""
     eval_case, _arm = eval_arm
     workdir = clean_room / "workdir"
-    pre_run_shas = seed_room(eval_case.fixtures_dir, workdir, today)
+    pre_run_shas = seed_room(eval_case.workspace_dir, workdir, today)
     return workdir, pre_run_shas
 
 
