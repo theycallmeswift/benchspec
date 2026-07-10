@@ -29,7 +29,7 @@ Each arm runs in a clean room outside your project — it can't reach the skill 
 
 An eval has three moving parts: the **skill under test**, the **eval case** (a prompt plus assertions, in Markdown), and the **judge** (a model that grades the resulting transcript). A checklist assertion passes or fails — that's what makes it a test.
 
-Each eval is one self-contained file, `skills/<skill>/evals/<slug>/prompt.md`; the parent dir name is the slug, and a sibling `fixtures/` holds the starting files. There is no suite header. The shape of one — `skills/archive/evals/archive-source-from-inbox/prompt.md`:
+Each eval is one self-contained file, `skills/<skill>/evals/<group>/eval.md` (or a `<stem>.eval.md` sibling when a group holds more than one eval — the eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`). A sibling `workspace/` holds the starting files, and a sibling `setup.sh` handles per-eval sandbox setup. There is no suite header. The shape of one — `skills/archive/evals/archive-source-from-inbox/eval.md`:
 
 ```markdown
 ---
@@ -86,7 +86,7 @@ Section determines polarity (`## Trigger` → should fire; `## No Trigger` → s
 pip install "evalspec[microsandbox,claude]"
 ```
 
-evalspec registers itself as a pytest plugin — no `-p` flag needed. In a repo with `skills/<name>/SKILL.md`, `skills/<name>/evals/<slug>/prompt.md` output evals, an `evals/setup.sh` that branches on `$EVALSPEC_ARM`, and an eval set in `pyproject.toml`:
+evalspec registers itself as a pytest plugin — no `-p` flag needed. In a repo with `skills/<name>/SKILL.md`, `skills/<name>/evals/<group>/eval.md` output evals, a per-eval `setup.sh` that branches on `$EVALSPEC_ARM`, and an eval set in `pyproject.toml`:
 
 ```toml
 [tool.evalspec]

@@ -290,7 +290,7 @@ async def _create_sandbox(
     """Create a microsandbox instance from a snapshot."""
     from microsandbox import Sandbox, Volume
 
-    # The project mounts read-only so setup.sh can install the suite-specific skill.
+    # The project mounts read-only so a per-eval setup.sh can install the suite-specific skill.
     volumes = {GUEST_WORKDIR: Volume.bind(str(host_workdir), readonly=False)}
     if host_repo_root is not None:
         volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)

@@ -1,11 +1,11 @@
 """Clean-room construction and fact-gathering for honest skill-eval runs.
 
-`seed_room` stages an eval's fixture into a workdir outside the project, substitutes
+`seed_room` stages an eval's `workspace/` into a workdir outside the project, substitutes
 `{TODAY}` in file contents and names, and SHA-snapshots the result; `gather_facts`
 snapshots the workdir for the judge. The honesty contract these enforce: the workdir
-holds only the eval's own fixture — no docs, no peers, no project state. The skill
-install itself is a per-cell concern, handled by `setup.sh` inside the sandbox, so the
-arms differ there, not here.
+holds only the eval's own workspace — no docs, no peers, no project state. The skill
+install itself is a per-cell concern, handled by the eval's own `setup.sh` inside the
+sandbox, so the arms differ there, not here.
 """
 
 from __future__ import annotations
