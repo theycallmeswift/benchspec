@@ -1,8 +1,8 @@
 """Discover skill eval files under a repo root and resolve the root itself.
 
-Output evals come from Git's tracked and nonignored untracked files when `repo_root` is
-inside a worktree, with a pruned filesystem walk as the non-Git fallback. Direct
-`evals/<group>/eval.md` / `*.eval.md` files are keyed on the folder-derived
+Output evals are found by walking a configured list of search paths (`eval_paths`,
+default `skills`, `tests`, `evals`, `benchmarks`) under the repo root. Any `eval.md` /
+`*.eval.md` file under a search path is an eval, keyed on the folder-derived
 `(group, eval_id)` pair — one `EvalCase` per eval file. Trigger evals still resolve per
 skill dir under `skills/` and `.claude/skills/` (`evals/trigger-evals.md`), one
 `TriggerCase` per query. Each file is validated at discovery so a malformed eval fails
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +99,8 @@ def resolve_repo_root(config: object) -> Path:
 
 _DEFAULT_EVAL_ROOTS = ["skills", ".claude/skills"]
 
+_DEFAULT_EVAL_PATHS = ["skills", "tests", "evals", "benchmarks"]
+
 _PRUNE_DIRS = frozenset({"tmp", ".git", "__pycache__"})
 
 
@@ -142,6 +143,33 @@ def resolve_eval_roots(config: object) -> list[str]:
     if pyproject_roots is not None:
         return pyproject_roots
     return list(_DEFAULT_EVAL_ROOTS)
+
+
+def _pyproject_eval_paths(repo_root: Path) -> list[str] | None:
+    """Read output-eval search paths from pyproject configuration."""
+    paths = pyproject_table(repo_root).get("eval_paths")
+    if paths is None:
+        return None
+    if not (isinstance(paths, list) and all(isinstance(path, str) for path in paths)):
+        raise schema.SchemaError("[tool.evalspec] eval_paths must be a list of strings")
+    return paths
+
+
+def resolve_eval_paths(config: object) -> list[str]:
+    """Where to search for output evals, in precedence order:.
+
+    --evalspec-eval-paths (comma-separated CLI flag) > [tool.evalspec] eval_paths in
+    pyproject.toml > built-in default (skills, tests, evals, benchmarks). Each path is
+    a repo-root-relative directory whose tree is walked for `eval.md` / `*.eval.md`.
+    """
+    raw = config.getoption("evalspec_eval_paths")
+    if raw:
+        return [path.strip() for path in raw.split(",") if path.strip()]
+    repo_root = resolve_repo_root(config)
+    pyproject_paths = _pyproject_eval_paths(repo_root)
+    if pyproject_paths is not None:
+        return pyproject_paths
+    return list(_DEFAULT_EVAL_PATHS)
 
 
 @dataclass(frozen=True)
@@ -231,159 +259,69 @@ def _is_pruned_dir(name: str) -> bool:
     return name in _PRUNE_DIRS or name.startswith(".")
 
 
-def _git_entries(repo_root: Path) -> list[Path] | None:
-    """Return Git-tracked and nonignored untracked entries, or None outside Git."""
-    git_env = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
-    }
-    try:
-        worktree = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=repo_root,
-            env=git_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    except OSError:
-        return None
-    if worktree.returncode != 0 or worktree.stdout.strip() != b"true":
-        return None
-
-    try:
-        listed = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            cwd=repo_root,
-            env=git_env,
-            capture_output=True,
-            check=False,
-        )
-    except OSError as error:
-        raise schema.SchemaError(f"{repo_root}: git ls-files failed: {error}") from error
-    if listed.returncode != 0:
-        detail = os.fsdecode(listed.stderr).strip() or "unknown error"
-        raise schema.SchemaError(f"{repo_root}: git ls-files failed: {detail}")
-
-    relative_paths = set()
-    for raw_path in listed.stdout.split(b"\0"):
-        if not raw_path:
-            continue
-        relative_path = Path(os.fsdecode(raw_path))
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise schema.SchemaError(f"git ls-files returned out-of-root path: {relative_path}")
-        relative_paths.add(relative_path)
-    return [repo_root / relative_path for relative_path in sorted(relative_paths)]
+def _is_eval_file(name: str) -> bool:
+    """Return whether a filename marks an output eval."""
+    return name == "eval.md" or name.endswith(".eval.md")
 
 
-def _filesystem_entries(repo_root: Path) -> list[Path]:
-    """Return filesystem entries without following pruned or symlinked directories."""
-    entries: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(repo_root):
+def _walk_eval_root(root: Path) -> list[Path]:
+    """Collect eval files under one search path, not following symlinks or fixtures.
+
+    The search path itself is walked verbatim (a dot-prefixed configured root like
+    `.claude/skills` is honored); only its descendants are subject to the prune set. A
+    `workspace/` beside an eval file is that eval's sandbox seed, never a nested eval
+    root, so it is not descended into. An embedded Git repo is a discovery boundary.
+    """
+    eval_files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
         current_dir = Path(dirpath)
-        if current_dir != repo_root and (current_dir / ".git").exists():
+        if current_dir != root and (current_dir / ".git").exists():
             dirnames[:] = []
             continue
-        kept_dirs: list[str] = []
-        for name in sorted(dirnames):
-            child = current_dir / name
-            if _is_pruned_dir(name):
-                continue
-            if name == "workspace" and current_dir.parent.name == "evals":
-                continue
-            if child.is_symlink():
-                entries.append(child)
-                continue
-            kept_dirs.append(name)
-        dirnames[:] = kept_dirs
-        entries.extend(current_dir / name for name in sorted(filenames))
-    return entries
-
-
-def _inside_eval_workspace(relative_path: Path) -> bool:
-    """Return whether a path sits below an `evals/<group>/workspace/` tree."""
-    parts = relative_path.parts
-    return any(
-        part == "evals" and index + 2 < len(parts) and parts[index + 2] == "workspace"
-        for index, part in enumerate(parts)
-    )
-
-
-def _is_eval_file_path(relative_path: Path) -> bool:
-    """Return whether a path has the direct `evals/<group>/<eval file>` shape."""
-    return (
-        len(relative_path.parts) >= 3
-        and relative_path.parts[-3] == "evals"
-        and (
-            relative_path.name == "eval.md" or relative_path.name.endswith(".eval.md")
+        here = sorted(
+            current_dir / name
+            for name in filenames
+            if _is_eval_file(name) and not (current_dir / name).is_symlink()
         )
-    )
+        eval_files.extend(here)
+        has_eval = bool(here)
+        dirnames[:] = [
+            name
+            for name in sorted(dirnames)
+            if not _is_pruned_dir(name)
+            and not (current_dir / name).is_symlink()
+            and not (has_eval and name == "workspace")
+        ]
+    return eval_files
 
 
-def _reject_symlinked_layout(path: Path, relative_path: Path) -> None:
-    """Reject symlinks that could hide or escape an eval group layout."""
-    if not path.is_symlink():
-        return
-    if (
-        relative_path.name == "evals"
-        or (
-            relative_path.parent.name == "evals"
-            and (path.is_dir() or schema.is_kebab(relative_path.name))
-        )
-        or _is_eval_file_path(relative_path)
-    ):
-        raise schema.SchemaError(f"{path}: eval layouts may not use symlinks")
-
-
-def _validate_candidate_path(repo_root: Path, eval_file: Path) -> None:
-    """Require a real eval file under a non-symlinked group inside the repo root."""
-    group_dir = eval_file.parent
-    evals_dir = group_dir.parent
-    if eval_file.is_symlink() or group_dir.is_symlink() or evals_dir.is_symlink():
-        raise schema.SchemaError(f"{eval_file}: eval layouts may not use symlinks")
-    try:
-        group_dir.resolve(strict=True).relative_to(repo_root.resolve(strict=True))
-    except (OSError, ValueError) as error:
-        message = f"{eval_file}: eval group resolves outside the repo root"
-        raise schema.SchemaError(message) from error
-
-
-def _eval_files(repo_root: Path) -> list[Path]:
-    """Return Git-aware output-eval candidates, with a safe filesystem fallback."""
-    entries = _git_entries(repo_root)
-    if entries is None:
-        entries = _filesystem_entries(repo_root)
-
-    candidates: list[Path] = []
-    for path in entries:
-        try:
-            relative_path = path.relative_to(repo_root)
-        except ValueError as error:
-            raise schema.SchemaError(f"{path}: repository entry is outside {repo_root}") from error
-        if any(_is_pruned_dir(part) for part in relative_path.parts[:-1]):
+def _eval_files(repo_root: Path, eval_paths: list[str]) -> list[Path]:
+    """Return output-eval files under each configured search path, deduplicated."""
+    seen: set[Path] = set()
+    for relative_path in eval_paths:
+        root = repo_root / relative_path
+        if root.is_symlink() or not root.is_dir():
             continue
-        if _inside_eval_workspace(relative_path):
-            continue
-        if path.is_symlink() and _is_pruned_dir(relative_path.name):
-            continue
-        _reject_symlinked_layout(path, relative_path)
-        if not _is_eval_file_path(relative_path) or not path.is_file():
-            continue
-        _validate_candidate_path(repo_root, path)
-        candidates.append(path)
-    return sorted(candidates)
+        seen.update(_walk_eval_root(root))
+    return sorted(seen)
 
 
-def discover_eval_cases(repo_root: Path) -> list[EvalCase]:
-    """Discover Markdown output evals from repository candidate files.
+def discover_eval_cases(
+    repo_root: Path, eval_paths: list[str] | None = None
+) -> list[EvalCase]:
+    """Discover Markdown output evals under the configured search paths.
 
-    Raises `schema.SchemaError` on a non-kebab `group`/`eval_id` or a duplicate
-    `(group, eval_id)` pair, naming both source files.
+    `eval_paths` are repo-root-relative directories to walk for `eval.md` / `*.eval.md`
+    (default: skills, tests, evals, benchmarks; falls back to `[tool.evalspec]
+    eval_paths` when not given). Raises `schema.SchemaError` on a non-kebab
+    `group`/`eval_id` or a duplicate `(group, eval_id)` pair, naming both source files.
     """
+    if eval_paths is None:
+        pyproject_paths = _pyproject_eval_paths(repo_root)
+        eval_paths = pyproject_paths if pyproject_paths is not None else _DEFAULT_EVAL_PATHS
     seen: dict[tuple[str, str], Path] = {}
     cases: list[EvalCase] = []
-    for eval_file in _eval_files(repo_root):
+    for eval_file in _eval_files(repo_root, eval_paths):
         group_dir = eval_file.parent
         group = group_dir.name
         parsed = mdformat.parse_eval_md(eval_file)

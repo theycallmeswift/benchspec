@@ -116,15 +116,15 @@ def _collect(pytester: object, *extra: object) -> object:
     )
 
 
-def test_help_describes_repo_wide_output_and_trigger_only_roots(pytester: object) -> None:
+def test_help_describes_output_and_trigger_search_paths(pytester: object) -> None:
     """Verify discovery option help distinguishes output and trigger evals."""
     result = pytester.runpytest("-p", "evalspec.plugin", "--help")
 
     output = " ".join(result.stdout.str().split())
     assert result.ret == 0
-    assert "repository root for repo-wide output-eval discovery" in output
     assert "trigger evals only" in output
-    assert "Output evals are discovered repo-wide" in output
+    assert "output evals only" in output
+    assert "skills, tests, evals, benchmarks" in output
 
 
 def test_cross_product_of_evals_and_arms(pytester: object) -> None:

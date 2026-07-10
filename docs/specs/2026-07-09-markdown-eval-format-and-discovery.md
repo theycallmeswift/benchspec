@@ -1,4 +1,6 @@
-**TL;DR** — Replace skill-root eval discovery with Git-aware, repo-wide discovery of `eval.md` / `*.eval.md` under `evals/<group>/`, rename the frontmatter `seed:[{role,text}]` block to `history:[{role,content}]`, move per-eval `fixtures/` → `workspace/` and suite-level `setup.sh` → per-eval `setup.sh`, and key cases on a folder-derived id no longer tied to a skill directory — Phase 3 of the #1 roadmap.
+**TL;DR** — Replace skill-root eval discovery with search-path discovery of `eval.md` / `*.eval.md` files (walk a configured `eval_paths` list, default `skills`, `tests`, `evals`, `benchmarks`; filename is the marker), rename the frontmatter `seed:[{role,text}]` block to `history:[{role,content}]`, move per-eval `fixtures/` → `workspace/` and suite-level `setup.sh` → per-eval `setup.sh`, and key cases on a folder-derived id no longer tied to a skill directory — Phase 3 of the #1 roadmap.
+
+> **Post-review revision (2026-07-10):** the original design shipped a Git-aware, repo-wide crawl (`git ls-files --exclude-standard`, filesystem fallback). Review flagged that coupling discovery to VCS/`.gitignore` state undermines reproducibility for a benchmark tool (global excludes, git-vs-tarball divergence, silent drops). Replaced with an explicit `eval_paths` allowlist: deterministic, no VCS coupling, and vendor/build trees are excluded by not being on the list rather than by `.gitignore`. The bullets below are updated to the shipped design.
 
 ## Problem
 
@@ -14,12 +16,12 @@
 ## Solution
 
 ```text
-**/evals/                     # eligible repo-wide; Git tracks + nonignored untracked files
-  summarize-transcript/       # non-Git fallback walks; source-path prunes apply in both
+skills/ (or tests/, evals/, benchmarks/, …)  # a configured eval_paths search path
+  …/summarize-transcript/     # <group>/ — any depth under a search path; filename is the marker
     workspace/transcript.md   # copied into the sandbox workdir (was fixtures/)
     setup.sh                  # per-eval sandbox setup (was one suite-level script)
     eval.md                   # id = folder name  →  group `summarize-transcript`
-  to-spec-activation/
+  …/to-spec-activation/
     write-spec.eval.md        # id = file stem    →  group `to-spec-activation`, eval `write-spec`
     prd-migration.eval.md
 ```
@@ -36,11 +38,11 @@ history:                      # renamed from `seed:`
 - [ ] A file exists at `./brief.md`
 ```
 
-Discovery finds eligible `eval.md` / `*.eval.md` files repo-wide, keys each case on a `(group, eval_id)` pair derived from the folder and filename, and fails loudly on a duplicate pair; the format, workspace, and setup renames follow mechanically.
+Discovery walks each configured search path for `eval.md` / `*.eval.md` files, keys each case on a `(group, eval_id)` pair derived from the folder and filename, and fails loudly on a duplicate pair; the format, workspace, and setup renames follow mechanically.
 
 ## User Stories
 
-1. As an eval author, I want **to drop `eval.md` under any `evals/` folder**, so I place evals by product concern without learning the skill-root layout or a `[tool.evalspec] eval_roots` list.
+1. As an eval author, I want **to drop `eval.md` under any `<group>/` folder beneath a search path**, so I place evals by product concern (under `skills/`, `tests/`, `evals/`, `benchmarks/`, or a path I add to `eval_paths`) without the rigid skill-root `evals/<slug>/prompt.md` layout.
 2. As an eval author, I want **sibling `*.eval.md` files in one folder**, so a compact suite of related probes (e.g. activation cases) shares one `workspace/` and `setup.sh` without a dir-per-case.
 3. As an eval author, I want **`history:` with `role`/`content` turns**, so prior chat context reads the way every other agent format writes it.
 4. As an eval author, I want **a per-eval `setup.sh`**, so one eval installs its own preconditions instead of every eval in a folder sharing one suite script.
@@ -48,10 +50,10 @@ Discovery finds eligible `eval.md` / `*.eval.md` files repo-wide, keys each case
 ## Implementation Decisions
 
 ```text
-repo_root ──► discovery.discover_eval_cases
-                └─ enumerate eligible eval files repo-wide  (Git-aware; walk fallback)
-                     ├─ evals/<folder>/eval.md          ─┐
-                     └─ evals/<folder>/*.eval.md         ─┤
+repo_root ──► discovery.discover_eval_cases(repo_root, eval_paths)
+                └─ for each search path: os.walk for eval.md / *.eval.md
+                     ├─ <search-path>/…/<folder>/eval.md      ─┐
+                     └─ <search-path>/…/<folder>/*.eval.md     ─┤
                                                           ▼
                            mdformat.parse_eval_md ──► schema._validate_evals_v1
                                                           ▼
@@ -62,16 +64,17 @@ repo_root ──► discovery.discover_eval_cases
         copy workspace/ → workdir   bash PROJECT_MOUNT/<reldir>/setup.sh   …/<group>/eval-<eval_id>/<arm>/
 ```
 
-- **Eval discovery becomes repo-wide, Git-aware enumeration, decoupled from `eval_roots`.** Inside a Git worktree, `discover_eval_cases` reads NUL-delimited `git ls-files --cached --others --exclude-standard -z` output, so tracked and nonignored untracked evals are eligible while ignored build/vendor trees are not. A failed Git enumeration is a hard error.
-  - Outside a Git worktree, discovery falls back to a top-down filesystem walk that does not follow symlinks.
-  - Both paths prune `tmp/`, `.git`, `__pycache__`, and dot-prefixed components; accept only direct `evals/<group>/{eval.md,*.eval.md}` files; and skip candidates below an outer `evals/<group>/workspace/` without suppressing unrelated nested `evals/` roots.
-  - Symlinked `evals/` roots, group directories, and eval files are unsupported and fail loudly, as does a group resolving outside the repo root.
+- **Eval discovery walks a configured `eval_paths` allowlist, decoupled from `eval_roots`.** `discover_eval_cases(repo_root, eval_paths)` walks each search path (default `skills`, `tests`, `evals`, `benchmarks`; resolvable via `--evalspec-eval-paths` > `[tool.evalspec] eval_paths` > default). The filename is the marker: any `eval.md` / `*.eval.md` under a search path is an eval, `group` = its parent folder — no `evals/` ancestor required.
+  - The walk does not follow symlinks (a symlinked group dir or eval file is skipped, not an error) and treats an embedded Git repo (`.git` present) as a boundary.
+  - Within a search path it prunes `tmp/`, `.git`, `__pycache__`, and every dot-prefixed dir; a configured search path that is itself dot-prefixed (e.g. `.claude/skills`) is still walked. A `workspace/` beside an eval file is that eval's sandbox seed and is never descended into.
+  - Vendor/build trees are excluded by not being on `eval_paths` — no `.gitignore` coupling. (Superseded the original Git-aware crawl; see the post-review revision note above.)
   - `[tool.evalspec] eval_roots` and `--evalspec-eval-roots` govern trigger discovery only (below) until Phase 4 removes triggers.
+  - **Deferred to Phase 5 (`evalspec run`):** positional path overrides — `evalspec run <paths…>` narrowing `eval_paths` the way `pytest tests/` narrows `testpaths`. The pytest plugin owns positional argv, so Phase 3 ships flag + config only.
 - **Case identity is a `(group, eval_id)` pair, folder-derived, preserving the two-axis artifact path.** The existing path is `…/<skill>/eval-<eval_id>/<arm>/sample-K`; `group` takes the `<skill>` slot and `eval_id` the eval slot, so `workspace.arm_dir`, `execution` grading records, and report keys need no shape change this phase.
   - `eval.md` → `group` = eval folder name, `eval_id` = same folder name.
   - `<stem>.eval.md` → `group` = eval folder name, `eval_id` = `<stem>`.
   - `param_id` = `f"{group}-{eval_id}"`; both segments must be kebab-case (schema already enforces this on the id).
-- **Duplicate `(group, eval_id)` pairs fail loudly at collection.** Repo-wide discovery can surface `a/evals/happy/eval.md` and `b/evals/happy/eval.md` — the old `_skill_dirs` raised on duplicate skill names and this preserves that guard as a `SchemaError` naming both source paths. A single loud fail replaces path-qualified ids; a richer collision scheme is deferred to Phase 6/8 if folder-name clashes prove common in practice.
+- **Duplicate `(group, eval_id)` pairs fail loudly at collection.** Two search paths can surface the same `<group>/eval.md` (e.g. `skills/happy/eval.md` and `tests/happy/eval.md`) — the old `_skill_dirs` raised on duplicate skill names and this preserves that guard as a `SchemaError` naming both source paths. A single loud fail replaces path-qualified ids; a richer collision scheme is deferred to Phase 6/8 if folder-name clashes prove common in practice.
 - **The frontmatter block renames `seed` → `history` and `text` → `content`; the flatten stays.** `mdformat._EVAL_FM = {"history"}`, `parse_eval_md` reads `fm["history"]`, `schema._validate_seed` becomes `_validate_history` (keys `{role, content}`), and `_validate_evals_v1`'s `allowed_eval` swaps `seed`→`history`. `room.render_seed` → `render_history`, still flattening turns into the prompt prefix — no real multi-turn replay is introduced here (single-turn task execution is unchanged).
 - **`fixtures/` → `workspace/`, relocated into the eval folder.** `EvalCase.fixtures_dir` becomes `workspace_dir = eval_dir / "workspace"`; `room.seed_room` copies it into the workdir exactly as before. For `*.eval.md` siblings, all cases in the folder share the one `workspace/` (the vision's compact-suite intent).
 - **`setup.sh` moves from one suite-level script to per-eval, located by the eval's relative dir.** `run_setup_sh` no longer `cd`s into `skills/<skill>/` by name; it runs `bash PROJECT_MOUNT/<eval_dir_relpath>/setup.sh` when that file exists, passing the eval dir relpath (from repo root) through `SandboxSession`. `EVALSPEC_*` cell-env vars (arm, model, harness, set) still reach the script. For `*.eval.md` siblings, all cases in the folder share the one `setup.sh`.
@@ -82,7 +85,7 @@ repo_root ──► discovery.discover_eval_cases
 ## Testing Plan
 
 ### Logic
-- **Discovery finds both filename shapes under any eligible `evals/` depth** — Git worktrees include tracked and nonignored untracked evals; non-Git roots use the filesystem fallback; source-path prunes, targeted `workspace/` exclusion, and symlink rejection behave identically in both modes.
+- **Discovery finds both filename shapes at any depth under a search path** — `eval.md` and `<stem>.eval.md` are found by filename with no `evals/` ancestor required; evals outside `eval_paths` are ignored; an explicit `eval_paths` argument and `[tool.evalspec] eval_paths` both override the default; within-root prunes, `workspace/` exclusion, embedded-repo boundary, and symlink skipping all hold.
 - **Identity derivation is correct and collisions fail loudly** — folder name and file stem map to `(group, eval_id)` per the rules above, and two evals resolving to the same pair raise a `SchemaError` naming both paths rather than silently colliding.
 - **The `history` format parses to the same internal shape the old `seed` did** — `history:[{role, content}]` validates, renders into the prompt prefix, and rejects the old `seed`/`text` keys and malformed turns.
 - **Format strictness is preserved** — the `## Prompt` / `## Assertions` checklist rules, H3 grouping, and loud-failure behavior carry over unchanged from `prompt.md` to `eval.md`.
@@ -102,7 +105,7 @@ repo_root ──► discovery.discover_eval_cases
 ## Documentation Plan
 
 - **`docs/schema.md`**: document `eval.md` / `*.eval.md` discovery, the `history:[{role, content}]` frontmatter, the per-eval `workspace/` and `setup.sh`, and the `(group, eval_id)` identity + duplicate rule.
-- **`src/evalspec/discovery.py`** + **`src/evalspec/mdformat.py`** module docstrings: rewrite the skill-root / `prompt.md` / `seed` descriptions to the repo-wide layout.
+- **`src/evalspec/discovery.py`** + **`src/evalspec/mdformat.py`** module docstrings: rewrite the skill-root / `prompt.md` / `seed` descriptions to the search-path layout.
 - **`src/evalspec/room.py`** + **`src/evalspec/sandbox.py`** docstrings: `fixtures/`→`workspace/` and suite-level→per-eval `setup.sh`.
 - **`README.md` / `docs/quickstart.md`**: update any eval-authoring example that shows the `skills/<skill>/evals/<slug>/prompt.md` shape.
 
@@ -114,7 +117,7 @@ repo_root ──► discovery.discover_eval_cases
 - Real multi-turn `history` replay — `history` flattens into the prompt prefix as `seed` did; genuine turn-by-turn execution is not introduced.
 - Authoring new README-shaped contract suites in this layout — Phase 9; this phase makes the layout discoverable, not populated.
 - `evalspec lint` / `evalspec run` CLI surfaces — Phase 5, though `lint.py`'s internal path is updated here to keep it working.
-- Migrating evals that live under `.claude/skills/**`. The dot-dir prune drops that subtree from output discovery, so downstream consumers with real output evals there lose eval discovery with no migration path (trigger discovery under `.claude/` is unaffected — it stays on the old skill-root path).
+- Adding `.claude/skills` (or other non-default locations) to the default output search paths. Output evals there are simply not discovered unless the path is added to `eval_paths` — no code change is needed to support it, only config. Trigger discovery under `.claude/` is unaffected (it stays on the `eval_roots` skill-root path).
 
 ## References
 
@@ -131,6 +134,6 @@ repo_root ──► discovery.discover_eval_cases
 ## Verification
 
 - `make lint` — the package and docs pass lint after the discovery rewrite and renames.
-- `make test` — offline suites green: Git-aware and fallback discovery of both filename shapes with pruning, `(group, eval_id)` derivation and the duplicate-pair `SchemaError`, `history` parse/validate/render, and the `prompt.md`/`seed`/`fixtures` removals.
+- `make test` — offline suites green: search-path discovery of both filename shapes with within-root pruning, `eval_paths` override (argument + pyproject + default precedence), evals outside the search paths ignored, `(group, eval_id)` derivation and the duplicate-pair `SchemaError`, `history` parse/validate/render, and the `prompt.md`/`seed`/`fixtures` removals.
 - `grep -rEn "prompt\.md|\bseed\b|fixtures_dir|_skill_dirs" src/evalspec` — returns only the trigger-discovery / historical-doc references that legitimately survive; no eval-discovery path still reads the old shapes.
 - `make evals SET=<a-workspace-and-setup-eval>` — a live arm run proves a discovered `eval.md` stages its `workspace/`, runs its per-eval `setup.sh`, and writes artifacts under `…/<group>/eval-<eval_id>/`.

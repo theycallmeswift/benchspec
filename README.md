@@ -29,7 +29,7 @@ Each arm runs in a clean room outside your project — it can't reach the skill 
 
 An eval has three moving parts: the **skill under test**, the **eval case** (a prompt plus assertions, in Markdown), and the **judge** (a model that grades the resulting transcript). A checklist assertion passes or fails — that's what makes it a test.
 
-Output evals are discovered repo-wide. Each is one self-contained file under any `**/evals/<group>/` directory: use `eval.md`, or a `<stem>.eval.md` sibling when a group holds more than one eval. The eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`. A sibling `workspace/` holds the starting files, and a sibling `setup.sh` handles per-eval sandbox setup. There is no suite header. The shape of one — `skills/archive/evals/archive-source-from-inbox/eval.md`:
+Output evals are discovered by walking a configured set of search paths (`skills`, `tests`, `evals`, `benchmarks` by default; set your own with `[tool.evalspec] eval_paths`). Each is one self-contained file under any `<group>/` directory beneath a search path: use `eval.md`, or a `<stem>.eval.md` sibling when a group holds more than one eval. The eval id is the folder name for `eval.md`, or the file stem for `<stem>.eval.md`. A sibling `workspace/` holds the starting files, and a sibling `setup.sh` handles per-eval sandbox setup. There is no suite header. The shape of one — `skills/archive/evals/archive-source-from-inbox/eval.md`:
 
 ```markdown
 ---
@@ -86,7 +86,7 @@ Section determines polarity (`## Trigger` → should fire; `## No Trigger` → s
 pip install "evalspec[microsandbox,claude]"
 ```
 
-evalspec registers itself as a pytest plugin — no `-p` flag needed. In a repo with `skills/<name>/SKILL.md`, an output eval under `**/evals/<group>/`, a per-eval `setup.sh` that branches on `$EVALSPEC_ARM`, and an eval set in `pyproject.toml`:
+evalspec registers itself as a pytest plugin — no `-p` flag needed. In a repo with `skills/<name>/SKILL.md`, an output eval under a search path (`skills/…/<group>/`), a per-eval `setup.sh` that branches on `$EVALSPEC_ARM`, and an eval set in `pyproject.toml`:
 
 ```toml
 [tool.evalspec]

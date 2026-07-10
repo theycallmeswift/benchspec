@@ -29,6 +29,7 @@ from evalspec.discovery import (
     discover_eval_cases,
     discover_trigger_cases,
     pyproject_table,
+    resolve_eval_paths,
     resolve_eval_roots,
     resolve_repo_root,
 )
@@ -60,8 +61,8 @@ def pytest_addoption(parser: object) -> None:
     group.addoption(
         "--evalspec-repo-root",
         default=None,
-        help="repository root for repo-wide output-eval discovery and project-relative paths "
-        "(default: $PROJECT_ROOT, else rootdir)",
+        help="repository root that output-eval search paths resolve against, plus "
+        "project-relative paths (default: $PROJECT_ROOT, else rootdir)",
     )
     group.addoption(
         "--evalspec-models",
@@ -133,7 +134,16 @@ def pytest_addoption(parser: object) -> None:
             "trigger evals only: comma-separated paths (relative to repo root) to scan for",
             "skill dirs containing evals/trigger-evals.md (default: skills, .claude/skills;",
             "also overridable via [tool.evalspec] eval_roots in pyproject.toml).",
-            "Output evals are discovered repo-wide.",
+            "Output eval search paths are set separately via --evalspec-eval-paths.",
+        ),
+    )
+    group.addoption(
+        "--evalspec-eval-paths",
+        default=None,
+        help=_help(
+            "output evals only: comma-separated paths (relative to repo root) to walk for",
+            "eval.md / *.eval.md (default: skills, tests, evals, benchmarks;",
+            "also overridable via [tool.evalspec] eval_paths in pyproject.toml).",
         ),
     )
     group.addoption(
@@ -657,7 +667,7 @@ def pytest_generate_tests(metafunc: object) -> None:
         # One eval set per run — uniform columns across every skill (resolved once, not
         # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
         repo_root = resolve_repo_root(metafunc.config)
-        cases = discover_eval_cases(repo_root)
+        cases = discover_eval_cases(repo_root, resolve_eval_paths(metafunc.config))
         # Resolve the set only when there are eval cases to cross with — a trigger-only
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
         arms = resolved_run_set(metafunc.config).arms if cases else []

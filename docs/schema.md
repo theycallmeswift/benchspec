@@ -3,18 +3,16 @@
 Output evals and trigger (routing) evals are both **Markdown**.
 
 ```
-**/evals/<group>/eval.md          # id = folder name
-**/evals/<group>/<stem>.eval.md   # id = file stem (siblings share the folder)
-**/evals/<group>/workspace/       # optional starting files, copied into /workspace
-**/evals/<group>/setup.sh         # optional per-eval sandbox setup
-skills/<skill>/evals/trigger-evals.md  # evalspec-trigger/v1 (unchanged this phase)
+<search-path>/…/<group>/eval.md          # id = folder name
+<search-path>/…/<group>/<stem>.eval.md   # id = file stem (siblings share the folder)
+<search-path>/…/<group>/workspace/       # optional starting files, copied into /workspace
+<search-path>/…/<group>/setup.sh         # optional per-eval sandbox setup
+skills/<skill>/evals/trigger-evals.md    # evalspec-trigger/v1 (unchanged this phase)
 ```
 
-Output-eval discovery is repo-wide and Git-aware. Inside a Git worktree, evalspec enumerates tracked files plus nonignored untracked files with `git ls-files --cached --others --exclude-standard -z`; a failed Git enumeration is a hard error. Outside a Git worktree, it falls back to a top-down filesystem walk that does not follow symlinks. Both modes prune `tmp/` (the artifact root), `.git`, `__pycache__`, and every dot-prefixed path component.
+Output-eval discovery walks a configured list of **search paths** (`eval_paths`, default `skills`, `tests`, `evals`, `benchmarks`) under the repo root. Any `eval.md` / `*.eval.md` file anywhere beneath a search path is an eval — the filename is the marker, so no `evals/` ancestor is required, and `group` is the eval file's parent folder. Set your own with `[tool.evalspec] eval_paths` or `--evalspec-eval-paths`. The walk does not follow symlinks (a symlinked group or eval file is skipped, not an error), treats an embedded Git repo as a boundary, and prunes `tmp/`, `.git`, `__pycache__`, and every dot-prefixed directory *within* a search path (a dot-prefixed path you configure as a search path, e.g. `.claude/skills`, is still walked). A `workspace/` beside an eval file is that eval's sandbox seed and is never descended into.
 
-A candidate must be an existing file directly under `evals/<group>/`, named `eval.md` or `*.eval.md`. Nested `evals/` roots elsewhere remain eligible; only candidates below an outer `evals/<group>/workspace/` are skipped, because that subtree is workspace seed data. Symlinked `evals/` roots, group directories, and eval files are unsupported and fail loudly, as does a group that resolves outside the repository root.
-
-Output discovery is decoupled from `eval_roots` (below). **The dot-dir prune excludes `.claude/`, so output evals placed under `.claude/skills/**/evals/` are never discovered** — only `skills/` (or any other non-dot path) works for output evals. Trigger discovery is unaffected by this prune: it still resolves `evals/trigger-evals.md` per skill dir under the configured eval roots (default `skills/` and `.claude/skills/`), so a skill's trigger evals under `.claude/skills/` keep working even though output evals there would not.
+Output discovery (`eval_paths`) is independent of trigger discovery (`eval_roots`, below). Nothing under a path outside `eval_paths` is discovered as an output eval — to place output evals under `.claude/skills/` (or any other non-default location), add that path to `eval_paths`.
 
 Case identity is the pair `(group, eval_id)`. For `eval.md`, `group` and `eval_id` are both the parent folder's name. For `<stem>.eval.md`, `group` is the parent folder's name and `eval_id` is the file stem — so several `<stem>.eval.md` files can share one folder. The full test id is `<group>-<eval_id>-<arm>`; artifact paths read `<group>/eval-<eval_id>/`. A duplicate `(group, eval_id)` pair fails loudly at collection, naming both source files.
 
