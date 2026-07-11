@@ -60,7 +60,7 @@ _BINDING_PROMPT = textwrap.dedent(
     <primitives>
     Each spec is a JSON object with a `checker` field plus that checker's args:
     - file_exists  {{"checker":"file_exists","path":"<rel/path>"}}
-      (optional "should_exist": false to assert absence)
+    - file_absent  {{"checker":"file_absent","path":"<rel/path>"}}  (the path must NOT exist)
     - glob_count   {{"checker":"glob_count","glob":"<pattern>","count":<int>}}
       (use EITHER "count" XOR "min", never both)
     - frontmatter_has {{"checker":"frontmatter_has","path":"<rel/path>","key":"<key>"}}
@@ -70,8 +70,11 @@ _BINDING_PROMPT = textwrap.dedent(
       {{"checker":"sha256_match","path":"<rel/path>","original":"<named-pre-run-file>"}}
       (or "sha256":"<64 hex>")
     - skill_invoked {{"checker":"skill_invoked","skill":"<skill-name>"}}
-    Canonical skill-activation assertion line:
-    `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}}.
+    - not_skill_invoked {{"checker":"not_skill_invoked","skill":"<skill-name>"}}
+    A negative matcher (`file_absent`, `not_skill_invoked`) is its own primitive, not a
+    flag: bind the negation of a checkable fact to it. Canonical skill-activation lines:
+    `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}};
+    `- Skill \\`X\\` not invoked` → {{"checker":"not_skill_invoked","skill":"X"}}.
     </primitives>
 
     <rules>
@@ -110,9 +113,10 @@ _BINDING_PROMPT = textwrap.dedent(
     Punt when an assertion bundles two facts with "and" (e.g. "the file exists and is
     accurate") — one object checks one fact.
 
-    DIRECTORIES — file_exists tests whether a path EXISTS as a file or a directory, so a BARE
-    existence claim about a folder ("the directory X was created", "X no longer exists") binds
-    to file_exists with that path. A claim that ALSO says what the directory contains — "exists
+    DIRECTORIES — file_exists / file_absent test whether a path EXISTS as a file or a directory,
+    so a BARE existence claim about a folder ("the directory X was created") binds to file_exists,
+    and a BARE absence claim ("X no longer exists", "the directory X was removed") binds to
+    file_absent, with that path. A claim that ALSO says what the directory contains — "exists
     and contains all six templates", "holds the seven PARA folders" — is compound: punt. A bare
     file count with an explicit glob ("exactly 3 files match notes/*.md") still binds glob_count,
     but "contains all the right files" is NOT a count — glob_count can't tell the right files
@@ -134,6 +138,12 @@ _BINDING_PROMPT = textwrap.dedent(
 
     Assertion: - Skill `my-skill` invoked
     {{"checker":"skill_invoked","skill":"my-skill"}}
+
+    Assertion: - Skill `my-skill` not invoked
+    {{"checker":"not_skill_invoked","skill":"my-skill"}}
+
+    Assertion: the ./tmp/scratch.md file no longer exists
+    {{"checker":"file_absent","path":"tmp/scratch.md"}}
 
     Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl
     (the active session source)
@@ -374,29 +384,35 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
 
 
 def _bind_skill_invoked(assertion_text: str) -> dict | None:
-    """Bind a canonical skill-activation assertion to a skill_invoked checker spec.
+    """Bind a canonical skill-activation assertion to a (not_)skill_invoked spec.
 
-    Recognizes both polarities offline — `` Skill `X` invoked `` and `` Skill `X` not
-    invoked `` — so the canonical activation line never reaches the model. The negative
-    form especially must bind here: the Gemini prompt's negation rule always punts it to
-    the judge, defeating the deterministic negative form. Looser phrasings fail the
-    fullmatch and fall through to the model.
+    Recognizes both polarities offline — `` Skill `X` invoked `` binds `skill_invoked`,
+    `` Skill `X` not invoked `` binds `not_skill_invoked`. Binding the negative here keeps
+    it deterministic and free rather than leaving it to the model. Looser phrasings fail
+    the fullmatch and fall through to the model.
     """
     text = _LIST_MARKER_RE.sub("", assertion_text.strip()).strip()
     match = _SKILL_INVOKED_RE.fullmatch(text)
     if not match:
         return None
-    spec = {
-        "type": "deterministic",
-        "checker": "skill_invoked",
-        "skill": match.group("skill"),
-        "expected": not match.group("neg"),
-    }
+    checker = "not_skill_invoked" if match.group("neg") else "skill_invoked"
+    spec = {"type": "deterministic", "checker": checker, "skill": match.group("skill")}
     try:
         _validate_checker_obj(spec, "binder")
     except SchemaError:
         return None
     return spec
+
+
+def skill_invoked_target(assertion_text: str) -> str | None:
+    """Return the skill a canonical activation assertion names, or None.
+
+    Both polarities yield the skill (`` Skill `X` invoked `` and `` Skill `X` not
+    invoked `` → `X`), so a runner can collect activation candidates without reaching
+    into the offline binder or re-implementing the recognizer.
+    """
+    spec = _bind_skill_invoked(assertion_text)
+    return spec["skill"] if spec else None
 
 
 def _parse_binding(text: str) -> dict | None:

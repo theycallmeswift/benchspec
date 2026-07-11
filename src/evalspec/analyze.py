@@ -50,7 +50,7 @@ def classify_assertion(text: str, *, bind: Callable[[str], dict | None] = binder
     spec = bind(text)
     if spec is None:
         return "judge-backed"
-    if spec["checker"] == "skill_invoked":
+    if spec["checker"] in {"skill_invoked", "not_skill_invoked"}:
         return "activation"
     return "deterministic"
 
@@ -94,11 +94,13 @@ def run(repo_root: Path) -> int:
     """
     binder.preflight_gemini_key()
     classifications = analyze_repo(repo_root)
+
     current = None
     for classification in classifications:
         if classification.file != current:
             print(f"\n{classification.file}")
             current = classification.file
         print(f"  {classification.label:<13}  {classification.assertion}")
+
     print(f"\n{len(classifications)} assertion(s)")
     return 0

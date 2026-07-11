@@ -160,18 +160,21 @@ def test_missing_assertions_shows_example() -> None:
     assert 'e.g. "assertions": ["a Resource page was created"]' in str(ei.value)
 
 
-def test_skill_invoked_accepts_expected_bool() -> None:
-    """Verify a skill_invoked checker with an `expected` boolean validates."""
-    _validate_checker_obj(
-        {"checker": "skill_invoked", "skill": "x", "expected": True}, "root"
-    )
+def test_not_skill_invoked_validates() -> None:
+    """Verify the negative activation checker validates with just a skill."""
+    _validate_checker_obj({"checker": "not_skill_invoked", "skill": "x"}, "root")
 
 
-def test_skill_invoked_rejects_non_bool_expected() -> None:
-    """Verify a non-bool `expected` raises SchemaError."""
-    with pytest.raises(SchemaError, match="expected"):
+def test_file_absent_validates() -> None:
+    """Verify the negative existence checker validates with just a path."""
+    _validate_checker_obj({"checker": "file_absent", "path": "x"}, "root")
+
+
+def test_skill_invoked_rejects_legacy_expected_flag() -> None:
+    """Verify the retired `expected` polarity flag is now an unknown field."""
+    with pytest.raises(SchemaError, match="unknown field"):
         _validate_checker_obj(
-            {"checker": "skill_invoked", "skill": "x", "expected": "yes"}, "root"
+            {"checker": "skill_invoked", "skill": "x", "expected": True}, "root"
         )
 
 

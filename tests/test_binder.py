@@ -115,20 +115,29 @@ def test_bind_skill_invoked() -> None:
         "type": "deterministic",
         "checker": "skill_invoked",
         "skill": "ingest",
-        "expected": True,
     }
 
 
-def test_bind_skill_not_invoked_binds_expected_false_offline() -> None:
-    """Verify the negative activation line binds offline to expected:false, no model call."""
+def test_bind_skill_not_invoked_binds_not_skill_invoked_offline() -> None:
+    """Verify the negative activation line binds offline to not_skill_invoked, no model call."""
     spec = bind("Skill `codex` not invoked", call_model=_fail_call_model)
 
     assert spec == {
         "type": "deterministic",
-        "checker": "skill_invoked",
+        "checker": "not_skill_invoked",
         "skill": "codex",
-        "expected": False,
     }
+
+
+def test_skill_invoked_target_returns_skill_for_both_polarities() -> None:
+    """Verify the candidate helper yields the skill name for positive and negative lines."""
+    assert binder.skill_invoked_target("Skill `ingest` invoked") == "ingest"
+    assert binder.skill_invoked_target("Skill `ingest` not invoked") == "ingest"
+
+
+def test_skill_invoked_target_returns_none_for_non_activation() -> None:
+    """Verify a non-activation assertion yields no candidate skill."""
+    assert binder.skill_invoked_target("the file report.md exists") is None
 
 
 def test_bind_skill_invoked_namespaced_token() -> None:

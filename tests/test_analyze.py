@@ -24,9 +24,11 @@ _ACTIVATION_FIXTURE = Path(__file__).parent / "fixtures" / "activation"
 
 
 def _bind_like_binder(text: object) -> object:
-    """Bind stub mirroring the real binder for the three canonical assertion shapes."""
+    """Bind stub mirroring the real binder for the canonical assertion shapes."""
     if text == "Skill `ingest` invoked":
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
+    if text == "Skill `ingest` not invoked":
+        return {"type": "deterministic", "checker": "not_skill_invoked", "skill": "ingest"}
     if text == "a file exists at ./notes.md":
         return {"type": "deterministic", "checker": "file_exists", "path": "./notes.md"}
     return None
@@ -58,6 +60,13 @@ def _write_eval(
 def test_classify_assertion_labels_activation() -> None:
     """Verify a bound skill_invoked spec classifies as activation."""
     label = analyze.classify_assertion("Skill `ingest` invoked", bind=_bind_like_binder)
+
+    assert label == "activation"
+
+
+def test_classify_assertion_labels_negative_activation() -> None:
+    """Verify a bound not_skill_invoked spec also classifies as activation."""
+    label = analyze.classify_assertion("Skill `ingest` not invoked", bind=_bind_like_binder)
 
     assert label == "activation"
 

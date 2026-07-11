@@ -90,7 +90,7 @@ Each turn needs a non-empty `role` and `content`. `{TODAY}` is substituted in `c
 
 ### Assertions
 
-Every `## Assertions` entry is plain prose. The **binder** classifies each one at grade time: when confident, it maps the prose to one of six deterministic **checkers** (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`) run on the host against the final workdir or process facts; otherwise it **punts** to the LLM judge. Authors write no checker syntax — there is none to learn. The split is invisible from the suite. See `concepts.md` for the binder's contract.
+Every `## Assertions` entry is plain prose. The **binder** classifies each one at grade time: when confident, it maps the prose to a deterministic **checker** (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`, plus the negative matchers `file_absent` and `not_skill_invoked`) run on the host against the final workdir or process facts; otherwise it **punts** to the LLM judge. Authors write no checker syntax — there is none to learn. The split is invisible from the suite. See `concepts.md` for the binder's contract.
 
 One family of assertions is special by convention: **activation**. Write it in one of two polarities:
 
@@ -99,10 +99,12 @@ One family of assertions is special by convention: **activation**. Write it in o
 - [ ] Skill `codex` not invoked
 ```
 
-The binder recognizes both lines **offline** (no Gemini call) and maps them to the `skill_invoked` checker, which grades against the arm's dispatched-skills set. The checker carries an `expected` boolean:
+The binder recognizes both lines **offline** (no Gemini call) and maps each polarity to its own checker, both grading against the arm's dispatched-skills set:
 
-- `` Skill `X` invoked `` → `expected: true` (the default when omitted). Passes when `X` is in the dispatched set.
-- `` Skill `X` not invoked `` → `expected: false`. A **membership-absence** check — passes when `X` is *not* in the dispatched set.
+- `` Skill `X` invoked `` → `skill_invoked`. Passes when `X` is in the dispatched set.
+- `` Skill `X` not invoked `` → `not_skill_invoked`. A **membership-absence** check — passes when `X` is *not* in the dispatched set.
+
+Negation is always a distinct checker name (`not_skill_invoked`, `file_absent`), never a polarity flag — the spec reads unambiguously and the binder picks an explicit primitive. More negative matchers get added as evals need them.
 
 The skill token may be plain or backticked and may be namespaced (`plugin:ingest`); a fired `plugin:ingest` satisfies an assertion written against `ingest` (exact-or-namespaced match). Both are ordinary prose assertions graded symmetrically across arms — there is no separate invocation gate. On a trial arm (skill installed) the positive form passes and the negative form of that same skill fails; on a baseline arm (no skill) the positive form fails and the negative form passes.
 
@@ -111,7 +113,7 @@ The skill token may be plain or backticked and may be namespaced (`plugin:ingest
 **Two distinct axes — don't conflate them.** A `skill_invoked` assertion sits on two orthogonal axes:
 
 - **Checker family** — the `type` field in `grading.json`. `skill_invoked` is a **`deterministic`** checker, the same family as `file_exists` or `regex`; it records `type: deterministic`, not `type: activation`. There is no `type: activation` and no `type: skill_invoked` in the grading artifact.
-- **Evidence domain** — the label `evalspec analyze` prints. `analyze` reports `skill_invoked` as **`activation`**: a deterministic checker whose evidence is a *process fact* (which skills the arm dispatched) rather than the workdir. The five file checkers analyze as `deterministic`; `skill_invoked` analyzes as `activation`; a punt analyzes as `judge-backed`.
+- **Evidence domain** — the label `evalspec analyze` prints. `analyze` reports the activation checkers as **`activation`**: a deterministic checker whose evidence is a *process fact* (which skills the arm dispatched) rather than the workdir. The workdir checkers analyze as `deterministic`; `skill_invoked` and `not_skill_invoked` analyze as `activation`; a punt analyzes as `judge-backed`.
 
 So one activation assertion is `type: deterministic` in `grading.json` **and** `activation` under `analyze` — the first names how it grades, the second names what evidence it reads.
 

@@ -21,7 +21,7 @@ from pathlib import Path
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
-from evalspec.binder import _bind_skill_invoked
+from evalspec.binder import skill_invoked_target
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
@@ -348,24 +348,20 @@ def run_eval_arm(
         )
     )
 
-    # Activation is graded off the arm's actually-dispatched skills — empty on a non-firing
-    # arm (skill_invoked then grades False, never an error). Candidates are the skills the
-    # eval itself asserts on (bound offline, no Gemini), never the group name — so an eval
-    # whose group differs from its asserted skills still grades every asserted skill.
-    candidates = {
-        spec["skill"]
-        for assertion in eval_case.assertions
-        if (spec := _bind_skill_invoked(assertion))
+    # Activation grades off the skills the eval actually asserts on — its own
+    # (not_)skill_invoked lines, never the group name, so an eval whose group differs
+    # from its asserted skills still grades every one.
+    candidate_skills = {
+        skill for assertion in eval_case.assertions if (skill := skill_invoked_target(assertion))
     }
-    # (i) every real Skill-tool fire, target-independent; (ii) fallback-shape fires for
-    # asserted skills — recovered per candidate so no group name feeds detection.
+
+    # Fired skills = every real Skill-tool fire (target-independent) plus each candidate's
+    # fallback-shape fire, deduped first-seen so the evidence list stays stable.
     dispatched = list(skills_dispatched(arm_run.trajectory))
-    for candidate in candidates:
-        dispatched.extend(skills_dispatched(arm_run.trajectory, candidate))
-    # A skill caught by both the no-arg Skill-tool pass and its per-candidate fallback pass
-    # would appear twice; collapse to one while keeping first-seen order so the evidence
-    # list stays stable and readable rather than order-shuffled by set().
+    for skill in candidate_skills:
+        dispatched.extend(skills_dispatched(arm_run.trajectory, skill))
     fired_skills = tuple(dict.fromkeys(dispatched))
+
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
