@@ -3,6 +3,8 @@ mode: advisory
 paths:
   - .
 rules:
+  - id: no-suppression-comments
+    description: Do not use lint or type-check suppression comments.
   - id: section-header-comments
     description: Do not use region-style comments instead of named structure.
   - id: provenance-comments

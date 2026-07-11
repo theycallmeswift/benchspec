@@ -83,9 +83,7 @@ select = [
     "PT",     # flake8-pytest-style: pytest-specific readability rules.
     "B",      # flake8-bugbear: likely bugs and surprising Python behavior.
     "A",      # flake8-builtins: avoid shadowing Python builtins.
-    "PGH003", # pygrep-hooks: require codes on type-ignore suppressions.
-    "PGH004", # pygrep-hooks: require codes on noqa suppressions.
-    "RUF100", # Ruff: remove stale noqa suppressions.
+    "RUF100", # Ruff: remove stale noqa suppressions while houserules bans suppressions.
 ]
 
 [tool.ruff.lint.pydocstyle]
