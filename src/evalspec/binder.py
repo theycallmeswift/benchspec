@@ -60,7 +60,7 @@ _BINDING_PROMPT = textwrap.dedent(
     <primitives>
     Each spec is a JSON object with a `checker` field plus that checker's args:
     - file_exists  {{"checker":"file_exists","path":"<rel/path>"}}
-    - file_absent  {{"checker":"file_absent","path":"<rel/path>"}}
+    - not_file_exists  {{"checker":"not_file_exists","path":"<rel/path>"}}
     - glob_count   {{"checker":"glob_count","glob":"<pattern>","count":<int>}}
       (use EITHER "count" XOR "min", never both)
     - frontmatter_has {{"checker":"frontmatter_has","path":"<rel/path>","key":"<key>"}}
@@ -71,10 +71,10 @@ _BINDING_PROMPT = textwrap.dedent(
       (or "sha256":"<64 hex>")
     - skill_invoked {{"checker":"skill_invoked","skill":"<skill-name>"}}
     - not_skill_invoked {{"checker":"not_skill_invoked","skill":"<skill-name>"}}
-    file_absent binds ONLY a bare claim that the path ITSELF is gone ("X no longer exists",
+    not_file_exists binds ONLY a bare claim that the path ITSELF is gone ("X no longer exists",
     "X was removed"). "No <thing> was written / created / added to <path>" is a persistence
     claim — the path may well exist and the check would false-positive — so it PUNTS under A9,
-    never file_absent. Canonical skill-activation lines:
+    never not_file_exists. Canonical skill-activation lines:
     `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}};
     `- Skill \\`X\\` not invoked` → {{"checker":"not_skill_invoked","skill":"X"}}.
     Bind (not_)skill_invoked ONLY for such a bare one-skill line. A longer sentence that ALSO
@@ -118,10 +118,10 @@ _BINDING_PROMPT = textwrap.dedent(
     Punt when an assertion bundles two facts with "and" (e.g. "the file exists and is
     accurate") — one object checks one fact.
 
-    DIRECTORIES — file_exists / file_absent test whether a path EXISTS as a file or a directory,
+    DIRECTORIES — file_exists / not_file_exists test whether a path EXISTS as a file or a directory,
     so a BARE existence claim about a folder ("the directory X was created") binds to file_exists,
     and a BARE absence claim ("X no longer exists", "the directory X was removed") binds to
-    file_absent, with that path. A claim that ALSO says what the directory contains — "exists
+    not_file_exists, with that path. A claim that ALSO says what the directory contains — "exists
     and contains all six templates", "holds the seven PARA folders" — is compound: punt. A bare
     file count with an explicit glob ("exactly 3 files match notes/*.md") still binds glob_count,
     but "contains all the right files" is NOT a count — glob_count can't tell the right files
@@ -153,11 +153,11 @@ _BINDING_PROMPT = textwrap.dedent(
       written' and an intent claim; not_skill_invoked checks only one bare activation line"}}
 
     Assertion: the ./tmp/scratch.md file no longer exists
-    {{"checker":"file_absent","path":"tmp/scratch.md"}}
+    {{"checker":"not_file_exists","path":"tmp/scratch.md"}}
 
     Assertion: No new 'archive' entry was written to ./.meta/logs/{{TODAY}}.md
     {{"punt": true, "reason": "A9 persistence-negation — the log path exists; 'no new entry
-      was written' is a contents/absence-of-action claim, not a path-absence file_absent sees"}}
+      was written' is a contents/absence-of-action claim, not a path-absence not_file_exists sees"}}
 
     Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl
     (the active session source)

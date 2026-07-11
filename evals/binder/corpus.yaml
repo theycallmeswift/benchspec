@@ -70,7 +70,7 @@ binds:
   - The ./.meta/logs/ directory exists
   - The ./.meta/templates/ directory exists
   - ./1. Profile/whoami.md exists
-  file_absent:
+  not_file_exists:
   - The folder no longer exists at ./0. Inbox/pycon-keynote/ — it was moved out of the Inbox
   - ./tmp/scratch.md no longer exists
   - The ./.obsidian/workspace.json file does not exist

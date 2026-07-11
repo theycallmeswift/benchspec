@@ -58,7 +58,7 @@ def derive_text(spec: dict) -> str:
     if checker == "frontmatter_has":
         tail = f" = {spec['value']}" if "value" in spec else ""
         return f"{spec['path']} frontmatter has {spec['key']}{tail}"
-    if checker == "file_absent":
+    if checker == "not_file_exists":
         return f"the file {spec['path']} does not exist"
     if checker == "skill_invoked":
         return f"Skill `{spec['skill']}` invoked"
@@ -110,7 +110,7 @@ def _file_exists(
     """Report whether the checker's path is present in the clean-room root.
 
     exists(), not is_file(): a path present as a file OR a directory counts, so "the
-    folder X was created" is checkable. `file_absent` negates this via _negated.
+    folder X was created" is checkable. `not_file_exists` negates this via _negated.
     """
     exists = _resolve(spec["path"], workdir).exists()
     return exists, f"{spec['path']} {'exists' if exists else 'absent'}"
@@ -241,7 +241,7 @@ def _negated(checker: Checker) -> Checker:
 
 _CHECKERS = {
     "file_exists": _file_exists,
-    "file_absent": _negated(_file_exists),
+    "not_file_exists": _negated(_file_exists),
     "glob_count": _glob_count,
     "sha256_match": _sha256_match,
     "frontmatter_has": _frontmatter_has,

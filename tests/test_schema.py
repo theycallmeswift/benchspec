@@ -165,9 +165,9 @@ def test_not_skill_invoked_validates() -> None:
     _validate_checker_obj({"checker": "not_skill_invoked", "skill": "x"}, "root")
 
 
-def test_file_absent_validates() -> None:
+def test_not_file_exists_validates() -> None:
     """Verify the negative existence checker validates with just a path."""
-    _validate_checker_obj({"checker": "file_absent", "path": "x"}, "root")
+    _validate_checker_obj({"checker": "not_file_exists", "path": "x"}, "root")
 
 
 def test_skill_invoked_rejects_legacy_expected_flag() -> None:

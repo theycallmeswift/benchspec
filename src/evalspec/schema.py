@@ -19,13 +19,13 @@ _ID_KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 # checker -> (required keys, optional keys). Key types live in _CHECKER_KEY_TYPES.
-# Negation is a distinct checker name (`file_absent`, `not_skill_invoked`) sharing its
+# Negation is a distinct checker name (`not_file_exists`, `not_skill_invoked`) sharing its
 # positive counterpart's fields, not a polarity flag — so a spec reads unambiguously and
 # the binder picks an explicit primitive. Only the two currently-useful negatives exist;
 # more (`regex_absent`, `frontmatter_missing`, …) get added the same way as evals need them.
 _CHECKER_FIELDS = {
     "file_exists": ({"path"}, set()),
-    "file_absent": ({"path"}, set()),
+    "not_file_exists": ({"path"}, set()),
     "glob_count": ({"glob"}, {"count", "min"}),
     "sha256_match": ({"path"}, {"original", "sha256"}),
     "frontmatter_has": ({"path", "key"}, {"value"}),

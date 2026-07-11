@@ -185,7 +185,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     def bind(text: object) -> object:
         """Bind."""
         return {
-            "checker": "file_absent",
+            "checker": "not_file_exists",
             "path": "./gone.md",
             "type": "deterministic",
         }

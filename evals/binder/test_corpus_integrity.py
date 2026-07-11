@@ -51,7 +51,7 @@ CORPUS = _load_corpus(CORPUS_PATH)
 
 _CHECKERS = {
     "file_exists",
-    "file_absent",
+    "not_file_exists",
     "glob_count",
     "sha256_match",
     "frontmatter_has",
@@ -138,10 +138,10 @@ def test_skill_invoked_binds_present() -> None:
 def test_negative_matchers_bind_present() -> None:
     """Ensure the corpus exercises the negative matchers so the gate guards their binding.
 
-    `not_skill_invoked` binds offline; `file_absent` binds via the model — both must stay
+    `not_skill_invoked` binds offline; `not_file_exists` binds via the model — both must stay
     binds, never punts, and target their own checker.
     """
-    for checker in ("not_skill_invoked", "file_absent"):
+    for checker in ("not_skill_invoked", "not_file_exists"):
         entries = [entry for entry in CORPUS if entry["cohort"] == checker]
         assert entries, f"{checker} has no corpus bind entries"
         for entry in entries:

@@ -38,9 +38,9 @@ def test_file_exists_pass_and_fail(workdir: object) -> None:
     assert "absent" in result["evidence"]
 
 
-def test_file_absent_passes_on_missing(workdir: object) -> None:
-    """Verify file_absent passes when the path is missing."""
-    spec = {"type": "deterministic", "checker": "file_absent", "path": "missing.md"}
+def test_not_file_exists_passes_on_missing(workdir: object) -> None:
+    """Verify not_file_exists passes when the path is missing."""
+    spec = {"type": "deterministic", "checker": "not_file_exists", "path": "missing.md"}
     assert _run(spec, workdir)["passed"] is True
 
 
@@ -50,9 +50,9 @@ def test_file_exists_matches_a_directory(workdir: object) -> None:
     assert _run(spec, workdir)["passed"] is True
 
 
-def test_file_absent_fails_on_present_directory(workdir: object) -> None:
-    """Verify file_absent fails when the path is present as a directory."""
-    spec = {"type": "deterministic", "checker": "file_absent", "path": "Greetings"}
+def test_not_file_exists_fails_on_present_directory(workdir: object) -> None:
+    """Verify not_file_exists fails when the path is present as a directory."""
+    spec = {"type": "deterministic", "checker": "not_file_exists", "path": "Greetings"}
     assert _run(spec, workdir)["passed"] is False
 
 
