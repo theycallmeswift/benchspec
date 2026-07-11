@@ -64,6 +64,46 @@ A fully-classified suite exits 0 (a classification is a report, not a warning �
 
 Because binding reuses the real binder, `analyze` needs **`GEMINI_API_KEY`** set (same key the graded run needs — see [Environment variables](#environment-variables)); it fails fast if the key is missing or empty. Spend follows the binder's own fast-path split: the local bare-exists recognizer (`file_exists`) bills **nothing**, while every other assertion — activation lines included — pays one Gemini punt-or-bind call.
 
+## Running a benchmark — `evalspec run`
+
+`evalspec run [root]` (`python -m evalspec run [root]`) resolves one eval set, runs its `(eval × arm)` cells under pytest, and grades them — the same path `make evals` drives, behind a curated flag vocabulary. Each flag is shorthand for the underlying `--evalspec-*` pytest option; the option's semantics are documented in [CLI flags](#cli-flags-pytest-or-make-evals-eval_args) below.
+
+| `evalspec run` flag | pytest option |
+|---|---|
+| `--set` | `--evalspec-set` |
+| `--config` | `--evalspec-config` |
+| `--model` | `--evalspec-model` |
+| `--models` | `--evalspec-models` |
+| `--harness` | `--evalspec-harness` |
+| `--effort` | `--evalspec-effort` |
+| `--eval-paths` | `--evalspec-eval-paths` |
+| `--fail-under` | `--evalspec-fail-under` |
+| `--judge-harness` | `--evalspec-judge-harness` |
+| `--judge-model` | `--evalspec-judge-model` |
+| `--judge-effort` | `--evalspec-judge-effort` |
+| `--env` | `--evalspec-env` (repeatable `KEY=VAL`) |
+
+Anything after a standalone `--` passes through to pytest verbatim, so power-user selectors and pytest options still work: `evalspec run --set default -- -k archive -x --collect-only`. The curated surface is deliberately narrower than the full `--evalspec-*` set — reach for `--` (or drive `pytest` directly) for the rest.
+
+### Exit codes
+
+All four `evalspec` subcommands (`lint`, `analyze`, `run`, `sandbox:build`) share one contract:
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | a finding or gate failure — `lint` warnings, or a `run --fail-under` gate tripped |
+| `2` | usage error — a bad flag, an unknown `--set`, or an unreadable `--config`, caught before any paid arm runs |
+| `5` | nothing to do — no evals discovered under `root` |
+
+`run` detects an empty selection **up front** — it reuses the plugin's own discovery before spawning pytest — so a root with no evals returns `5` with a readable message and never boots a VM. One consequence of that ordering: because emptiness short-circuits first, a bad `--set` (or an unreadable `--config`) against an **empty** root also returns `5`, not `2` — the set and config are only validated once there are cells to parametrize. The exit-`2`-for-a-bad-set contract therefore holds for a **populated** repo.
+
+## Building the sandbox — `evalspec sandbox:build`
+
+`evalspec sandbox:build [root]` builds (or reuses) the microsandbox snapshot for the repo's agent up front, so the first `evalspec run` doesn't pay the build cost. It resolves the agent and environment from `root` alone; a failed host preflight exits `2`, a build failure exits `1`.
+
+> **Bare in Phase 5.** The spec sketches `evalspec sandbox:build --set default`, but this phase ships the **bare** form with no `--set`/`--config`: a single-agent, root-resolved build doesn't vary by eval set (so `--set` would be inert), and threading `--config` into environment resolution lands in a later phase. Use `evalspec sandbox:build [root]`.
+
 ## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
 
 | Flag | Default | Notes |
@@ -200,6 +240,8 @@ In the host plugin's Makefile (external consumers replicate as needed):
 | `make evals EVAL_ARGS="-k …"` | Wraps `pytest -p evalspec.plugin`. Runs the `default-set`. |
 | `make evals SET=<name>` | Resolve a named set instead of `default-set` (forwards `--evalspec-set <name>`). Combine with `EVAL_ARGS` for scope/overrides. |
 | `make evals:build` | Builds the microsandbox snapshot up front for the current `EVALSPEC_AGENT`. |
+
+`make evals` and `make evals:build` predate the `evalspec` subcommands and stay as-is for now; they may become thin aliases for [`evalspec run`](#running-a-benchmark--evalspec-run) / [`evalspec sandbox:build`](#building-the-sandbox--evalspec-sandboxbuild) in a later phase (the `evals` → `e2e` target rename is deferred to Phase 9).
 
 ## Cross-agent runs
 
