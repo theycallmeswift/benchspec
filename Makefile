@@ -1,4 +1,4 @@
-.PHONY: help install test evals evals\:binder lint clean
+.PHONY: help install test evals evals\:binder lint lint-ruff lint-houserules clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -20,8 +20,19 @@ evals\:binder:  ## Alias for `make evals` while the binder corpus is the only li
 
 LINT_BASE ?= origin/dev
 lint:  ## Lint with Ruff and houserules
+	$(MAKE) lint-ruff
+	$(MAKE) lint-houserules
+
+lint-ruff:  ## Lint with Ruff
 	uv run ruff check .
-	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .
+
+lint-houserules:  ## Lint changed lines with houserules (needs GEMINI_API_KEY)
+	@untracked="$$(git ls-files --others --exclude-standard -- '*.py')"; \
+	if [ -n "$$untracked" ]; then git add -N -- $$untracked; fi; \
+	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .; \
+	rc=$$?; \
+	if [ -n "$$untracked" ]; then git reset -q -- $$untracked; fi; \
+	exit $$rc
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
