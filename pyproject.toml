@@ -7,7 +7,7 @@ name = "evalspec"
 dynamic = ["version"]
 description = "A pytest-native runner for coding-agent skill evals, sandboxed under microsandbox."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Swift", email = "swift@majorleaguehacking.com" }]
 classifiers = [
@@ -16,7 +16,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -38,7 +37,7 @@ testing = []
 
 [dependency-groups]
 dev = [
-    "houserules>=0.1.0,<1.0.0",
+    "houserules>=0.1.1,<1.0.0",
     "pytest>=8",
     "pytest-xdist>=3",
     "pytest-repeat>=0.9,<1",
