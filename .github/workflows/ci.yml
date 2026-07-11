@@ -56,7 +56,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run Ruff
-        run: make lint-ruff
+        run: make lint:ruff
 
       # Model-backed houserules needs the Gemini secret, which GitHub withholds
       # from fork PRs. Ruff above still runs for forks; only gate this step.
@@ -64,4 +64,4 @@ jobs:
         if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: make lint-houserules LINT_BASE=origin/${{ github.base_ref }}
+        run: make lint:houserules LINT_BASE=origin/${{ github.base_ref }}

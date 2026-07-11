@@ -1,4 +1,4 @@
-.PHONY: help install test evals evals\:binder lint lint-ruff lint-houserules clean
+.PHONY: help install test evals evals\:binder lint lint\:ruff lint\:houserules clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -18,15 +18,15 @@ evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-ru
 evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
 	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
 
-LINT_BASE ?= origin/dev
 lint:  ## Lint with Ruff and houserules
-	$(MAKE) lint-ruff
-	$(MAKE) lint-houserules
+	$(MAKE) lint:ruff
+	$(MAKE) lint:houserules
 
-lint-ruff:  ## Lint with Ruff
+lint\:ruff:  ## Lint with Ruff
 	uv run ruff check .
 
-lint-houserules:  ## Lint changed lines with houserules (needs GEMINI_API_KEY)
+LINT_BASE ?= origin/dev
+lint\:houserules:  ## Lint changed lines with houserules (needs GEMINI_API_KEY)
 	@untracked="$$(git ls-files --others --exclude-standard -- '*.py')"; \
 	if [ -n "$$untracked" ]; then git add -N -- $$untracked; fi; \
 	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .; \
