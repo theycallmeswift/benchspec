@@ -67,20 +67,21 @@ def _split_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
 def _run_sandbox_build(args: argparse.Namespace) -> int:
     """Build the agent-ready snapshot for `root`, mapping host and build errors to exit codes.
 
-    A failed host `preflight` is a usage error (exit 2) surfaced before any build; a build
-    or provisioning failure (`MicrosandboxError`, or a `RuntimeError` from the redundant
-    internal preflight) is a finding (exit 1). `MicrosandboxError` is imported lazily so a
-    host without microsandbox installed never breaks `lint`/`analyze`.
+    A failed host `preflight` is a usage error (exit 2) surfaced before any build. A bad
+    environment config raises `SchemaError` from `cli_build`, which the `main` boundary maps
+    to USAGE (2) as well — a config error, not a build failure. A genuine build or
+    provisioning failure (`MicrosandboxError`, or a `RuntimeError` from the redundant internal
+    preflight) is a finding (exit 1). `MicrosandboxError` is imported after a passing preflight
+    (which guarantees `import microsandbox` works) so a host without microsandbox installed
+    hits preflight's clean exit 2 rather than an uncaught `ModuleNotFoundError`.
 
     Args:
         args: The parsed `sandbox:build` namespace, with `root` a `Path`.
 
     Returns:
         `ExitCode.SUCCESS` on a built or already-present snapshot, `ExitCode.USAGE` on a
-        preflight failure, `ExitCode.FINDING` on a build failure.
+        preflight or config-schema failure, `ExitCode.FINDING` on a build failure.
     """
-    from microsandbox.errors import MicrosandboxError
-
     root = args.root.resolve()
 
     try:
@@ -88,6 +89,8 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
     except RuntimeError as error:
         print(f"error: {error}", file=sys.stderr)
         return ExitCode.USAGE
+
+    from microsandbox.errors import MicrosandboxError
 
     try:
         sandbox.cli_build(repo_root=root)

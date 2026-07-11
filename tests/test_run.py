@@ -238,13 +238,24 @@ def test_run_maps_gate_failure_to_one(monkeypatch: object) -> None:
     assert exit_code == 1
 
 
-def test_run_maps_usage_status_to_two(monkeypatch: object) -> None:
-    """Verify pytest statuses 2 and 4 both map to the usage exit code 2."""
+def test_run_maps_pytest_collection_usage_status_to_two(monkeypatch: object) -> None:
+    """Verify a pytest status of 2 (collection usage error) maps to exit 2."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    assert run.run(args, runner=_runner_returning(2, {})) == 2
-    assert run.run(args, runner=_runner_returning(4, {})) == 2
+    exit_code = run.run(args, runner=_runner_returning(2, {}))
+
+    assert exit_code == 2
+
+
+def test_run_maps_pytest_usage_error_status_to_two(monkeypatch: object) -> None:
+    """Verify a pytest status of 4 (usage error) maps to exit 2."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"))
+
+    exit_code = run.run(args, runner=_runner_returning(4, {}))
+
+    assert exit_code == 2
 
 
 def test_run_empty_root_reports_no_evals_without_spawning(

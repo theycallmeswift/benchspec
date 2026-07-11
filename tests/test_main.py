@@ -6,8 +6,11 @@ root it resolved, with the handler stubbed so no eval discovery happens.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from textwrap import dedent
+
+import pytest
 
 from evalspec import __main__
 
@@ -176,13 +179,35 @@ def test_lint_command_maps_schema_error_to_usage(tmp_path: Path) -> None:
     assert exit_code == 2
 
 
-def test_all_four_subcommands_registered(monkeypatch: object) -> None:
-    """Verify all four subcommands are registered, each accepting a root positional."""
+@pytest.mark.parametrize("command", ["lint", "analyze", "sandbox:build", "run"])
+def test_subcommand_registered(monkeypatch: object, command: str) -> None:
+    """Verify each subcommand is registered and accepts a root positional."""
     monkeypatch.setattr(__main__.lint, "run", lambda root: 0)
     monkeypatch.setattr(__main__.analyze, "run", lambda root: 0)
     monkeypatch.setattr(__main__.run, "run", lambda args: 0)
     monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
     monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
 
-    for command in ("lint", "analyze", "sandbox:build", "run"):
-        assert __main__.main([command, "some/dir"]) == 0
+    assert __main__.main([command, "some/dir"]) == 0
+
+
+def test_sandbox_build_missing_package_exits_two_before_importing_errors(
+    monkeypatch: object,
+) -> None:
+    """Verify a host without microsandbox hits preflight's exit 2, never the errors import.
+
+    Poisoning `microsandbox.errors` makes `from microsandbox.errors import MicrosandboxError`
+    raise `ImportError`. Because that import now follows `preflight`, a missing-package
+    preflight `RuntimeError` returns USAGE (2) first — proving the import no longer precedes
+    preflight. Were the import still first, the poisoned module would raise an uncaught
+    `ImportError` instead of yielding 2.
+    """
+    monkeypatch.setitem(sys.modules, "microsandbox.errors", None)
+
+    def missing_package_preflight() -> None:
+        """Reject the host the way an absent microsandbox package does."""
+        raise RuntimeError("microsandbox runtime not installed")
+
+    monkeypatch.setattr(__main__.sandbox, "preflight", missing_package_preflight)
+
+    assert __main__.main(["sandbox:build", "some/dir"]) == 2
