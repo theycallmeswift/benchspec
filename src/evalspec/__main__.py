@@ -8,6 +8,7 @@ from pathlib import Path
 
 from evalspec import analyze, lint, run, sandbox
 from evalspec.exit_codes import ExitCode
+from evalspec.schema import SchemaError
 
 
 def _add_root_argument(command_parser: argparse.ArgumentParser) -> None:
@@ -131,7 +132,11 @@ def main(argv: list[str] | None = None) -> int:
         "run": run.run,
         "sandbox:build": _run_sandbox_build,
     }
-    return dispatch[args.command](args)
+    try:
+        return dispatch[args.command](args)
+    except SchemaError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return ExitCode.USAGE
 
 
 if __name__ == "__main__":

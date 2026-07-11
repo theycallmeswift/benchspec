@@ -7,8 +7,30 @@ root it resolved, with the handler stubbed so no eval discovery happens.
 from __future__ import annotations
 
 from pathlib import Path
+from textwrap import dedent
 
 from evalspec import __main__
+
+
+def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:
+    """Write an eval under `skills/demo/evals/<slug>/`; a non-kebab slug is malformed."""
+    group_dir = tmp_path / "skills" / "demo" / "evals" / slug
+    group_dir.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
+    header = dedent("""\
+        ---
+        {}
+        ---
+
+        ## Prompt
+
+        p
+
+        ## Assertions
+
+    """)
+    (group_dir / "eval.md").write_text(header + body)
+    return group_dir
 
 
 def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
@@ -131,3 +153,36 @@ def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object
 
     assert exit_code == 1
     assert "error: snapshot build failed" in capsys.readouterr().err
+
+
+def test_analyze_command_maps_schema_error_to_usage(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """Verify a malformed eval under `analyze` surfaces as the usage exit code (2)."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    _write_eval(tmp_path, ["Skill `ingest` invoked"], slug="NotKebab")
+
+    exit_code = __main__.main(["analyze", str(tmp_path)])
+
+    assert exit_code == 2
+
+
+def test_lint_command_maps_schema_error_to_usage(tmp_path: Path) -> None:
+    """Verify a malformed eval under `lint` surfaces as the usage exit code (2)."""
+    _write_eval(tmp_path, ["Skill `ingest` invoked"], slug="NotKebab")
+
+    exit_code = __main__.main(["lint", str(tmp_path)])
+
+    assert exit_code == 2
+
+
+def test_all_four_subcommands_registered(monkeypatch: object) -> None:
+    """Verify all four subcommands are registered, each accepting a root positional."""
+    monkeypatch.setattr(__main__.lint, "run", lambda root: 0)
+    monkeypatch.setattr(__main__.analyze, "run", lambda root: 0)
+    monkeypatch.setattr(__main__.run, "run", lambda args: 0)
+    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
+    monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
+
+    for command in ("lint", "analyze", "sandbox:build", "run"):
+        assert __main__.main([command, "some/dir"]) == 0
