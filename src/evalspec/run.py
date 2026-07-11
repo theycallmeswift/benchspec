@@ -9,6 +9,13 @@ consumes its output is layered on separately.
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import sys
+from collections.abc import Callable
+
+from evalspec import discovery
+from evalspec.exit_codes import ExitCode, exit_code_for_pytest_status
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
 # `option=value` token so a value that starts with `-` is never mistaken for a flag.
@@ -60,3 +67,45 @@ def translate_run_flags(args: argparse.Namespace) -> list[str]:
             tokens.append(f"{option}={value}")
 
     return tokens
+
+
+def run(
+    args: argparse.Namespace,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> int:
+    """Run the eval suite by spawning a pytest subprocess, mapping its status to an exit code.
+
+    Emptiness is detected up front by reusing the plugin's own discovery: with no evals
+    under `root`, pytest would still self-register `cases.py` and report SUCCESS on an
+    empty parametrization, so relying on its status is impossible. When discovery finds
+    nothing, the runner is never spawned. Otherwise the child inherits the environment
+    with `PYTEST_DISABLE_PLUGIN_AUTOLOAD` scrubbed so the entry-point plugin loads exactly
+    once (no `-p evalspec.plugin`, which would double-register it), and the child's return
+    code maps through the shared exit-code contract.
+
+    Args:
+        args: The parsed `run` namespace — `root` (a `Path`), the curated `--evalspec-*`
+            flags, and `passthrough` (verbatim pytest args after `--`).
+        runner: Injectable process launcher with `subprocess.run`'s contract; called as
+            `runner(argv, env=child_env)` and expected to expose `.returncode`.
+
+    Returns:
+        `ExitCode.NOTHING_TO_DO` when no evals are discovered, otherwise the child pytest
+        status mapped through `exit_code_for_pytest_status`.
+    """
+    root = args.root.resolve()
+
+    eval_paths = None
+    if args.eval_paths:
+        eval_paths = [path.strip() for path in args.eval_paths.split(",") if path.strip()]
+    if not discovery.discover_eval_cases(root, eval_paths):
+        print(f"no evals discovered under {root}")
+        return ExitCode.NOTHING_TO_DO
+
+    child_env = {**os.environ}
+    child_env.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)
+
+    argv = [sys.executable, "-m", "pytest", *translate_run_flags(args), *args.passthrough]
+    completed = runner(argv, env=child_env)
+    return exit_code_for_pytest_status(int(completed.returncode))

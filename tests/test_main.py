@@ -43,3 +43,29 @@ def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
 
     assert exit_code == 0
     assert seen == [Path("some/dir").resolve()]
+
+
+def test_run_command_splits_passthrough_at_double_dash(monkeypatch: object) -> None:
+    """Verify args after `--` are split into passthrough while flags before it still parse."""
+    seen: list[object] = []
+
+    def fake_run(args: object) -> int:
+        """Record the parsed namespace and report a success exit code."""
+        seen.append(args)
+        return 0
+
+    monkeypatch.setattr(__main__.run, "run", fake_run)
+
+    __main__.main(["run", "--set", "x", "--", "-k", "foo"])
+
+    assert seen[0].passthrough == ["-k", "foo"]
+    assert seen[0].set == "x"
+
+
+def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
+    """Verify `evalspec run` routes to run.run and returns its exit code."""
+    monkeypatch.setattr(__main__.run, "run", lambda args: 7)
+
+    exit_code = __main__.main(["run"])
+
+    assert exit_code == 7
