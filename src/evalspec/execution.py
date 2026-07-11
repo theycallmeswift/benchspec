@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +27,12 @@ from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
 from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
-from evalspec.sandbox import DEFAULT_PROJECT_MARKER, arm_session, ensure_snapshot
+from evalspec.sandbox import (
+    DEFAULT_PROJECT_MARKER,
+    SandboxSession,
+    arm_session,
+    ensure_snapshot,
+)
 from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 
 # The judge is a run-level concern, independent of the task arm's own harness/model
@@ -95,7 +101,7 @@ def _grade_via_judge(
     contents: object,
     shas: object,
     result_text: object,
-    grade: object,
+    grade: Callable[..., dict],
     judge_config: object,
     eval_id: object,
     arm_name: object,
@@ -142,8 +148,8 @@ def _grade_mixed(
     contents: object,
     shas: object,
     result_text: object,
-    bind: object,
-    grade: object,
+    bind: Callable[[str], dict | None],
+    grade: Callable[..., dict],
     workdir: object,
     grade_context: object,
     judge_config: object,
@@ -206,7 +212,7 @@ def _grade_mixed(
 
 
 async def _run_arm_turns(
-    session_factory: object,
+    session_factory: Callable[..., SandboxSession],
     *,
     agent: object,
     snapshot: object,
@@ -290,9 +296,9 @@ def run_eval_arm(
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
-    session_factory: object = arm_session,
-    grade: object = grade_run,
-    bind: object = binder.bind,
+    session_factory: Callable[..., SandboxSession] = arm_session,
+    grade: Callable[..., dict] = grade_run,
+    bind: Callable[[str], dict | None] = binder.bind,
 ) -> ArmOutcome:
     """Run all cases for one eval arm and write result artifacts."""
     judge_config = judge_config or JudgeConfig()

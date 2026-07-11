@@ -9,6 +9,7 @@ import textwrap
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from evalspec.judge import _balanced_objects
@@ -328,7 +329,7 @@ def preflight_gemini_key() -> None:
 def bind(
     assertion_text: str,
     *,
-    call_model: object = _call_gemini,
+    call_model: Callable[..., GeminiReply] = _call_gemini,
 ) -> dict | None:
     """Return a deterministic checker spec dict for `assertion_text`, or None to punt.
 
