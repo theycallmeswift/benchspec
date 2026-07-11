@@ -9,6 +9,7 @@ call, so an author sees where each assertion lands before spending on a full run
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,7 @@ class Classification:
     label: str
 
 
-def classify_assertion(text: str, *, bind: object = binder.bind) -> str:
+def classify_assertion(text: str, *, bind: Callable[[str], dict | None] = binder.bind) -> str:
     """Classify how one assertion will be graded at run time.
 
     Binds the assertion exactly as a live run does and maps the result to an evidence
@@ -54,7 +55,9 @@ def classify_assertion(text: str, *, bind: object = binder.bind) -> str:
     return "deterministic"
 
 
-def analyze_repo(repo_root: Path, *, bind: object = binder.bind) -> list[Classification]:
+def analyze_repo(
+    repo_root: Path, *, bind: Callable[[str], dict | None] = binder.bind
+) -> list[Classification]:
     """Classify every discovered assertion under a repo root.
 
     Args:

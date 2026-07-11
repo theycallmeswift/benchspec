@@ -13,8 +13,14 @@ from evalspec import __main__
 
 def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
     """Verify `evalspec analyze <dir>` routes to analyze.run with the resolved root."""
-    seen = []
-    monkeypatch.setattr(__main__.analyze, "run", lambda root: seen.append(root) or 0)
+    seen: list[Path] = []
+
+    def fake_run(root: Path) -> int:
+        """Record the resolved root and report a success exit code."""
+        seen.append(root)
+        return 0
+
+    monkeypatch.setattr(__main__.analyze, "run", fake_run)
 
     exit_code = __main__.main(["analyze", "some/dir"])
 
@@ -24,8 +30,14 @@ def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
 
 def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
     """Verify `evalspec lint <dir>` still routes to lint.run with the resolved root."""
-    seen = []
-    monkeypatch.setattr(__main__.lint, "run", lambda root: seen.append(root) or 0)
+    seen: list[Path] = []
+
+    def fake_run(root: Path) -> int:
+        """Record the resolved root and report a success exit code."""
+        seen.append(root)
+        return 0
+
+    monkeypatch.setattr(__main__.lint, "run", fake_run)
 
     exit_code = __main__.main(["lint", "some/dir"])
 

@@ -116,7 +116,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
     )
 
     assert outcome.errored is False
-    assert not hasattr(outcome, "fired")  # the informational flag was removed from ArmOutcome
+    assert not hasattr(outcome, "fired")  # ArmOutcome carries no fired flag
     assert [assertion["passed"] for assertion in outcome.grading["assertions"]] == [True, True]
     # session_factory called with the eval_arm NAME (not the Arm repr) and eval_arm.model
     factory_kwargs = session_factory.calls[0]

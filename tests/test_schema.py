@@ -193,6 +193,7 @@ def test_former_trigger_doc_now_rejected() -> None:
                 "queries": [{"slug": "q-one", "query": "q", "should_trigger": True}],
             }
         )
+
     msg = str(ei.value)
     # The message names the sole supported schema and echoes the rejected value, but no
     # longer advertises the removed trigger schema as a supported option.

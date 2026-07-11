@@ -41,13 +41,15 @@ def _named_tool_line(name: str) -> str:
     )
 
 
-def test_retained_primitives_import_and_detect_a_fire() -> None:
-    """Verify the kept routing primitives import and a minimal fire is detected."""
-    # Guard: Task 4 removes the trigger-eval subsystem but must keep these four names
-    # importable and working — runner.py, agents/claude.py, and sandbox.py depend on them.
+def test_retained_primitives_are_importable() -> None:
+    """Verify the kept routing primitives remain importable and callable."""
     assert issubclass(RoutingError, RuntimeError)
     assert callable(dispatches_skill)
     assert callable(streamed_activity)
+
+
+def test_retained_detect_skill_fired_detects_a_minimal_fire() -> None:
+    """Verify the retained detect_skill_fired reports True for a minimal skill fire."""
     assert detect_skill_fired([_skill_line("bootstrap")], "bootstrap") is True
 
 
