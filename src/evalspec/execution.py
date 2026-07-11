@@ -356,7 +356,10 @@ def run_eval_arm(
     dispatched = list(skills_dispatched(arm_run.trajectory))
     for candidate in candidates:
         dispatched.extend(skills_dispatched(arm_run.trajectory, candidate))
-    fired_skills = tuple(dict.fromkeys(dispatched))  # de-dupe, preserve first-seen order
+    # A skill caught by both the no-arg Skill-tool pass and its per-candidate fallback pass
+    # would appear twice; collapse to one while keeping first-seen order so the evidence
+    # list stays stable and readable rather than order-shuffled by set().
+    fired_skills = tuple(dict.fromkeys(dispatched))
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted

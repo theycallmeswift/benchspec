@@ -496,10 +496,15 @@ def _bind_ingest_activation(text: object) -> object:
     return None
 
 
-def test_activation_grades_when_group_differs_from_asserted_skill(tmp_path: object) -> None:
-    """Verify activation grades off the asserted skill, not the group name."""
-    # The group ("writing") differs from the asserted skill ("ingest"); no group hint feeds
-    # detection, so the candidate comes from the assertion and the Skill-tool fire still grades.
+def test_activation_grades_fallback_fire_when_group_differs_from_asserted_skill(
+    tmp_path: object,
+) -> None:
+    """Verify a fallback-shape fire grades True even when the group differs from the skill."""
+    # The hard decoupling case: group ("writing") differs from the asserted skill ("ingest"),
+    # and the skill fires ONLY as a bare tool_call named `ingest` — no Skill tool call. The
+    # no-arg Skill-tool pass misses that fallback shape, so it lands in fired_skills only via
+    # per-candidate capture keyed off the *asserted* skill. Were detection to key off the group
+    # name again, "ingest" would never be a candidate and this would grade False.
     workspace.set_current_iteration("iteration_01")
 
     eval_case = _case(
@@ -507,9 +512,7 @@ def test_activation_grades_when_group_differs_from_asserted_skill(tmp_path: obje
         {"id": "single", "prompt": "do it", "assertions": ["Skill `ingest` invoked"]},
         skill="writing",
     )
-    trajectory = [
-        {"kind": "tool_call", "id": "1", "name": "Skill", "arguments": {"skill": "ingest"}}
-    ]
+    trajectory = [{"kind": "tool_call", "id": "1", "name": "ingest", "arguments": {"arg": "x"}}]
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
@@ -547,43 +550,6 @@ def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: object)
     trajectory = [
         {"kind": "tool_call", "id": "1", "name": "Skill", "arguments": {"skill": "plugin:ingest"}}
     ]
-    workdir = tmp_path / "wd"
-    workdir.mkdir()
-
-    outcome = run_eval_arm(
-        eval_case,
-        TRIAL,
-        workdir,
-        {},
-        tmp_path,
-        today="2099-01-01",
-        repo_root=tmp_path,
-        sample=0,
-        session_factory=fake_session_factory(
-            RunResult(
-                "single", "trial", "out", 1, 1, False,
-                session_id="s1", fired=True, trajectory=trajectory,
-            )
-        ),
-        grade=_grade_all_pass,
-        bind=_bind_ingest_activation,
-    )
-
-    assert outcome.grading["assertions"][0]["passed"] is True
-
-
-def test_activation_recovers_bare_tool_fallback_fire_for_candidate(tmp_path: object) -> None:
-    """Verify a fallback-shape fire (bare tool named as the skill) is recovered per candidate."""
-    # No Skill tool call — the skill fires only as a bare tool_call named `ingest`. The no-arg
-    # Skill-tool set misses it; the per-candidate capture recovers it, so activation grades True.
-    workspace.set_current_iteration("iteration_01")
-
-    eval_case = _case(
-        tmp_path,
-        {"id": "single", "prompt": "do it", "assertions": ["Skill `ingest` invoked"]},
-        skill="ingest",
-    )
-    trajectory = [{"kind": "tool_call", "id": "1", "name": "ingest", "arguments": {"arg": "x"}}]
     workdir = tmp_path / "wd"
     workdir.mkdir()
 

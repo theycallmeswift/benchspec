@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -38,9 +39,19 @@ def _write_eval(
     group_dir = tmp_path / "skills" / skill / "evals" / slug
     group_dir.mkdir(parents=True, exist_ok=True)
     body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
-    (group_dir / "eval.md").write_text(
-        f"---\n{{}}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n{body}"
-    )
+    header = dedent("""\
+        ---
+        {}
+        ---
+
+        ## Prompt
+
+        p
+
+        ## Assertions
+
+    """)
+    (group_dir / "eval.md").write_text(header + body)
     return group_dir
 
 
