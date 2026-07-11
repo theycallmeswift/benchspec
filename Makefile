@@ -26,13 +26,12 @@ lint\:ruff:  ## Lint with Ruff
 	uv run ruff check .
 
 LINT_BASE ?= origin/dev
-lint\:houserules:  ## Lint changed lines with houserules (needs GEMINI_API_KEY)
-	@untracked="$$(git ls-files --others --exclude-standard -- '*.py')"; \
-	if [ -n "$$untracked" ]; then git add -N -- $$untracked; fi; \
-	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .; \
-	rc=$$?; \
-	if [ -n "$$untracked" ]; then git reset -q -- $$untracked; fi; \
-	exit $$rc
+lint\:houserules:  ## Lint changed and new Python files with houserules (needs GEMINI_API_KEY)
+	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .
+	@untracked_python_files="$$(git ls-files --others --exclude-standard -- '*.py')"; \
+	if [ -n "$$untracked_python_files" ]; then \
+		uv run houserules --verbose $$untracked_python_files; \
+	fi
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
