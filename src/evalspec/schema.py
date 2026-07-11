@@ -4,8 +4,7 @@ Dispatches on the top-level `$schema` field and raises `SchemaError` on any
 deviation. No unknown fields permitted. Used at pytest collection (see
 `discovery._validate`, which names the offending file).
 
-Supported schemas are `evalspec/v1` for output evals and `evalspec-trigger/v1` for
-`trigger-evals.md`.
+The only supported schema is `evalspec/v1` for output evals.
 """
 
 from __future__ import annotations
@@ -15,20 +14,24 @@ import re
 from pathlib import Path
 
 _EVALS_V1 = "evalspec/v1"
-_TRIGGER_V1 = "evalspec-trigger/v1"
 
 _ID_KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_SKILL_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 # checker -> (required keys, optional keys). Key types live in _CHECKER_KEY_TYPES.
+# Negation is a distinct checker name (`not_file_exists`, `not_skill_invoked`) sharing its
+# positive counterpart's fields, not a polarity flag — so a spec reads unambiguously and
+# the binder picks an explicit primitive. Only the two currently-useful negatives exist;
+# more (`regex_absent`, `frontmatter_missing`, …) get added the same way as evals need them.
 _CHECKER_FIELDS = {
-    "file_exists": ({"path"}, {"should_exist"}),
+    "file_exists": ({"path"}, set()),
+    "not_file_exists": ({"path"}, set()),
     "glob_count": ({"glob"}, {"count", "min"}),
     "sha256_match": ({"path"}, {"original", "sha256"}),
     "frontmatter_has": ({"path", "key"}, {"value"}),
     "regex": ({"path", "pattern"}, set()),
     "skill_invoked": ({"skill"}, set()),
+    "not_skill_invoked": ({"skill"}, set()),
 }
 
 _CHECKER_KEY_TYPES = {
@@ -42,7 +45,6 @@ _CHECKER_KEY_TYPES = {
     "skill": str,
     "count": int,
     "min": int,
-    "should_exist": bool,
 }
 
 _KEBAB_HINT = "lowercase alphanumerics separated by hyphens, e.g. `happy-path`"
@@ -101,21 +103,6 @@ def _reject_extra_keys(obj: dict, allowed: set[str], path: str) -> None:
     extra = set(obj.keys()) - allowed
     if extra:
         raise SchemaError(f"{path}: unknown field(s) {sorted(extra)} (allowed: {sorted(allowed)})")
-
-
-def _validate_string_list(val: object, key_path: str) -> None:
-    """Validate a non-empty list of non-empty strings."""
-    if not isinstance(val, list):
-        raise SchemaError(f"{key_path}: expected list, got {type(val).__name__}")
-    if not val:
-        raise SchemaError(f"{key_path}: must be non-empty")
-    for item_index, item in enumerate(val):
-        if not isinstance(item, str):
-            raise SchemaError(
-                f"{key_path}[{item_index}]: expected string, got {type(item).__name__}"
-            )
-        if not item.strip():
-            raise SchemaError(f"{key_path}[{item_index}]: must be non-empty")
 
 
 def _check_key_type(item: dict, key: str, path: str) -> None:
@@ -233,93 +220,14 @@ def _validate_evals_v1(data: dict) -> None:
                 raise SchemaError(f"{path}.assertions[{assertion_index}]: must be non-empty")
 
 
-def _validate_trigger_v1(data: dict) -> None:
-    """Validate an evalspec-trigger/v1 routing document."""
-    allowed_top = {"$schema", "description", "skill_name", "queries"}
-    _reject_extra_keys(data, allowed_top, "root")
-
-    _optional(data, "description", str, "root")
-    skill_name = _require(data, "skill_name", str, "root", example='"skill_name": "my-skill"')
-    if not _SKILL_NAME.match(skill_name):
-        raise SchemaError(f"root.skill_name: `{skill_name}` is not kebab-case ({_KEBAB_HINT})")
-
-    queries = _require(
-        data,
-        "queries",
-        list,
-        "root",
-        example='"queries": [{"slug": "ingest-article", "query": "…", "should_trigger": true}]',
-    )
-    if not queries:
-        raise SchemaError("root.queries: must be non-empty")
-
-    seen_slugs: set[str] = set()
-    allowed_query = {"slug", "description", "query", "should_trigger", "xfail"}
-    valid_tiers = {"opus", "sonnet", "haiku"}
-    for query_index, item in enumerate(queries):
-        path = f"root.queries[{query_index}]"
-        if not isinstance(item, dict):
-            raise SchemaError(f"{path}: expected object, got {type(item).__name__}")
-        _reject_extra_keys(item, allowed_query, path)
-
-        slug = _require(item, "slug", str, path, example='"slug": "ingest-article"')
-        if not _ID_KEBAB.match(slug):
-            raise SchemaError(f"{path}.slug: `{slug}` is not kebab-case ({_KEBAB_HINT})")
-        if slug in seen_slugs:
-            raise SchemaError(f"{path}.slug: duplicate slug `{slug}`")
-        seen_slugs.add(slug)
-
-        _optional(item, "description", str, path)
-        query = _require(item, "query", str, path, example='"query": "archive this meeting note"')
-        if not query.strip():
-            raise SchemaError(f"{path}.query: must be non-empty")
-
-        _require(item, "should_trigger", bool, path, example='"should_trigger": true')
-
-        # `xfail`, when present, records a known routing miss the suite expects on
-        # SPECIFIC model tiers rather than gates on. `models` lists the tiers that
-        # miss (e.g. a query that routes on opus but not sonnet); the runner attaches
-        # a non-strict pytest xfail only when the run's model is one of them, so any
-        # other tier runs strict and a regression there still fails. `should_trigger`
-        # stays truthful (the query *should* route) — `xfail` changes the gate per
-        # tier, not the truth.
-        xfail = _optional(item, "xfail", dict, path)
-        if xfail is not None:
-            xfail_path = f"{path}.xfail"
-            _reject_extra_keys(xfail, {"models", "reason"}, xfail_path)
-            models = _require(
-                xfail,
-                "models",
-                list,
-                xfail_path,
-                example='"models": ["sonnet", "haiku"]',
-            )
-            _validate_string_list(models, f"{xfail_path}.models")
-            for tier in models:
-                if tier not in valid_tiers:
-                    raise SchemaError(f"{xfail_path}.models: `{tier}` not in {sorted(valid_tiers)}")
-            reason = _require(
-                xfail,
-                "reason",
-                str,
-                xfail_path,
-                example='"reason": "sonnet routing boundary; …"',
-            )
-            if not reason.strip():
-                raise SchemaError(f"{xfail_path}.reason: must be non-empty")
-
-
 def _validate(data: dict) -> None:
     """Provide the validate helper."""
     schema = data.get("$schema")
     if schema == _EVALS_V1:
         _validate_evals_v1(data)
-    elif schema == _TRIGGER_V1:
-        _validate_trigger_v1(data)
     else:
         raise SchemaError(
-            f"root.$schema: expected `{_EVALS_V1}` (output evals) or "
-            f"`{_TRIGGER_V1}` (trigger-evals.md), got {schema!r} — add "
+            f"root.$schema: expected `{_EVALS_V1}` (output evals), got {schema!r} — add "
             '`"$schema"` as the first key'
         )
 

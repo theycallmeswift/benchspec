@@ -20,8 +20,6 @@ import re
 import statistics
 from pathlib import Path
 
-from evalspec.trigger import xfail_applies
-
 # Credential-shaped env key names are masked in reports. URLs and other config pass through.
 _SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)
 
@@ -57,16 +55,6 @@ def _sample_dirs(parent: Path) -> list[Path]:
             if sample_dir.is_dir() and sample_dir.name.removeprefix("sample-").isdigit()
         ),
         key=lambda sample_dir: int(sample_dir.name.removeprefix("sample-")),
-    )
-
-
-def _trigger_qdirs(root: Path) -> list[Path]:
-    """Return trigger-query result directories for one skill."""
-    # `trigger-<slug>` query dirs, sorted by slug. Slugs are kebab strings, so a
-    # plain name sort is stable and deterministic.
-    return sorted(
-        (query_dir for query_dir in root.glob("trigger-*") if query_dir.is_dir()),
-        key=lambda query_dir: query_dir.name,
     )
 
 
@@ -150,51 +138,11 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
     }
 
 
-def _as_expected(timing: dict) -> bool:
-    """Whether one trigger sample matches its documented expectation.
-
-    A tier-scoped `xfail` is a documented routing miss only on the tiers it lists:
-    on one of those tiers a miss is a green xfail and an unexpected fire is an XPASS,
-    both non-failing on the scoreboard. On any other tier the query is as-expected only
-    when it passed (`fired == should_trigger`), matching the strict gate. The sample
-    carries its own run `model`, so the scoreboard and the gate agree.
-    """
-    xfail = timing.get("xfail")
-    if xfail and xfail_applies(xfail, timing.get("model", "")):
-        return True
-    return timing["passed"]
-
-
-def _trigger_rows(eval_root: Path) -> list[dict]:
-    """Read trigger result records for report rendering."""
-    rows: list[dict] = []
-    for query_dir in _trigger_qdirs(eval_root):
-        samples = [
-            timing
-            for sample_dir in _sample_dirs(query_dir)
-            if (timing := _load_json(sample_dir / "timing.json"))
-        ]
-        if not samples:
-            continue
-        expected = samples[0]["should_trigger"]
-        rows.append(
-            {
-                "slug": samples[0]["slug"],
-                "query": samples[0].get("query", ""),
-                "should_trigger": expected,
-                "xfail": samples[0].get("xfail"),
-                "samples": len(samples),
-                "as_expected": sum(1 for timing in samples if _as_expected(timing)),
-            }
-        )
-    return rows
-
-
 def index_rows(skill_dir: Path, skill: str) -> list[dict]:
     """Flat per-sample rows for the iteration-level index.jsonl.
 
-    Emits one line per eval sample and trigger-query sample. An aggregator reads these
-    without tree-walking; everything here is also in the per-sample artifacts.
+    Emits one line per eval sample. An aggregator reads these without tree-walking;
+    everything here is also in the per-sample artifacts.
     """
     rows: list[dict] = []
     eval_dirs = sorted(
@@ -228,26 +176,6 @@ def index_rows(skill_dir: Path, skill: str) -> list[dict]:
                         "output_tokens": timing.get("output_tokens"),
                     }
                 )
-    for query_dir in _trigger_qdirs(skill_dir):
-        for sample_dir in _sample_dirs(query_dir):
-            timing = _load_json(sample_dir / "timing.json")
-            if timing is None:
-                continue
-            rows.append(
-                {
-                    "skill": skill,
-                    "kind": "trigger",
-                    "slug": timing["slug"],
-                    "sample": int(sample_dir.name.removeprefix("sample-")),
-                    "passed": timing["passed"],
-                    "should_trigger": timing["should_trigger"],
-                    "fires": timing["fires"],
-                    "threshold": timing["threshold"],
-                    "duration_ms": sum(
-                        pass_record.get("ms", 0) for pass_record in timing.get("per_pass", [])
-                    ),
-                }
-            )
     return rows
 
 
@@ -265,12 +193,6 @@ def delta_noise_pp(arm_a: dict, arm_b: dict) -> float | None:
     return 100 * math.sqrt(
         arm_a["pass_rate_stdev"] ** 2 / arm_a["n"] + arm_b["pass_rate_stdev"] ** 2 / arm_b["n"]
     )
-
-
-def _md_cell(text: str, limit: int = 48) -> str:
-    """Format a Markdown table cell with stable scalar rendering."""
-    cell = text.replace("|", "\\|").replace("\n", " ")
-    return cell if len(cell) <= limit else cell[: limit - 1] + "…"
 
 
 def _headline_lines(benchmark: dict) -> list[str]:
@@ -422,23 +344,6 @@ def _format_markdown(benchmark: dict) -> str:
 
         lines.append("")
 
-    trigger = benchmark.get("trigger") or []
-    if trigger:
-        ok = sum(1 for row in trigger if row["as_expected"] == row["samples"])
-        lines += [f"## Trigger routing — {ok}/{len(trigger)} queries as expected", ""]
-        lines.append("| Query | Text | Expected | As expected |")
-        lines.append("|-------|------|----------|-------------|")
-
-        for row in trigger:
-            expected = "fire" if row["should_trigger"] else "no fire"
-            mark = " (xfail)" if row.get("xfail") else ""
-            lines.append(
-                f"| {row['slug']}{mark} | {_md_cell(row['query'])} "
-                f"| {expected} | {row['as_expected']}/{row['samples']} |"
-            )
-
-        lines.append("")
-
     return "\n".join(lines)
 
 
@@ -522,7 +427,6 @@ def build_benchmark(
         "baseline": baseline,
         "max_samples": max_samples,
         "arms": arm_stats,
-        "trigger": _trigger_rows(eval_root),
     }
 
 
@@ -571,8 +475,4 @@ def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
         # carries a score, not just a bare path.
         if not parts and baseline in arms:
             parts.append(f"{baseline} {_pct(ref_rate)}")
-    trigger = benchmark.get("trigger") or []
-    if trigger:
-        ok = sum(1 for row in trigger if row["as_expected"] == row["samples"])
-        parts.append(f"trigger {ok}/{len(trigger)}")
     return f"{skill}: " + "  |  ".join(parts) + f"  -> {benchmark_md}"

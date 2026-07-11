@@ -19,6 +19,10 @@ binds:
   - Skill `interview-me` invoked
   - Skill `to-spec` invoked
   - Skill `writing-agent-skills` invoked
+  not_skill_invoked:
+  - Skill `archive` not invoked
+  - Skill `bootstrap` not invoked
+  - Skill `handoff` not invoked
   glob_count:
   - All three are flat markdown files under ./9. Archive/Sources/{TODAY}/ (rust-async.md, wasm-components.md,
     edge-databases.md), not wrapped in per-source subfolders
@@ -49,7 +53,6 @@ binds:
       glob: ./docs/specs/{TODAY}-*.md
       min: 1
   file_exists:
-  - The folder no longer exists at ./0. Inbox/pycon-keynote/ — it was moved out of the Inbox
   - The capture now lives at ./9. Archive/Sources/{TODAY}/openai-o1-launch.md — a flat markdown
     file under a dated Sources folder (NOT a per-source subfolder, NOT renamed to index.md)
   - The previously-missing ./.obsidian/ configuration now exists
@@ -67,6 +70,11 @@ binds:
   - The ./.meta/logs/ directory exists
   - The ./.meta/templates/ directory exists
   - ./1. Profile/whoami.md exists
+  not_file_exists:
+  - The folder no longer exists at ./0. Inbox/pycon-keynote/ — it was moved out of the Inbox
+  - ./tmp/scratch.md no longer exists
+  - The ./.obsidian/workspace.json file does not exist
+  - No ./drafts/outline.md file remains under the workspace
   regex:
   - ./.meta/index.md now exists with a '# Index' heading
   - the first line of ./.meta/index.md matches '# Index'

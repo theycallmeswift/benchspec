@@ -3,10 +3,8 @@
 Output evals are found by walking a configured list of search paths (`eval_paths`,
 default `skills`, `tests`, `evals`, `benchmarks`) under the repo root. Any `eval.md` /
 `*.eval.md` file under a search path is an eval, keyed on the folder-derived
-`(group, eval_id)` pair — one `EvalCase` per eval file. Trigger evals still resolve per
-skill dir under `skills/` and `.claude/skills/` (`evals/trigger-evals.md`), one
-`TriggerCase` per query. Each file is validated at discovery so a malformed eval fails
-pytest collection loudly.
+`(group, eval_id)` pair — one `EvalCase` per eval file. Each file is validated at
+discovery so a malformed eval fails pytest collection loudly.
 """
 
 from __future__ import annotations
@@ -66,28 +64,8 @@ class EvalCase:
         return workspace_dir if workspace_dir.is_dir() else None
 
 
-@dataclass
-class TriggerCase:
-    """Store trigger case data."""
-
-    skill_dir: Path
-    repo_root: Path  # repo root staged for real routing (plugin + local skills)
-    skill_name: str  # data["skill_name"] — the name detect_skill_fired matches
-    query: dict
-
-    @property
-    def skill(self: object) -> str:
-        """Return the skill name for this discovered case."""
-        return self.skill_dir.name  # directory name — for artifact paths and test ids
-
-    @property
-    def param_id(self: object) -> str:
-        """Return the pytest parameter id for this case."""
-        return f"{self.skill}-{self.query['slug']}"
-
-
 def resolve_repo_root(config: object) -> Path:
-    """Project whose `skills/` tree is under test.
+    """The repo root that `eval_paths` discovery and project-relative paths resolve against.
 
     Order: --evalspec-repo-root, then $PROJECT_ROOT, then the pytest rootdir.
     """
@@ -96,8 +74,6 @@ def resolve_repo_root(config: object) -> Path:
         return Path(raw).resolve()
     return Path(config.rootpath)
 
-
-_DEFAULT_EVAL_ROOTS = ["skills", ".claude/skills"]
 
 _DEFAULT_EVAL_PATHS = ["skills", "tests", "evals", "benchmarks"]
 
@@ -116,33 +92,6 @@ def pyproject_table(repo_root: Path) -> dict:
     with pyproject.open("rb") as pyproject_file:
         data = tomllib.load(pyproject_file)
     return data.get("tool", {}).get("evalspec", {})
-
-
-def _pyproject_eval_roots(repo_root: Path) -> list[str] | None:
-    """Read eval root paths from pyproject configuration."""
-    roots = pyproject_table(repo_root).get("eval_roots")
-    if roots is None:
-        return None
-    if not (isinstance(roots, list) and all(isinstance(root, str) for root in roots)):
-        raise schema.SchemaError("[tool.evalspec] eval_roots must be a list of strings")
-    return roots
-
-
-def resolve_eval_roots(config: object) -> list[str]:
-    """Where to look for eval-bearing skill dirs, in precedence order.
-
-    --evalspec-eval-roots (comma-separated CLI flag) > [tool.evalspec] eval_roots in
-    pyproject.toml > built-in default (skills, .claude/skills). Lets external consumers
-    point at a non-Claude layout without disturbing the host plugin's `make evals` flow.
-    """
-    raw = config.getoption("evalspec_eval_roots")
-    if raw:
-        return [root.strip() for root in raw.split(",") if root.strip()]
-    repo_root = resolve_repo_root(config)
-    pyproject_roots = _pyproject_eval_roots(repo_root)
-    if pyproject_roots is not None:
-        return pyproject_roots
-    return list(_DEFAULT_EVAL_ROOTS)
 
 
 def _pyproject_eval_paths(repo_root: Path) -> list[str] | None:
@@ -225,33 +174,6 @@ def resolve_environment_config(repo_root: Path) -> EnvConfig:
         script_path = rel
 
     return EnvConfig(base_image=base_image, script=script, script_path=script_path)
-
-
-def _skill_dirs(repo_root: Path, eval_roots: list[str] | None = None) -> list[Path]:
-    """Skill dirs under each configured root, sorted by name.
-
-    Raises if a name appears.
-        under more than one root: test ids and workspace paths key on the bare directory name,
-        so a duplicate would silently collide. Explicit roots, not a recursive glob — that
-        would crawl skill-shaped scratch under `tmp/` and the `tests/` mirror. Defaults to the
-        Claude-shaped roots so callers that pass no config keep working.
-    """
-    roots = eval_roots if eval_roots is not None else _DEFAULT_EVAL_ROOTS
-    seen: dict[str, Path] = {}
-    for relative_root in roots:
-        root = repo_root / relative_root
-        if not root.is_dir():
-            continue
-        for skill_path in root.iterdir():
-            if not skill_path.is_dir():
-                continue
-            if skill_path.name in seen:
-                raise schema.SchemaError(
-                    f"duplicate skill name {skill_path.name!r}: "
-                    f"{seen[skill_path.name]} and {skill_path}"
-                )
-            seen[skill_path.name] = skill_path
-    return sorted(seen.values(), key=lambda skill_path: skill_path.name)
 
 
 def _is_pruned_dir(name: str) -> bool:
@@ -343,26 +265,3 @@ def discover_eval_cases(
         seen[key] = eval_file
         cases.append(EvalCase(group=group, eval_dir=group_dir, eval_file=eval_file, eval=parsed))
     return sorted(cases, key=lambda case: (case.group, case.eval_id))
-
-
-def discover_trigger_cases(
-    repo_root: Path, eval_roots: list[str] | None = None
-) -> list[TriggerCase]:
-    """Discover trigger-routing cases from configured roots."""
-    cases: list[TriggerCase] = []
-    for skill_dir in _skill_dirs(repo_root, eval_roots):
-        evals_dir = skill_dir / "evals"
-        trigger_file = evals_dir / "trigger-evals.md"
-        if not trigger_file.is_file():
-            continue
-        data = mdformat.parse_trigger(trigger_file)
-        for query in data.get("queries", []):
-            cases.append(
-                TriggerCase(
-                    skill_dir=skill_dir,
-                    repo_root=repo_root,
-                    skill_name=data["skill_name"],
-                    query=query,
-                )
-            )
-    return cases

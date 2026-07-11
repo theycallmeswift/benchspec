@@ -8,9 +8,8 @@ from pathlib import Path
 # Re-export so existing test imports keep working. New code (and external
 # CodingAgent implementers) should import from `evalspec.testing` directly.
 from evalspec.testing import FakeExecOutput, FakeSandbox
-from evalspec.trigger import trigger_record
 
-__all__ = ["FakeExecOutput", "FakeSandbox", "seed_arm", "seed_trigger"]
+__all__ = ["FakeExecOutput", "FakeSandbox", "seed_arm"]
 
 
 def seed_arm(
@@ -64,45 +63,4 @@ def seed_arm(
             }
         )
     )
-    return d
-
-
-def seed_trigger(
-    eval_root: Path,
-    query_id: int,
-    *,
-    should_trigger: bool,
-    fires: int,
-    threshold: int = 1,
-    sample: int = 0,
-    query: str = "some query",
-    xfail: dict | None = None,
-    model: str = "sonnet",
-    slug: str | None = None,
-) -> Path:
-    """Write a trigger sample's timing.json in the persisted-verdict shape.
-
-    Delegates the fired/passed verdict to the production `trigger_record`, so the
-    fixture can never drift from the rule the report consumes.
-    """
-    resolved_slug = slug if slug is not None else f"q{query_id}"
-    d = eval_root / f"trigger-{resolved_slug}" / f"sample-{sample}"
-    d.mkdir(parents=True)
-    query_obj = {
-        "slug": resolved_slug,
-        "query": query,
-        "should_trigger": should_trigger,
-    }
-    if xfail is not None:
-        query_obj["xfail"] = xfail
-    per_pass = [{"ms": 0, "fired": i < fires} for i in range(3)]
-    record = trigger_record(
-        query_obj,
-        mode="asymmetric",
-        threshold=threshold,
-        fires=fires,
-        per_pass=per_pass,
-        model=model,
-    )
-    (d / "timing.json").write_text(json.dumps(record))
     return d

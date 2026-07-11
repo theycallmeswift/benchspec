@@ -146,7 +146,7 @@ tree tmp/evals/iteration_01
 
 ```
 tmp/evals/iteration_01
-├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, the resolved judge object (harness/model/effort/timeout/env/harness_args), efforts, trigger mode, start time, format_version; the join key for cross-run aggregation
+├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, the resolved judge object (harness/model/effort/timeout/env/harness_args), efforts, start time, format_version; the join key for cross-run aggregation
 ├── index.jsonl                     # flat per-sample results — the aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout
 └── skills
     └── hello
@@ -167,7 +167,7 @@ tmp/evals/iteration_01
                     └── session.jsonl    # every arm streams, so the baseline gets one too
 ```
 
-Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. `benchmark.md` opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a `## Matrix` eval×arm table (evals down the left, `<arm> (<harness>)` across the top — baseline cells show absolute rates, every other cell its ±pp delta) and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration. If trigger evals ran, a `## Trigger routing — N/M queries as expected` table follows, showing each query's expected behaviour and how many samples matched. `benchmark.json` is the same data, machine-readable, with a `trigger` key alongside `arms`. `meta.json` at the iteration root records what produced the run. The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
+Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. `benchmark.md` opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a `## Matrix` eval×arm table (evals down the left, `<arm> (<harness>)` across the top — baseline cells show absolute rates, every other cell its ±pp delta) and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration. `benchmark.json` is the same data, machine-readable, keyed by `arms`. `meta.json` at the iteration root records what produced the run. The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
 
 ## Common first-run failures
 
@@ -175,7 +175,7 @@ Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run
 - **Preflight: microsandbox runtime not installed.** Run Step 4 — it installs the runtime on first use.
 - **`microsandbox … database error: Migration file … is missing`.** The installed `microsandbox` package version doesn't match the migration state of the shared host store at `~/.microsandbox/db/` — usually because a newer microsandbox ran against it and applied migrations this version doesn't carry. Install the microsandbox version this evalspec pins (see `pip show microsandbox`), or reset the host store per microsandbox's own docs before re-running.
 - **Preflight: no Claude credential.** Run `claude setup-token` (sets `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. A repo-root `.env` with either is picked up automatically.
-- **The trial arm's `` Skill `hello` invoked `` assertion fails** — the agent hand-rolled the task instead of routing to the skill, so its activation assertion grades False. The skill's description or the eval's prompt isn't triggering routing. See [`agents.md`](agents.md) for the dispatch flow.
+- **The trial arm's `` Skill `hello` invoked `` assertion fails** — the agent hand-rolled the task instead of dispatching the skill, so its activation assertion grades False. The skill's description or the eval's prompt isn't getting the skill engaged. See [`agents.md`](agents.md) for the dispatch flow.
 
 ## A cross-family judge
 
@@ -197,7 +197,7 @@ A Codex judge needs the `codex` CLI installed and on `PATH` with valid credentia
 
 ## Next
 
-- [`schema.md`](schema.md) — the Markdown eval format in full: prose assertions and the binder, the `history:` prefix, trigger routing, and `evalspec lint`.
+- [`schema.md`](schema.md) — the Markdown eval format in full: prose assertions and the binder, activation assertions, the `history:` prefix, and `evalspec lint`.
 - [`concepts.md`](concepts.md) — vocabulary (arm/set/baseline/fired/errored), lifecycle, artifact layout, honesty contract.
 - [`configuration.md`](configuration.md) — every `--evalspec-*` flag, env var, and `[tool.evalspec]` key.
 - [`agents.md`](agents.md) — `CodingAgent` protocol, switching to OpenCode (`EVALSPEC_AGENT=opencode`), running one suite against both.

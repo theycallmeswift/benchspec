@@ -14,10 +14,14 @@ from __future__ import annotations
 import datetime
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+# A checker maps (spec, workdir, pre-run SHA map, process-fact context) to (passed, evidence).
+Checker = Callable[[dict, Path, dict, object], tuple[bool, str]]
 
 
 @dataclass(frozen=True)
@@ -42,8 +46,7 @@ def derive_text(spec: dict) -> str:
     """Return checker text from an assertion or explicit checker field."""
     checker = spec["checker"]
     if checker == "file_exists":
-        verb = "exists" if spec.get("should_exist", True) else "does not exist"
-        return f"the file {spec['path']} {verb}"
+        return f"the file {spec['path']} exists"
     if checker == "glob_count":
         if "count" in spec:
             return f"exactly {spec['count']} file(s) match {spec['glob']}"
@@ -55,8 +58,12 @@ def derive_text(spec: dict) -> str:
     if checker == "frontmatter_has":
         tail = f" = {spec['value']}" if "value" in spec else ""
         return f"{spec['path']} frontmatter has {spec['key']}{tail}"
+    if checker == "not_file_exists":
+        return f"the file {spec['path']} does not exist"
     if checker == "skill_invoked":
         return f"Skill `{spec['skill']}` invoked"
+    if checker == "not_skill_invoked":
+        return f"Skill `{spec['skill']}` not invoked"
     return f"{spec['path']} content matches /{spec['pattern']}/"
 
 
@@ -100,12 +107,13 @@ def _frontmatter(path: Path) -> dict | None:
 def _file_exists(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Evaluate a file-exists checker against the clean-room root."""
-    # exists(), not is_file(): file_exists verifies a path is present or absent
-    # regardless of type, so "the folder X was created / no longer exists" is checkable.
+    """Report whether the checker's path is present in the clean-room root.
+
+    exists(), not is_file(): a path present as a file OR a directory counts, so "the
+    folder X was created" is checkable. `not_file_exists` negates this via _negated.
+    """
     exists = _resolve(spec["path"], workdir).exists()
-    want = spec.get("should_exist", True)
-    return exists == want, f"{spec['path']} {'exists' if exists else 'absent'}"
+    return exists, f"{spec['path']} {'exists' if exists else 'absent'}"
 
 
 def _glob_count(
@@ -203,21 +211,43 @@ def _regex(
 def _skill_invoked(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Evaluate whether trajectory facts show a skill invocation."""
-    # Exact-or-namespaced match: a skill may fire as `ingest` or `plugin:ingest`.
+    """Report whether the asserted skill appears in the run's fired-skill facts.
+
+    A skill may fire bare or namespaced (`ingest` or `plugin:ingest`), so both match.
+    `not_skill_invoked` negates this via _negated.
+    """
     target = spec["skill"]
     fired = context.fired_skills if context else ()
     hit = any(skill == target or skill.endswith(f":{target}") for skill in fired)
-    return hit, (f"`{target}` invoked" if hit else f"`{target}` not among fired {list(fired)}")
+    return hit, f"`{target}` invoked" if hit else f"`{target}` not among fired {list(fired)}"
+
+
+def _negated(checker: Checker) -> Checker:
+    """Derive a negative matcher from its positive counterpart by inverting the verdict.
+
+    The base checker reports the raw fact; the negative passes exactly when the fact is
+    false. Keeping this one wrapper means new negatives (`regex_absent`,
+    `frontmatter_missing`, …) are a one-line registration when an eval needs them.
+    """
+
+    def negated(
+        spec: dict, workdir: Path, original_shas: dict, context: object = None
+    ) -> tuple[bool, str]:
+        passed, evidence = checker(spec, workdir, original_shas, context)
+        return not passed, evidence
+
+    return negated
 
 
 _CHECKERS = {
     "file_exists": _file_exists,
+    "not_file_exists": _negated(_file_exists),
     "glob_count": _glob_count,
     "sha256_match": _sha256_match,
     "frontmatter_has": _frontmatter_has,
     "regex": _regex,
     "skill_invoked": _skill_invoked,
+    "not_skill_invoked": _negated(_skill_invoked),
 }
 
 

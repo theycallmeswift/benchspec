@@ -1,9 +1,8 @@
 """Pytest plugin: turn discovered eval files into parametrized `(eval × arm)` tests.
 
-Registers options, parametrizes the single `eval_arm` fixture over `(case, arm)` pairs
-and `test_trigger` over `trigger_query`, and picks one iteration-dir name on the
-controller that all xdist workers share. The test bodies and fixtures live in
-`cases.py`.
+Registers options, parametrizes the single `eval_arm` fixture over `(case, arm)` pairs,
+and picks one iteration-dir name on the controller that all xdist workers share. The
+test bodies and fixtures live in `cases.py`.
 """
 
 from __future__ import annotations
@@ -27,15 +26,12 @@ from evalspec.arms import Set as EvalSet
 from evalspec.arms import parse_sets, resolve_set
 from evalspec.discovery import (
     discover_eval_cases,
-    discover_trigger_cases,
     pyproject_table,
     resolve_eval_paths,
-    resolve_eval_roots,
     resolve_repo_root,
 )
 from evalspec.judges import JudgeConfig, resolve_judge_config
 from evalspec.schema import SchemaError
-from evalspec.trigger import xfail_applies
 
 _CASES = Path(__file__).parent / "cases.py"
 
@@ -102,46 +98,10 @@ def pytest_addoption(parser: object) -> None:
         "a $VAR value expands from the host environment",
     )
     group.addoption(
-        "--evalspec-trigger-mode",
-        default="asymmetric",
-        choices=["majority", "asymmetric", "best-of"],
-        help="trigger-eval scoring (default: asymmetric): 'majority' = >half of 3 "
-        "(reliable routing); 'best-of' = >=1 of 3 (lenient positives AND stricter "
-        "negatives); 'asymmetric' = best-of for should-trigger, majority for should-not",
-    )
-    group.addoption(
-        "--evalspec-trigger-effort",
-        default="low",
-        help="reasoning effort for trigger routing (default: low — routing is a snap "
-        "'which skill fires?' decision, so the model dispatches fast). Agent-"
-        "specific and passed through unvalidated; an unsupported value surfaces "
-        "as an error from the agent CLI.",
-    )
-    group.addoption(
-        "--evalspec-trigger-timeout",
-        type=int,
-        default=20,
-        help=_help(
-            "per-pass routing budget in seconds (default: 20).",
-            "A pass that streams model activity but doesn't dispatch within it",
-            "counts as a non-fire.",
-        ),
-    )
-    group.addoption(
-        "--evalspec-eval-roots",
-        default=None,
-        help=_help(
-            "trigger evals only: comma-separated paths (relative to repo root) to scan for",
-            "skill dirs containing evals/trigger-evals.md (default: skills, .claude/skills;",
-            "also overridable via [tool.evalspec] eval_roots in pyproject.toml).",
-            "Output eval search paths are set separately via --evalspec-eval-paths.",
-        ),
-    )
-    group.addoption(
         "--evalspec-eval-paths",
         default=None,
         help=_help(
-            "output evals only: comma-separated paths (relative to repo root) to walk for",
+            "comma-separated paths (relative to repo root) to walk for",
             "eval.md / *.eval.md (default: skills, tests, evals, benchmarks;",
             "also overridable via [tool.evalspec] eval_paths in pyproject.toml).",
         ),
@@ -159,7 +119,7 @@ def pytest_addoption(parser: object) -> None:
         "--evalspec-agent",
         default=None,
         help=_help(
-            "coding agent for TRIGGER-routing runs (default: claude-code).",
+            "coding agent for the `__route__` sandbox path (default: claude-code).",
             "Output-eval task arms select their harness per arm, so this flag no longer",
             "governs them. Precedence: this flag > EVALSPEC_AGENT > [tool.evalspec]",
             "agent in pyproject.toml. Unknown values fail at startup naming the source.",
@@ -223,7 +183,7 @@ def pytest_addoption(parser: object) -> None:
         "skill below it fails the run with exit 1 (e.g. 0 = the skill must "
         "at least match baseline). Uses the raw delta — read the within-noise "
         "label in benchmark.md before trusting small numbers. Skills without "
-        "both arms (trigger-only) are exempt.",
+        "both arms are exempt.",
     )
 
 
@@ -504,8 +464,8 @@ def _write_manifest(
     Run-level `agent`/`agent_version` come from the default harness, so they name only one
     harness even for a multi-harness set; the per-arm roster records each arm's own
     `harness`/`model`/`effort`/`env` (env redacted). Per-arm agent versions aren't probed.
-    `run_set` is None for a trigger-only run with no eval set — `set`/`arms` degrade to
-    null/empty. `judge_meta` is the already-resolved judge object (see `_judge_meta`).
+    `run_set` is None for a run with no eval set — `set`/`arms` degrade to null/empty.
+    `judge_meta` is the already-resolved judge object (see `_judge_meta`).
     """
     agent_version = token_split = None
     try:
@@ -535,8 +495,6 @@ def _write_manifest(
         if run_set
         else [],
         "judge": judge_meta,
-        "trigger_effort": config.getoption("evalspec_trigger_effort"),
-        "trigger_mode": config.getoption("evalspec_trigger_mode"),
     }
     manifest = build_manifest(
         run_id=uuid.uuid4().hex,
@@ -568,8 +526,8 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         return
     # Resolve the eval set only when this run produced output-eval artifacts — mirrors
     # pytest_generate_tests' `if cases` guard so the hooks agree on whether a set is
-    # required. A trigger-only project (no eval set declared) still writes artifacts here;
-    # resolving unconditionally would raise UsageError at finish for a config we tolerate.
+    # required. A project that declared no eval set resolves nothing here; resolving
+    # unconditionally would raise UsageError at finish for a config we tolerate.
     # None → manifest/report degrade.
     needs_set = any(
         child_dir.is_dir() and child_dir.name.startswith("eval-")
@@ -607,7 +565,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     binder_degraded_total = 0
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         if not any(
-            child_dir.is_dir() and child_dir.name.startswith(("eval-", "trigger-"))
+            child_dir.is_dir() and child_dir.name.startswith("eval-")
             for child_dir in skill_dir.iterdir()
         ):
             continue
@@ -668,7 +626,7 @@ def pytest_generate_tests(metafunc: object) -> None:
         # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
         repo_root = resolve_repo_root(metafunc.config)
         cases = discover_eval_cases(repo_root, resolve_eval_paths(metafunc.config))
-        # Resolve the set only when there are eval cases to cross with — a trigger-only
+        # Resolve the set only when there are eval cases to cross with — an empty
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
         arms = resolved_run_set(metafunc.config).arms if cases else []
         if cases:
@@ -683,24 +641,3 @@ def pytest_generate_tests(metafunc: object) -> None:
                 pairs.append((case, arm))
                 ids.append(f"{case.param_id}-{arm.name}")
         metafunc.parametrize("eval_arm", pairs, ids=ids)
-    if "trigger_query" in fixtures:
-        repo_root = resolve_repo_root(metafunc.config)
-        eval_roots = resolve_eval_roots(metafunc.config)
-        queries = discover_trigger_cases(repo_root, eval_roots)
-        # --evalspec-model is now a set scalar-override defaulting to None; trigger
-        # routing keeps a concrete model, so fall back to sonnet (mirrors cases.py).
-        model = metafunc.config.getoption("evalspec_model") or "sonnet"
-        params = []
-        for query in queries:
-            # A tier-scoped `xfail` is a documented routing miss on SPECIFIC tiers.
-            # Attach the non-strict mark only when the running model is one of them,
-            # so any other tier runs strict and a regression there still fails. The
-            # routing still runs — we keep measuring it.
-            xfail = query.query.get("xfail")
-            marks = (
-                [pytest.mark.xfail(reason=xfail["reason"], strict=False)]
-                if xfail and xfail_applies(xfail, model)
-                else []
-            )
-            params.append(pytest.param(query, marks=marks, id=query.param_id))
-        metafunc.parametrize("trigger_query", params)

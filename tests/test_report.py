@@ -1,11 +1,9 @@
 """Tests for report."""
 
-import json
-
 import pytest
 
 from evalspec import report
-from tests.support import seed_arm, seed_trigger
+from tests.support import seed_arm
 
 
 def test_redact_env_masks_secrets_keeps_urls() -> None:
@@ -518,26 +516,6 @@ def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
     assert row["samples"] == 1  # only the well-formed sample counted
 
 
-def test_trigger_rows_aggregate_per_query(tmp_path: object) -> None:
-    """Verify trigger rows aggregate per query."""
-    seed_trigger(tmp_path, 1, should_trigger=True, fires=2)  # fired as expected
-    seed_trigger(tmp_path, 2, should_trigger=False, fires=1)  # fired but shouldn't
-
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
-
-    rows = bench["trigger"]
-    assert rows[0]["slug"] == "q1"
-    assert rows[0]["should_trigger"] is True
-    assert rows[0]["samples"] == 1
-    assert rows[0]["as_expected"] == 1
-    assert rows[1]["slug"] == "q2"
-    assert rows[1]["should_trigger"] is False
-    assert rows[1]["samples"] == 1
-    assert rows[1]["as_expected"] == 0
-    md = report._format_markdown(bench)
-    assert "## Trigger routing — 1/2 queries as expected" in md
-
-
 def test_benchmark_carries_format_version(tmp_path: object) -> None:
     """Verify benchmark carries format version."""
     seed_arm(tmp_path, "alpha", "trial", passes=1, total=1)
@@ -547,65 +525,16 @@ def test_benchmark_carries_format_version(tmp_path: object) -> None:
     assert bench["format_version"] == 1
 
 
-def test_trigger_rows_read_persisted_verdict_and_query(tmp_path: object) -> None:
-    """Verify trigger rows read persisted verdict and query."""
-    seed_trigger(tmp_path, 1, should_trigger=True, fires=2, query="archive this note")
-    seed_trigger(tmp_path, 2, should_trigger=False, fires=1, query="what is PARA?")
-
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
-
-    assert bench["trigger"][0]["query"] == "archive this note"
-    assert bench["trigger"][0]["as_expected"] == 1
-    assert bench["trigger"][1]["as_expected"] == 0
-    md = report._format_markdown(bench)
-    assert "archive this note" in md
-
-
-def test_trigger_md_table_escapes_pipes_and_truncates(tmp_path: object) -> None:
-    """Verify trigger md table escapes pipes and truncates."""
-    long_query = "alpha | beta " + ("overflow" * 20)
-    seed_trigger(tmp_path, 1, should_trigger=True, fires=1, query=long_query)
-
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
-    md = report._format_markdown(bench)
-
-    assert "alpha \\| beta" in md  # cell-safe
-    assert long_query not in md  # truncated
-
-
-def test_trigger_xfail_marked_in_report(tmp_path: object) -> None:
-    """Verify trigger xfail marked in report."""
-    seed_trigger(
-        tmp_path,
-        3,
-        should_trigger=True,
-        fires=0,
-        query="boundary query",
-        xfail={"models": ["sonnet"], "reason": "documented routing boundary"},
-    )
-
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
-
-    assert bench["trigger"][0]["xfail"] == {
-        "models": ["sonnet"],
-        "reason": "documented routing boundary",
-    }
-    assert "(xfail)" in report._format_markdown(bench)
-
-
-def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
-    """Verify index rows flatten evals and triggers."""
+def test_index_rows_flatten_evals(tmp_path: object) -> None:
+    """Verify index rows flatten eval samples."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path, "alpha", "trial", passes=0, total=2, sample=1, errored=True)
-    seed_trigger(tmp_path, 1, should_trigger=True, fires=2, query="route me")
 
     rows = report.index_rows(tmp_path, "demo")
 
     evals = [row for row in rows if row["kind"] == "eval"]
-    triggers = [row for row in rows if row["kind"] == "trigger"]
     assert len(evals) == 3
-    assert len(triggers) == 1
     first = next(row for row in evals if row["arm"] == "trial" and row["sample"] == 0)
     assert first == {
         "skill": "demo",
@@ -624,9 +553,6 @@ def test_index_rows_flatten_evals_and_triggers(tmp_path: object) -> None:
     }
     errored = next(row for row in evals if row["sample"] == 1)
     assert errored["errored"] is True
-    assert triggers[0]["slug"] == "q1"
-    assert triggers[0]["passed"] is True
-    assert triggers[0]["skill"] == "demo"
 
 
 def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
@@ -682,103 +608,3 @@ def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None
     assert "within noise" in report.delta_line("demo", bench, tmp_path / "benchmark.md")
 
 
-def test_as_expected_counts_xfail_miss_as_expected() -> None:
-    """Verify as expected counts xfail miss as expected."""
-    # An xfail query that missed on its listed tier (the documented behavior) is "as expected".
-    assert (
-        report._as_expected(
-            {
-                "passed": False,
-                "model": "sonnet",
-                "xfail": {"models": ["sonnet"], "reason": "known sonnet miss"},
-            }
-        )
-        is True
-    )
-    # An xfail query that fired anyway (XPASS) on its listed tier is also non-failing.
-    assert (
-        report._as_expected(
-            {
-                "passed": True,
-                "model": "sonnet",
-                "xfail": {"models": ["sonnet"], "reason": "known sonnet miss"},
-            }
-        )
-        is True
-    )
-    # A non-xfail query is as-expected only when it passed.
-    assert report._as_expected({"passed": False, "model": "opus"}) is False
-    assert report._as_expected({"passed": True, "model": "opus"}) is True
-
-
-def _write_trigger_sample(skill_dir: object, slug: object, rec: object) -> None:
-    """Write trigger sample."""
-    sd = skill_dir / f"trigger-{slug}" / "sample-0"
-    sd.mkdir(parents=True)
-    (sd / "timing.json").write_text(json.dumps(rec), encoding="utf-8")
-
-
-def test_as_expected_xfail_credited_only_on_listed_tier(tmp_path: object) -> None:
-    """Verify as expected xfail credited only on listed tier."""
-    # A documented sonnet miss, run on sonnet: missed but as-expected (green).
-    on_tier = {
-        "slug": "article-routing",
-        "query": "archive this article",
-        "should_trigger": True,
-        "passed": False,
-        "model": "sonnet",
-        "xfail": {"models": ["sonnet"], "reason": "r"},
-    }
-    assert report._as_expected(on_tier) is True
-    # Same query run on opus (not in models): a miss is NOT credited — it's a fail.
-    off_tier = {**on_tier, "model": "opus", "passed": False}
-    assert report._as_expected(off_tier) is False
-    # Off-tier but actually passed: as-expected via passed.
-    off_tier_pass = {**on_tier, "model": "opus", "passed": True}
-    assert report._as_expected(off_tier_pass) is True
-
-
-def test_trigger_rows_use_slug(tmp_path: object) -> None:
-    """Verify trigger rows use slug."""
-    skill_dir = tmp_path / "ingest"
-    _write_trigger_sample(
-        skill_dir,
-        "ingest-article",
-        {
-            "slug": "ingest-article",
-            "query": "ingest this",
-            "should_trigger": True,
-            "passed": True,
-            "model": "opus",
-            "fires": 2,
-            "threshold": 2,
-        },
-    )
-    rows = report._trigger_rows(skill_dir)
-    assert rows[0]["slug"] == "ingest-article"
-    assert rows[0]["as_expected"] == 1
-
-
-def test_trigger_rows_counts_xfail_miss_as_expected(tmp_path: object) -> None:
-    """Verify trigger rows counts xfail miss as expected."""
-    # An xfail query whose sample missed (passed=False) must count as as_expected
-    # in _trigger_rows. If the call site used t["passed"] instead of _as_expected(t)
-    # this assertion would fail: as_expected would be 0, not 1.
-    seed_trigger(
-        tmp_path,
-        1,
-        should_trigger=True,
-        fires=0,
-        xfail={"models": ["sonnet"], "reason": "documented sonnet routing miss"},
-    )
-
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
-
-    row = bench["trigger"][0]
-    assert row["xfail"] == {
-        "models": ["sonnet"],
-        "reason": "documented sonnet routing miss",
-    }
-    assert row["samples"] == 1
-    # The miss is documented — it must be counted as expected, not a failure.
-    assert row["as_expected"] == 1

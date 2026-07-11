@@ -107,14 +107,18 @@ def test_directory_created_path_shape_binds_without_host_call() -> None:
     assert spec["path"] == "./output/"
 
 
-def test_bind_skill_invoked() -> None:
-    """Verify bind skill invoked."""
+def test_activation_line_binds_via_model() -> None:
+    """Verify an activation line reaches the model and binds to its checker.
+
+    There is no offline skill recognizer — the binder handles activation like any other
+    assertion; the corpus gate (`make evals:binder`) covers the model's reliability.
+    """
     spec = bind(
         "Skill `ingest` invoked",
         call_model=_reply('{"checker":"skill_invoked","skill":"ingest"}'),
     )
-    assert spec["checker"] == "skill_invoked"
-    assert spec["skill"] == "ingest"
+
+    assert spec == {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
 
 def test_punt_explicit() -> None:

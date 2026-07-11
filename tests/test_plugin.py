@@ -14,7 +14,7 @@ import pytest
 
 from evalspec import plugin, workspace
 from evalspec.agents.base import AgentCapabilities
-from tests.support import seed_arm, seed_trigger
+from tests.support import seed_arm
 
 ALPHA_MD = textwrap.dedent(
     """\
@@ -84,9 +84,6 @@ env = { OPENAI_API_KEY = "sk-live-supersecret123" }
 DUMMY_CASES = """
 def test_eval(eval_arm):
     pass
-
-def test_trigger(trigger_query):
-    pass
 """
 
 
@@ -116,14 +113,13 @@ def _collect(pytester: object, *extra: object) -> object:
     )
 
 
-def test_help_describes_output_and_trigger_search_paths(pytester: object) -> None:
-    """Verify discovery option help distinguishes output and trigger evals."""
+def test_help_describes_eval_search_paths(pytester: object) -> None:
+    """Verify the eval-paths option help names the default search paths."""
     result = pytester.runpytest("-p", "evalspec.plugin", "--help")
 
     output = " ".join(result.stdout.str().split())
     assert result.ret == 0
-    assert "trigger evals only" in output
-    assert "output evals only" in output
+    assert "eval.md / *.eval.md" in output
     assert "skills, tests, evals, benchmarks" in output
 
 
@@ -390,86 +386,6 @@ def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
         plugin.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
-def test_trigger_queries_parametrized(pytester: object) -> None:
-    """Verify trigger queries parametrized."""
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: myskill\n---\n## Trigger\n\n- q1: do it\n\n## No Trigger\n\n- q2: nope\n"
-    )
-    pytester.makepyfile(test_cases=DUMMY_CASES)
-
-    result = pytester.runpytest(
-        "-p",
-        "evalspec.plugin",
-        "--collect-only",
-        "-q",
-        "--evalspec-repo-root",
-        str(pytester.path),
-        "test_cases.py::test_trigger",
-    )
-
-    out = result.stdout.str()
-    assert "test_trigger[myskill-q1]" in out
-    assert "test_trigger[myskill-q2]" in out
-
-
-def test_trigger_xfail_marks_known_failure_on_listed_tier(pytester: object) -> None:
-    """Verify trigger xfail marks known failure on listed tier."""
-    # On a listed tier (sonnet), the xfail mark attaches: the dummy body passes,
-    # so the marked param shows XPASS while the unmarked one passes — proving the
-    # mark was attached without real routing.
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: myskill\n---\n## Trigger\n\n- routes-fine: routes fine\n\n"
-        "- known-miss: known miss\n"
-        "  - fails-on [sonnet]: documented routing boundary\n"
-    )
-    pytester.makepyfile(test_cases=DUMMY_CASES)
-
-    result = pytester.runpytest(
-        "-p",
-        "evalspec.plugin",
-        "-rX",
-        "--evalspec-model",
-        "sonnet",
-        "--evalspec-repo-root",
-        str(pytester.path),
-        "test_cases.py::test_trigger",
-    )
-
-    result.assert_outcomes(passed=1, xpassed=1)
-
-
-def test_trigger_xfail_strict_on_unlisted_tier(pytester: object) -> None:
-    """Verify trigger xfail strict on unlisted tier."""
-    # On a tier NOT listed (opus), the mark is withheld: the same query runs strict.
-    # The dummy body passes, so BOTH params show plain PASS (no xpassed) — proving
-    # the gate stays strict where the xfail doesn't apply.
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: myskill\n---\n## Trigger\n\n- routes-fine: routes fine\n\n"
-        "- known-miss: known miss\n"
-        "  - fails-on [sonnet]: documented routing boundary\n"
-    )
-    pytester.makepyfile(test_cases=DUMMY_CASES)
-
-    result = pytester.runpytest(
-        "-p",
-        "evalspec.plugin",
-        "-rX",
-        "--evalspec-model",
-        "opus",
-        "--evalspec-repo-root",
-        str(pytester.path),
-        "test_cases.py::test_trigger",
-    )
-
-    result.assert_outcomes(passed=2)
-
-
 def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object) -> None:
     """Verify count two parametrizes sample index."""
     # --count 2 must yield 8 items (2 evals × 2 arms × 2 samples) AND the
@@ -539,8 +455,6 @@ class _FakeConfig:
             "evalspec_judge_timeout": None,
             "evalspec_judge_harness_arg": [],
             "evalspec_judge_env": [],
-            "evalspec_trigger_effort": "low",
-            "evalspec_trigger_mode": "asymmetric",
             "evalspec_fail_under": self._fail_under,
         }.get(name)
 
@@ -620,8 +534,7 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
 def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
     """Verify terminal summary multi skill single header."""
     # Two skills with eval-* children emit exactly one header and one delta line
-    # each (sorted: archive before ingest). A third skill dir that contains only
-    # a trigger-q1 subdir now reports too — trigger-only skills are no longer skipped.
+    # each (sorted: archive before ingest).
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -635,18 +548,12 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     seed_arm(ingest_dir, "beta", "trial", passes=1, total=2)
     seed_arm(ingest_dir, "beta", "baseline", passes=1, total=2)
 
-    trigger_only_dir = skills / "trigger-only"
-    seed_trigger(trigger_only_dir, 1, should_trigger=True, fires=0)
-
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
     assert terminal_reporter.events.count(("separator", "evalspec benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    # trigger-only skill now reports too.
-    assert len(lines) == 3
-    assert any("trigger-only" in message and "trigger 0/1" in message for message in lines)
-    assert (trigger_only_dir / "benchmark.md").exists()
+    assert len(lines) == 2
 
     benchmark = json.loads((archive_dir / "benchmark.json").read_text())
     assert benchmark["label"] == "iteration_01 · archive"
@@ -670,8 +577,6 @@ def test_build_manifest_assembles_shape_by_value() -> None:
             "harness_args": [],
         },
         "eval_effort": "medium",
-        "trigger_effort": "low",
-        "trigger_mode": "asymmetric",
     }
 
     manifest = plugin.build_manifest(
@@ -690,7 +595,6 @@ def test_build_manifest_assembles_shape_by_value() -> None:
     assert manifest["iteration"] == "iteration_07"
     assert manifest["token_split"] is True
     assert manifest["model"] == "sonnet"  # cfg spread in
-    assert manifest["trigger_mode"] == "asymmetric"
     assert len(manifest["config_hash"]) == 12
     assert manifest["judge"]["harness"] == "claude-code"  # nested judge spread in whole
     assert manifest["judge"]["model"] == "sonnet"
@@ -713,8 +617,6 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
             "harness_args": [],
         },
         "eval_effort": "medium",
-        "trigger_effort": "low",
-        "trigger_mode": "asymmetric",
     }
     reordered = dict(reversed(list(cfg.items())))
 
@@ -785,8 +687,6 @@ arms = [
     assert meta["judge"]["timeout"] == 300
     assert meta["judge"]["env"] == {}
     assert meta["judge"]["harness_args"] == []
-    assert meta["trigger_effort"] == "low"
-    assert meta["trigger_mode"] == "asymmetric"
     assert meta["token_split"] is True
     assert "commit" in meta
     assert "started_at" in meta
@@ -847,28 +747,6 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     meta = json.loads(raw_text)
     assert meta["judge"]["env"]["OPENAI_API_KEY"] == "***"
     assert "sk-live-supersecret123" not in raw_text
-
-
-def test_sessionfinish_trigger_only_without_eval_set(tmp_path: object, monkeypatch: object) -> None:
-    """Verify sessionfinish trigger only without eval set."""
-    # A trigger-only run that declared no eval set must finish, not crash: sessionfinish
-    # resolves the set only when an `eval-` artifact exists. Here there are only `trigger-`
-    # dirs, so the set is never resolved and the manifest degrades to set=None/arms=[].
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
-    workspace.set_current_iteration("iteration_01")
-    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
-    trigger_only = skills / "router"
-    seed_trigger(trigger_only, 1, should_trigger=True, fires=1)
-
-    _, terminal_reporter = _finish_and_summarize(tmp_path)
-
-    meta = json.loads((skills.parent / "meta.json").read_text())
-    assert meta["set"] is None
-    assert meta["arms"] == []
-    assert (trigger_only / "benchmark.md").exists()
-    assert any(
-        "router" in message and "trigger 1/1" in message for message in terminal_reporter.lines
-    )
 
 
 def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatch: object) -> None:
@@ -1010,8 +888,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     # `test_cases.py` stub (`def test_eval(eval_arm): pass`), which never requests
     # `judge_config` and so could never exercise this preflight at all — see
     # `test_plugin_self_registers_cases_without_positional` for the same mechanic.
-    # `-k test_eval` keeps this to the real (parametrized) test_eval items; the dummy
-    # project has no trigger-evals.md, so test_trigger collects zero items anyway.
+    # `-k test_eval` keeps this to the real (parametrized) test_eval items.
     result = pytester.runpytest(
         "-p",
         "evalspec.plugin",
@@ -1023,47 +900,6 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     assert result.ret != 0
     out = result.stdout.str() + result.stderr.str()
     assert "not found on PATH" in out
-
-
-def test_judge_preflight_does_not_fire_on_trigger_only_session(
-    pytester: object, monkeypatch: object
-) -> None:
-    """Verify judge preflight does not fire on trigger only session."""
-    # Regression guard: a trigger-only session (test_trigger, which doesn't request the
-    # judge_config fixture) must not be forced to have a judge binary on PATH — trigger
-    # runs never grade. No judge binary is "missing" here on purpose, so a failure can
-    # only mean the judge preflight fired when it should not have.
-    import shutil
-
-    from evalspec import sandbox
-
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: myskill\n---\n## Trigger\n\n- q1: do it\n\n## No Trigger\n\n- q2: nope\n"
-    )
-    monkeypatch.setattr(shutil, "which", lambda name: None)  # no judge binary anywhere
-    monkeypatch.setattr(sandbox, "preflight", lambda: None)
-    # No output-eval fixtures exist in this project (no [tool.evalspec] sets, no
-    # skills/*/evals/*/prompt.md), so real cases.py's test_eval parametrizes to zero
-    # items and only test_trigger items are collected — proving the judge preflight is
-    # gated by the fixture dependency, not just that nothing executed. Stub the actual
-    # routing call so this stays a fast, hermetic unit-of-behavior check with no
-    # microVM/credentials required; the routing/detection logic itself is covered
-    # elsewhere (tests/test_trigger.py).
-    monkeypatch.setattr(sandbox, "route_in_sandbox", lambda *args, **kwargs: [])
-    # No explicit positional (same reasoning as the test above): self-registration
-    # must load the real cases.py so this exercises the real judge preflight gate.
-    result = pytester.runpytest(
-        "-p",
-        "evalspec.plugin",
-        "--evalspec-repo-root",
-        str(pytester.path),
-        "-k",
-        "q1",
-    )
-    out = result.stdout.str() + result.stderr.str()
-    assert "not found on PATH" not in out
 
 
 def test_gemini_key_preflight_fixture_raises_when_missing(
@@ -1096,17 +932,13 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     assert "GEMINI_API_KEY" in out
 
 
-def test_gemini_key_preflight_does_not_fire_on_trigger_only_session(
+def test_gemini_key_preflight_skipped_under_collect_only(
     pytester: object, monkeypatch: object
 ) -> None:
-    """Verify a trigger-only session (no judge_config fixture request) needs no key."""
+    """Verify --collect-only never triggers the GEMINI_API_KEY preflight."""
     from evalspec import sandbox
 
-    evals = pytester.path / "skills" / "myskill" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: myskill\n---\n## Trigger\n\n- q1: do it\n\n## No Trigger\n\n- q2: nope\n"
-    )
+    _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(sandbox, "preflight", lambda: None)
 
@@ -1196,7 +1028,6 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     seed_arm(skill_results_dir / "archive", "alpha", "trial", passes=1, total=1)
     seed_arm(skill_results_dir / "archive", "alpha", "baseline", passes=0, total=1)
-    seed_trigger(skill_results_dir / "bootstrap", 1, should_trigger=True, fires=1)
 
     _finish_and_summarize(tmp_path)
 
@@ -1204,9 +1035,8 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
         json.loads(line)
         for line in (skill_results_dir.parent / "index.jsonl").read_text().splitlines()
     ]
-    assert {record["skill"] for record in lines} == {"archive", "bootstrap"}
+    assert {record["skill"] for record in lines} == {"archive"}
     assert sum(1 for record in lines if record["kind"] == "eval") == 2
-    assert sum(1 for record in lines if record["kind"] == "trigger") == 1
 
 
 def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:

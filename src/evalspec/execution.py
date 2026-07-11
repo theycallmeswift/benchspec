@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,7 +26,12 @@ from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
 from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
-from evalspec.sandbox import DEFAULT_PROJECT_MARKER, arm_session, ensure_snapshot
+from evalspec.sandbox import (
+    DEFAULT_PROJECT_MARKER,
+    SandboxSession,
+    arm_session,
+    ensure_snapshot,
+)
 from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 
 # The judge is a run-level concern, independent of the task arm's own harness/model
@@ -42,7 +48,6 @@ class ArmOutcome:
     errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
-    fired: bool = False  # informational: did the named skill get invoked this run?
 
 
 @dataclass
@@ -65,14 +70,13 @@ class _ArmRun:
     total_output_tokens: int = 0
 
 
-def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> dict:
+def _turn_transcript(*, prompt: str, result: object, tree: str) -> dict:
     """Render seeded turns and the prompt into an agent transcript."""
     record = {
         "turn": 1,
         "prompt": prompt,
         "result": result.result_text,
         "is_error": result.is_error,
-        "fired": result.fired,
         "result_subtype": result.result_subtype,
         # count dispatches (tool_call), not the round-trip tool_result events
         "tool_call_count": sum(
@@ -80,9 +84,10 @@ def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> d
         ),
         "workdir_tree": tree,
     }
-    # Pass the skill so a fire via the namespaced-tool fallback still lands here, keeping
-    # this field consistent with `fired` instead of empty on that shape.
-    dispatched = skills_dispatched(result.trajectory, skill)
+    # Informational Skill-tool set for this turn. The fallback-inclusive, candidate-unioned
+    # set used for grading is computed in run_eval_arm, not here — a no-arg call cannot see
+    # a bare-tool-name fallback fire.
+    dispatched = skills_dispatched(result.trajectory)
     if dispatched:
         record["skills_dispatched"] = dispatched
     return record
@@ -95,7 +100,7 @@ def _grade_via_judge(
     contents: object,
     shas: object,
     result_text: object,
-    grade: object,
+    grade: Callable[..., dict],
     judge_config: object,
     eval_id: object,
     arm_name: object,
@@ -135,15 +140,39 @@ def _grade_via_judge(
     return graded, int((time.perf_counter() - t0) * 1000), judge_errored
 
 
+def _bind_all(
+    assertions: list, bind: Callable[[str], dict | None]
+) -> tuple[list, int]:
+    """Bind every assertion once, returning one spec-or-None per assertion plus a degrade count.
+
+    A transient binder infra failure (RuntimeError) degrades that assertion to judge
+    grading — spec None — and increments the count, never a silent absorb. A punt
+    (bind returning None) is the binder's designed outcome, not a degrade. BinderAuthError
+    is deliberately NOT caught: it propagates and fails the run.
+    """
+    cache: dict[str, dict | None] = {}
+    binder_degraded = 0
+    specs: list = []
+    for text in assertions:
+        if text not in cache:
+            try:
+                cache[text] = bind(text)
+            except RuntimeError:
+                cache[text] = None
+                binder_degraded += 1
+        specs.append(cache[text])
+    return specs, binder_degraded
+
+
 def _grade_mixed(
     *,
     assertions: object,
+    specs: object,
     tree: object,
     contents: object,
     shas: object,
     result_text: object,
-    bind: object,
-    grade: object,
+    grade: Callable[..., dict],
     workdir: object,
     grade_context: object,
     judge_config: object,
@@ -152,38 +181,22 @@ def _grade_mixed(
     pre_run_shas: object,
     process_facts: object = "",
 ) -> object:
-    """Grade bound assertions locally and punt the rest to the judge.
+    """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
-    Returns (results, judge_ms, judge_errored, binder_degraded) — binder_degraded
-    counts each distinct bind_cache MISS that raised RuntimeError (a transient
-    binder infra failure degrading to judge grading), never a punt (bind() returning
-    None is the binder's designed, non-degraded outcome). A BinderAuthError is never
-    caught here — it propagates and fails the run.
+    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Returns
+    (results, judge_ms, judge_errored).
     """
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
-    bind_cache: dict[str, dict | None] = {}
-    binder_degraded = 0
-    for assertion_index, text in enumerate(assertions):
-        if text not in bind_cache:
-            try:
-                bind_cache[text] = bind(text)
-            except RuntimeError:
-                # A transient binder infra failure degrades to judge grading (not a
-                # cell error) but must be counted, not silently absorbed — see
-                # execution.py's degradation-visibility contract. BinderAuthError
-                # deliberately isn't caught here: it propagates and fails the run.
-                bind_cache[text] = None
-                binder_degraded += 1
-        spec = bind_cache[text]
+    for assertion_index, spec in enumerate(specs):
         if spec is not None:
             entry = checkers.run_assertion(spec, workdir, pre_run_shas, context=grade_context)
-            entry["text"] = text  # the author's prose, not the spec-derived rendering
+            entry["text"] = assertions[assertion_index]  # author's prose, not spec-derived
             results[assertion_index] = entry
         else:
             judge_idx.append(assertion_index)
     if not judge_idx:
-        return results, 0, False, binder_degraded
+        return results, 0, False
 
     texts = [assertions[assertion_index] for assertion_index in judge_idx]
     graded, judge_ms, judge_errored = _grade_via_judge(
@@ -202,11 +215,11 @@ def _grade_mixed(
     for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[assertion_index] = entry
-    return results, judge_ms, judge_errored, binder_degraded
+    return results, judge_ms, judge_errored
 
 
 async def _run_arm_turns(
-    session_factory: object,
+    session_factory: Callable[..., SandboxSession],
     *,
     agent: object,
     snapshot: object,
@@ -219,7 +232,6 @@ async def _run_arm_turns(
     prompt: object,
     project_marker: object,
     setup_reldir: object,
-    detect_skill: object,
     arm_env: object = None,
     eval_set: object = "",
     harness_args: object = None,
@@ -248,10 +260,12 @@ async def _run_arm_turns(
         # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
         # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
         # host side of the same mount.
+        # Ordinary execution never feeds a group-derived skill name to detection; the
+        # adapter keeps the parameter for the __route__/runner paths but receives None here.
         result = await run(
             prompt,
             resume_session_id=None,
-            detect_skill=detect_skill,
+            detect_skill=None,
         )
 
         run_acc.total_duration_ms += result.duration_ms
@@ -270,9 +284,7 @@ async def _run_arm_turns(
         run_acc.tree, run_acc.contents, run_acc.shas = tree, contents, shas
         run_acc.result_text = result.result_text
         run_acc.trajectory = result.trajectory
-        run_acc.transcript.append(
-            _turn_transcript(prompt=prompt, result=result, tree=tree, skill=detect_skill)
-        )
+        run_acc.transcript.append(_turn_transcript(prompt=prompt, result=result, tree=tree))
         run_acc.raw = result.raw
 
     return run_acc
@@ -291,9 +303,9 @@ def run_eval_arm(
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
-    session_factory: object = arm_session,
-    grade: object = grade_run,
-    bind: object = binder.bind,
+    session_factory: Callable[..., SandboxSession] = arm_session,
+    grade: Callable[..., dict] = grade_run,
+    bind: Callable[[str], dict | None] = binder.bind,
 ) -> ArmOutcome:
     """Run all cases for one eval arm and write result artifacts."""
     judge_config = judge_config or JudgeConfig()
@@ -306,8 +318,6 @@ def run_eval_arm(
     # because the sole caller (cases.py) passes project=repo_root. A future caller that
     # mounts a staged project distinct from repo_root must address this.
     setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
-    # Stream the skill name on both arms so fired-detection runs unconditionally.
-    detect_skill = eval_case.skill
 
     # Resolve the agent + snapshot BEFORE the per-arm asyncio.run: building a missing
     # snapshot itself calls asyncio.run, which can't nest inside a running loop. The agent
@@ -337,7 +347,6 @@ def run_eval_arm(
             prompt=prompt,
             project_marker=project_marker,
             setup_reldir=setup_reldir,
-            detect_skill=detect_skill,
             # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
             # actually runs, never at collection (a deselected arm's secret is never read).
             arm_env=expand_env(arm.env, os.environ),
@@ -346,22 +355,36 @@ def run_eval_arm(
         )
     )
 
-    # Activation is graded off the arm's actually-dispatched skills — empty on a non-firing
-    # arm (skill_invoked then grades False, never an error). Pass the eval's skill so a fire
-    # via the namespaced-tool fallback (detect_skill_fired's second shape) lands in the set
-    # too, sparing a run where the skill demonstrably fired a false-negative activation.
-    fired_skills = tuple(skills_dispatched(arm_run.trajectory, eval_case.skill))
+    # Bind once, up front: the binder's own output is the source of truth for which
+    # assertions are activation checks — no separate recognizer.
+    specs, binder_degraded = _bind_all(graded_assertions, bind)
+
+    # Candidate skills are those the binder bound to an activation checker — the skills the
+    # eval asserts on, never the group name, so an eval whose group differs still grades each.
+    candidate_skills = {
+        spec["skill"]
+        for spec in specs
+        if spec is not None and spec["checker"] in ("skill_invoked", "not_skill_invoked")
+    }
+
+    # Fired skills = every real Skill-tool fire (target-independent) plus each candidate's
+    # fallback-shape fire, deduped first-seen so the evidence list stays stable.
+    dispatched = list(skills_dispatched(arm_run.trajectory))
+    for skill in candidate_skills:
+        dispatched.extend(skills_dispatched(arm_run.trajectory, skill))
+    fired_skills = tuple(dict.fromkeys(dispatched))
+
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    merged, judge_ms, judge_errored, binder_degraded = _grade_mixed(
+    merged, judge_ms, judge_errored = _grade_mixed(
         assertions=graded_assertions,
+        specs=specs,
         tree=arm_run.tree,
         contents=arm_run.contents,
         shas=arm_run.shas,
         result_text=arm_run.result_text,
-        bind=bind,
         grade=grade,
         workdir=workdir,
         grade_context=grade_context,
@@ -415,9 +438,4 @@ def run_eval_arm(
         errored,
         arm_run.total_duration_ms,
         arm_run.total_tokens,
-        # `fired` is read back from the transcript, the one persisted home for the
-        # per-turn `result.fired` — no redundant copy threaded through `_ArmRun`. An
-        # errored arm can return before the single turn appends; treat an empty
-        # transcript as no fire rather than an IndexError.
-        fired=arm_run.transcript[0]["fired"] if arm_run.transcript else False,
     )

@@ -38,14 +38,9 @@ def test_file_exists_pass_and_fail(workdir: object) -> None:
     assert "absent" in result["evidence"]
 
 
-def test_file_exists_negated(workdir: object) -> None:
-    """Verify file exists negated."""
-    spec = {
-        "type": "deterministic",
-        "checker": "file_exists",
-        "path": "missing.md",
-        "should_exist": False,
-    }
+def test_not_file_exists_passes_on_missing(workdir: object) -> None:
+    """Verify not_file_exists passes when the path is missing."""
+    spec = {"type": "deterministic", "checker": "not_file_exists", "path": "missing.md"}
     assert _run(spec, workdir)["passed"] is True
 
 
@@ -55,14 +50,9 @@ def test_file_exists_matches_a_directory(workdir: object) -> None:
     assert _run(spec, workdir)["passed"] is True
 
 
-def test_file_exists_negated_fails_on_present_directory(workdir: object) -> None:
-    """Verify file exists negated fails on present directory."""
-    spec = {
-        "type": "deterministic",
-        "checker": "file_exists",
-        "path": "Greetings",
-        "should_exist": False,
-    }
+def test_not_file_exists_fails_on_present_directory(workdir: object) -> None:
+    """Verify not_file_exists fails when the path is present as a directory."""
+    spec = {"type": "deterministic", "checker": "not_file_exists", "path": "Greetings"}
     assert _run(spec, workdir)["passed"] is False
 
 
@@ -424,6 +414,66 @@ def test_skill_invoked_not_fired(tmp_path: object) -> None:
         {},
         context=GradeContext(fired_skills=("archive",)),
     )
+    assert out["passed"] is False
+
+
+def test_not_skill_invoked_fails_on_firing_arm(tmp_path: object) -> None:
+    """Verify a negative assertion fails when the skill did fire."""
+    out = checkers.run_assertion(
+        {"checker": "not_skill_invoked", "skill": "ingest"},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("ingest",)),
+    )
+
+    assert out["passed"] is False
+
+
+def test_not_skill_invoked_passes_on_non_firing_arm(tmp_path: object) -> None:
+    """Verify a negative assertion passes when the skill did not fire."""
+    out = checkers.run_assertion(
+        {"checker": "not_skill_invoked", "skill": "ingest"},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("archive",)),
+    )
+
+    assert out["passed"] is True
+
+
+def test_skill_invoked_expected_true_fails_on_non_firing_arm(tmp_path: object) -> None:
+    """Verify an explicit positive assertion fails when the skill did not fire."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": True},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("archive",)),
+    )
+
+    assert out["passed"] is False
+
+
+def test_skill_invoked_namespaced_hit_passes_positive(tmp_path: object) -> None:
+    """Verify a namespaced fire (`plugin:ingest`) counts as a hit for the positive form."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": True},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("plugin:ingest",)),
+    )
+
+    assert out["passed"] is True
+
+
+def test_not_skill_invoked_namespaced_hit_fails_negative(tmp_path: object) -> None:
+    """Verify a namespaced fire (`plugin:ingest`) counts as a hit for the negative form."""
+    out = checkers.run_assertion(
+        {"checker": "not_skill_invoked", "skill": "ingest"},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("plugin:ingest",)),
+    )
+
     assert out["passed"] is False
 
 

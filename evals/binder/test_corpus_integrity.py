@@ -51,11 +51,13 @@ CORPUS = _load_corpus(CORPUS_PATH)
 
 _CHECKERS = {
     "file_exists",
+    "not_file_exists",
     "glob_count",
     "sha256_match",
     "frontmatter_has",
     "regex",
     "skill_invoked",
+    "not_skill_invoked",
 }
 
 
@@ -131,6 +133,25 @@ def test_skill_invoked_binds_present() -> None:
             f"skill_invoked entry {entry['text'][:50]}... targets "
             f"{entry['expect_checker']!r}"
         )
+
+
+def test_negative_matchers_bind_present() -> None:
+    """Ensure the corpus exercises the negative matchers so the gate guards their binding.
+
+    Both bind via the model now (no offline recognizer); they must stay binds, never punts,
+    and target their own checker.
+    """
+    for checker in ("not_skill_invoked", "not_file_exists"):
+        entries = [entry for entry in CORPUS if entry["cohort"] == checker]
+        assert entries, f"{checker} has no corpus bind entries"
+        for entry in entries:
+            assert entry["gold"] == "bind", (
+                f"{checker} entry {entry['text'][:50]}... is marked gold={entry['gold']!r}; "
+                "must be bind"
+            )
+            assert entry["expect_checker"] == checker, (
+                f"{checker} entry {entry['text'][:50]}... targets {entry['expect_checker']!r}"
+            )
 
 
 def test_has_persistence_and_semantic_punts() -> None:

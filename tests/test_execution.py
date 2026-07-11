@@ -116,7 +116,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
     )
 
     assert outcome.errored is False
-    assert outcome.fired is True
+    assert not hasattr(outcome, "fired")  # ArmOutcome carries no fired flag
     assert [assertion["passed"] for assertion in outcome.grading["assertions"]] == [True, True]
     # session_factory called with the eval_arm NAME (not the Arm repr) and eval_arm.model
     factory_kwargs = session_factory.calls[0]
@@ -185,9 +185,8 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     def bind(text: object) -> object:
         """Bind."""
         return {
-            "checker": "file_exists",
+            "checker": "not_file_exists",
             "path": "./gone.md",
-            "should_exist": False,
             "type": "deterministic",
         }
 
@@ -487,6 +486,92 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
     entry = outcome.grading["assertions"][0]
     assert entry["passed"] is False
     assert "not among fired []" in entry["evidence"]
+
+
+def _bind_ingest_activation(text: object) -> object:
+    """Bind the `ingest` activation line to a skill_invoked spec; punt everything else."""
+    if text == "Skill `ingest` invoked":
+        return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
+    return None
+
+
+def test_activation_grades_fallback_fire_when_group_differs_from_asserted_skill(
+    tmp_path: object,
+) -> None:
+    """Verify a fallback-shape fire grades True even when the group differs from the skill."""
+    # The hard decoupling case: group ("writing") differs from the asserted skill ("ingest"),
+    # and the skill fires ONLY as a bare tool_call named `ingest` — no Skill tool call. The
+    # no-arg Skill-tool pass misses that fallback shape, so it lands in fired_skills only via
+    # per-candidate capture keyed off the *asserted* skill. Were detection to key off the group
+    # name again, "ingest" would never be a candidate and this would grade False.
+    workspace.set_current_iteration("iteration_01")
+
+    eval_case = _case(
+        tmp_path,
+        {"id": "single", "prompt": "do it", "assertions": ["Skill `ingest` invoked"]},
+        skill="writing",
+    )
+    trajectory = [{"kind": "tool_call", "id": "1", "name": "ingest", "arguments": {"arg": "x"}}]
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    outcome = run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=fake_session_factory(
+            RunResult(
+                "single", "trial", "out", 1, 1, False,
+                session_id="s1", fired=True, trajectory=trajectory,
+            )
+        ),
+        grade=_grade_all_pass,
+        bind=_bind_ingest_activation,
+    )
+
+    assert outcome.grading["assertions"][0]["passed"] is True
+
+
+def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: object) -> None:
+    """Verify a Skill-tool fire with a namespaced value grades the plain-name assertion True."""
+    workspace.set_current_iteration("iteration_01")
+
+    eval_case = _case(
+        tmp_path,
+        {"id": "single", "prompt": "do it", "assertions": ["Skill `ingest` invoked"]},
+        skill="ingest",
+    )
+    trajectory = [
+        {"kind": "tool_call", "id": "1", "name": "Skill", "arguments": {"skill": "plugin:ingest"}}
+    ]
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    outcome = run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=fake_session_factory(
+            RunResult(
+                "single", "trial", "out", 1, 1, False,
+                session_id="s1", fired=True, trajectory=trajectory,
+            )
+        ),
+        grade=_grade_all_pass,
+        bind=_bind_ingest_activation,
+    )
+
+    assert outcome.grading["assertions"][0]["passed"] is True
 
 
 def _record_session_model(seen: object, name: object) -> object:
@@ -825,9 +910,10 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
     assert session_factory.prompts[0] == "just the prompt"
 
 
-def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
-    """Verify detect skill passed unconditionally."""
-    # Fired bookkeeping streams the suite skill name on every eval_arm.
+def test_ordinary_execution_passes_no_group_skill_to_detection(tmp_path: object) -> None:
+    """Verify ordinary execution never feeds the group name to skill detection."""
+    # The adapter keeps the detect_skill parameter for the __route__ path, but ordinary
+    # eval execution passes None so detection stays decoupled from the group name.
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -856,7 +942,7 @@ def test_detect_skill_passed_unconditionally(tmp_path: object) -> None:
         bind=_punt_all,
     )
 
-    assert session_factory.detects == ["ingest"]
+    assert session_factory.detects == [None]
 
 
 def test_errored_run_flags_outcome(tmp_path: object) -> None:
