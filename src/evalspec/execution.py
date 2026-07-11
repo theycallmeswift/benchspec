@@ -21,7 +21,6 @@ from pathlib import Path
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
-from evalspec.binder import skill_invoked_target
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
@@ -141,14 +140,38 @@ def _grade_via_judge(
     return graded, int((time.perf_counter() - t0) * 1000), judge_errored
 
 
+def _bind_all(
+    assertions: list, bind: Callable[[str], dict | None]
+) -> tuple[list, int]:
+    """Bind every assertion once, returning one spec-or-None per assertion plus a degrade count.
+
+    A transient binder infra failure (RuntimeError) degrades that assertion to judge
+    grading — spec None — and increments the count, never a silent absorb. A punt
+    (bind returning None) is the binder's designed outcome, not a degrade. BinderAuthError
+    is deliberately NOT caught: it propagates and fails the run.
+    """
+    cache: dict[str, dict | None] = {}
+    binder_degraded = 0
+    specs: list = []
+    for text in assertions:
+        if text not in cache:
+            try:
+                cache[text] = bind(text)
+            except RuntimeError:
+                cache[text] = None
+                binder_degraded += 1
+        specs.append(cache[text])
+    return specs, binder_degraded
+
+
 def _grade_mixed(
     *,
     assertions: object,
+    specs: object,
     tree: object,
     contents: object,
     shas: object,
     result_text: object,
-    bind: Callable[[str], dict | None],
     grade: Callable[..., dict],
     workdir: object,
     grade_context: object,
@@ -158,38 +181,22 @@ def _grade_mixed(
     pre_run_shas: object,
     process_facts: object = "",
 ) -> object:
-    """Grade bound assertions locally and punt the rest to the judge.
+    """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
-    Returns (results, judge_ms, judge_errored, binder_degraded) — binder_degraded
-    counts each distinct bind_cache MISS that raised RuntimeError (a transient
-    binder infra failure degrading to judge grading), never a punt (bind() returning
-    None is the binder's designed, non-degraded outcome). A BinderAuthError is never
-    caught here — it propagates and fails the run.
+    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Returns
+    (results, judge_ms, judge_errored).
     """
     results: list = [None] * len(assertions)
     judge_idx: list[int] = []
-    bind_cache: dict[str, dict | None] = {}
-    binder_degraded = 0
-    for assertion_index, text in enumerate(assertions):
-        if text not in bind_cache:
-            try:
-                bind_cache[text] = bind(text)
-            except RuntimeError:
-                # A transient binder infra failure degrades to judge grading (not a
-                # cell error) but must be counted, not silently absorbed — see
-                # execution.py's degradation-visibility contract. BinderAuthError
-                # deliberately isn't caught here: it propagates and fails the run.
-                bind_cache[text] = None
-                binder_degraded += 1
-        spec = bind_cache[text]
+    for assertion_index, spec in enumerate(specs):
         if spec is not None:
             entry = checkers.run_assertion(spec, workdir, pre_run_shas, context=grade_context)
-            entry["text"] = text  # the author's prose, not the spec-derived rendering
+            entry["text"] = assertions[assertion_index]  # author's prose, not spec-derived
             results[assertion_index] = entry
         else:
             judge_idx.append(assertion_index)
     if not judge_idx:
-        return results, 0, False, binder_degraded
+        return results, 0, False
 
     texts = [assertions[assertion_index] for assertion_index in judge_idx]
     graded, judge_ms, judge_errored = _grade_via_judge(
@@ -208,7 +215,7 @@ def _grade_mixed(
     for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[assertion_index] = entry
-    return results, judge_ms, judge_errored, binder_degraded
+    return results, judge_ms, judge_errored
 
 
 async def _run_arm_turns(
@@ -348,11 +355,16 @@ def run_eval_arm(
         )
     )
 
-    # Activation grades off the skills the eval actually asserts on — its own
-    # (not_)skill_invoked lines, never the group name, so an eval whose group differs
-    # from its asserted skills still grades every one.
+    # Bind once, up front: the binder's own output is the source of truth for which
+    # assertions are activation checks — no separate recognizer.
+    specs, binder_degraded = _bind_all(graded_assertions, bind)
+
+    # Candidate skills are those the binder bound to an activation checker — the skills the
+    # eval asserts on, never the group name, so an eval whose group differs still grades each.
     candidate_skills = {
-        skill for assertion in eval_case.assertions if (skill := skill_invoked_target(assertion))
+        spec["skill"]
+        for spec in specs
+        if spec is not None and spec["checker"] in ("skill_invoked", "not_skill_invoked")
     }
 
     # Fired skills = every real Skill-tool fire (target-independent) plus each candidate's
@@ -366,13 +378,13 @@ def run_eval_arm(
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    merged, judge_ms, judge_errored, binder_degraded = _grade_mixed(
+    merged, judge_ms, judge_errored = _grade_mixed(
         assertions=graded_assertions,
+        specs=specs,
         tree=arm_run.tree,
         contents=arm_run.contents,
         shas=arm_run.shas,
         result_text=arm_run.result_text,
-        bind=bind,
         grade=grade,
         workdir=workdir,
         grade_context=grade_context,

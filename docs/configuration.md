@@ -57,13 +57,12 @@ A transient binder infra failure degrades that one assertion to judge grading ra
 
 `evalspec analyze [root]` (`python -m evalspec analyze [root]`) classifies every discovered assertion by how it will be graded, **before** you spend on a live run. It binds each assertion exactly as the runner does and prints a per-file table labeling each one:
 
-- `deterministic` — a workdir checker (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`).
-- `activation` — the `skill_invoked` checker (a deterministic checker over a *process fact*: which skills the arm dispatched). This is the **evidence domain**, distinct from the `type: deterministic` recorded in `grading.json` — see [`schema.md`](schema.md#assertions).
-- `judge-backed` — the binder punts; the LLM judge grades it.
+- `deterministic` — the binder mapped it to a host-side checker (a workdir checker like `file_exists`/`glob_count`/`regex`, or an activation checker `skill_invoked`/`not_skill_invoked` that grades a *process fact*: which skills the arm dispatched). Zero-variance, no judge cost — see [`schema.md`](schema.md#assertions).
+- `judge-backed` — the binder punts; the LLM judge grades it (the nondeterministic path).
 
 A fully-classified suite exits 0 (a classification is a report, not a warning — unlike `evalspec lint`, `analyze` never exits nonzero on a non-empty suite). Discovery, parse, and schema errors propagate and exit nonzero.
 
-Because binding reuses the real binder, `analyze` needs **`GEMINI_API_KEY`** set (same key the graded run needs — see [Environment variables](#environment-variables)); it fails fast if the key is missing or empty. Spend follows the binder's own fast-path split: the local recognizers for bare-exists (`file_exists`) and skill-activation (`skill_invoked`) lines bill **nothing**, while every other assertion pays one Gemini punt-or-bind call.
+Because binding reuses the real binder, `analyze` needs **`GEMINI_API_KEY`** set (same key the graded run needs — see [Environment variables](#environment-variables)); it fails fast if the key is missing or empty. Spend follows the binder's own fast-path split: the local bare-exists recognizer (`file_exists`) bills **nothing**, while every other assertion — activation lines included — pays one Gemini punt-or-bind call.
 
 ## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
 

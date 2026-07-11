@@ -99,7 +99,7 @@ One family of assertions is special by convention: **activation**. Write it in o
 - [ ] Skill `codex` not invoked
 ```
 
-The binder recognizes both lines **offline** (no Gemini call) and maps each polarity to its own checker, both grading against the arm's dispatched-skills set:
+The binder maps each polarity to its own checker, both grading against the arm's dispatched-skills set:
 
 - `` Skill `X` invoked `` → `skill_invoked`. Passes when `X` is in the dispatched set.
 - `` Skill `X` not invoked `` → `not_skill_invoked`. A **membership-absence** check — passes when `X` is *not* in the dispatched set.
@@ -110,12 +110,7 @@ The skill token may be plain or backticked and may be namespaced (`plugin:ingest
 
 > **On the vision's `Capability … activated` wording.** The [readme vision](research/evalspec-readme-vision.md) phrases these as `` Capability `X` activated `` / `` Capability `X` not activated ``. That is documentation-level wording for the *same* shipped checker — the recognizer that binds today matches `` Skill `X` invoked `` / `` not invoked ``. Read "capability activated" and "skill invoked" as the same process-fact assertion.
 
-**Two distinct axes — don't conflate them.** A `skill_invoked` assertion sits on two orthogonal axes:
-
-- **Checker family** — the `type` field in `grading.json`. `skill_invoked` is a **`deterministic`** checker, the same family as `file_exists` or `regex`; it records `type: deterministic`, not `type: activation`. There is no `type: activation` and no `type: skill_invoked` in the grading artifact.
-- **Evidence domain** — the label `evalspec analyze` prints. `analyze` reports the activation checkers as **`activation`**: a deterministic checker whose evidence is a *process fact* (which skills the arm dispatched) rather than the workdir. The workdir checkers analyze as `deterministic`; `skill_invoked` and `not_skill_invoked` analyze as `activation`; a punt analyzes as `judge-backed`.
-
-So one activation assertion is `type: deterministic` in `grading.json` **and** `activation` under `analyze` — the first names how it grades, the second names what evidence it reads.
+**A `skill_invoked` / `not_skill_invoked` assertion is an ordinary deterministic checker.** It records `type: deterministic` in `grading.json` — the same family as `file_exists` or `regex` — and `evalspec analyze` labels it `deterministic` too. What sets it apart is only its *evidence*: a process fact (which skills the arm dispatched, via `GradeContext`) rather than the workdir. There is no separate `activation` type or analyze label — it grades and reports exactly like any other deterministic checker; a punt analyzes as `judge-backed`.
 
 ### Placeholder substitution
 

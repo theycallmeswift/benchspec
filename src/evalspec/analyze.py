@@ -29,10 +29,10 @@ class Classification:
 def classify_assertion(text: str, *, bind: Callable[[str], dict | None] = binder.bind) -> str:
     """Classify how one assertion will be graded at run time.
 
-    Binds the assertion exactly as a live run does and maps the result to an evidence
-    domain, so the label matches the runtime grading path rather than a reimplemented
-    heuristic. Only a punt (`bind` returning None) is judge-backed; a binder
-    *infrastructure* failure is not a classification and is left to propagate.
+    Binds the assertion exactly as a live run does: if the binder maps it to a host-side
+    checker it grades `deterministic` (zero-variance, no judge cost); otherwise it punts
+    and grades `judge-backed` (the nondeterministic LLM path). A binder *infrastructure*
+    failure is not a classification and is left to propagate.
 
     Args:
         text: The assertion prose to classify.
@@ -40,19 +40,14 @@ def classify_assertion(text: str, *, bind: Callable[[str], dict | None] = binder
             `binder.bind` so the label matches how the assertion actually grades.
 
     Returns:
-        One of `"deterministic"`, `"activation"`, or `"judge-backed"`.
+        `"deterministic"` if the binder binds it, else `"judge-backed"`.
 
     Raises:
         BinderAuthError: the Gemini credential was rejected — analyze cannot classify
             a suite whose binder is down, so this propagates instead of mislabeling.
         RuntimeError: the binder transport failed, for the same reason.
     """
-    spec = bind(text)
-    if spec is None:
-        return "judge-backed"
-    if spec["checker"] in {"skill_invoked", "not_skill_invoked"}:
-        return "activation"
-    return "deterministic"
+    return "deterministic" if bind(text) is not None else "judge-backed"
 
 
 def analyze_repo(

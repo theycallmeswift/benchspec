@@ -107,78 +107,18 @@ def test_directory_created_path_shape_binds_without_host_call() -> None:
     assert spec["path"] == "./output/"
 
 
-def test_bind_skill_invoked() -> None:
-    """Verify the canonical positive activation line binds offline with no model call."""
-    spec = bind("Skill `ingest` invoked", call_model=_fail_call_model)
+def test_activation_line_binds_via_model() -> None:
+    """Verify an activation line reaches the model and binds to its checker.
 
-    assert spec == {
-        "type": "deterministic",
-        "checker": "skill_invoked",
-        "skill": "ingest",
-    }
-
-
-def test_bind_skill_not_invoked_binds_not_skill_invoked_offline() -> None:
-    """Verify the negative activation line binds offline to not_skill_invoked, no model call."""
-    spec = bind("Skill `codex` not invoked", call_model=_fail_call_model)
-
-    assert spec == {
-        "type": "deterministic",
-        "checker": "not_skill_invoked",
-        "skill": "codex",
-    }
-
-
-def test_skill_invoked_target_returns_skill_for_both_polarities() -> None:
-    """Verify the candidate helper yields the skill name for positive and negative lines."""
-    assert binder.skill_invoked_target("Skill `ingest` invoked") == "ingest"
-    assert binder.skill_invoked_target("Skill `ingest` not invoked") == "ingest"
-
-
-def test_skill_invoked_target_returns_none_for_non_activation() -> None:
-    """Verify a non-activation assertion yields no candidate skill."""
-    assert binder.skill_invoked_target("the file report.md exists") is None
-
-
-def test_bind_skill_invoked_namespaced_token() -> None:
-    """Verify a namespaced skill token (`plugin:ingest`) binds offline with the colon kept."""
-    spec = bind("Skill `plugin:ingest` invoked", call_model=_fail_call_model)
-
-    assert spec["skill"] == "plugin:ingest"
-
-
-def test_bind_skill_invoked_trailing_period() -> None:
-    """Verify a trailing period does not stop the activation line from binding offline."""
-    spec = bind("Skill `ingest` invoked.", call_model=_fail_call_model)
-
-    assert spec["checker"] == "skill_invoked"
-    assert spec["skill"] == "ingest"
-
-
-def test_bind_skill_invoked_bare_token_without_backticks() -> None:
-    """Verify an un-backticked activation line binds offline."""
-    spec = bind("Skill ingest invoked", call_model=_fail_call_model)
-
-    assert spec["checker"] == "skill_invoked"
-    assert spec["skill"] == "ingest"
-
-
-def test_bind_skill_invoked_checkbox_form() -> None:
-    """Verify a checkbox-prefixed activation line binds offline (list-marker strip)."""
-    spec = bind("- [ ] Skill `ingest` invoked", call_model=_fail_call_model)
-
-    assert spec["checker"] == "skill_invoked"
-    assert spec["skill"] == "ingest"
-
-
-def test_looser_activation_phrasing_falls_through_to_model() -> None:
-    """Verify a looser phrasing misses the offline recognizer and reaches the model."""
+    There is no offline skill recognizer — the binder handles activation like any other
+    assertion; the corpus gate (`make evals:binder`) covers the model's reliability.
+    """
     spec = bind(
-        "the ingest skill fired",
-        call_model=_reply('{"punt":true,"reason":"semantic"}'),
+        "Skill `ingest` invoked",
+        call_model=_reply('{"checker":"skill_invoked","skill":"ingest"}'),
     )
 
-    assert spec is None
+    assert spec == {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
 
 def test_punt_explicit() -> None:

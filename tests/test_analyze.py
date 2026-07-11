@@ -1,4 +1,4 @@
-"""Classify discovered assertions deterministic/activation/judge-backed before a run.
+"""Classify discovered assertions deterministic/judge-backed before a run.
 
 The injected `bind` stub stands in for the real binder so no test touches the network;
 each test pins one assertion shape to the label it must carry.
@@ -15,7 +15,7 @@ import pytest
 
 from evalspec import analyze, discovery, workspace
 from evalspec.arms import Arm
-from evalspec.binder import _bind_bare_exists, _bind_skill_invoked
+from evalspec.binder import _bind_bare_exists
 from evalspec.execution import run_eval_arm
 from evalspec.runner import RunResult
 from evalspec.schema import SchemaError
@@ -57,22 +57,18 @@ def _write_eval(
     return group_dir
 
 
-def test_classify_assertion_labels_activation() -> None:
-    """Verify a bound skill_invoked spec classifies as activation."""
-    label = analyze.classify_assertion("Skill `ingest` invoked", bind=_bind_like_binder)
-
-    assert label == "activation"
-
-
-def test_classify_assertion_labels_negative_activation() -> None:
-    """Verify a bound not_skill_invoked spec also classifies as activation."""
-    label = analyze.classify_assertion("Skill `ingest` not invoked", bind=_bind_like_binder)
-
-    assert label == "activation"
+def test_classify_assertion_labels_skill_invoked_as_deterministic() -> None:
+    """Verify a bound (not_)skill_invoked spec classifies as deterministic like any checker."""
+    assert analyze.classify_assertion("Skill `ingest` invoked", bind=_bind_like_binder) == (
+        "deterministic"
+    )
+    assert analyze.classify_assertion("Skill `ingest` not invoked", bind=_bind_like_binder) == (
+        "deterministic"
+    )
 
 
 def test_classify_assertion_labels_deterministic() -> None:
-    """Verify a bound non-activation spec classifies as deterministic."""
+    """Verify a bound file checker classifies as deterministic."""
     label = analyze.classify_assertion("a file exists at ./notes.md", bind=_bind_like_binder)
 
     assert label == "deterministic"
@@ -95,7 +91,7 @@ def test_analyze_repo_labels_each_assertion(tmp_path: object) -> None:
     classifications = analyze.analyze_repo(tmp_path, bind=_bind_like_binder)
 
     assert [classification.label for classification in classifications] == [
-        "activation",
+        "deterministic",
         "deterministic",
         "judge-backed",
     ]
@@ -114,11 +110,11 @@ def test_analyze_repo_records_file_and_eval_id(tmp_path: object) -> None:
 def test_run_returns_zero_on_clean_suite(tmp_path: object, monkeypatch: object) -> None:
     """Verify run classifies a non-empty suite and returns 0, unlike lint's warning exit.
 
-    The assertions all bind through the binder's offline fast paths, so the real
+    The assertions bind through the binder's offline bare-exists fast path, so the real
     `binder.bind` classifies them without a network call.
     """
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    _write_eval(tmp_path, ["Skill `ingest` invoked", "The file ./notes.md exists"])
+    _write_eval(tmp_path, ["The file ./notes.md exists", "The ./out/ directory exists"])
 
     exit_code = analyze.run(tmp_path)
 
@@ -137,12 +133,20 @@ def test_run_surfaces_schema_error_on_malformed_eval(
 
 
 def _bind_offline(text: object) -> object:
-    """Bind through the binder's offline fast paths only; punt everything else.
+    """Bind the fixture's canonical lines without a network call.
 
-    Mirrors what the real `binder.bind` does for the fixture without a network call,
-    so tests classify and grade the committed activation eval deterministically.
+    The binder binds skill-activation lines via the model; this stub reproduces the two
+    the fixture uses, plus the real bare-exists fast path, so the classify/grade tests
+    stay offline and deterministic.
     """
-    return _bind_skill_invoked(text) or _bind_bare_exists(text)
+    fixture_skills = {
+        "Skill `ingest` invoked": ("skill_invoked", "ingest"),
+        "Skill `codex` not invoked": ("not_skill_invoked", "codex"),
+    }
+    if text in fixture_skills:
+        checker, skill = fixture_skills[text]
+        return {"type": "deterministic", "checker": checker, "skill": skill}
+    return _bind_bare_exists(text)
 
 
 def _fake_session_factory(result: object) -> object:
@@ -186,12 +190,12 @@ def test_activation_fixture_discovers_four_assertions() -> None:
 
 
 def test_activation_fixture_classifies_each_assertion() -> None:
-    """Verify analyze_repo labels the fixture activation/activation/deterministic/judge-backed."""
+    """Verify analyze_repo labels the fixture's four assertions deterministic×3/judge-backed."""
     classifications = analyze.analyze_repo(_ACTIVATION_FIXTURE, bind=_bind_offline)
 
     assert [classification.label for classification in classifications] == [
-        "activation",
-        "activation",
+        "deterministic",
+        "deterministic",
         "deterministic",
         "judge-backed",
     ]

@@ -138,8 +138,8 @@ def test_skill_invoked_binds_present() -> None:
 def test_negative_matchers_bind_present() -> None:
     """Ensure the corpus exercises the negative matchers so the gate guards their binding.
 
-    `not_skill_invoked` binds offline; `not_file_exists` binds via the model — both must stay
-    binds, never punts, and target their own checker.
+    Both bind via the model now (no offline recognizer); they must stay binds, never punts,
+    and target their own checker.
     """
     for checker in ("not_skill_invoked", "not_file_exists"):
         entries = [entry for entry in CORPUS if entry["cohort"] == checker]

@@ -32,17 +32,6 @@ _COMPOUND_AFTER_EXISTS_RE = re.compile(
     r"\b(?:exists?|created)\b\s*(?:,|;|\band\b|\bwith\b|\bcontaining\b|\bcontains?\b)",
     re.IGNORECASE,
 )
-# Strips an optional Markdown list / checkbox marker so `- [ ] Skill …` reaches the
-# recognizer bare. Defensive only: the mdformat path already unwraps checkboxes before
-# binding, so real discovered assertions arrive without it.
-_LIST_MARKER_RE = re.compile(r"^-\s+(?:\[[ xX]?\]\s+)?")
-# `[\w:.-]+` captures a namespaced skill (`plugin:ingest`) — `skill` is a plain string in
-# the schema, so a `[\w-]+` class would drop the colon and punt the line to Gemini. Backticks
-# and a trailing period are optional so bare and punctuated shapes still bind.
-_SKILL_INVOKED_RE = re.compile(
-    r"skill\s+`?(?P<skill>[\w:.-]+)`?\s+(?P<neg>not\s+)?invoked\.?",
-    re.IGNORECASE,
-)
 
 # Prompt wording is part of binder accuracy. The semantic and conjunction rules below keep
 # surface checks from accepting wrong output.
@@ -363,8 +352,6 @@ def bind(
     """
     if spec := _bind_bare_exists(assertion_text):
         return spec
-    if spec := _bind_skill_invoked(assertion_text):
-        return spec
     prompt = _BINDING_PROMPT.format(assertion=assertion_text)
     reply = call_model(prompt, timeout=60)
     return _parse_binding(reply.text)
@@ -395,38 +382,6 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
     except SchemaError:
         return None
     return spec
-
-
-def _bind_skill_invoked(assertion_text: str) -> dict | None:
-    """Bind a canonical skill-activation assertion to a (not_)skill_invoked spec.
-
-    Recognizes both polarities offline — `` Skill `X` invoked `` binds `skill_invoked`,
-    `` Skill `X` not invoked `` binds `not_skill_invoked`. Binding the negative here keeps
-    it deterministic and free rather than leaving it to the model. Looser phrasings fail
-    the fullmatch and fall through to the model.
-    """
-    text = _LIST_MARKER_RE.sub("", assertion_text.strip()).strip()
-    match = _SKILL_INVOKED_RE.fullmatch(text)
-    if not match:
-        return None
-    checker = "not_skill_invoked" if match.group("neg") else "skill_invoked"
-    spec = {"type": "deterministic", "checker": checker, "skill": match.group("skill")}
-    try:
-        _validate_checker_obj(spec, "binder")
-    except SchemaError:
-        return None
-    return spec
-
-
-def skill_invoked_target(assertion_text: str) -> str | None:
-    """Return the skill a canonical activation assertion names, or None.
-
-    Both polarities yield the skill (`` Skill `X` invoked `` and `` Skill `X` not
-    invoked `` → `X`), so a runner can collect activation candidates without reaching
-    into the offline binder or re-implementing the recognizer.
-    """
-    spec = _bind_skill_invoked(assertion_text)
-    return spec["skill"] if spec else None
 
 
 def _parse_binding(text: str) -> dict | None:
