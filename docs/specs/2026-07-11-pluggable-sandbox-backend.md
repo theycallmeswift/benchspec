@@ -1,0 +1,121 @@
+**TL;DR** — Make `runner` and `sandbox` first-class `[tool.evalspec.sets.<name>]` fields that fail fast on unsupported values, factor the microsandbox lifecycle behind a `SandboxBackend` adapter (preflight / build / session / cache-fingerprint), and fold backend id + resolved base-image digest + harness install inputs into the snapshot cache identity — Phase 7 of the #1 roadmap. microsandbox stays the only concrete backend; Docker is **not** implemented, only the seam that would let it be added is.
+
+## Problem
+
+- **Symptom:** The sandbox backend is hardcoded, not selected. `microsandbox` is imported inline at every lifecycle call site — `Sandbox, Snapshot` in `_build_snapshot_async` (`sandbox.py:169`), `Sandbox, Volume` in `_create_sandbox` (`sandbox.py:291`), `MicrosandboxError` in `_guest_shell`/`_stop_quietly` (`sandbox.py:97,133`), `is_installed()` in `_microsandbox_installed` (`sandbox.py:48-54`). There is no interface a second backend could implement; adding Docker later means editing every one of these call sites.
+- **Symptom:** `runner` and `sandbox` are not config at all. `Set` carries only `name`/`arms`/`baseline` (`arms.py:34-41`) and `_SET_DEFAULT_KEYS` is `("harness","model","effort","env","harness_args")` (`arms.py:53`) — no `runner`, no `sandbox`. The vision makes both set-level benchmark fields (`evalspec-readme-vision.md:53-56,163-164`), so an unsupported value today is silently ignored instead of failing fast.
+- **Symptom:** The cache identity is incomplete. `snapshot_name` = `evalspec-{agent.id}-{agent.version()}-{env.digest()}` (`sandbox.py:35-40`); `env.digest()` hashes `base_image` string + script bytes (`discovery.py:141-146`). It omits the **backend** (a Docker and a microsandbox snapshot of the same agent+env would collide on one name) and pins nothing: `BASE_IMAGE = "ubuntu:latest"` (`sandbox.py:29`) is a floating tag, so an upstream image move does not invalidate the snapshot, and the harness **install inputs** (CLI installer version beyond `agent.version()`) never participate.
+- **Symptom:** Preflight is microsandbox-shaped and unconditional. `preflight()` hardcodes Apple-Silicon / `/dev/kvm` / `microsandbox.is_installed()` checks (`sandbox.py:57-75`) with the microsandbox-specific remedy `make evals:build`. A different backend would need entirely different host checks, but there is no dispatch point.
+- **Exposed by:** Roadmap #1 Phase 7 Done-When: `runner` and `sandbox` are parsed config fields; the sandbox backend is selected through a pluggable adapter (microsandbox only for now, shaped so Docker can be added without touching runtime callers); cache identity includes backend, harness version, image digest, package/install inputs, and environment setup bytes.
+- **Scope:** Add `runner`/`sandbox` set fields + fail-fast validation; extract a `SandboxBackend` adapter with microsandbox as the sole implementation; enrich the cache fingerprint. **Not** the `evalspec sandbox:build` CLI command (Phase 5 wires the CLI; Phase 7 exposes the build entry it wraps) and **not** any second backend.
+- **Constraint:** No compatibility shims (roadmap rule). microsandbox call sites move behind the adapter; nothing keeps importing `microsandbox` outside the backend module.
+- **Constraint:** Docker is explicitly out. The adapter interface and the `sandbox = "docker"` fail-fast path are in scope; a Docker implementation is not (Out of Scope, and Out of Scope on #1).
+- **Note:** `runner` has one value — `pytest` — and the runner *is* the pytest plugin. Phase 7 parses/validates/records `runner` and fails fast on anything else, but does **not** build a runner-plugin abstraction; only the sandbox axis gets an adapter, because that is where the future-backend modularization lives.
+
+## Solution
+
+```toml
+[tool.evalspec.sets.default]
+runner  = "pytest"        # parsed, validated, recorded; only "pytest" supported
+sandbox = "microsandbox"  # selects the backend adapter; only "microsandbox" supported
+arms    = [ ... ]
+baseline = "baseline"
+```
+
+```text
+$ evalspec run --set default            # sandbox = "microsandbox" → MicrosandboxBackend
+  ... builds snapshot evalspec-microsandbox-claude-code-1.2.3-<fp> ...
+
+$ evalspec run --set docker-set         # sandbox = "docker"
+error: [tool.evalspec.sets.docker-set] unsupported sandbox `docker`
+       (supported: microsandbox). Docker is not implemented.
+$ echo $?
+2
+```
+
+An unsupported `sandbox`/`runner` fails before any paid arm runs; the supported value routes through an adapter that owns preflight, build, session, and its slice of the cache key.
+
+## User Stories
+
+1. As a benchmark maintainer, I want **`runner` and `sandbox` in the set config with fail-fast validation**, so a typo or an unavailable backend errors before I pay for a run instead of silently defaulting.
+2. As a maintainer adding a backend later, I want **one `SandboxBackend` interface**, so a Docker or exe.dev backend is a new adapter module, not edits scattered across `sandbox.py`.
+3. As an eval author, I want **the snapshot cache keyed on the backend and the resolved base image**, so a moved upstream tag or a switched backend rebuilds rather than silently reusing a stale VM.
+
+## Implementation Decisions
+
+```text
+[tool.evalspec.sets.<name>] runner / sandbox
+        │  parse_sets: validate against SUPPORTED_RUNNERS / registered backends
+        │  unsupported → SchemaError → nonzero exit (before any arm runs)
+        ▼
+Set(runner="pytest", sandbox="microsandbox", …)
+        │
+        ▼
+resolve_sandbox("microsandbox") ─► MicrosandboxBackend   (registry; "docker" absent → fail fast)
+        │
+        ├─ preflight()                → host-readiness errors (Apple Silicon / KVM / installed)
+        ├─ cache_fingerprint(agent,env) → backend id · base-image DIGEST · install inputs · env bytes
+        ├─ build_snapshot(agent,name,env)   (was _build_snapshot_async)
+        └─ open_session(...)                (was _create_sandbox / SandboxSession)
+
+snapshot_name = evalspec-{backend.id}-{agent.id}-{agent.version()}-{cache_fingerprint}
+```
+
+- **Add `runner`/`sandbox` as set fields, validated in `parse_sets`.** Extend `Set` (`arms.py:34-41`) with `runner: str` and `sandbox: str`, read them in `parse_sets` (`arms.py:83-147`) alongside `baseline`, default `runner="pytest"` / `sandbox="microsandbox"`, and raise `SchemaError` when the value is not in `SUPPORTED_RUNNERS = {"pytest"}` / the backend registry. They are **set-level**, not arm-level — not in `_SET_DEFAULT_KEYS` (`arms.py:53`), which stays the agent-facing axes. Reuse the existing early-raise path so an unsupported value exits nonzero before any task arm (mirrors the judge-preflight ordering at `plugin.py:633`).
+- **Extract a `SandboxBackend` adapter; microsandbox is the only implementation.** New `src/evalspec/sandboxes/` (or `backend.py`) defining the interface — `id`, `preflight() -> list[str]`, `cache_fingerprint(agent, env) -> str`, `build_snapshot(agent, name, env)`, `snapshot_exists(name) -> bool`, `open_session(...) -> SandboxSession`. Move the inline `microsandbox` imports (`sandbox.py:97,133,169,291`), `_microsandbox_installed` (`sandbox.py:48-54`), and the Darwin/KVM checks out of `preflight` (`sandbox.py:57-75`) into `MicrosandboxBackend`. `resolve_sandbox(name)` looks up a registry `{"microsandbox": MicrosandboxBackend}`; an unknown name (including `"docker"`) raises `SchemaError`. Runtime callers (`execution.py:326`, `SandboxSession`) take a resolved backend, never import `microsandbox`.
+- **Fold backend + image digest + install inputs into the cache fingerprint.** `snapshot_name` (`sandbox.py:35-40`) prepends `backend.id`; `cache_fingerprint` hashes, in addition to today's `env.digest()` (base-image string + script bytes, `discovery.py:141-146`): (a) the backend id, (b) the **resolved** base-image digest — the backend pins `ubuntu:latest` (`sandbox.py:29`) to its content digest at build time so a moved tag invalidates the snapshot, and (c) an agent **install fingerprint** for the CLI installer inputs beyond `agent.version()` (a new `CodingAgent.install_fingerprint()` defaulting to `agent.version()` so adapters opt in without breaking). Result: `evalspec-{backend}-{agent.id}-{agent.version()}-{fp}`.
+- **Route preflight through the resolved backend.** `preflight()` (`sandbox.py:57-75`) becomes: resolve the set's backend, call `backend.preflight()` for host errors, then keep the shared `credential_preflight_error()` check (`sandbox.py:71-73`). The microsandbox remedy string (`make evals:build`) moves into `MicrosandboxBackend`.
+- **Define the boundaries.** `runner` is parsed/validated/recorded only — no runner-plugin abstraction (one runner exists). The `evalspec sandbox:build` **CLI command** is Phase 5; Phase 7 exposes `backend.build_snapshot` / the `ensure_snapshot` entry (`sandbox.py:194-210`) that the command wraps. The new fingerprint fields **appear in artifacts** only once Phase 8 (metadata) lands — Phase 7 makes them participate in the cache key, not yet in `meta.json` (same interim gap the binder identity has). A committed two-set fixture (one `sandbox = "microsandbox"`, one `sandbox = "docker"`) gives the fail-fast path something to assert against.
+
+## Testing Plan
+
+### Logic
+- **`runner`/`sandbox` validate and fail fast** — a set with `sandbox = "docker"` or `runner = "jest"` raises `SchemaError` naming the field and the supported values; a valid set resolves to `Set(runner="pytest", sandbox="microsandbox")`; both fields default when omitted.
+- **`resolve_sandbox` registry** — `"microsandbox"` returns the backend; `"docker"` and any unknown name raise; the error names Docker as not implemented.
+- **Cache fingerprint is complete and reproducible** — `snapshot_name` changes when the backend id, resolved base-image digest, agent install fingerprint, or environment script bytes change, and is stable when none do; two backends over the same agent+env never collide on one name.
+- **Backend id is part of identity** — `snapshot_name(agent, env)` for a microsandbox backend is prefixed `evalspec-microsandbox-`.
+
+### Behavior
+- **Supported set runs end to end** — a `sandbox = "microsandbox"` set builds/reuses a snapshot and runs an arm through the backend adapter with no direct `microsandbox` import outside the backend module.
+- **Unsupported backend exits nonzero before any arm** — running the `docker` fixture set exits nonzero with a readable diagnostic and spends no task-model tokens.
+- **Preflight dispatches to the backend** — the microsandbox host checks (Apple Silicon / KVM / installed) run via `MicrosandboxBackend.preflight()`; the shared credential preflight still runs.
+
+### Interface
+- **`sandbox`/`runner` are a public config surface** — `[tool.evalspec.sets.<name>]` accepts the supported values, rejects others early, and the resolved values are available on `Set` for Phase 8 to record.
+- **No `microsandbox` import escapes the backend** — a grep-style test asserts `microsandbox` is imported only under the backend module; `execution.py`/`sandbox.py` callers use the resolved adapter.
+
+## Open Questions
+
+- **Module layout: `src/evalspec/sandboxes/` package vs a single `sandbox_backend.py`?** Recommendation: keep `sandbox.py` as the runtime session home and add a small `backend.py` + `MicrosandboxBackend` beside it now; promote to a `sandboxes/` package only if Phase 10 reorg lands. Resolved by a layout call before implementation.
+- **Should the resolved base-image digest be pinned in config or resolved at build time?** Recommendation: resolve at build time inside the backend (no config churn) and record the digest in Phase 8 artifacts; revisit a config-pinned digest only if reproducibility across hosts demands it.
+
+## Documentation Plan
+
+- **`docs/configuration.md`**: document set-level `runner`/`sandbox`, the supported values, the fail-fast behavior, the pluggable-backend interface (microsandbox only for now), and the cache-key inputs (backend, harness version, resolved image digest, install inputs, environment setup bytes).
+- **`docs/agents.md`**: note the new `CodingAgent.install_fingerprint()` opt-in and the backend/adapter boundary that harness adapters sit beside.
+- **`docs/concepts.md`**: reconcile the sandbox section with the adapter model; state Docker/exe.dev as future backends the seam allows, not shipped ones.
+
+## Out of Scope
+
+- Implementing a Docker, exe.dev, or any second sandbox backend — only the adapter boundary and the `sandbox = "docker"` fail-fast path.
+- The `evalspec sandbox:build` / `evalspec run` CLI commands and shared arg/exit conventions — Phase 5.
+- Recording backend / image-digest / install-fingerprint fields in `meta.json` / index rows — Phase 8 (metadata).
+- A runner-plugin abstraction — one runner (`pytest`) exists; `runner` is validated config only.
+- Changing the microsandbox VM shape (CPUs/memory), routing, or artifact capture.
+
+## References
+
+- #1 — roadmap umbrella; Phase 7 Done-When and the "pluggable adapter, microsandbox-only, Docker not implemented" decision (updated 2026-07-11).
+- `docs/research/evalspec-readme-vision.md:53-56,63-64,163-164,244-247` — runner/sandbox as set fields, capability-matrix targets, and the on-demand build model.
+- `src/evalspec/sandbox.py:29,35-40,48-75,97,133,169,194-210,291` — `BASE_IMAGE`, `snapshot_name`, microsandbox-specific preflight, inline backend imports, and the build/session lifecycle to extract.
+- `src/evalspec/discovery.py:125-176` — `EnvConfig.digest()` (base-image string + script bytes) the fingerprint extends.
+- `src/evalspec/arms.py:34-41,53,83-147` — `Set`, `_SET_DEFAULT_KEYS`, `parse_sets` where `runner`/`sandbox` are added and validated.
+- `src/evalspec/execution.py:326` — `ensure_snapshot` call site that takes a resolved backend.
+- `src/evalspec/agents/base.py` — `CodingAgent` where `install_fingerprint()` is added.
+
+## Verification
+
+- `make test` — proves `runner`/`sandbox` parsing + fail-fast, `resolve_sandbox`, the enriched fingerprint, and the backend-boundary import test pass.
+- `make lint` — proves package and docs satisfy lint after the backend extraction.
+- `evalspec run --set <docker-fixture>` exits nonzero — proves `sandbox` is a first-class field and an unimplemented backend fails cleanly before any arm.
+- `evalspec run --set <microsandbox-fixture>` — proves the supported backend routes through the adapter and builds/reuses a snapshot whose name carries the backend id.
