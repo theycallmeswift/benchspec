@@ -60,7 +60,7 @@ _BINDING_PROMPT = textwrap.dedent(
     <primitives>
     Each spec is a JSON object with a `checker` field plus that checker's args:
     - file_exists  {{"checker":"file_exists","path":"<rel/path>"}}
-    - file_absent  {{"checker":"file_absent","path":"<rel/path>"}}  (the path must NOT exist)
+    - file_absent  {{"checker":"file_absent","path":"<rel/path>"}}
     - glob_count   {{"checker":"glob_count","glob":"<pattern>","count":<int>}}
       (use EITHER "count" XOR "min", never both)
     - frontmatter_has {{"checker":"frontmatter_has","path":"<rel/path>","key":"<key>"}}
@@ -71,10 +71,15 @@ _BINDING_PROMPT = textwrap.dedent(
       (or "sha256":"<64 hex>")
     - skill_invoked {{"checker":"skill_invoked","skill":"<skill-name>"}}
     - not_skill_invoked {{"checker":"not_skill_invoked","skill":"<skill-name>"}}
-    A negative matcher (`file_absent`, `not_skill_invoked`) is its own primitive, not a
-    flag: bind the negation of a checkable fact to it. Canonical skill-activation lines:
+    file_absent binds ONLY a bare claim that the path ITSELF is gone ("X no longer exists",
+    "X was removed"). "No <thing> was written / created / added to <path>" is a persistence
+    claim — the path may well exist and the check would false-positive — so it PUNTS under A9,
+    never file_absent. Canonical skill-activation lines:
     `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}};
     `- Skill \\`X\\` not invoked` → {{"checker":"not_skill_invoked","skill":"X"}}.
+    Bind (not_)skill_invoked ONLY for such a bare one-skill line. A longer sentence that ALSO
+    claims a file was/wasn't written, describes intent ("announces readiness"), or bundles
+    other facts is compound — punt; the checker sees only the single activation fact.
     </primitives>
 
     <rules>
@@ -142,8 +147,17 @@ _BINDING_PROMPT = textwrap.dedent(
     Assertion: - Skill `my-skill` not invoked
     {{"checker":"not_skill_invoked","skill":"my-skill"}}
 
+    Assertion: The skill did NOT invoke the `to-spec` skill — no Skill or Task call that runs
+    to-spec, and no spec file written. It announces handoff readiness only.
+    {{"punt": true, "reason": "compound — bundles the activation fact with 'no spec file
+      written' and an intent claim; not_skill_invoked checks only one bare activation line"}}
+
     Assertion: the ./tmp/scratch.md file no longer exists
     {{"checker":"file_absent","path":"tmp/scratch.md"}}
+
+    Assertion: No new 'archive' entry was written to ./.meta/logs/{{TODAY}}.md
+    {{"punt": true, "reason": "A9 persistence-negation — the log path exists; 'no new entry
+      was written' is a contents/absence-of-action claim, not a path-absence file_absent sees"}}
 
     Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl
     (the active session source)
