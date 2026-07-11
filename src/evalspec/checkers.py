@@ -56,7 +56,8 @@ def derive_text(spec: dict) -> str:
         tail = f" = {spec['value']}" if "value" in spec else ""
         return f"{spec['path']} frontmatter has {spec['key']}{tail}"
     if checker == "skill_invoked":
-        return f"Skill `{spec['skill']}` invoked"
+        verb = "invoked" if spec.get("expected", True) else "not invoked"
+        return f"Skill `{spec['skill']}` {verb}"
     return f"{spec['path']} content matches /{spec['pattern']}/"
 
 

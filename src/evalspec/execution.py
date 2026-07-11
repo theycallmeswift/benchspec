@@ -20,6 +20,7 @@ from pathlib import Path
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
+from evalspec.binder import _bind_skill_invoked
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
@@ -42,7 +43,6 @@ class ArmOutcome:
     errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
-    fired: bool = False  # informational: did the named skill get invoked this run?
 
 
 @dataclass
@@ -65,14 +65,13 @@ class _ArmRun:
     total_output_tokens: int = 0
 
 
-def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> dict:
+def _turn_transcript(*, prompt: str, result: object, tree: str) -> dict:
     """Render seeded turns and the prompt into an agent transcript."""
     record = {
         "turn": 1,
         "prompt": prompt,
         "result": result.result_text,
         "is_error": result.is_error,
-        "fired": result.fired,
         "result_subtype": result.result_subtype,
         # count dispatches (tool_call), not the round-trip tool_result events
         "tool_call_count": sum(
@@ -80,9 +79,10 @@ def _turn_transcript(*, prompt: str, result: object, tree: str, skill: str) -> d
         ),
         "workdir_tree": tree,
     }
-    # Pass the skill so a fire via the namespaced-tool fallback still lands here, keeping
-    # this field consistent with `fired` instead of empty on that shape.
-    dispatched = skills_dispatched(result.trajectory, skill)
+    # Informational Skill-tool set for this turn. The fallback-inclusive, candidate-unioned
+    # set used for grading is computed in run_eval_arm, not here — a no-arg call cannot see
+    # a bare-tool-name fallback fire.
+    dispatched = skills_dispatched(result.trajectory)
     if dispatched:
         record["skills_dispatched"] = dispatched
     return record
@@ -219,7 +219,6 @@ async def _run_arm_turns(
     prompt: object,
     project_marker: object,
     setup_reldir: object,
-    detect_skill: object,
     arm_env: object = None,
     eval_set: object = "",
     harness_args: object = None,
@@ -248,10 +247,12 @@ async def _run_arm_turns(
         # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
         # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
         # host side of the same mount.
+        # Ordinary execution never feeds a group-derived skill name to detection; the
+        # adapter keeps the parameter for the __route__/runner paths but receives None here.
         result = await run(
             prompt,
             resume_session_id=None,
-            detect_skill=detect_skill,
+            detect_skill=None,
         )
 
         run_acc.total_duration_ms += result.duration_ms
@@ -270,9 +271,7 @@ async def _run_arm_turns(
         run_acc.tree, run_acc.contents, run_acc.shas = tree, contents, shas
         run_acc.result_text = result.result_text
         run_acc.trajectory = result.trajectory
-        run_acc.transcript.append(
-            _turn_transcript(prompt=prompt, result=result, tree=tree, skill=detect_skill)
-        )
+        run_acc.transcript.append(_turn_transcript(prompt=prompt, result=result, tree=tree))
         run_acc.raw = result.raw
 
     return run_acc
@@ -306,8 +305,6 @@ def run_eval_arm(
     # because the sole caller (cases.py) passes project=repo_root. A future caller that
     # mounts a staged project distinct from repo_root must address this.
     setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
-    # Stream the skill name on both arms so fired-detection runs unconditionally.
-    detect_skill = eval_case.skill
 
     # Resolve the agent + snapshot BEFORE the per-arm asyncio.run: building a missing
     # snapshot itself calls asyncio.run, which can't nest inside a running loop. The agent
@@ -337,7 +334,6 @@ def run_eval_arm(
             prompt=prompt,
             project_marker=project_marker,
             setup_reldir=setup_reldir,
-            detect_skill=detect_skill,
             # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
             # actually runs, never at collection (a deselected arm's secret is never read).
             arm_env=expand_env(arm.env, os.environ),
@@ -347,10 +343,20 @@ def run_eval_arm(
     )
 
     # Activation is graded off the arm's actually-dispatched skills — empty on a non-firing
-    # arm (skill_invoked then grades False, never an error). Pass the eval's skill so a fire
-    # via the namespaced-tool fallback (detect_skill_fired's second shape) lands in the set
-    # too, sparing a run where the skill demonstrably fired a false-negative activation.
-    fired_skills = tuple(skills_dispatched(arm_run.trajectory, eval_case.skill))
+    # arm (skill_invoked then grades False, never an error). Candidates are the skills the
+    # eval itself asserts on (bound offline, no Gemini), never the group name — so an eval
+    # whose group differs from its asserted skills still grades every asserted skill.
+    candidates = {
+        spec["skill"]
+        for assertion in eval_case.assertions
+        if (spec := _bind_skill_invoked(assertion))
+    }
+    # (i) every real Skill-tool fire, target-independent; (ii) fallback-shape fires for
+    # asserted skills — recovered per candidate so no group name feeds detection.
+    dispatched = list(skills_dispatched(arm_run.trajectory))
+    for candidate in candidates:
+        dispatched.extend(skills_dispatched(arm_run.trajectory, candidate))
+    fired_skills = tuple(dict.fromkeys(dispatched))  # de-dupe, preserve first-seen order
     grade_context = checkers.GradeContext(fired_skills=fired_skills)
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
@@ -415,9 +421,4 @@ def run_eval_arm(
         errored,
         arm_run.total_duration_ms,
         arm_run.total_tokens,
-        # `fired` is read back from the transcript, the one persisted home for the
-        # per-turn `result.fired` — no redundant copy threaded through `_ArmRun`. An
-        # errored arm can return before the single turn appends; treat an empty
-        # transcript as no fire rather than an IndexError.
-        fired=arm_run.transcript[0]["fired"] if arm_run.transcript else False,
     )
