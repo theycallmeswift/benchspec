@@ -1,0 +1,25 @@
+model: gemini-3.1-flash-lite
+mode: advisory
+paths:
+  - .
+rules:
+  - id: no-suppression-comments
+    description: Do not use lint or type-check suppression comments.
+  - id: section-header-comments
+    description: Do not use region-style comments instead of named structure.
+  - id: provenance-comments
+    description: >
+      Do not reference PRs, issues, commits, callers, or planning docs in
+      source comments.
+  - id: descriptive-names
+    description: >
+      Do not use single-letter bindings except `_` for intentionally unused
+      values. Do not flag leading underscores on private function, class,
+      method, or module-level helper names; only flag the actual bound
+      identifier.
+  - id: dedented-multiline-strings
+    description: >
+      Use textwrap.dedent for indented multiline string values. Docstrings are
+      exempt — indented multiline docstrings are correct.
+  - id: semantic-block-newlines
+    description: Use blank lines to separate semantic blocks for readability.

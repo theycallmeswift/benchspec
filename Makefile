@@ -18,12 +18,12 @@ evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-ru
 evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
 	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
 
-lint:  ## Lint with ruff and verified style checks
+lint:  ## Lint with Ruff and houserules
 	uv run ruff check .
-	uv run python bin/linters/style_lint.py --verify-findings --verbose .
+	uv run houserules --verbose .
 
-lint\:custom:  ## Run custom advisory style checks
-	uv run python bin/linters/style_lint.py
+lint\:custom:  ## Run houserules advisory style checks
+	uv run houserules
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
