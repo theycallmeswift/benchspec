@@ -1,4 +1,4 @@
-.PHONY: help install test evals evals\:binder lint lint\:custom clean
+.PHONY: help install test evals evals\:binder lint clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -21,9 +21,6 @@ evals\:binder:  ## Alias for `make evals` while the binder corpus is the only li
 lint:  ## Lint with Ruff and houserules
 	uv run ruff check .
 	uv run houserules --verbose .
-
-lint\:custom:  ## Run houserules advisory style checks
-	uv run houserules
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
