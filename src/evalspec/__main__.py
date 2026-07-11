@@ -6,7 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from evalspec import analyze, lint, run
+from evalspec import analyze, lint, run, sandbox
+from evalspec.exit_codes import ExitCode
 
 
 def _add_root_argument(command_parser: argparse.ArgumentParser) -> None:
@@ -62,6 +63,40 @@ def _split_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv[:separator], argv[separator + 1 :]
 
 
+def _run_sandbox_build(args: argparse.Namespace) -> int:
+    """Build the agent-ready snapshot for `root`, mapping host and build errors to exit codes.
+
+    A failed host `preflight` is a usage error (exit 2) surfaced before any build; a build
+    or provisioning failure (`MicrosandboxError`, or a `RuntimeError` from the redundant
+    internal preflight) is a finding (exit 1). `MicrosandboxError` is imported lazily so a
+    host without microsandbox installed never breaks `lint`/`analyze`.
+
+    Args:
+        args: The parsed `sandbox:build` namespace, with `root` a `Path`.
+
+    Returns:
+        `ExitCode.SUCCESS` on a built or already-present snapshot, `ExitCode.USAGE` on a
+        preflight failure, `ExitCode.FINDING` on a build failure.
+    """
+    from microsandbox.errors import MicrosandboxError
+
+    root = args.root.resolve()
+
+    try:
+        sandbox.preflight()
+    except RuntimeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return ExitCode.USAGE
+
+    try:
+        sandbox.cli_build(repo_root=root)
+    except (RuntimeError, MicrosandboxError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return ExitCode.FINDING
+
+    return ExitCode.SUCCESS
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatch the evalspec command-line interface."""
     parser = argparse.ArgumentParser(prog="evalspec")
@@ -80,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_root_argument(run_parser)
     _add_run_flags(run_parser)
+    _add_root_argument(
+        sub.add_parser("sandbox:build", help="build the agent-ready sandbox snapshot")
+    )
 
     if argv is None:
         argv = sys.argv[1:]
@@ -91,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         "lint": lambda parsed: lint.run(parsed.root.resolve()),
         "analyze": lambda parsed: analyze.run(parsed.root.resolve()),
         "run": run.run,
+        "sandbox:build": _run_sandbox_build,
     }
     return dispatch[args.command](args)
 

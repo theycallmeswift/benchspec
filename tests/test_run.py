@@ -8,10 +8,52 @@ from __future__ import annotations
 
 import argparse
 import sys
+import textwrap
 from pathlib import Path
 
 from evalspec import run
 from evalspec.run import translate_run_flags
+
+# The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
+# child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,
+# but no task arm executes and no sandbox or credentials are touched.
+
+_ARMS_TOML = textwrap.dedent(
+    """\
+    [tool.evalspec]
+    default-set = "default"
+
+    [tool.evalspec.sets.default]
+    harness = "claude-code"
+    model = "sonnet"
+    baseline = "baseline"
+    arms = [{name="baseline"}, {name="trial", model="opus"}]
+    """
+)
+
+_EVAL_MD = textwrap.dedent(
+    """\
+    ---
+    {}
+    ---
+
+    ## Prompt
+
+    Archive the source note.
+
+    ## Assertions
+
+    - [ ] source note archived
+    """
+)
+
+
+def _populated_eval_project(root: Path) -> None:
+    """Write a minimal but valid arms + one-eval project under `root` (no test_cases.py)."""
+    (root / "pyproject.toml").write_text(_ARMS_TOML)
+    evals = root / "skills" / "myskill" / "evals" / "myskill"
+    evals.mkdir(parents=True)
+    (evals / "alpha.eval.md").write_text(_EVAL_MD)
 
 
 def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
@@ -220,3 +262,23 @@ def test_run_empty_root_reports_no_evals_without_spawning(
 
     assert exit_code == 5
     assert f"no evals discovered under {tmp_path.resolve()}" in capsys.readouterr().out
+
+
+def test_run_subprocess_collects_populated_fixture_cleanly(tmp_path: Path) -> None:
+    """Verify a real `--collect-only` subprocess loads the plugin once and maps success to 0."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, set="default", passthrough=["--collect-only"])
+
+    exit_code = run.run(args)
+
+    assert exit_code == 0
+
+
+def test_run_subprocess_unknown_set_exits_two(tmp_path: Path) -> None:
+    """Verify an unknown --set surfaces the collection UsageError as exit 2 end to end."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, set="does-not-exist", passthrough=["--collect-only"])
+
+    exit_code = run.run(args)
+
+    assert exit_code == 2

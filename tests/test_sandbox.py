@@ -220,6 +220,26 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
     assert captured["image"] == "python:3.12-slim"
 
 
+def test_cli_build_resolves_environment_from_repo_root(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Verify cli_build reads its environment config from the given repo_root, not cwd."""
+    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: True)
+    monkeypatch.setattr(sandbox, "build_snapshot", lambda agent, name, env: None)
+    resolved_roots = []
+    monkeypatch.setattr(
+        sandbox,
+        "resolve_environment_config",
+        lambda repo_root: resolved_roots.append(repo_root) or EnvConfig(),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path)
+
+    assert resolved_roots == [tmp_path]
+
+
 def test_plugin_dir_for(tmp_path: object) -> None:
     """Verify plugin dir for."""
     assert sandbox._plugin_dir_for(None) is None

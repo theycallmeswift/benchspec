@@ -602,11 +602,17 @@ def route_in_sandbox(
     )
 
 
-def cli_build() -> None:
-    """`make evals:build`: build the agent-ready snapshot up front (loud on error)."""
+def cli_build(repo_root: Path | None = None) -> None:
+    """Build the agent-ready snapshot up front (loud on error).
+
+    Args:
+        repo_root: Repo root whose environment config selects the base image and
+            build steps. Defaults to the current working directory.
+    """
     preflight()
     agent = make_agent()
-    env = resolve_environment_config(Path.cwd())
+    root = repo_root or Path.cwd()
+    env = resolve_environment_config(root)
     name = snapshot_name(agent, env)
     if snapshot_exists(name):
         print(f"snapshot {name} already present")
