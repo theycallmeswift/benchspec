@@ -108,13 +108,68 @@ def test_directory_created_path_shape_binds_without_host_call() -> None:
 
 
 def test_bind_skill_invoked() -> None:
-    """Verify bind skill invoked."""
-    spec = bind(
-        "Skill `ingest` invoked",
-        call_model=_reply('{"checker":"skill_invoked","skill":"ingest"}'),
-    )
+    """Verify the canonical positive activation line binds offline with no model call."""
+    spec = bind("Skill `ingest` invoked", call_model=_fail_call_model)
+
+    assert spec == {
+        "type": "deterministic",
+        "checker": "skill_invoked",
+        "skill": "ingest",
+        "expected": True,
+    }
+
+
+def test_bind_skill_not_invoked_binds_expected_false_offline() -> None:
+    """Verify the negative activation line binds offline to expected:false, no model call."""
+    spec = bind("Skill `codex` not invoked", call_model=_fail_call_model)
+
+    assert spec == {
+        "type": "deterministic",
+        "checker": "skill_invoked",
+        "skill": "codex",
+        "expected": False,
+    }
+
+
+def test_bind_skill_invoked_namespaced_token() -> None:
+    """Verify a namespaced skill token (`plugin:ingest`) binds offline with the colon kept."""
+    spec = bind("Skill `plugin:ingest` invoked", call_model=_fail_call_model)
+
+    assert spec["skill"] == "plugin:ingest"
+
+
+def test_bind_skill_invoked_trailing_period() -> None:
+    """Verify a trailing period does not stop the activation line from binding offline."""
+    spec = bind("Skill `ingest` invoked.", call_model=_fail_call_model)
+
     assert spec["checker"] == "skill_invoked"
     assert spec["skill"] == "ingest"
+
+
+def test_bind_skill_invoked_bare_token_without_backticks() -> None:
+    """Verify an un-backticked activation line binds offline."""
+    spec = bind("Skill ingest invoked", call_model=_fail_call_model)
+
+    assert spec["checker"] == "skill_invoked"
+    assert spec["skill"] == "ingest"
+
+
+def test_bind_skill_invoked_checkbox_form() -> None:
+    """Verify a checkbox-prefixed activation line binds offline (list-marker strip)."""
+    spec = bind("- [ ] Skill `ingest` invoked", call_model=_fail_call_model)
+
+    assert spec["checker"] == "skill_invoked"
+    assert spec["skill"] == "ingest"
+
+
+def test_looser_activation_phrasing_falls_through_to_model() -> None:
+    """Verify a looser phrasing misses the offline recognizer and reaches the model."""
+    spec = bind(
+        "the ingest skill fired",
+        call_model=_reply('{"punt":true,"reason":"semantic"}'),
+    )
+
+    assert spec is None
 
 
 def test_punt_explicit() -> None:
