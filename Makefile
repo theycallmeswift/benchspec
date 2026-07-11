@@ -18,9 +18,10 @@ evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-ru
 evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
 	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
 
+LINT_BASE ?= origin/dev
 lint:  ## Lint with Ruff and houserules
 	uv run ruff check .
-	uv run houserules --verbose .
+	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .
 
 clean:  ## Remove the venv and Python caches
 	rm -rf .venv .pytest_cache .ruff_cache
