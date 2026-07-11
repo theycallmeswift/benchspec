@@ -183,151 +183,21 @@ def test_skill_invoked_rejects_unknown_key() -> None:
         )
 
 
-def _trigger_doc(query_obj: dict) -> dict:
-    """Build the trigger doc test fixture."""
-    return {
-        "$schema": "evalspec-trigger/v1",
-        "skill_name": "demo-skill",
-        "queries": [query_obj],
-    }
-
-
-def test_trigger_xfail_object_valid() -> None:
-    """Verify trigger xfail object valid."""
-    v._validate(
-        _trigger_doc(
+def test_former_trigger_doc_now_rejected() -> None:
+    """Verify a former evalspec-trigger/v1 doc raises, naming only evalspec/v1."""
+    with pytest.raises(SchemaError) as ei:
+        _validate(
             {
-                "slug": "q-one",
-                "query": "q",
-                "should_trigger": True,
-                "xfail": {
-                    "models": ["sonnet", "haiku"],
-                    "reason": "documented routing boundary",
-                },
+                "$schema": "evalspec-trigger/v1",
+                "skill_name": "demo-skill",
+                "queries": [{"slug": "q-one", "query": "q", "should_trigger": True}],
             }
         )
-    )
-
-
-def test_trigger_xfail_must_be_object() -> None:
-    """Verify trigger xfail must be object."""
-    with pytest.raises(v.SchemaError, match="xfail"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "q-one",
-                    "query": "q",
-                    "should_trigger": True,
-                    "xfail": "a bare string is no longer allowed",
-                }
-            )
-        )
-
-
-def test_trigger_xfail_empty_models_rejected() -> None:
-    """Verify trigger xfail empty models rejected."""
-    with pytest.raises(v.SchemaError, match="models"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "q-one",
-                    "query": "q",
-                    "should_trigger": True,
-                    "xfail": {"models": [], "reason": "r"},
-                }
-            )
-        )
-
-
-def test_trigger_xfail_unknown_tier_rejected() -> None:
-    """Verify trigger xfail unknown tier rejected."""
-    with pytest.raises(v.SchemaError, match="not in"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "q-one",
-                    "query": "q",
-                    "should_trigger": True,
-                    "xfail": {"models": ["sonet"], "reason": "r"},
-                }
-            )
-        )
-
-
-def test_trigger_xfail_empty_reason_rejected() -> None:
-    """Verify trigger xfail empty reason rejected."""
-    with pytest.raises(v.SchemaError, match="reason"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "q-one",
-                    "query": "q",
-                    "should_trigger": True,
-                    "xfail": {"models": ["sonnet"], "reason": "  "},
-                }
-            )
-        )
-
-
-def test_trigger_xfail_extra_key_rejected() -> None:
-    """Verify trigger xfail extra key rejected."""
-    with pytest.raises(v.SchemaError, match="unknown field"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "q-one",
-                    "query": "q",
-                    "should_trigger": True,
-                    "xfail": {
-                        "models": ["sonnet"],
-                        "reason": "r",
-                        "verified_on": "2026-05-30",
-                    },
-                }
-            )
-        )
-
-
-def test_trigger_slug_must_be_kebab() -> None:
-    """Verify trigger slug must be kebab."""
-    with pytest.raises(v.SchemaError, match="slug"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "slug": "Not Kebab",
-                    "query": "q",
-                    "should_trigger": True,
-                }
-            )
-        )
-
-
-def test_trigger_slug_duplicate_rejected() -> None:
-    """Verify trigger slug duplicate rejected."""
-    doc = {
-        "$schema": "evalspec-trigger/v1",
-        "skill_name": "ingest",
-        "queries": [
-            {"slug": "dup", "query": "a", "should_trigger": True},
-            {"slug": "dup", "query": "b", "should_trigger": False},
-        ],
-    }
-    with pytest.raises(v.SchemaError, match="duplicate slug"):
-        v._validate(doc)
-
-
-def test_trigger_int_id_now_rejected() -> None:
-    """Verify trigger int id now rejected."""
-    with pytest.raises(v.SchemaError, match="slug"):
-        v._validate(
-            _trigger_doc(
-                {
-                    "id": 1,
-                    "query": "q",
-                    "should_trigger": True,
-                }
-            )
-        )
+    msg = str(ei.value)
+    # The message names the sole supported schema and echoes the rejected value, but no
+    # longer advertises the removed trigger schema as a supported option.
+    assert "evalspec/v1" in msg
+    assert "trigger-evals.md" not in msg
 
 
 def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
@@ -354,5 +224,4 @@ def test_missing_schema_key_says_how_to_add_it() -> None:
         v._validate({"evals": []})
     msg = str(ei.value)
     assert "evalspec/v1" in msg
-    assert "evalspec-trigger/v1" in msg
     assert "first key" in msg

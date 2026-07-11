@@ -7,27 +7,10 @@ import pytest
 from evalspec import discovery, schema
 from evalspec.discovery import (
     discover_eval_cases,
-    discover_trigger_cases,
     resolve_environment_config,
     resolve_repo_root,
 )
 from evalspec.mdformat import MdFormatError
-
-
-def _trigger_md(skill_name: str, queries: list[str]) -> str:
-    """Build a minimal trigger-evals.md with all queries in the Trigger section."""
-    lines = [f"---\nskill_name: {skill_name}\n---\n## Trigger\n"]
-    lines.extend(queries)
-    return "".join(lines)
-
-
-def _write_trigger_md(skill_dir: Path, queries: list[str], *, skill_name: object = None) -> Path:
-    """Write trigger md."""
-    evals_dir = skill_dir / "evals"
-    evals_dir.mkdir(parents=True, exist_ok=True)
-    trigger_path = evals_dir / "trigger-evals.md"
-    trigger_path.write_text(_trigger_md(skill_name or skill_dir.name, queries), encoding="utf-8")
-    return trigger_path
 
 
 class _FakeConfig:
@@ -51,14 +34,6 @@ class _FakeConfig:
         if option_name == "evalspec_eval_paths":
             return self._eval_paths
         return None
-
-
-def _write_triggers(skill_dir: Path, queries: list[str], *, skill_name: object = None) -> Path:
-    """Write a trigger-evals.md.
-
-    `queries` is a list of markdown bullet lines.
-    """
-    return _write_trigger_md(skill_dir, queries, skill_name=skill_name)
 
 
 # ---------------------------------------------------------------------------
@@ -355,19 +330,6 @@ def test_discover_rejects_unknown_frontmatter_end_to_end(tmp_path: object) -> No
         discover_eval_cases(tmp_path)
 
 
-def test_skill_with_only_triggers_still_discovers_no_eval_cases(
-    tmp_path: object,
-) -> None:
-    """Verify skill with only triggers still discovers no eval cases."""
-    _write_trigger_md(
-        tmp_path / "skills" / "demo",
-        ["- my-query: q\n"],
-    )
-
-    assert discover_eval_cases(tmp_path) == []
-    assert len(discover_trigger_cases(tmp_path)) == 1
-
-
 def test_discover_eval_cases_raises_on_bad_schema(tmp_path: object) -> None:
     """Verify discover eval cases raises on bad schema."""
     # Malformed here = a bare `## Prompt` with no `## Assertions` section.
@@ -406,61 +368,6 @@ def test_resolve_eval_paths_flag_overrides_pyproject(tmp_path: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# discover_trigger_cases
-# ---------------------------------------------------------------------------
-
-
-def test_discover_trigger_cases_one_per_query(tmp_path: object) -> None:
-    """Verify discover trigger cases one per query."""
-    _write_triggers(
-        tmp_path / "skills" / "myskill",
-        [
-            "- do-it: do it\n",
-            "- not-this: not this\n",
-        ],
-    )
-    cases = discover_trigger_cases(tmp_path)
-    assert [case.param_id for case in cases] == ["myskill-do-it", "myskill-not-this"]
-    assert all(case.skill_name == "myskill" for case in cases)
-    assert all(case.repo_root == tmp_path for case in cases)
-
-
-def test_discover_trigger_reads_markdown(tmp_path: object) -> None:
-    """Verify discover trigger reads markdown."""
-    evals = tmp_path / "skills" / "ingest" / "evals"
-    evals.mkdir(parents=True)
-    (evals / "trigger-evals.md").write_text(
-        "---\nskill_name: ingest\n---\n## Trigger\n"
-        "- ingest-article: ingest this article into my kb\n",
-        encoding="utf-8",
-    )
-    cases = discovery.discover_trigger_cases(tmp_path)
-    assert len(cases) == 1
-    assert cases[0].query["slug"] == "ingest-article"
-    assert cases[0].param_id == "ingest-ingest-article"
-
-
-# ---------------------------------------------------------------------------
-# dual-root discovery (.claude/skills)
-# ---------------------------------------------------------------------------
-
-
-def test_discover_trigger_cases_finds_both_roots(tmp_path: object) -> None:
-    """Verify discover trigger cases finds both roots."""
-    _write_triggers(
-        tmp_path / "skills" / "plug",
-        ["- some-query: q\n"],
-    )
-    _write_triggers(
-        tmp_path / ".claude" / "skills" / "loc",
-        ["- some-query: q\n"],
-    )
-    cases = {case.skill: case for case in discover_trigger_cases(tmp_path)}
-    assert set(cases) == {"plug", "loc"}
-    assert all(case.repo_root == tmp_path for case in cases.values())
-
-
-# ---------------------------------------------------------------------------
 # pyproject_table
 # ---------------------------------------------------------------------------
 
@@ -468,39 +375,15 @@ def test_discover_trigger_cases_finds_both_roots(tmp_path: object) -> None:
 def test_pyproject_table_reads_tool_evalspec(tmp_path: object) -> None:
     """Verify pyproject table reads tool evalspec."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\nagent = "opencode"\neval_roots = ["evals/skills"]\n'
+        '[tool.evalspec]\nagent = "opencode"\neval_paths = ["evals/skills"]\n'
     )
     table = discovery.pyproject_table(tmp_path)
-    assert table == {"agent": "opencode", "eval_roots": ["evals/skills"]}
+    assert table == {"agent": "opencode", "eval_paths": ["evals/skills"]}
 
 
 def test_pyproject_table_missing_file_is_empty(tmp_path: object) -> None:
     """Verify pyproject table missing file is empty."""
     assert discovery.pyproject_table(tmp_path) == {}
-
-
-def test_output_and_trigger_evals_coexist(tmp_path: object) -> None:
-    """Verify output and trigger evals coexist."""
-    # A skill dir with BOTH a valid output eval.md AND trigger-evals.md under evals/:
-    # discover_eval_cases must not raise, must return the output eval case, and must
-    # not include anything derived from trigger-evals.md (a bare file, never a group
-    # dir). discover_trigger_cases must return the trigger case.
-    skill_dir = tmp_path / "skills" / "myskill"
-    _write_eval(tmp_path, "skills/myskill", "myskill", "eval.md")
-    _write_triggers(skill_dir, ["- my-query: do this thing\n"])
-
-    output_cases = discover_eval_cases(tmp_path)
-    trigger_cases = discover_trigger_cases(tmp_path)
-
-    # Output cases: exactly one, from the output eval file — no bleed from trigger-evals.md
-    assert len(output_cases) == 1
-    assert output_cases[0].eval_id == "myskill"
-    assert output_cases[0].skill == "myskill"
-    assert not any("trigger" in case.eval_id for case in output_cases)
-
-    # Trigger cases: exactly one, from trigger-evals.md
-    assert len(trigger_cases) == 1
-    assert trigger_cases[0].param_id == "myskill-my-query"
 
 
 # ---------------------------------------------------------------------------

@@ -13,10 +13,6 @@ Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML fron
 display-only groups, flattened in document order). The eval id is the parent folder name
 for `eval.md`, or the `<stem>` for `<stem>.eval.md`. Single-turn only: `history:` carries
 any prior context; there is no `## Turn` syntax.
-
-Trigger evals: `trigger-evals.md` — frontmatter `skill_name` + optional `## Description`
-+ `## Trigger`/`## No Trigger` sections of `- <slug>: <query>` lines, each with an
-optional indented `fails-on [tiers]: reason`.
 """
 
 from __future__ import annotations
@@ -31,11 +27,6 @@ from evalspec import schema
 _FENCE = re.compile(r"^(```|~~~)")
 _HEADER = re.compile(r"^(#{2,3}) +(.+?)\s*$")
 _CHECKBOX = re.compile(r"^- \[[ xX]\] +(.*\S)\s*$")
-
-_TRIG_QUERY = re.compile(r"^- (\S.*)$")
-_TRIG_XFAIL = re.compile(r"^  - fails-on \[([^\]]+)\]: (\S.*)$")
-_TRIG_FM = {"skill_name"}
-_TRIGGER_TITLES = {"Trigger": True, "No Trigger": False}
 
 _EVAL_FM = {"history"}
 
@@ -227,76 +218,3 @@ def parse_eval_md(path: Path) -> dict:
     result["prompt"] = prompt
     result["assertions"] = assertions
     return result
-
-
-def _parse_trigger_section(
-    content_lines: list[str], should_trigger: bool, path: Path
-) -> list[dict]:
-    """One polarity section (`## Trigger` / `## No Trigger`) → query dicts.
-
-    A query is `- <slug>: <query>`; the section it sits under decides should_trigger. An
-    optional 2-space-indented `- fails-on [tiers]: reason` rides under its query; deeper
-    indented lines continue the reason. Slug uniqueness + kebab are schema's job.
-    """
-    label = "Trigger" if should_trigger else "No Trigger"
-    queries: list[dict] = []
-    current: dict | None = None
-    reason_open = False
-    for line in content_lines:
-        if not line.strip():
-            reason_open = False
-            continue
-        query_match = _TRIG_QUERY.match(line)
-        if query_match:
-            body = query_match.group(1)
-            if ": " not in body:
-                raise MdFormatError(f"{path}: {label}: expected `<slug>: <query>`, got: {body!r}")
-            slug, query = body.split(": ", 1)
-            current = {
-                "slug": slug.strip(),
-                "query": query.rstrip(),
-                "should_trigger": should_trigger,
-            }
-            queries.append(current)
-            reason_open = False
-            continue
-        xfail_match = _TRIG_XFAIL.match(line)
-        if xfail_match:
-            if current is None:
-                raise MdFormatError(f"{path}: {label}: fails-on before any query: {line!r}")
-            if "xfail" in current:
-                raise MdFormatError(f"{path}: {label}: duplicate fails-on for `{current['slug']}`")
-            models = [tier.strip() for tier in xfail_match.group(1).split(",")]
-            current["xfail"] = {"models": models, "reason": xfail_match.group(2).rstrip()}
-            reason_open = True
-            continue
-        if line[0].isspace() and reason_open:
-            current["xfail"]["reason"] += " " + line.strip()
-            continue
-        raise MdFormatError(f"{path}: {label}: unexpected line: {line!r}")
-    return queries
-
-
-def parse_trigger(path: Path) -> dict:
-    """Parse `trigger-evals.md` into a validated `evalspec-trigger/v1` doc."""
-    fm, body_lines = _split_frontmatter(path.read_text(encoding="utf-8"), path)
-    _check_fm_keys(fm, _TRIG_FM, path)
-    if "skill_name" not in fm:
-        raise MdFormatError(f"{path}: frontmatter missing `skill_name`")
-    doc: dict = {
-        "$schema": "evalspec-trigger/v1",
-        "skill_name": fm["skill_name"],
-        "queries": [],
-    }
-    for level, title, content in _sections(body_lines, path):
-        if level == 2 and title == "Description":
-            doc["description"] = _prose(content)
-        elif level == 2 and title in _TRIGGER_TITLES:
-            doc["queries"].extend(_parse_trigger_section(content, _TRIGGER_TITLES[title], path))
-        else:
-            raise MdFormatError(f"{path}: unexpected `{'#' * level} {title}`")
-    try:
-        schema._validate(doc)
-    except schema.SchemaError as e:
-        raise MdFormatError(str(e)) from e
-    return doc

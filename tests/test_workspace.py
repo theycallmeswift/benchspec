@@ -84,28 +84,6 @@ def test_arm_dir_shards_per_sample(tmp_path: object) -> None:
     assert d0.parent == d1.parent
 
 
-def test_trigger_dir_shards_per_sample(tmp_path: object) -> None:
-    """Verify trigger dir shards per sample."""
-    workspace.set_current_iteration("iteration_01")
-
-    d0 = workspace.trigger_dir(tmp_path, "archive", "archive-save-article", sample=0)
-    d1 = workspace.trigger_dir(tmp_path, "archive", "archive-save-article", sample=1)
-
-    assert d0 != d1
-    assert d0.name == "sample-0"
-    assert d1.name == "sample-1"
-    assert d0.parent == d1.parent
-    assert d0.parent.name == "trigger-archive-save-article"
-
-
-def test_trigger_dir_uses_slug(tmp_path: object) -> None:
-    """Verify trigger dir uses slug."""
-    workspace.set_current_iteration("iteration_01")
-    d = workspace.trigger_dir(tmp_path, "ingest", "ingest-article", sample=0)
-    assert d.name == "sample-0"
-    assert d.parent.name == "trigger-ingest-article"
-
-
 def test_current_iteration_or_none_unset(monkeypatch: object) -> None:
     """Verify current iteration or none unset."""
     monkeypatch.delenv("EVALSPEC_ITERATION", raising=False)

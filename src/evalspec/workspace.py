@@ -84,8 +84,3 @@ def skill_dir(repo_root: Path, skill: str) -> Path:
 def arm_dir(repo_root: Path, skill: str, eval_id: str, arm: str, sample: int) -> Path:
     """Return the artifact directory for one eval arm sample."""
     return skill_dir(repo_root, skill) / f"eval-{eval_id}" / arm / f"sample-{sample}"
-
-
-def trigger_dir(repo_root: Path, skill: str, slug: object, sample: int) -> Path:
-    """Return the artifact directory for one trigger sample."""
-    return skill_dir(repo_root, skill) / f"trigger-{slug}" / f"sample-{sample}"
