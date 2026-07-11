@@ -6,10 +6,20 @@ each test pins one assertion shape to the label it must carry.
 
 from __future__ import annotations
 
+import contextlib
+import json
+from pathlib import Path
+
 import pytest
 
-from evalspec import analyze
+from evalspec import analyze, discovery, workspace
+from evalspec.arms import Arm
+from evalspec.binder import _bind_bare_exists, _bind_skill_invoked
+from evalspec.execution import run_eval_arm
+from evalspec.runner import RunResult
 from evalspec.schema import SchemaError
+
+_ACTIVATION_FIXTURE = Path(__file__).parent / "fixtures" / "activation"
 
 
 def _bind_like_binder(text: object) -> object:
@@ -104,3 +114,113 @@ def test_run_surfaces_schema_error_on_malformed_eval(
 
     with pytest.raises(SchemaError):
         analyze.run(tmp_path)
+
+
+def _bind_offline(text: object) -> object:
+    """Bind through the binder's offline fast paths only; punt everything else.
+
+    Mirrors what the real `binder.bind` does for the fixture without a network call,
+    so tests classify and grade the committed activation eval deterministically.
+    """
+    return _bind_skill_invoked(text) or _bind_bare_exists(text)
+
+
+def _fake_session_factory(result: object) -> object:
+    """Single-turn session factory yielding one fixed RunResult for the arm's run."""
+
+    @contextlib.asynccontextmanager
+    async def factory(**_kwargs: object) -> object:
+        """Yield a run callable returning the pre-baked result."""
+
+        async def run(
+            _prompt: object, *, resume_session_id: object, detect_skill: object
+        ) -> object:
+            """Return the fixed run result for the single graded turn."""
+            return result
+
+        yield run
+
+    return factory
+
+
+def _grade_all_pass(assertions: object, *_args: object, **_kwargs: object) -> object:
+    """Judge stub passing every punted assertion so no network judge is called."""
+    return {
+        "assertions": [
+            {"text": assertion, "passed": True, "evidence": "ok"} for assertion in assertions
+        ]
+    }
+
+
+def test_activation_fixture_discovers_four_assertions() -> None:
+    """Verify the committed fixture is discoverable and yields its four assertions."""
+    cases = discovery.discover_eval_cases(_ACTIVATION_FIXTURE)
+
+    assert len(cases) == 1
+    assert cases[0].assertions == [
+        "Skill `ingest` invoked",
+        "Skill `codex` not invoked",
+        "The file ./notes.md exists",
+        "The summary is accurate",
+    ]
+
+
+def test_activation_fixture_classifies_each_assertion() -> None:
+    """Verify analyze_repo labels the fixture activation/activation/deterministic/judge-backed."""
+    classifications = analyze.analyze_repo(_ACTIVATION_FIXTURE, bind=_bind_offline)
+
+    assert [classification.label for classification in classifications] == [
+        "activation",
+        "activation",
+        "deterministic",
+        "judge-backed",
+    ]
+
+
+def test_activation_fixture_grades_both_polarities_end_to_end(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify a discover to grade run records both activation polarities as pass.
+
+    The arm's trajectory dispatches `ingest` but not `codex`, so the positive
+    `` Skill `ingest` invoked `` and the negative `` Skill `codex` not invoked ``
+    both grade True off the arm's dispatched-skill set.
+    """
+    workspace.set_current_iteration("iteration_01")
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: None)
+    monkeypatch.setattr("evalspec.execution.ensure_snapshot", lambda agent, **kwargs: "snap")
+    eval_case = discovery.discover_eval_cases(_ACTIVATION_FIXTURE)[0]
+    trajectory = [
+        {"kind": "tool_call", "id": "1", "name": "Skill", "arguments": {"skill": "ingest"}}
+    ]
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    run_eval_arm(
+        eval_case,
+        Arm("trial", "claude-code", "opus"),
+        workdir,
+        {},
+        None,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=_fake_session_factory(
+            RunResult(
+                "activation-demo", "trial", "out", 1, 1, False,
+                session_id="s1", fired=True, trajectory=trajectory,
+            )
+        ),
+        grade=_grade_all_pass,
+        bind=_bind_offline,
+    )
+
+    run_dir = workspace.arm_dir(
+        tmp_path, eval_case.skill, eval_case.eval_id, "trial", sample=0
+    )
+    grading = json.loads((run_dir / "grading.json").read_text())
+    passed_by_text = {
+        assertion["text"]: assertion["passed"] for assertion in grading["assertions"]
+    }
+    assert passed_by_text["Skill `ingest` invoked"] is True
+    assert passed_by_text["Skill `codex` not invoked"] is True
