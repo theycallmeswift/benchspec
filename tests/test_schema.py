@@ -7,7 +7,7 @@ import json
 import pytest
 
 from evalspec import schema as v
-from evalspec.schema import SchemaError, _validate
+from evalspec.schema import SchemaError, _validate, _validate_checker_obj
 
 
 def _doc(evals: list[dict]) -> dict:
@@ -158,6 +158,29 @@ def test_missing_assertions_shows_example() -> None:
     with pytest.raises(SchemaError) as ei:
         _validate(_doc([{"id": "a", "prompt": "p"}]))
     assert 'e.g. "assertions": ["a Resource page was created"]' in str(ei.value)
+
+
+def test_skill_invoked_accepts_expected_bool() -> None:
+    """Verify a skill_invoked checker with an `expected` boolean validates."""
+    _validate_checker_obj(
+        {"checker": "skill_invoked", "skill": "x", "expected": True}, "root"
+    )
+
+
+def test_skill_invoked_rejects_non_bool_expected() -> None:
+    """Verify a non-bool `expected` raises SchemaError."""
+    with pytest.raises(SchemaError, match="expected"):
+        _validate_checker_obj(
+            {"checker": "skill_invoked", "skill": "x", "expected": "yes"}, "root"
+        )
+
+
+def test_skill_invoked_rejects_unknown_key() -> None:
+    """Verify an undeclared key on skill_invoked still raises SchemaError."""
+    with pytest.raises(SchemaError, match="unknown field"):
+        _validate_checker_obj(
+            {"checker": "skill_invoked", "skill": "x", "bogus": True}, "root"
+        )
 
 
 def _trigger_doc(query_obj: dict) -> dict:

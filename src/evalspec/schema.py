@@ -28,7 +28,7 @@ _CHECKER_FIELDS = {
     "sha256_match": ({"path"}, {"original", "sha256"}),
     "frontmatter_has": ({"path", "key"}, {"value"}),
     "regex": ({"path", "pattern"}, set()),
-    "skill_invoked": ({"skill"}, set()),
+    "skill_invoked": ({"skill"}, {"expected"}),
 }
 
 _CHECKER_KEY_TYPES = {
@@ -43,6 +43,7 @@ _CHECKER_KEY_TYPES = {
     "count": int,
     "min": int,
     "should_exist": bool,
+    "expected": bool,
 }
 
 _KEBAB_HINT = "lowercase alphanumerics separated by hyphens, e.g. `happy-path`"

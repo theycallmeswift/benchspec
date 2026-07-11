@@ -427,6 +427,66 @@ def test_skill_invoked_not_fired(tmp_path: object) -> None:
     assert out["passed"] is False
 
 
+def test_skill_invoked_expected_false_fails_on_firing_arm(tmp_path: object) -> None:
+    """Verify a negative assertion fails when the skill did fire."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": False},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("ingest",)),
+    )
+
+    assert out["passed"] is False
+
+
+def test_skill_invoked_expected_false_passes_on_non_firing_arm(tmp_path: object) -> None:
+    """Verify a negative assertion passes when the skill did not fire."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": False},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("archive",)),
+    )
+
+    assert out["passed"] is True
+
+
+def test_skill_invoked_expected_true_fails_on_non_firing_arm(tmp_path: object) -> None:
+    """Verify an explicit positive assertion fails when the skill did not fire."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": True},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("archive",)),
+    )
+
+    assert out["passed"] is False
+
+
+def test_skill_invoked_namespaced_hit_passes_positive(tmp_path: object) -> None:
+    """Verify a namespaced fire (`plugin:ingest`) counts as a hit for the positive form."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": True},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("plugin:ingest",)),
+    )
+
+    assert out["passed"] is True
+
+
+def test_skill_invoked_namespaced_hit_fails_negative(tmp_path: object) -> None:
+    """Verify a namespaced fire (`plugin:ingest`) counts as a hit for the negative form."""
+    out = checkers.run_assertion(
+        {"checker": "skill_invoked", "skill": "ingest", "expected": False},
+        tmp_path,
+        {},
+        context=GradeContext(fired_skills=("plugin:ingest",)),
+    )
+
+    assert out["passed"] is False
+
+
 def test_skill_invoked_no_context_is_negative(tmp_path: object) -> None:
     """Verify skill invoked no context is negative."""
     # No runner wired fired_skills yet (inert path); absent context grades False, never crashes.

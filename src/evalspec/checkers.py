@@ -203,12 +203,26 @@ def _regex(
 def _skill_invoked(
     spec: dict, workdir: Path, original_shas: dict, context: object = None
 ) -> tuple[bool, str]:
-    """Evaluate whether trajectory facts show a skill invocation."""
+    """Evaluate whether trajectory facts match the asserted skill-activation polarity.
+
+    `expected` (default True) selects the polarity: a positive assertion (`` Skill `X`
+    invoked ``) passes when the skill fired, a negative one (`` Skill `X` not invoked ``)
+    passes when it did not. The evidence names which polarity was checked.
+    """
     # Exact-or-namespaced match: a skill may fire as `ingest` or `plugin:ingest`.
     target = spec["skill"]
+    expected = spec.get("expected", True)
     fired = context.fired_skills if context else ()
     hit = any(skill == target or skill.endswith(f":{target}") for skill in fired)
-    return hit, (f"`{target}` invoked" if hit else f"`{target}` not among fired {list(fired)}")
+    if expected:
+        evidence = f"`{target}` invoked" if hit else f"`{target}` not among fired {list(fired)}"
+    else:
+        evidence = (
+            f"`{target}` invoked but expected absent"
+            if hit
+            else f"`{target}` not invoked (absent from fired {list(fired)})"
+        )
+    return hit == expected, evidence
 
 
 _CHECKERS = {
