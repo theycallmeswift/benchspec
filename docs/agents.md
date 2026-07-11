@@ -2,7 +2,7 @@
 
 evalspec runs each eval inside a microsandbox microVM and drives a **coding agent** (a headless CLI like Claude Code or OpenCode). Agent-specific code lives behind the `CodingAgent` interface in `evalspec.agents`; the sandbox lifecycle, grading, and honesty contract never name a concrete agent.
 
-`--evalspec-agent` / `EVALSPEC_AGENT` sets the run-level agent (flag > env > pyproject > default). It governs trigger routing and `make_agent()` when no explicit harness is given. The default is `claude-code`. Unknown values fail at startup naming the source.
+`--evalspec-agent` / `EVALSPEC_AGENT` sets the run-level agent (flag > env > pyproject > default). It backs the `__route__` sandbox path and `make_agent()` when no explicit harness is given. The default is `claude-code`. Unknown values fail at startup naming the source.
 
 ```bash
 pytest --evalspec-agent opencode   # one-off override
@@ -21,7 +21,7 @@ src/evalspec/agents/
   __init__.py   # make_agent() factory + credential_preflight_error()
 ```
 
-`sandbox.py` calls only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) — trigger routing uses this run-level agent, so a multi-harness set's trigger numbers are single-harness. Grading selects its adapter from its own `JudgeConfig`, independent from the task agent (see [Grading uses the same adapter](#grading-uses-the-same-adapter-in-a-different-environment) below).
+`sandbox.py` calls only the protocol plus `make_agent()` / `credential_preflight_error()`. Snapshots key on `evalspec-{agent.id}-{agent.version()}`, so each agent + version caches its own image and multiple coexist on one host. `make_agent(harness)` selects a specific agent per arm (an eval set's columns may span harnesses); `make_agent()` with no argument reads the run-level agent (`--evalspec-agent` / `EVALSPEC_AGENT`) for the `__route__` sandbox path. Grading selects its adapter from its own `JudgeConfig`, independent from the task agent (see [Grading uses the same adapter](#grading-uses-the-same-adapter-in-a-different-environment) below).
 
 ## The `CodingAgent` protocol
 
@@ -30,7 +30,7 @@ Implement every member (signatures in `base.py`):
 | Member | Responsibility |
 |---|---|
 | `id: str` | Stable slug — snapshot-cache key and report label (e.g. `"claude-code"`). |
-| `guest_home: str` | The agent's `HOME` inside the guest; asset staging target and trigger-run cwd. |
+| `guest_home: str` | The agent's `HOME` inside the guest; asset staging target and `__route__`-run cwd. |
 | `skill_load_dir: str` | Absolute guest path the agent auto-loads skills from (e.g. `/root/.claude/skills`). Must differ from `FIXED_SKILLS_HOME` and `guest_home` — the bridge `rm -rf`s it before symlinking. |
 | `agent_bin: str` | The binary this **instance** runs — an instance is bound to one execution environment. The default binding is the guest install path (`build_command`'s argv[0] for sandbox runs); `for_host()` returns an instance bound to the host name PATH resolves (judge mode's argv[0], the judge binary preflight, `binary_version()`). |
 | `capabilities: AgentCapabilities` | Typed capability declaration — see the field table below for each field's consumer (`efforts` is documentation-only today). |
@@ -41,11 +41,11 @@ Implement every member (signatures in `base.py`):
 | `provision(sandbox)` | Install CLI + system deps into a booted sandbox. Runs once, captured as the snapshot; raise on failure. |
 | `secrets() -> list` | `microsandbox.Secret` entries to inject (e.g. an API key scoped to the provider host). Value never enters the guest. |
 | `guest_env() -> dict` | Per-exec env (e.g. `HOME`, sandbox flags). No credential values — those ride as secrets. |
-| `stage_project_assets(sandbox, project_mount)` | Copy project-side assets (canonically skills) into the guest. **Trigger path only** — output evals install per-cell via `setup.sh` + the skills-home bridge, so this no longer fires for them. No-op if nothing to stage. |
+| `stage_project_assets(sandbox, project_mount)` | Copy project-side assets (canonically skills) into the guest. **`__route__` path only** — output evals install per-cell via `setup.sh` + the skills-home bridge, so this no longer fires for them. No-op if nothing to stage. |
 | `build_command(prompt, *, plugin_dir, model, effort, resume_session_id, detect_skill, harness_args=None)` | Build the headless argv. With `detect_skill` set, emit a streamable format so firing is detectable; the in-tree agents stream unconditionally (both arms), so `detect_skill` gates only firing detection downstream, not the format. Validate `harness_args` against the adapter's reserved identity/control flags, append supported pass-through args in a position that preserves the CLI shape, and fail loudly if the adapter cannot support them. |
 | `invoke(sandbox, prompt, *, ..., extra_env=None, harness_args=None) -> RunResult` | Run one turn in the sandbox; parse stdout into a `RunResult` (see `runner.py`). Surface failures as `is_error=True`, not exceptions. `extra_env` (an arm's per-arm `env`, already `$VAR`-expanded) merges over `guest_env()` for the agent exec — arm keys win, so a set's leaky-OpenRouter arm reaches the agent and not just `setup.sh`. `harness_args` are the resolved set+arm pass-through tokens for the invocation layer, not environment mutation. |
 | `detect_dispatch(line, skill_name) -> bool` | Given one streamed line, return True if it shows a skill dispatch. Keeps `trigger.py` and `sandbox.py` agent-agnostic. |
-| `detect_fired(lines, skill_name) -> bool` | Given the whole routing stream, return True if *our* skill fired. `cases.py` passes this to the trigger run; pairs with `detect_dispatch` (single-line) for the full firing tally. |
+| `detect_fired(lines, skill_name) -> bool` | Given the whole routing stream, return True if *our* skill fired. Pairs with `detect_dispatch` (single-line) for the full firing tally on the `__route__` sandbox path. |
 | `streamed_activity(lines) -> bool` | True if the model began a turn (an `assistant` event), distinguishing a clean non-fire from a retryable launch stall so a budget timeout isn't misread. |
 
 `AgentCapabilities` fields:
@@ -82,6 +82,19 @@ Judging stays independent from the task *arms*: a run resolves one `JudgeConfig`
 
 The trajectory feeds **process facts**: `render_process_facts` collapses cross-turn tool and sub-skill activity into a compact block, and `build_judge_prompt` hands it to the judge as evidence a final-message-only grader can't see — a `Skill(name)` dispatch proves the agent used a sub-skill even when its message is silent. `tool_call_count` and `skills_dispatched` in `transcript.json` come from the same trajectory.
 
+## Activation and the routing primitives
+
+Skill activation is graded as an **ordinary assertion**, not a separate eval type. An eval writes `` - [ ] Skill `X` invoked `` (or `` not invoked ``); the binder maps it to the `skill_invoked` checker, which grades against the arm's dispatched-skills set derived from the trajectory. There is no separate trigger-eval file, no versioned trigger schema, and no routing-score modes — activation rides the same discovery, binding, and grading path as every other assertion (see [`schema.md`](schema.md#assertions) and [`concepts.md`](concepts.md#activation-is-an-assertion-not-a-gate)).
+
+The skill-detection/routing helpers in `evalspec.trigger` **remain** — they back the `__route__` sandbox path and each adapter's `detect_dispatch` / `detect_fired`:
+
+- `detect_skill_fired` — whole-stream fire detection.
+- `dispatches_skill` — single-line dispatch detection.
+- `streamed_activity` — did the model begin a turn (a clean non-fire vs. a retryable launch stall).
+- `RoutingError` — raised (in `sandbox.py`) when a routing probe streams no activity before its budget.
+
+The trigger-**eval scoring** helpers were removed outright — no compatibility shims: `fire_threshold`, `trigger_record`, `count_fires`, `xfail_applies`, and `first_dispatched_skill` no longer exist.
+
 ## `ClaudeCodeAgent` — worked example
 
 | Field | Value |
@@ -99,7 +112,7 @@ The trajectory feeds **process facts**: `render_process_facts` collapses cross-t
 | Skills bridge | `skill_load_dir=/root/.claude/skills` symlinked to `/home/evalspec/skills` once at provision |
 | Output-eval install | per-cell `setup.sh` writing into `/home/evalspec/skills` (the bridge target); no implicit copy or plugin dir |
 | Harness args | Appended after evalspec-managed flags. Reserved: prompt/print flags (`-p`, `--print`, `--prompt`), model, effort, output/input format, permission mode, and resume/session controls (`-r`, `--resume`, `-c`, `--continue`, `--session-id`, `--fork-session`, `--no-session-persistence`). Use `["--plugin-dir", "/project"]` to opt an output arm into a Claude plugin surface. |
-| Project assets (trigger path) | `cp -r {project}/.claude/skills {HOME}/.claude/skills` |
+| Project assets (`__route__` path) | `cp -r {project}/.claude/skills {HOME}/.claude/skills` |
 | Detect dispatch | Claude stream-json `Skill` tool_use, or a tool_use whose name is the skill (namespaced fallback) |
 
 Why `bypassPermissions` over `acceptEdits`: the microVM is the containment boundary, so the agent runs with full autonomy. The `--allowedTools Bash` workaround the host-spawn version needed isn't required inside the VM.
@@ -121,7 +134,7 @@ Why `bypassPermissions` over `acceptEdits`: the microVM is the containment bound
 | Skills bridge | `skill_load_dir=/root/.config/opencode/skills` symlinked to `/home/evalspec/skills` once at provision |
 | Output-eval install | per-cell `setup.sh` writing into `/home/evalspec/skills` (the bridge target); no implicit copy |
 | Harness args | Inserted before the trailing prompt positional. Reserved: model, variant/effort, format, session controls (`-c`, `--continue`, `-s`, `--session`, `--fork`), and prompt-position controls (`--command`, `--prompt`). |
-| Project assets (trigger path) | `.opencode/skills` (native); also reads `.claude/skills` for repos that ship the Claude layout |
+| Project assets (`__route__` path) | `.opencode/skills` (native); also reads `.claude/skills` for repos that ship the Claude layout |
 | Detect dispatch | JSONL `tool_use` whose `name` is the skill (exact or namespaced); no generic Skill dispatcher today |
 
 `build_command` accepts `plugin_dir` and `resume_session_id` for protocol parity but ignores them — OpenCode v1 has no equivalents. Multi-turn evals under OpenCode therefore start a fresh session per turn; chained sessions are Claude-only. Non-empty `harness_args` are supported only when they can be placed before the prompt without changing evalspec-owned model, variant, format, or parsing semantics.
@@ -143,7 +156,7 @@ Why `bypassPermissions` over `acceptEdits`: the microVM is the containment bound
 | Skills bridge | `skill_load_dir=/root/.codex/skills` symlinked to `/home/evalspec/skills` once at provision |
 | Output-eval install | per-cell `setup.sh` writing into `/home/evalspec/skills` (the bridge target); no plugin marketplace install |
 | Harness args | Inserted before the trailing prompt positional. Reserved: model, cwd, JSON/output controls, config/profile controls, sandbox/approval controls, `resume`, `review`, and prompt-position controls. |
-| Project assets (trigger path) | merges `skills`, `.agents/skills`, and `.claude/skills` into `/root/.codex/skills` |
+| Project assets (`__route__` path) | merges `skills`, `.agents/skills`, and `.claude/skills` into `/root/.codex/skills` |
 | Detect dispatch | Codex JSONL item skill-invocation shapes, plus `Skill` tool-call and namespaced-tool fallbacks |
 
 `build_command` accepts `plugin_dir`, `resume_session_id`, `effort`, and `detect_skill` for protocol parity, but only model, workdir, harness args, and prompt affect the current command. `capabilities.multi_turn=False` until Codex resume semantics are verified inside the eval sandbox. Use `CODEX_AUTH_JSON_PATH` when you want Codex runs to use an existing ChatGPT/Codex subscription login instead of an API-key billing path.

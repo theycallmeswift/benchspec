@@ -1,22 +1,21 @@
 # Schema reference
 
-Output evals and trigger (routing) evals are both **Markdown**.
+Evals are authored in **Markdown**.
 
 ```
 <search-path>/…/<group>/eval.md          # id = folder name
 <search-path>/…/<group>/<stem>.eval.md   # id = file stem (siblings share the folder)
 <search-path>/…/<group>/workspace/       # optional starting files, copied into /workspace
 <search-path>/…/<group>/setup.sh         # optional per-eval sandbox setup
-skills/<skill>/evals/trigger-evals.md    # evalspec-trigger/v1 (unchanged this phase)
 ```
 
-Output-eval discovery walks a configured list of **search paths** (`eval_paths`, default `skills`, `tests`, `evals`, `benchmarks`) under the repo root. Any `eval.md` / `*.eval.md` file anywhere beneath a search path is an eval — the filename is the marker, so no `evals/` ancestor is required, and `group` is the eval file's parent folder. Set your own with `[tool.evalspec] eval_paths` or `--evalspec-eval-paths`. The walk does not follow symlinks (a symlinked group or eval file is skipped, not an error), treats an embedded Git repo as a boundary, and prunes `tmp/`, `.git`, `__pycache__`, and every dot-prefixed directory *within* a search path (a dot-prefixed path you configure as a search path, e.g. `.claude/skills`, is still walked). A `workspace/` beside an eval file is that eval's sandbox seed and is never descended into.
+Discovery walks a configured list of **search paths** (`eval_paths`, default `skills`, `tests`, `evals`, `benchmarks`) under the repo root. Any `eval.md` / `*.eval.md` file anywhere beneath a search path is an eval — the filename is the marker, so no `evals/` ancestor is required, and `group` is the eval file's parent folder. Set your own with `[tool.evalspec] eval_paths` or `--evalspec-eval-paths` — this is the sole discovery knob. The walk does not follow symlinks (a symlinked group or eval file is skipped, not an error), treats an embedded Git repo as a boundary, and prunes `tmp/`, `.git`, `__pycache__`, and every dot-prefixed directory *within* a search path (a dot-prefixed path you configure as a search path, e.g. `.claude/skills`, is still walked). A `workspace/` beside an eval file is that eval's sandbox seed and is never descended into.
 
-Output discovery (`eval_paths`) is independent of trigger discovery (`eval_roots`, below). Nothing under a path outside `eval_paths` is discovered as an output eval — to place output evals under `.claude/skills/` (or any other non-default location), add that path to `eval_paths`.
+Nothing under a path outside `eval_paths` is discovered — to place evals under `.claude/skills/` (or any other non-default location), add that path to `eval_paths`.
 
 Case identity is the pair `(group, eval_id)`. For `eval.md`, `group` and `eval_id` are both the parent folder's name. For `<stem>.eval.md`, `group` is the parent folder's name and `eval_id` is the file stem — so several `<stem>.eval.md` files can share one folder. The full test id is `<group>-<eval_id>-<arm>`; artifact paths read `<group>/eval-<eval_id>/`. A duplicate `(group, eval_id)` pair fails loudly at collection, naming both source files.
 
-`<skill-dir>` (for trigger evals) is any directory under the configured eval roots (default `skills/` and `.claude/skills/`; override via `--evalspec-eval-roots` or `[tool.evalspec] eval_roots`). There is no `skill_name` frontmatter for output evals and no suite header — group identity comes entirely from the folder layout above.
+There is no `skill_name` frontmatter and no suite header — group identity comes entirely from the folder layout above.
 
 `mdformat.py` owns the Markdown structure, `schema.py` owns validation. Both are strict and loud: unknown headings, plain `-` bullets, indented non-checkbox lines, prose outside known sections, grandchild or ragged assertion nesting, and unknown frontmatter keys all fail at pytest collection with the offending path quoted.
 
@@ -93,13 +92,28 @@ Each turn needs a non-empty `role` and `content`. `{TODAY}` is substituted in `c
 
 Every `## Assertions` entry is plain prose. The **binder** classifies each one at grade time: when confident, it maps the prose to one of six deterministic **checkers** (`file_exists`, `glob_count`, `sha256_match`, `frontmatter_has`, `regex`, `skill_invoked`) run on the host against the final workdir or process facts; otherwise it **punts** to the LLM judge. Authors write no checker syntax — there is none to learn. The split is invisible from the suite. See `concepts.md` for the binder's contract.
 
-One assertion is special by convention: **activation**. Write it as
+One family of assertions is special by convention: **activation**. Write it in one of two polarities:
 
 ```markdown
 - [ ] Skill `archive` invoked
+- [ ] Skill `codex` not invoked
 ```
 
-The binder maps that line to the `skill_invoked` checker, which grades against the arm's dispatched-skills set: True where the skill fired, False where it didn't. It's an ordinary prose assertion graded symmetrically across arms — there is no separate invocation gate. A trial arm (skill installed) passes it; a baseline arm (no skill) fails it.
+The binder recognizes both lines **offline** (no Gemini call) and maps them to the `skill_invoked` checker, which grades against the arm's dispatched-skills set. The checker carries an `expected` boolean:
+
+- `` Skill `X` invoked `` → `expected: true` (the default when omitted). Passes when `X` is in the dispatched set.
+- `` Skill `X` not invoked `` → `expected: false`. A **membership-absence** check — passes when `X` is *not* in the dispatched set.
+
+The skill token may be plain or backticked and may be namespaced (`plugin:ingest`); a fired `plugin:ingest` satisfies an assertion written against `ingest` (exact-or-namespaced match). Both are ordinary prose assertions graded symmetrically across arms — there is no separate invocation gate. On a trial arm (skill installed) the positive form passes and the negative form of that same skill fails; on a baseline arm (no skill) the positive form fails and the negative form passes.
+
+> **On the vision's `Capability … activated` wording.** The [readme vision](research/evalspec-readme-vision.md) phrases these as `` Capability `X` activated `` / `` Capability `X` not activated ``. That is documentation-level wording for the *same* shipped checker — the recognizer that binds today matches `` Skill `X` invoked `` / `` not invoked ``. Read "capability activated" and "skill invoked" as the same process-fact assertion.
+
+**Two distinct axes — don't conflate them.** A `skill_invoked` assertion sits on two orthogonal axes:
+
+- **Checker family** — the `type` field in `grading.json`. `skill_invoked` is a **`deterministic`** checker, the same family as `file_exists` or `regex`; it records `type: deterministic`, not `type: activation`. There is no `type: activation` and no `type: skill_invoked` in the grading artifact.
+- **Evidence domain** — the label `evalspec analyze` prints. `analyze` reports `skill_invoked` as **`activation`**: a deterministic checker whose evidence is a *process fact* (which skills the arm dispatched) rather than the workdir. The five file checkers analyze as `deterministic`; `skill_invoked` analyzes as `activation`; a punt analyzes as `judge-backed`.
+
+So one activation assertion is `type: deterministic` in `grading.json` **and** `activation` under `analyze` — the first names how it grades, the second names what evidence it reads.
 
 ### Placeholder substitution
 
@@ -110,47 +124,6 @@ Applied before the agent sees the content.
 | `{TODAY}` | ISO `YYYY-MM-DD` from the host clock (UTC, for guest agreement) | Prompt, assertions, history content, workspace files, workspace filenames |
 
 Paths are `./`-relative: the agent runs with its current working directory set to the workdir mount (`/workspace`), so `./Inbox/x` resolves there. Hidden-directory assertions preserve the hidden path component, for example `./.meta/templates/entity-person.md exists` binds to that full relative path. Any `{UPPERCASE_PLACEHOLDER}` other than `{TODAY}` in a prompt or history turn fails fast — eval prompts must be spec-free to keep baselines honest. Put the value in the workspace.
-
----
-
-## `evalspec-trigger/v1` — trigger evals
-
-Trigger evals live in `trigger-evals.md`. Each query becomes one parametrized routing test: invoke the agent against `query` (no workspace, no judge), assert whether the skill was dispatched. `mdformat.parse_trigger` owns parsing; `schema` validates it.
-
-Structure: YAML frontmatter (`skill_name`), an optional `## Description`, then `## Trigger` and `## No Trigger` sections. Each query is `- <slug>: <query>`; polarity comes from section membership (`## Trigger` → `should_trigger=true`; `## No Trigger` → `should_trigger=false`). An optional `  - fails-on [tiers]: reason` indented under a query marks a known miss or over-fire.
-
-```markdown
----
-skill_name: ingest
----
-## Description
-Positives capture INTO the wiki; negatives lean on near-miss siblings.
-
-## Trigger
-- ingest-article: ingest this article into my knowledge base
-- inbox-process: process the source in my Inbox and add it to the wiki
-  - fails-on [sonnet]: routes on opus; sonnet misses. Cross-verified 2026-05-30.
-
-## No Trigger
-- archive-near-miss: archive this transcript, I'm done with it
-- summarize-readonly: summarize what my vault says about OpenAI
-```
-
-| Field | Source | Required | Notes |
-|---|---|---|---|
-| `skill_name` | frontmatter | yes | Kebab-case. Matches the skill's frontmatter `name` (what the Skill tool reports). Trigger evals keep this key — routing detection matches the dispatched skill's reported name, which is decoupled from the directory basename. |
-| `## Trigger` / `## No Trigger` | section | yes | Polarity sections. ≥1 query total. Queries under `## Trigger` should route; queries under `## No Trigger` should not. |
-| `slug` | `<slug>:` prefix | yes | Kebab-case, unique within file. Identity for artifacts, report rows, `-k`. Decoupled from the query text. |
-| `query` | line remainder | yes | User message the agent receives. Routing-sensitive — never reword. Backticks are safe (not a table cell). |
-| `fails-on` | indented sub-bullet | no | `fails-on [tiers]: reason`. `tiers` ⊆ `{opus, sonnet, haiku}`. The runner marks `pytest.mark.xfail(strict=False)` only when `--evalspec-model` matches a listed tier; all others run strict. `reason` is free prose (dated provenance). Section membership remains the design intent — `fails-on` only relaxes the gate per tier. Applies to both polarities: a positive that misses and a negative that over-fires are both tier failures. |
-
-Run the suite per tier:
-
-```
-uv run pytest -p evalspec.plugin -k trigger --evalspec-model opus
-uv run pytest -p evalspec.plugin -k trigger --evalspec-model sonnet
-uv run pytest -p evalspec.plugin -k trigger --evalspec-model haiku
-```
 
 ---
 
@@ -172,10 +145,10 @@ Each rule is a heuristic with an honest level:
 
 ## Validation rules
 
-- Both `group` and `eval_id` (the output eval's folder name and id) and `skill_name` (trigger frontmatter) must match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case); the query `slug` must be kebab-case and unique within its file.
+- Both `group` and `eval_id` (the eval's folder name and id) must match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case).
 - Assertion strings must be non-empty after stripping whitespace; `## Assertions` itself must be non-empty.
 - A history turn needs a non-empty `role` and `content`; `history` must be a list.
-- The only output-eval frontmatter key is `history`; the only trigger frontmatter key is `skill_name`. Unknown frontmatter keys, top-level keys, or per-item fields are rejected. Add functionality via a new `$schema` version or a documented field, not by sneaking one in.
+- The only frontmatter key is `history`. Unknown frontmatter keys, top-level keys, or per-item fields are rejected. Add functionality via a new `$schema` version or a documented field, not by sneaking one in.
 - A duplicate `(group, eval_id)` pair fails loudly at collection, naming both source files. Per-eval `setup.sh` replaces the old suite-level `evals/setup.sh` script.
 
 Authoritative validator: `evalspec.schema` (plus `evalspec.mdformat` for Markdown structure). When this document drifts, the code wins.
