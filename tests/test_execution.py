@@ -799,6 +799,46 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
     assert session_factory.calls[0]["harness_args"] == ["--plugin-dir", "/project"]
 
 
+def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify the caller's sandbox_name (not a hardcoded default) drives resolve_sandbox."""
+    # cases.test_eval threads the resolved set's `.sandbox` here; execution must resolve
+    # exactly that name, never silently fall back to DEFAULT_SANDBOX.
+    workspace.set_current_iteration("iteration_01")
+    captured = {}
+
+    def fake_resolve(name: object) -> object:
+        """Fake resolve."""
+        captured["name"] = name
+        return object()
+
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", fake_resolve)
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+
+    run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        sandbox_name="custombackend",
+        session_factory=fake_session_factory(
+            RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+        ),
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert captured["name"] == "custombackend"
+
+
 def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
     """Verify artifact dir uses eval_arm name string."""
     # Artifact paths use the eval_arm name string.

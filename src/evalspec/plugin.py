@@ -289,6 +289,33 @@ def resolved_run_set(config: object) -> EvalSet:
         raise pytest.UsageError(str(error)) from None
 
 
+def run_set_when_needed(config: object, *, needs_set: bool) -> EvalSet | None:
+    """Resolve this run's eval set, but only when the run actually needs one.
+
+    A trigger-only project declares no `[tool.evalspec.sets.*]` table, so calling
+    `resolved_run_set` there raises a UsageError. Both the session sandbox preflight
+    (via `session_run_set`) and `pytest_sessionfinish` compute their own "a set is
+    required" signal — the collection's eval cases, and the produced `eval-*` artifact
+    dirs respectively — then share this seam so the trigger-only path degrades to None
+    identically instead of parsing/raising.
+    """
+    return resolved_run_set(config) if needs_set else None
+
+
+def session_run_set(config: object) -> EvalSet | None:
+    """The eval set for the session sandbox preflight, or None for a trigger-only run.
+
+    Guards `resolved_run_set` on the same eval-case-existence signal
+    `pytest_generate_tests` uses to decide whether arms are required, so a trigger-only
+    project with no sets table degrades to the default backend instead of raising. Runs
+    at session start (before any `eval-*` artifact exists), so it discovers cases rather
+    than walking produced artifacts like `pytest_sessionfinish` does.
+    """
+    repo_root = resolve_repo_root(config)
+    cases = discover_eval_cases(repo_root, resolve_eval_paths(config))
+    return run_set_when_needed(config, needs_set=bool(cases))
+
+
 def _parse_judge_cli_table(config: object) -> dict:
     """The CLI-override layer for resolve_judge_config.
 
@@ -535,7 +562,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         if skill_dir.is_dir()
         for child_dir in skill_dir.iterdir()
     )
-    run_set = resolved_run_set(config) if needs_set else None
+    run_set = run_set_when_needed(config, needs_set=needs_set)
     judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
     judge_meta = _judge_meta(judge_config)
     _write_manifest(config, skills_root.parent, iteration, repo_root, run_set, judge_meta)
@@ -646,7 +673,8 @@ def pytest_generate_tests(metafunc: object) -> None:
         cases = discover_eval_cases(repo_root, resolve_eval_paths(metafunc.config))
         # Resolve the set only when there are eval cases to cross with — an empty
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
-        arms = resolved_run_set(metafunc.config).arms if cases else []
+        run_set = run_set_when_needed(metafunc.config, needs_set=bool(cases))
+        arms = run_set.arms if run_set else []
         if cases:
             # Structural judge preflight — before ANY paid task arm runs. Raises
             # pytest.UsageError at collection on a bad config; binary-on-PATH is

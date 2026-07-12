@@ -386,6 +386,109 @@ def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
         plugin.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
+def test_session_run_set_resolves_when_cases_exist(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify session_run_set resolves the set (with its sandbox) when a run has cases."""
+    _write_sets_pyproject(tmp_path)  # sandbox default = microsandbox
+    monkeypatch.setattr(plugin, "discover_eval_cases", lambda root, paths: [object()])
+
+    run_set = plugin.session_run_set(_FakeConfig(tmp_path))
+
+    assert run_set is not None
+    assert run_set.sandbox == "microsandbox"  # feeds the session sandbox preflight
+
+
+def test_session_run_set_none_for_trigger_only(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify a trigger-only run (no cases, no sets table) degrades to None, never raises."""
+    (tmp_path / "pyproject.toml").write_text("[tool.other]\nx = 1\n")
+    monkeypatch.setattr(plugin, "discover_eval_cases", lambda root, paths: [])
+
+    # resolved_run_set here WOULD raise UsageError (no sets table); the guard must not.
+    assert plugin.session_run_set(_FakeConfig(tmp_path)) is None
+
+
+def test_run_set_when_needed_degrades_without_resolving(tmp_path: object) -> None:
+    """Verify needs_set=False returns None even where resolving would raise (no sets table)."""
+    (tmp_path / "pyproject.toml").write_text("[tool.other]\nx = 1\n")
+
+    assert plugin.run_set_when_needed(_FakeConfig(tmp_path), needs_set=False) is None
+
+
+def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object) -> None:
+    """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
+    from evalspec import cases
+    from evalspec.arms import Arm, Set
+
+    fake_set = Set(
+        "s", [Arm("a", "claude-code", "opus")], baseline=None, sandbox="custombackend"
+    )
+    monkeypatch.setattr(cases, "session_run_set", lambda config: fake_set)
+    monkeypatch.setattr(cases, "resolve_sandbox", lambda name: f"backend:{name}")
+    seen = {}
+    monkeypatch.setattr(
+        cases.sandbox, "preflight", lambda backend=None: seen.__setitem__("backend", backend)
+    )
+
+    cases.preflight_session_sandbox(object())  # config unused — session_run_set stubbed
+
+    assert seen["backend"] == "backend:custombackend"
+
+
+def test_preflight_session_sandbox_trigger_only_uses_default(monkeypatch: object) -> None:
+    """Verify a trigger-only run passes None so preflight resolves the default backend."""
+    from evalspec import cases
+
+    monkeypatch.setattr(cases, "session_run_set", lambda config: None)
+    seen = {}
+    monkeypatch.setattr(
+        cases.sandbox, "preflight", lambda backend=None: seen.setdefault("backend", backend)
+    )
+
+    cases.preflight_session_sandbox(object())
+
+    assert seen["backend"] is None  # None => preflight resolves DEFAULT_SANDBOX itself
+
+
+def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
+    pytester: object, monkeypatch: object
+) -> None:
+    """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
+    import types
+
+    from evalspec import binder, cases, sandbox
+
+    _make_project(pytester)  # set with sandbox default = microsandbox
+    captured: list = []
+
+    def capture(*args: object, **kwargs: object) -> object:
+        """Capture."""
+        captured.append(kwargs["sandbox_name"])
+        return types.SimpleNamespace(errored=False)
+
+    # Neutralize the environment-dependent preflights so the body reaches run_eval_arm.
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(binder, "preflight_gemini_key", lambda: None)
+    monkeypatch.setattr(cases, "preflight_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
+    monkeypatch.setattr(cases, "run_eval_arm", capture)
+
+    result = pytester.runpytest(
+        "-p",
+        "evalspec.plugin",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "-k",
+        "test_eval",
+    )
+
+    assert result.ret == 0
+    assert captured  # the parametrized body actually ran
+    assert set(captured) == {"microsandbox"}  # every arm got the resolved set's sandbox
+
+
 def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object) -> None:
     """Verify count two parametrizes sample index."""
     # --count 2 must yield 8 items (2 evals × 2 arms × 2 samples) AND the
@@ -884,7 +987,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     monkeypatch.setattr(shutil, "which", lambda name: None)
     # No-op the sandbox preflight so it cannot fail first for unrelated reasons (no
     # microVM/credentials) and mask the judge-binary assertion below.
-    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
     # test_eval"): `pytest_configure` only self-registers the real `evalspec/cases.py`
     # (whose `judge_config` fixture runs the binary preflight under test) when
@@ -918,7 +1021,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude")  # binary IS present
-    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     # A dev-machine repo-root .env can otherwise repopulate GEMINI_API_KEY inside the
     # inner run's own pytest_configure (plugin.py calls load_dotenv() unconditionally) —
     # no-op it so this test is deterministic regardless of local .env contents.
@@ -945,7 +1048,7 @@ def test_gemini_key_preflight_skipped_under_collect_only(
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
 
     result = pytester.runpytest(
         "-p",
