@@ -506,12 +506,14 @@ def _layer_build_config(table: dict, config_path: str | None) -> dict:
 def cli_build(
     repo_root: Path | None = None, *, set_name: str | None = None, config: str | None = None
 ) -> None:
-    """Build the agent-ready snapshot (loud on error).
+    """Build the agent-ready snapshot(s) (loud on error).
 
     With neither `--set` nor `--config`, preserves the Phase-5 bare-build path: a single
     `make_agent()`, env from the repo root, and the default microsandbox backend — NO sets
     table required. With `--set`/`--config`, layers config over pyproject, resolves the set,
-    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2).
+    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2),
+    building one snapshot per DISTINCT harness in the set (two arms sharing a harness build
+    once) via `make_agent(harness)`.
 
     Args:
         repo_root: Repo root whose pyproject + environment config drive the build.
@@ -525,18 +527,38 @@ def cli_build(
         rawsets, default_set = parse_sets(table)
         resolved = resolve_set(rawsets, default_set, set_name=set_name)
         backend = resolve_sandbox(resolved.sandbox)
+        preflight(backend)
+        env = resolve_environment_config(root)
+        # dict.fromkeys dedupes while preserving first-seen order — two arms sharing a
+        # harness build once.
+        for harness in dict.fromkeys(resolved_arm.harness for resolved_arm in resolved.arms):
+            _build_or_reuse_snapshot(make_agent(harness), env, backend)
     else:
         backend = resolve_sandbox(DEFAULT_SANDBOX)
-    preflight(backend)
-    agent = make_agent()
-    env = resolve_environment_config(root)
+        preflight(backend)
+        env = resolve_environment_config(root)
+        _build_or_reuse_snapshot(make_agent(), env, backend)
+
+
+def _build_or_reuse_snapshot(agent: CodingAgent, env: EnvConfig, backend: SandboxBackend) -> None:
+    """Build `agent`'s snapshot on `backend` if absent, then report it and its image identity.
+
+    Preserves the existing "built" vs "reused" ("already present") reporting distinction,
+    and additionally surfaces each snapshot's `image_identity()` status: available
+    prints the digest, unavailable prints the explaining error rather than a bare null.
+    """
     name = snapshot_name(agent, env, backend=backend)
     if backend.snapshot_exists(name):
         print(f"snapshot {name} already present")
-        return
-    print(f"building snapshot {name} from {_display_base_image(env)} ...")
-    backend.build_snapshot(agent, name, env)
-    print(f"built {name}")
+    else:
+        print(f"building snapshot {name} from {_display_base_image(env)} ...")
+        backend.build_snapshot(agent, name, env)
+        print(f"built {name}")
+    identity = backend.image_identity(name)
+    if identity.image_digest_status == "available":
+        print(f"  image identity: {identity.image_digest}")
+    else:
+        print(f"  image identity: unavailable ({identity.image_digest_error})")
 
 
 def _display_base_image(env: EnvConfig) -> str:

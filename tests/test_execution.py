@@ -1827,7 +1827,6 @@ def test_grading_is_self_describing(tmp_path: object) -> None:
     assert persisted["arm"] == "trial"
 
 
-# --- Runtime provenance capture (Phase 8, Task 4) ---------------------------------------
 
 _CANNED_FINGERPRINT = FingerprintInputs(
     backend_id="microsandbox",

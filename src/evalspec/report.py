@@ -217,7 +217,7 @@ def index_rows(
     `arm_axes` maps an arm name to its three core configured axes
     (`{harness, model, effort}`) — built by the caller from `planned_arms(run_set)`.
     When an arm resolves in the lookup, those three axes are denormalized onto its
-    rows so a reader learns them without a meta.json join (spec 104–110); nothing
+    rows so a reader learns them without a meta.json join; nothing
     heavier (sandbox/version/provenance) belongs here. A configured arm is always
     present in the lookup; a row whose arm is somehow absent simply omits the axes
     rather than emitting misleading nulls.
@@ -385,7 +385,7 @@ def _provenance_lines(benchmark: dict) -> list[str]:
     One line per configured arm (the matrix columns): its observed guest version,
     snapshot, and image digest as available. Configured-but-unobserved arms — those
     with no persisted runtime record — are labeled `not observed` rather than shown
-    with fabricated identity (spec 174, 213). Adds no matrix columns.
+    with fabricated identity. Adds no matrix columns.
     """
     arms = benchmark["arms"]
     if not arms:
@@ -513,7 +513,7 @@ def build_benchmark(
             listed here (and remain empty matrix columns) but acquire no observed entry.
         observed_arms: Aggregated per-arm runtime provenance (the `aggregate_observed`
             mapping). Only arms that actually resolved and used a snapshot appear;
-            provenance is never fabricated for an absent arm (spec 112–115). Defaults
+            provenance is never fabricated for an absent arm. Defaults
             to empty so the per-skill fail-under build needs no provenance.
         runner: The run's runner (e.g. `pytest`), or None for a trigger-only run.
         binder: The fixed run-level binder transport identity (no key material).

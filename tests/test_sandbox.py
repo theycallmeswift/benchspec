@@ -18,8 +18,8 @@ from evalspec.runner import RunResult
 from evalspec.testing import FakeExecOutput, FakeSandbox
 
 
-def _claude_agent() -> object:
-    """Build the claude agent test fixture."""
+def _claude_agent(harness: object = None) -> object:
+    """Build the claude agent test fixture (accepts and ignores an optional harness arg)."""
     return ClaudeCodeAgent(auth_value="test-token", version="v")
 
 
@@ -309,6 +309,208 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
 
     assert len(built) == 1
     assert built[0].startswith("evalspec-microsandbox-")
+
+
+def _agent_for_harness(harness: object = None) -> object:
+    """Build a per-harness test fixture agent (mirrors `make_agent`'s harness dispatch)."""
+    if harness == "codex":
+        return CodexAgent(auth_value="test-token", version="v")
+    return ClaudeCodeAgent(auth_value="test-token", version="v")
+
+
+def test_cli_build_with_set_builds_once_per_distinct_harness(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Two DISTINCT-harness arms build two snapshots, one per harness (spec 205)."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.evalspec]\n"
+        'default-set = "mixed"\n'
+        "[tool.evalspec.sets.mixed]\n"
+        'model = "sonnet"\n'
+        'sandbox = "microsandbox"\n'
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  { name = "baseline", harness = "claude-code" },\n'
+        '  { name = "trial", harness = "codex" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    make_agent_calls: list = []
+
+    def fake_make_agent(harness: object = None) -> object:
+        """Record the harness each call resolved and delegate to the test fixture."""
+        make_agent_calls.append(harness)
+        return _agent_for_harness(harness)
+
+    monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+    )
+    built: list = []
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend,
+        "build_snapshot",
+        lambda self, agent, name, env: built.append(name),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path, set_name="mixed")
+
+    assert make_agent_calls == ["claude-code", "codex"]
+    assert len(built) == 2
+    assert built[0] != built[1]
+    assert all(name.startswith("evalspec-microsandbox-") for name in built)
+
+
+def test_cli_build_with_set_dedupes_shared_harness(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Two arms sharing one harness build exactly once (spec 205)."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.evalspec]\n"
+        'default-set = "shared"\n'
+        "[tool.evalspec.sets.shared]\n"
+        'model = "sonnet"\n'
+        'sandbox = "microsandbox"\n'
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  { name = "baseline", harness = "claude-code" },\n'
+        '  { name = "trial", harness = "claude-code", model = "opus" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    make_agent_calls: list = []
+
+    def fake_make_agent(harness: object = None) -> object:
+        """Record the harness each call resolved and delegate to the test fixture."""
+        make_agent_calls.append(harness)
+        return _claude_agent()
+
+    monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+    )
+    built: list = []
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend,
+        "build_snapshot",
+        lambda self, agent, name, env: built.append(name),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path, set_name="shared")
+
+    assert make_agent_calls == ["claude-code"]
+    assert len(built) == 1
+
+
+def test_cli_build_multi_harness_propagates_second_build_failure(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """A later harness's build failure propagates undisturbed after an earlier success.
+
+    A `MicrosandboxError` raised while building a later harness must propagate out of
+    `cli_build` unchanged (the CLI maps it to exit 1); the multi-harness loop must not
+    swallow or transform it, and must not retry or skip the first harness's built snapshot.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.evalspec]\n"
+        'default-set = "mixed"\n'
+        "[tool.evalspec.sets.mixed]\n"
+        'model = "sonnet"\n'
+        'sandbox = "microsandbox"\n'
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  { name = "baseline", harness = "claude-code" },\n'
+        '  { name = "trial", harness = "codex" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "make_agent", _agent_for_harness)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+    )
+    built: list = []
+
+    def failing_build(self: object, agent: object, name: object, env: object) -> None:
+        """Succeed for the first harness, then fail as a real build failure would."""
+        if built:
+            raise RuntimeError("snapshot build failed")
+        built.append(name)
+
+    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "build_snapshot", failing_build)
+
+    with pytest.raises(RuntimeError, match="snapshot build failed"):
+        sandbox.cli_build(repo_root=tmp_path, set_name="mixed")
+
+    assert len(built) == 1  # the first harness's snapshot was built before the failure
+
+
+def test_cli_build_reports_image_identity_available(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Every built/reused snapshot's image-identity status is reported (spec 160)."""
+    from evalspec.provenance import ImageIdentity
+
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
+    )
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend,
+        "image_identity",
+        lambda self, name: ImageIdentity.available("sha256:deadbeef"),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path)
+
+
+def test_cli_build_reports_image_identity_unavailable(
+    monkeypatch: object, tmp_path: object, capsys: object
+) -> None:
+    """An unavailable image-identity lookup surfaces its error, never a bare null."""
+    from evalspec.provenance import ImageIdentity
+
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
+    )
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend,
+        "image_identity",
+        lambda self, name: ImageIdentity.unavailable("snapshot manifest missing"),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path)
+
+    out = capsys.readouterr().out
+    assert "unavailable" in out
+    assert "snapshot manifest missing" in out
+
+
+def test_cli_build_bare_path_requires_no_sets_table(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Bare `sandbox:build` builds only the default agent with no `[tool.evalspec.sets]`."""
+    make_agent_calls: list = []
+
+    def fake_make_agent(harness: object = None) -> object:
+        """Record the harness each call resolved and delegate to the test fixture."""
+        make_agent_calls.append(harness)
+        return _claude_agent()
+
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
+    )
+
+    sandbox.cli_build(repo_root=tmp_path)  # no pyproject.toml at all
+
+    assert make_agent_calls == [None]
 
 
 def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:

@@ -399,9 +399,8 @@ def run_eval_arm(
     # Resolve the agent + backend + snapshot BEFORE the per-arm asyncio.run: building a
     # missing snapshot itself calls asyncio.run, which can't nest inside a running loop.
     # The agent is selected per arm so a multi-harness set runs each column on its own
-    # harness. `sandbox_name` defaults to "microsandbox" (the only implemented backend);
-    # the sole caller (cases.py) does not yet thread a resolved `Set.sandbox` value here
-    # (Phase 8).
+    # harness. `sandbox_name` is the resolved set's backend threaded in by the caller;
+    # it defaults to "microsandbox" (the only implemented backend) for other callers.
     agent = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
     snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)

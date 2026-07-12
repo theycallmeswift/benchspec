@@ -152,20 +152,99 @@ Authoritative validator: `evalspec.schema` (plus `evalspec.mdformat` for Markdow
 
 ---
 
+## `meta.json` — derived artifact
+
+The run manifest, written once per run at the **iteration root** — `tmp/evals/iteration_NN/meta.json`, beside `index.jsonl` and `benchmark.json`. It is a derived artifact assembled from resolved config plus captured runtime provenance, not an input schema and not validated at collection.
+
+`meta.json` v2 separates what was **configured** (`arms`) from what actually **ran** (`observed_arms`) — the v1 shape conflated them into run-level fields that were false or ambiguous for a multi-harness set.
+
+| Field | Notes |
+|---|---|
+| `format_version` | `2`. |
+| `run_id` / `commit` / `config_hash` | Identity for cross-run aggregation. `config_hash` hashes only the planned selectors (`set`, `runner`, `arms`, `judge`, `binder`) — never `observed_arms` or a probed `judge.actual_version` — so two runs of one config hash identically regardless of what ran or where. |
+| `iteration` / `started_at` / `evalspec_version` | The iteration name, run start time, and the evalspec release that produced the run. |
+| `set` / `runner` | The resolved set name and its runner (`pytest`), or `null` for a trigger-only run with no eval set. |
+| `arms` | The **complete configured roster**, including an arm that never produced a sample. See Planned arms below. |
+| `observed_arms` | Per-arm **runtime provenance** — only arms that actually resolved and used a snapshot. See Observed arms below. |
+| `judge` | The resolved judge: `harness`, `model`, `effort`, `timeout`, `env` (redacted), `harness_args`, `actual_version`. `actual_version` is a best-effort host-side probe of the judge binary (the judge runs on the host, not in a guest) — `null` when the probe fails, with no adjacent `_status`/`_error` pair, unlike the guest-probed fields below. |
+| `binder` | The binder's fixed transport identity: `provider`, `model`, `api_path`. See Binder identity below. |
+
+### Planned arms (`arms`)
+
+Each entry in `arms` is the arm as **configured**, independent of whether it ran:
+
+| Field | Notes |
+|---|---|
+| `name` / `harness` / `model` / `effort` | The arm's declared identity. |
+| `env` | The arm's env overlay, redacted (secret-shaped keys are masked). |
+| `harness_args` | The arm's pass-through CLI tokens. |
+| `requested_version` | The harness's install **selector** (for example `"latest"`) — configured intent, not the concrete binary that ran. The concrete version is `observed_arms[name].actual_version`. |
+| `capabilities.token_split` | Whether the harness reports a cache-aware token split. Per-arm, since one set can mix harnesses with different capabilities. |
+
+> **Removed in v2, no aliases.** The v1 run-level `agent`, `agent_version`, and `token_split` fields are gone — they described only the default harness. A consumer migrating off v1 reads `arms[i].harness`/`arms[i].requested_version` in place of `agent`/`agent_version`, and `arms[i].capabilities.token_split` in place of the run-level `token_split`. There is no compatibility shim; a reader keyed on the old fields must be updated, not patched around.
+
+### Observed arms (`observed_arms`)
+
+Keyed by arm name. **Only arms with at least one persisted runtime record appear** — a configured-but-deselected, skipped, or never-sampled arm has no key here, never a fabricated one. Provenance is captured once execution resolves and uses a snapshot (right after `ensure_snapshot()`, before the task harness runs) and persisted beside each sample; aggregation at session-finish dedupes identical records per arm and raises if two records for one arm disagree on `snapshot`, `image_digest`, or `actual_version`.
+
+| Field | Notes |
+|---|---|
+| `actual_version`, `actual_version_status` (`available`\|`unavailable`), `actual_version_error` | The task harness's binary version, probed **inside the guest snapshot** — never the host-side install selector. When `actual_version_status` is `unavailable`, `actual_version` is `null` and `actual_version_error` explains why; `actual_version_error` is present only on that path — the available path never emits an unexplained key. |
+| `sandbox.backend` / `sandbox.snapshot` / `sandbox.fingerprint` | The resolved backend name, the snapshot it built or reused, and the cache-key fingerprint — from the same helper `snapshot_name()` uses, never recomputed independently. |
+| `sandbox.base_image_ref` / `sandbox.install_fingerprint` / `sandbox.env_script_sha256` | The fingerprint's own inputs: the declared base image reference, the agent-install fingerprint, and the environment-script hash. |
+| `sandbox.image_digest`, `sandbox.image_digest_status` (`available`\|`unavailable`), `sandbox.image_digest_error` | The backend-native image manifest digest, with the same available/unavailable pairing as `actual_version` above. |
+
+**A recorded `image_digest` is an audit trail, not a cache key or a reproducibility guarantee.** It lets you notice, after the fact, that a floating base-image tag (`ubuntu:latest`) has moved since a snapshot was built — compare the digest recorded then against a digest read now. It does **not** by itself refresh the snapshot (evalspec does not become an OCI registry client and never auto-rebuilds on tag movement) and it does not, by itself, make a run reproducible: reproducing a run also depends on the base image's actual contents at pull time, the install step, and the environment script — none of which the digest alone pins down. Treat it as evidence for an investigation, not a guarantee baked into the artifact.
+
+### Binder identity (`binder`)
+
+Fixed and run-level — describes the assertion **binder** (the prose→checker classifier), not the configured judge: `provider` (`"gemini"`), `model` (`gemini-3.1-flash-lite`), `api_path` (`generativelanguage.googleapis.com/v1beta`). `GEMINI_API_KEY` is never recorded here or anywhere else in the artifact tree — this object carries transport identity, never key material.
+
+Authoritative shape: `evalspec.plugin.build_manifest` / `_write_manifest`, `evalspec.report.planned_arms`, `evalspec.provenance`. When this document drifts, the code wins.
+
+---
+
+## `index.jsonl` — derived artifact
+
+Flat per-sample results at the iteration root (`tmp/evals/iteration_NN/index.jsonl`), one JSON line per (eval × arm × sample). The aggregator's entry point — every field here is also present in the per-sample artifacts, so this file is a derived convenience, not a new input, and is rebuilt from disk rather than validated at collection.
+
+| Field | Notes |
+|---|---|
+| `skill` / `eval_id` / `arm` / `sample` | Case identity: the group (`skill`), the eval id, the arm name, and the sample index. |
+| `kind` | Always `"eval"` today. |
+| `harness` / `model` / `effort` | The arm's three core configured axes, denormalized from the planned-arm roster so a reader learns them without joining `meta.json`. Omitted entirely (never a faked `null`) for a row whose arm isn't in that roster. |
+| `errored` | Whether the sample was an infra failure. |
+| `passed` / `total` | Assertions passed vs. total for the sample. |
+| `duration_ms` / `judge_ms` / `total_tokens` / `input_tokens` / `output_tokens` | Timing/token figures from the sample's `timing.json`, where present. |
+
+Heavier per-arm provenance — sandbox identity, guest binary version — stays in `meta.json`'s `observed_arms` and the per-sample `provenance.json`; `index.jsonl` carries only the three core axes, never the full runtime record.
+
+Authoritative shape: `evalspec.report.index_rows`. When this document drifts, the code wins.
+
+---
+
 ## `benchmark.json` — derived artifact
 
 The run-level benchmark. One `benchmark.json` (plus its rendered `benchmark.md`) is written per run at the **iteration root** — `tmp/evals/iteration_NN/benchmark.json`, beside `meta.json` and `index.jsonl` — aggregating every group in the run into a single report. It is a derived artifact rebuilt from the per-sample `grading.json` files on disk, not an input schema and not validated at collection.
 
 | Field | Notes |
 |---|---|
-| `format_version` | `2`. Distinct from the `meta.json` run-manifest `format_version` (still `1`); the two version independently. |
+| `format_version` | `3`. Distinct from the `meta.json` run-manifest `format_version` (`2`); the two version independently. |
 | `label` | The run name (`iteration_NN`). The report spans the whole run, so there is no per-group suffix. |
 | `baseline` | The baseline arm name the Δ columns measure against, or `null` when the set names none — or when the named baseline produced no graded sample. |
 | `max_samples` | The highest per-cell sample count observed (from `--count N`). |
 | `roster` | The run's eval roster: a list of `{group, eval_id}` objects, one per discovered `<group>/eval-*` directory, sorted by `(group, eval_id)`. It drives the matrix rows, so an all-errored eval (no graded sample in any arm) still appears as an all-`—` row. |
-| `arms` | Per-arm stats keyed by declared arm name — `pass_rate`, `pass_rate_stdev`, `n`, `delta_pp` / `delta_noise_pp` (vs baseline), harness/model/env metadata, and a `per_eval` list. An arm configured but absent from disk is still a column (`pass_rate: null`). Each `per_eval` row carries its own `group` and `eval_id` — matched against the roster by that composite key — plus `pass_rate_mean` and `samples`. |
+| `arms` | Per-arm **stats**, keyed by declared arm name — `pass_rate`, `pass_rate_stdev`, `n`, `delta_pp` / `delta_noise_pp` (vs baseline), harness/model/env metadata, and a `per_eval` list. An arm configured but absent from disk is still a column (`pass_rate: null`). Each `per_eval` row carries its own `group` and `eval_id` — matched against the roster by that composite key — plus `pass_rate_mean` and `samples`. |
+| `planned_arms` | The complete configured arm roster, same shape and builder (`report.planned_arms`) as `meta.json`'s `arms` — see [`meta.json`](#metajson) above. A configured-but-unobserved arm is still a valid, empty `arms` matrix column here; it carries no fabricated provenance. |
+| `observed_arms` | Aggregated per-arm runtime provenance, same shape as `meta.json`'s `observed_arms` (see above) — only arms with a persisted record appear. |
+| `runner` | The run's runner (for example `pytest`), or `null` for a trigger-only run. |
+| `binder` | The binder's fixed transport identity — same shape as `meta.json`'s `binder` (see above). |
 
-The Markdown renders the composite `group/eval_id` for each row and column-per-arm; the JSON keeps `group` and `eval_id` as separate machine fields on every `roster` entry and `per_eval` row. Authoritative shape: `evalspec.report.build_benchmark`. When this document drifts, the code wins.
+Note the naming split: `arms` is per-arm **result stats** (pass rate, deltas, `per_eval`); `planned_arms` and `observed_arms` are the **configuration/provenance** pair mirroring `meta.json` — don't confuse the two `arms`-adjacent keys.
+
+`benchmark.md` renders the composite `group/eval_id` for each matrix row and one column per arm, then a compact `## Provenance` section below the matrix: one line per matrix-column arm giving its observed guest version, snapshot, and image digest where available. A configured arm with **no persisted runtime record is labeled `not observed`**, never shown with fabricated identity, and the section adds no matrix columns.
+
+The JSON keeps `group` and `eval_id` as separate machine fields on every `roster` entry and `per_eval` row. Authoritative shape: `evalspec.report.build_benchmark`. When this document drifts, the code wins.
 
 ---
 
