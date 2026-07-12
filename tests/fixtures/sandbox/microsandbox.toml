@@ -1,7 +1,11 @@
 # tests/fixtures/sandbox/microsandbox.toml
-# Accept-and-build fixture: a single microsandbox set that parses and resolves cleanly.
-#   evalspec run           --config tests/fixtures/sandbox/microsandbox.toml   -> resolves MicrosandboxBackend
-#   evalspec sandbox:build --config tests/fixtures/sandbox/microsandbox.toml   -> builds the snapshot
+# Accept-path fixture: a single microsandbox set that parses and resolves cleanly.
+# Tested today: `parse_sets` + `resolve_set` on this file yield
+#   Set(sandbox="microsandbox", runner="pytest", ...)
+# with no error. Nothing on the `run` path resolves a backend from `Set.sandbox` in
+# Phase 7 (that's Phase 8), and `evalspec sandbox:build` has no `--config` flag yet.
+# This is the fixture that `sandbox:build --config`/`run --config` will accept once
+# Task 7 (this PR) threads `--config` through those commands.
 [tool.evalspec]
 default-set = "micro"
 

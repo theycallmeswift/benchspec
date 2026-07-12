@@ -508,7 +508,9 @@ def test_resolve_set_models_sweep_dedupes_sanitized_name_collisions() -> None:
 
 def test_parse_sets_unsupported_runner_fails() -> None:
     """An unsupported runner fails fast naming the set, field, and supported values."""
-    with pytest.raises(SchemaError, match="runner"):
+    with pytest.raises(
+        SchemaError, match=r"tool\.evalspec\.sets\.default.*runner.*jest.*pytest"
+    ):
         parse_sets(
             _sets_table(
                 {

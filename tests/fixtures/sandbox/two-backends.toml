@@ -1,10 +1,15 @@
 # tests/fixtures/sandbox/two-backends.toml
 # Fail-fast fixture. This file contains an unsupported `sandbox = "docker"` set, and
 # validation is eager in parse_sets, so LOADING OR SELECTING ANY set in this file exits 2:
-#   evalspec run        --config tests/fixtures/sandbox/two-backends.toml   -> exit 2
-#   evalspec run --set micro --config tests/fixtures/sandbox/two-backends.toml -> exit 2 (still)
-#   evalspec sandbox:build --config tests/fixtures/sandbox/two-backends.toml -> exit 2
-# The docker set is rejected at config resolution, before any paid task arm executes.
+#   evalspec run              --config tests/fixtures/sandbox/two-backends.toml   -> exit 2
+#   evalspec run --set micro  --config tests/fixtures/sandbox/two-backends.toml   -> exit 2 (still)
+# `resolved_run_set` calls `parse_sets` on the whole sets table before any set is
+# selected, so the docker set's SchemaError fails the file even when only `micro` is
+# requested; pytest maps it to a UsageError, i.e. exit 2. Execution stays on the
+# microsandbox default until Phase 8 — nothing here is "resolved" to a backend.
+# `evalspec sandbox:build` has no `--config` flag yet and never reads this sets table;
+# Task 7 (this PR) threads `--config` through so `sandbox:build --config <this>` also
+# exits 2 on the docker set.
 [tool.evalspec]
 default-set = "micro"
 
