@@ -23,14 +23,6 @@ def _claude_agent() -> object:
     return ClaudeCodeAgent(auth_value="test-token", version="v")
 
 
-@pytest.fixture(autouse=True)
-def _stub_image_digest(monkeypatch: object) -> None:
-    """Keep every sandbox test off the network when the backend resolves an image digest."""
-    monkeypatch.setattr(
-        backend_mod, "resolve_image_digest", lambda image: f"sha256:stub-{image}"
-    )
-
-
 class _FakeEvent:
     """One microsandbox `exec_stream` event: a `stdout` chunk, or a terminal.
 
@@ -1237,7 +1229,7 @@ def _patch_build_primitives(monkeypatch: object, fake: object) -> None:
 
 
 def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
-    """Verify build passes the digest-pinned base image to sandbox create and seals it."""
+    """Verify build passes the declared base image to sandbox create and seals it."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
@@ -1245,15 +1237,18 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
 
-    assert fake.create_image == "python:3.12-slim@sha256:stub-python:3.12-slim"
+    assert fake.create_image == "python:3.12-slim"
     assert fake.sealed is True
 
 
-def test_build_uses_same_resolved_image_as_cache_fingerprint(monkeypatch: object) -> None:
-    """The immutable image used in the cache key is also used to build the snapshot."""
+def test_build_uses_the_declared_image_the_fingerprint_hashed(monkeypatch: object) -> None:
+    """Build and fingerprint reference the same declared image — evalspec never re-resolves it.
+
+    evalspec hashes and pulls the declared reference as-is (no separate digest lookup), so the
+    image the cache key names and the image the build pulls cannot diverge.
+    """
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    monkeypatch.setattr(backend_mod, "resolve_image_digest", lambda image: "sha256:resolved")
 
     microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1261,7 +1256,7 @@ def test_build_uses_same_resolved_image_as_cache_fingerprint(monkeypatch: object
     microsandbox_backend.cache_fingerprint(agent, env)
     microsandbox_backend.build_snapshot(agent, "snap", env)
 
-    assert fake.create_image == "python:3.12-slim@sha256:resolved"
+    assert fake.create_image == "python:3.12-slim"
 
 
 def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> None:
@@ -1273,8 +1268,7 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
 
-    default_image = backend_mod.BASE_IMAGE
-    assert fake.create_image == f"{default_image}@sha256:stub-{default_image}"
+    assert fake.create_image == backend_mod.BASE_IMAGE
 
 
 def test_build_runs_environment_script_after_provision(monkeypatch: object) -> None:
@@ -1318,7 +1312,7 @@ def test_build_runs_base_image_and_environment_script_together(
             script_path="s.sh",
         ),
     )
-    assert fake.create_image == "python:3.12-slim@sha256:stub-python:3.12-slim"
+    assert fake.create_image == "python:3.12-slim"
     shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 3  # provision, bridge, environment script
     assert "apt-get install -y jq" in shells[2][1]

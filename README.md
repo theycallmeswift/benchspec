@@ -120,7 +120,6 @@ Start with `evalspec lint`: it flags assertions the judge can't fairly grade *be
 - **Sandbox**: Apple Silicon Mac or Linux with `/dev/kvm`. microsandbox doesn't ship for x86_64 macOS or Linux without KVM.
 - **Agent CLI** (at least one): [Claude Code](https://claude.ai/install) on `$PATH` — required even for OpenCode and Codex runs, since the host-side judge uses it — plus [OpenCode](https://github.com/sst/opencode) or Codex CLI for matrix runs on those harnesses.
 - **Provider credential**: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, or `CODEX_AUTH_JSON_PATH` for subscription-backed Codex CLI auth. Loaded from `.env` if present.
-- **`skopeo`** (optional but recommended): resolves the base image to a content digest so a moved upstream tag rebuilds the snapshot. Without it, digest pinning is skipped (a loud warning is logged) and the floating tag is used as-is.
 - **Python**: 3.10+.
 
 ## Features

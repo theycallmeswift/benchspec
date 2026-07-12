@@ -2,30 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from evalspec import backend
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.discovery import EnvConfig
 from evalspec.schema import SchemaError
-
-# Captured before the autouse fixture below ever runs, so this always refers to the real
-# `lru_cache`-wrapped function — not whatever stub a given test's `monkeypatch.setattr`
-# swaps onto the `backend.resolve_image_digest` module attribute.
-_real_resolve_image_digest = backend.resolve_image_digest
-
-
-@pytest.fixture(autouse=True)
-def _stub_image_digest(monkeypatch: object) -> None:
-    """Keep the digest resolver off the network for every backend test by default.
-
-    Different images map to different stub digests, so name/fingerprint tests that vary
-    the base image still see a change without a real registry lookup. Tests that need a
-    *specific* digest value re-monkeypatch `resolve_image_digest` after this fixture runs.
-    """
-    monkeypatch.setattr(backend, "resolve_image_digest", lambda image: f"sha256:stub-{image}")
 
 
 def _agent() -> object:
@@ -60,47 +42,14 @@ def test_cache_fingerprint_stable_when_nothing_changes() -> None:
     ) == microsandbox_backend.cache_fingerprint(_agent(), env)
 
 
-def test_cache_fingerprint_changes_with_resolved_image_digest(monkeypatch: object) -> None:
-    """A moved base-image tag (new resolved digest) changes the fingerprint."""
+def test_cache_fingerprint_changes_with_base_image() -> None:
+    """A different declared base-image reference changes the fingerprint."""
     microsandbox_backend = backend.resolve_sandbox("microsandbox")
-    env = EnvConfig(base_image="ubuntu:latest")
 
-    monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:aaaa")
-    first = microsandbox_backend.cache_fingerprint(_agent(), env)
-    monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:bbbb")
-    second = microsandbox_backend.cache_fingerprint(_agent(), env)
+    first = microsandbox_backend.cache_fingerprint(_agent(), EnvConfig(base_image="ubuntu:22.04"))
+    second = microsandbox_backend.cache_fingerprint(_agent(), EnvConfig(base_image="ubuntu:24.04"))
 
     assert first != second
-
-
-def test_resolve_image_digest_memoizes_per_base_image(monkeypatch: object) -> None:
-    """`resolve_image_digest` shells out to skopeo at most once per distinct base image."""
-    _real_resolve_image_digest.cache_clear()
-    call_count = 0
-
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        nonlocal call_count
-        call_count += 1
-        return subprocess.CompletedProcess(args=(), returncode=0, stdout="sha256:cafe\n", stderr="")
-
-    monkeypatch.setattr(backend.shutil, "which", lambda name: "/usr/bin/skopeo")
-    monkeypatch.setattr(backend.subprocess, "run", fake_run)
-
-    first = _real_resolve_image_digest("ubuntu:latest")
-    second = _real_resolve_image_digest("ubuntu:latest")
-
-    assert first == second == "sha256:cafe"
-    assert call_count == 1
-
-
-def test_cache_fingerprint_stable_when_digest_stable(monkeypatch: object) -> None:
-    """A pinned digest that does not move keeps the fingerprint stable."""
-    microsandbox_backend = backend.resolve_sandbox("microsandbox")
-    env = EnvConfig(base_image="ubuntu:latest")
-    monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:aaaa")
-    assert microsandbox_backend.cache_fingerprint(
-        _agent(), env
-    ) == microsandbox_backend.cache_fingerprint(_agent(), env)
 
 
 def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object) -> None:
