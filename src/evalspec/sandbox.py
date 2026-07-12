@@ -27,9 +27,6 @@ from evalspec.trigger import RoutingError
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
 BASE_IMAGE = "ubuntu:latest"
-# Agent CLI installers and real eval work need this memory budget.
-VM_CPUS = 2
-VM_MEMORY_MIB = 2048
 
 
 def snapshot_name(
@@ -78,107 +75,33 @@ def _file_lock(path: Path) -> object:
         lock_file.close()
 
 
-async def _guest_shell(sandbox: object, agent: object, script: str) -> str | None:
-    """Run `script` in the guest, returning stdout on success or None on any failure.
-
-    Capture is best-effort: a failed snapshot just means nothing extra to grade, never a
-    failed arm.
-    """
-    from microsandbox.errors import MicrosandboxError
-
-    try:
-        res = await sandbox.shell(script, env=agent.guest_env())
-    except (MicrosandboxError, asyncio.TimeoutError, OSError):
-        return None
-    return res.stdout_text if res.exit_code == 0 else None
-
-
-async def _snapshot_artifact_shas(sandbox: object, agent: object) -> dict | None:
+async def _snapshot_artifact_shas(
+    sandbox: object, agent: object, backend: SandboxBackend
+) -> dict | None:
     """Snapshot agent artifact paths to SHA-256 digests inside the VM."""
     dirs = agent.artifact_dirs()
     if not dirs:
         return {}
-    out = await _guest_shell(sandbox, agent, sha_snapshot_script(dirs))
+    out = await backend.guest_shell(sandbox, agent, sha_snapshot_script(dirs))
     return None if out is None else parse_sha_stream(out)
 
 
-async def _read_authored(sandbox: object, agent: object, baseline_shas: dict | None) -> dict:
+async def _read_authored(
+    sandbox: object, agent: object, baseline_shas: dict | None, backend: SandboxBackend
+) -> dict:
     """Return display-path content for files authored since `baseline_shas`."""
     if baseline_shas is None:
         return {}
-    current = await _snapshot_artifact_shas(sandbox, agent)
+    current = await _snapshot_artifact_shas(sandbox, agent, backend)
     if current is None:
         return {}
     paths = changed_paths(baseline_shas, current)
     if not paths:
         return {}
-    out = await _guest_shell(sandbox, agent, read_files_script(paths))
+    out = await backend.guest_shell(sandbox, agent, read_files_script(paths))
     if not out:
         return {}
     return to_display_paths(parse_artifact_stream(out), agent.guest_home)
-
-
-async def _stop_quietly(sandbox: object) -> None:
-    """Best-effort VM teardown that never masks the real flow."""
-    from microsandbox.errors import MicrosandboxError
-
-    with contextlib.suppress(MicrosandboxError, asyncio.TimeoutError, OSError):
-        await sandbox.stop()
-
-
-async def _run_environment_script(sandbox: object, agent: object, env: EnvConfig) -> None:
-    """Run the host's environment script after the agent provisions, before sealing.
-
-    Prepend `set -e` so the FIRST failing command aborts — a mid-script failure must not
-    seal a half-provisioned snapshot under a success hash. Plain `set -e` only: the
-    guest `/bin/sh` is dash, which rejects `pipefail`, and `-u` would fail valid host
-    scripts that reference unset vars. Fail loud: a nonzero exit raises, surfacing the
-    tail of stderr.
-    """
-    if not env.script:
-        return
-    script = b"set -e\n" + env.script
-    res = await sandbox.shell(script.decode(), env=agent.guest_env())
-    if res.exit_code != 0:
-        raise RuntimeError(
-            f"environment_script failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
-        )
-
-
-async def _bridge_skills_home(sandbox: object, agent: object) -> None:
-    """Link the agent skill directory to the fixed skills-home path."""
-    res = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
-    if res.exit_code != 0:
-        raise RuntimeError(
-            f"skills-home bridge failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
-        )
-
-
-async def _build_snapshot_async(agent: object, name: str, env: EnvConfig) -> None:
-    """Provision and seal the reusable microsandbox snapshot asynchronously."""
-    from microsandbox import Sandbox, Snapshot
-
-    base_image = env.base_image or BASE_IMAGE
-    build_name = f"evalspec-build-{agent.id}"
-    sandbox = await Sandbox.create(
-        build_name, image=base_image, cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True
-    )
-    try:
-        await agent.provision(sandbox)
-        await _bridge_skills_home(sandbox, agent)
-        await _run_environment_script(sandbox, agent, env)
-        await sandbox.stop()  # snapshots require a stopped sandbox
-        await Snapshot.create(build_name, name=name, record_integrity=True)
-    finally:
-        from microsandbox.errors import MicrosandboxError
-
-        with contextlib.suppress(MicrosandboxError, OSError):
-            await Sandbox.remove(build_name)
-
-
-def build_snapshot(agent: object, name: str, env: EnvConfig) -> None:
-    """Provision and seal the reusable microsandbox snapshot."""
-    asyncio.run(_build_snapshot_async(agent, name, env))
 
 
 def ensure_snapshot(agent: object, *, repo_root: object, backend: SandboxBackend) -> str:
@@ -268,33 +191,6 @@ async def run_setup_sh(
         )
 
 
-async def _create_sandbox(
-    *,
-    agent: object,
-    snapshot: object,
-    name: object,
-    host_workdir: object,
-    host_repo_root: object,
-) -> object:
-    """Create a microsandbox instance from a snapshot."""
-    from microsandbox import Sandbox, Volume
-
-    # The project mounts read-only so a per-eval setup.sh can install the suite-specific skill.
-    volumes = {GUEST_WORKDIR: Volume.bind(str(host_workdir), readonly=False)}
-    if host_repo_root is not None:
-        volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)
-    volumes.update(_agent_extra_volumes(agent, Volume))
-    return await Sandbox.create(
-        name,
-        snapshot=snapshot,
-        volumes=volumes,
-        secrets=agent.secrets(),
-        cpus=VM_CPUS,
-        memory=VM_MEMORY_MIB,
-        replace=True,
-    )
-
-
 class SandboxSession:
     """Async context manager holding one microVM open across an arm's turns.
 
@@ -315,6 +211,7 @@ class SandboxSession:
         host_repo_root: object,
         model: object,
         effort: object,
+        backend: SandboxBackend,
         setup_reldir: str | None = None,
         arm: str | None = None,
         arm_env: dict | None = None,
@@ -331,6 +228,7 @@ class SandboxSession:
         self._host_repo_root = host_repo_root
         self._model = model
         self._effort = effort
+        self._backend = backend
         # Per-arm environment, already expanded, is shared by setup.sh and the agent exec.
         self._arm_env = arm_env
         self._eval_set = eval_set
@@ -342,12 +240,13 @@ class SandboxSession:
 
     async def __aenter__(self: object) -> object:
         """Enter the arm session and capture baseline artifact state."""
-        self._sandbox = await _create_sandbox(
+        self._sandbox = await self._backend.create_sandbox(
             agent=self._agent,
             snapshot=self._snapshot,
             name=_sandbox_run_name(self._eval_id, self._config),
             host_workdir=self._host_workdir,
             host_repo_root=self._host_repo_root,
+            extra_volumes=_agent_extra_volumes,
         )
         # Install before the artifact baseline so only later agent-authored files surface.
         if self._setup_reldir is not None:
@@ -362,9 +261,11 @@ class SandboxSession:
                     arm_env=self._arm_env,
                 )
             except BaseException:
-                await _stop_quietly(self._sandbox)
+                await self._backend.stop_quietly(self._sandbox)
                 raise
-        self._artifact_base = await _snapshot_artifact_shas(self._sandbox, self._agent)
+        self._artifact_base = await _snapshot_artifact_shas(
+            self._sandbox, self._agent, self._backend
+        )
         return self._run
 
     async def _run(
@@ -386,7 +287,9 @@ class SandboxSession:
             harness_args=self._harness_args,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
-        authored = await _read_authored(self._sandbox, self._agent, self._artifact_base)
+        authored = await _read_authored(
+            self._sandbox, self._agent, self._artifact_base, self._backend
+        )
         if authored:
             result = replace(result, artifacts=authored)
         return result
@@ -406,6 +309,7 @@ def arm_session(
     host_repo_root: object,
     model: object,
     effort: object,
+    backend: SandboxBackend,
     setup_reldir: str | None = None,
     arm: str | None = None,
     arm_env: dict | None = None,
@@ -423,6 +327,7 @@ def arm_session(
         host_repo_root=host_repo_root,
         model=model,
         effort=effort,
+        backend=backend,
         setup_reldir=setup_reldir,
         arm=arm,
         arm_env=arm_env,
@@ -430,31 +335,6 @@ def arm_session(
         project_marker=project_marker,
         harness_args=harness_args,
     )
-
-
-async def _create_trigger_sandbox(
-    *, agent: object, snapshot: object, name: object, host_repo_root: object
-) -> object:
-    """Create the sandbox used for trigger-routing probes."""
-    from microsandbox import Sandbox, Volume
-
-    volumes = {PROJECT_MOUNT: Volume.bind(str(host_repo_root), readonly=True)}
-    volumes.update(_agent_extra_volumes(agent, Volume))
-    sandbox = await Sandbox.create(
-        name,
-        snapshot=snapshot,
-        volumes=volumes,
-        secrets=agent.secrets(),
-        cpus=VM_CPUS,
-        memory=VM_MEMORY_MIB,
-        replace=True,
-    )
-    try:
-        await agent.stage_project_assets(sandbox, PROJECT_MOUNT)
-    except BaseException:
-        await _stop_quietly(sandbox)
-        raise
-    return sandbox
 
 
 def _trigger_command(
@@ -488,15 +368,17 @@ async def _route_in_sandbox_async(
     skill_name: object,
     agent: object,
     snapshot: object,
+    backend: SandboxBackend,
     project_marker: object = DEFAULT_PROJECT_MARKER,
 ) -> object:
     """Route in sandbox async."""
     # Snapshot resolution happens before this coroutine because snapshot builds run loops.
-    sandbox = await _create_trigger_sandbox(
+    sandbox = await backend.create_trigger_sandbox(
         agent=agent,
         snapshot=snapshot,
         name=f"trigger-{_worker_tag()}",
         host_repo_root=repo_root,
+        extra_volumes=_agent_extra_volumes,
     )
     lines: list[str] = []
     dispatched = False
@@ -541,12 +423,9 @@ async def _route_in_sandbox_async(
             timed_out = False
         except asyncio.TimeoutError:
             timed_out = True
-            from microsandbox.errors import MicrosandboxError
-
-            with contextlib.suppress(MicrosandboxError, OSError):
-                await handle.kill()
+            await backend.kill_quietly(handle)
     finally:
-        await _stop_quietly(sandbox)
+        await backend.stop_quietly(sandbox)
 
     if dispatched:
         return lines
@@ -575,7 +454,8 @@ def route_in_sandbox(
     # Resolve agent + snapshot up-front: a missing snapshot triggers build_snapshot
     # → asyncio.run, which can't nest inside the asyncio.run below.
     agent = make_agent()
-    snapshot = ensure_snapshot(agent, repo_root=repo_root)
+    backend = resolve_sandbox("microsandbox")
+    snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
     return asyncio.run(
         _route_in_sandbox_async(
             query,
@@ -587,6 +467,7 @@ def route_in_sandbox(
             agent=agent,
             snapshot=snapshot,
             project_marker=project_marker,
+            backend=backend,
         )
     )
 
@@ -602,12 +483,17 @@ def cli_build(repo_root: Path | None = None) -> None:
     agent = make_agent()
     root = repo_root or Path.cwd()
     env = resolve_environment_config(root)
+    # NOTE: `snapshot_name` now requires a `backend` keyword (Task 3); this bare call is
+    # left broken pending Task 7's rewrite of `cli_build` (which threads a resolved
+    # backend end-to-end, including `--set`/`--config`). Only the dangling reference to
+    # the now-deleted module-level `build_snapshot` is patched here so `sandbox.py` keeps
+    # importing cleanly; this line is unreachable until Task 7 fixes the line above it.
     name = snapshot_name(agent, env)
     if snapshot_exists(name):
         print(f"snapshot {name} already present")
         return
     print(f"building snapshot {name} from {env.base_image or BASE_IMAGE} ...")
-    build_snapshot(agent, name, env)
+    resolve_sandbox("microsandbox").build_snapshot(agent, name, env)
     print(f"built {name}")
 
 
