@@ -115,3 +115,33 @@ def test_microsandbox_snapshot_exists_checks_dir(tmp_path: object, monkeypatch: 
     assert mb.snapshot_exists(name) is False
     (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
     assert mb.snapshot_exists(name) is True
+
+
+def test_microsandbox_imported_only_under_allowlist() -> None:
+    """No source file outside the allowlist imports the microsandbox package.
+
+    The backend is the primary home for the concrete runtime; the CLI wrapper and the
+    three agent adapters keep their own legitimate lazy imports (exit-code split /
+    microsandbox.Secret). Everything else — notably sandbox.py and execution.py, which
+    Phase 7 cleared — must drive a resolved SandboxBackend. This guards that boundary so a
+    future edit cannot reintroduce a scattered `import microsandbox` there.
+    """
+    import re
+    from pathlib import Path
+
+    allowlist = {
+        "backend.py",
+        "__main__.py",
+        "claude.py",
+        "codex.py",
+        "opencode.py",
+    }
+    src = Path("src/evalspec")
+    pattern = re.compile(r"^\s*(import microsandbox|from microsandbox)", re.MULTILINE)
+    offenders: list[str] = []
+    for path in src.rglob("*.py"):
+        if path.name in allowlist:
+            continue
+        if pattern.search(path.read_text(encoding="utf-8")):
+            offenders.append(str(path))
+    assert offenders == [], f"microsandbox imported outside the allowlist: {offenders}"
