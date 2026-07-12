@@ -1,15 +1,17 @@
-"""Aggregate one skill-eval iteration's results into a benchmark.
+"""Aggregate one run's eval results into a single run-level benchmark.
 
-Walks a skill's iteration dir, reads each sample's grading.json/timing.json, and writes
-benchmark.json + benchmark.md at the root of that dir. Errored samples (infra failures)
-are excluded from pass rates but counted and surfaced — a half-crashed run must not read
-like a clean one.
+Consumes an explicit list of `eval-*` directories spanning every group (skill) in the
+run, reads each sample's grading.json/timing.json, and writes one benchmark.json +
+benchmark.md to a caller-supplied out_dir (the iteration root, beside meta.json and
+index.jsonl). Rows are keyed `group/eval_id`; columns are the run's arms. Errored samples
+(infra failures) are excluded from pass rates but counted and surfaced — a half-crashed
+run must not read like a clean one.
 
-Layout: `eval-<id>/<arm>/sample-<k>/{grading,timing}.json` where arm names are arbitrary
-strings discovered from disk (the per-eval subdirs are the arm names). The `baseline`
-arm — when one ran — is the arm every other arm's Δ is measured against; with no
-baseline in the sweep, each arm reports its absolute pass rate. The dir is
-`tmp/evals/iteration_NN/skills/<skill>/`.
+Layout: `<group>/eval-<id>/<arm>/sample-<k>/{grading,timing}.json` where arm names are
+arbitrary strings discovered from disk (the per-eval subdirs are the arm names). Evals
+sort lexically by dir name (`eval-10` before `eval-2`). The `baseline` arm — when one
+ran — is the arm every other arm's Δ is measured against; with no baseline in the sweep,
+each arm reports its absolute pass rate.
 """
 
 from __future__ import annotations
@@ -114,6 +116,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
 
         per_eval.append(
             {
+                "group": eval_dir.parent.name,
                 "eval_id": eval_dir.name.removeprefix("eval-"),
                 "samples": len(sample_rates),
                 "errored_samples": errored_count,
@@ -140,6 +143,31 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         "n": len(pair_rates),
         "per_eval": per_eval,
     }
+
+
+def discover_eval_dirs(skills_root: Path) -> list[Path]:
+    """Return every `<group>/eval-*` directory under a skills root.
+
+    A group is any child directory of skills_root; an eval directory is an `eval-*`
+    child directory of a group. This is the run-level roster passed to build_benchmark.
+
+    Args:
+        skills_root: The `skills/` directory holding one child dir per group.
+
+    Returns:
+        Every `skills_root/<group>/eval-*` directory, sorted by (group_name, eval_id)
+        as strings (lexical, so `eval-10` precedes `eval-2`).
+    """
+    return sorted(
+        (
+            eval_dir
+            for group_dir in skills_root.iterdir()
+            if group_dir.is_dir()
+            for eval_dir in group_dir.iterdir()
+            if eval_dir.is_dir() and eval_dir.name.startswith("eval-")
+        ),
+        key=lambda eval_dir: (eval_dir.parent.name, eval_dir.name),
+    )
 
 
 def index_rows(skill_dir: Path, skill: str) -> list[dict]:
@@ -228,8 +256,20 @@ def _headline_lines(benchmark: dict) -> list[str]:
     return lines
 
 
+def _per_eval_rate(arm_stats: dict, group: str, eval_id: str) -> float | None:
+    """Return an arm's per-eval pass_rate_mean for one (group, eval_id), or None."""
+    return next(
+        (
+            row["pass_rate_mean"]
+            for row in arm_stats["per_eval"]
+            if row["group"] == group and row["eval_id"] == eval_id
+        ),
+        None,
+    )
+
+
 def _matrix_table(benchmark: dict) -> list[str]:
-    """Return the primary eval-by-arm matrix."""
+    """Return the run-level group/eval-by-arm matrix with an All evals footer."""
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     # baseline column first, then the rest in declared order (dict preserves it).
@@ -239,12 +279,6 @@ def _matrix_table(benchmark: dict) -> list[str]:
     if not names:
         return []
     headers = [f"{name} ({arms[name].get('harness') or '?'})" for name in names]
-    # Union of eval_ids across arms, stable.
-    eval_ids: list[str] = []
-    for name in names:
-        for row in arms[name]["per_eval"]:
-            if row["eval_id"] not in eval_ids:
-                eval_ids.append(row["eval_id"])
 
     lines = [
         "## Matrix",
@@ -252,36 +286,35 @@ def _matrix_table(benchmark: dict) -> list[str]:
         "| Eval | " + " | ".join(headers) + " |",
         "|------|" + "|".join(["------"] * len(names)) + "|",
     ]
-    for eval_id in eval_ids:
-        ref_rate = (
-            next(
-                (
-                    row["pass_rate_mean"]
-                    for row in arms[baseline]["per_eval"]
-                    if row["eval_id"] == eval_id
-                ),
-                None,
-            )
-            if baseline in arms
-            else None
-        )
+    # Rows come from the roster, not the per-eval union, so an all-errored eval (which
+    # has no per-eval row in any arm) still renders a row of — cells.
+    for entry in benchmark["roster"]:
+        group = entry["group"]
+        eval_id = entry["eval_id"]
+        ref_rate = _per_eval_rate(arms[baseline], group, eval_id) if baseline in arms else None
         cells = []
         for arm_name in names:
-            row = next(
-                (
-                    candidate_row
-                    for candidate_row in arms[arm_name]["per_eval"]
-                    if candidate_row["eval_id"] == eval_id
-                ),
-                None,
-            )
-            if row is None:
+            rate = _per_eval_rate(arms[arm_name], group, eval_id)
+            if rate is None:
                 cells.append("—")
             elif arm_name == baseline or ref_rate is None:
-                cells.append(f"{row['pass_rate_mean']:.0%}")
+                cells.append(f"{rate:.0%}")
             else:
-                cells.append(f"{(row['pass_rate_mean'] - ref_rate) * 100:+.0f}pp")
-        lines.append(f"| {eval_id} | " + " | ".join(cells) + " |")
+                cells.append(f"{rate:.0%} ({(rate - ref_rate) * 100:+.0f}pp)")
+        lines.append(f"| {group}/{eval_id} | " + " | ".join(cells) + " |")
+
+    footer_cells = []
+    for arm_name in names:
+        arm_rate = arms[arm_name]["pass_rate"]
+        delta_pp = arms[arm_name].get("delta_pp")
+        if arm_rate is None:
+            footer_cells.append("—")
+        elif arm_name == baseline or delta_pp is None:
+            footer_cells.append(f"{arm_rate:.0%}")
+        else:
+            footer_cells.append(f"{arm_rate:.0%} ({delta_pp:+.0f}pp)")
+    lines.append("| All evals | " + " | ".join(footer_cells) + " |")
+
     lines.append("")
     return lines
 
@@ -360,22 +393,32 @@ def _inline_code(value: str) -> str:
 
 
 def build_benchmark(
-    eval_root: Path,
+    eval_dirs: list[Path],
     label: str,
     *,
     baseline: str | None = None,
     arm_meta: dict | None = None,
 ) -> dict:
-    """Build the machine-readable benchmark report object."""
-    eval_dirs = sorted(
-        eval_dir
-        for eval_dir in eval_root.iterdir()
-        if eval_dir.is_dir() and eval_dir.name.startswith("eval-")
-    )
-    # Arm names are arbitrary strings on disk: the per-eval subdirs ARE the arm names.
-    # Require a graded sample before counting a dir as an arm, so a stray subdir
-    # (__pycache__, an editor temp) never becomes an empty zero-sample arm.
-    arm_names = sorted(
+    """Build the machine-readable run-level benchmark report object.
+
+    Args:
+        eval_dirs: The run's roster — every `<group>/eval-*` directory to aggregate.
+        label: Human-readable report label (the run/iteration name).
+        baseline: Arm name every other arm's Δ is measured against, or None for
+            absolute scoring. Coerced to None when the baseline has no rate on disk.
+        arm_meta: Per-arm run config (harness/model/effort/env/harness_args), keyed by
+            arm name. Its keys also declare the arm column order and force a
+            configured-but-absent arm to appear as an empty column.
+
+    Returns:
+        The benchmark dict: format_version, label, baseline, max_samples, roster, arms.
+    """
+    # Configured arms (from the run set) declare the column order and guarantee a column
+    # even when an arm never landed on disk. Discovered arms are the on-disk subdirs;
+    # require a graded sample so a stray subdir (__pycache__, an editor temp) never
+    # becomes an empty zero-sample arm.
+    configured = list(arm_meta) if arm_meta else []
+    discovered = sorted(
         {
             arm_dir.name
             for eval_dir in eval_dirs
@@ -383,12 +426,15 @@ def build_benchmark(
             if arm_dir.is_dir() and any(arm_dir.glob("sample-*/grading.json"))
         }
     )
+    arm_names = configured + [name for name in discovered if name not in configured]
     arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name) for arm_name in arm_names}
 
-    # A declared baseline that never landed on disk (e.g. its arm errored out) coerces to
-    # None, so the report scores arms absolutely exactly as the run did, instead of
-    # asserting an absent baseline.
-    if baseline is not None and baseline not in arm_stats:
+    # A declared baseline with no rate on disk (its arm never ran, or every sample
+    # errored) coerces to None, so the report scores arms absolutely exactly as the run
+    # did, instead of framing every other arm against an absent baseline.
+    if baseline is not None and (
+        baseline not in arm_stats or arm_stats[baseline]["pass_rate"] is None
+    ):
         baseline = None
 
     # Per-arm metadata (harness/model/effort/env/harness_args) is joined by arm name onto the
@@ -401,12 +447,6 @@ def build_benchmark(
         stats["effort"] = metadata.get("effort")
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
-    # arm_stats is built from sorted(arm_names); reorder to the SET-DECLARED order
-    # (arm_meta preserves it) so matrix columns follow the set, not the alphabet.
-    if meta:
-        arm_stats = {name: arm_stats[name] for name in meta if name in arm_stats} | {
-            name: stats for name, stats in arm_stats.items() if name not in meta
-        }
 
     # Δ is measured against the baseline arm — when one ran. Each non-baseline arm
     # carries its delta_pp + noise band; with no baseline, arms report absolute rates.
@@ -419,6 +459,15 @@ def build_benchmark(
             stats["delta_pp"] = (stats["pass_rate"] - ref_rate) * 100
             stats["delta_noise_pp"] = delta_noise_pp(stats, ref_stats)
 
+    # The roster comes from the eval dirs on disk, not the per-eval union — so an
+    # all-errored eval (which _arm_stats skips) still yields a matrix row.
+    roster = [
+        {"group": group, "eval_id": eval_id}
+        for group, eval_id in sorted(
+            {(eval_dir.parent.name, eval_dir.name.removeprefix("eval-")) for eval_dir in eval_dirs}
+        )
+    ]
+
     # Observed --count N; per-eval `samples` may be smaller where samples errored.
     max_samples = max(
         (row["samples"] for stats in arm_stats.values() for row in stats["per_eval"]),
@@ -426,25 +475,38 @@ def build_benchmark(
     )
 
     return {
-        "format_version": 1,
+        "format_version": 2,
         "label": label,
         "baseline": baseline,
         "max_samples": max_samples,
+        "roster": roster,
         "arms": arm_stats,
     }
 
 
 def write_benchmark(
-    eval_root: Path,
+    out_dir: Path,
+    eval_dirs: list[Path],
     label: str,
     *,
     baseline: str | None = None,
     arm_meta: dict | None = None,
 ) -> dict:
-    """Write benchmark JSON and Markdown report artifacts."""
-    benchmark = build_benchmark(eval_root, label, baseline=baseline, arm_meta=arm_meta)
-    (eval_root / "benchmark.json").write_text(json.dumps(benchmark, indent=2) + "\n")
-    (eval_root / "benchmark.md").write_text(_format_markdown(benchmark))
+    """Build over eval_dirs then write out_dir/benchmark.{json,md}.
+
+    Args:
+        out_dir: Directory the benchmark artifacts land in (the iteration root).
+        eval_dirs: The run's roster — every `<group>/eval-*` directory to aggregate.
+        label: Human-readable report label (the run/iteration name).
+        baseline: Arm name every other arm's Δ is measured against, or None.
+        arm_meta: Per-arm run config keyed by arm name.
+
+    Returns:
+        The benchmark dict (also written to disk).
+    """
+    benchmark = build_benchmark(eval_dirs, label, baseline=baseline, arm_meta=arm_meta)
+    (out_dir / "benchmark.json").write_text(json.dumps(benchmark, indent=2) + "\n")
+    (out_dir / "benchmark.md").write_text(_format_markdown(benchmark))
     return benchmark
 
 

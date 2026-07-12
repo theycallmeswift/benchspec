@@ -23,11 +23,11 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
 
 def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
     """Verify build benchmark baseline and arm meta."""
-    seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline="baseline",
         arm_meta={
@@ -61,11 +61,11 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
     """Verify build benchmark arm meta drives column order."""
     # arm_stats is discovered alphabetically; arm_meta's declared order wins so the
     # matrix columns follow the set, not the alphabet.
-    seed_arm(tmp_path, "alpha", "zeta", passes=1, total=2)
-    seed_arm(tmp_path, "alpha", "alpha", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "zeta", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "alpha", passes=2, total=2)
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline="zeta",
         arm_meta={"zeta": {"harness": "claude-code"}, "alpha": {"harness": "opencode"}},
@@ -76,11 +76,11 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
 
 def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
     """Verify format markdown renders matrix table."""
-    seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)  # 50%
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)  # 100% → +50pp
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100% → +50pp
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline="baseline",
         arm_meta={
@@ -95,17 +95,19 @@ def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
     assert "| Eval |" in md
     assert "baseline (claude-code)" in md
     assert "trial (opencode)" in md
-    # baseline column shows the absolute rate; trial shows the ±pp delta.
+    # Rows are keyed group/eval_id; the baseline cell shows the absolute rate, the trial
+    # cell shows the absolute rate AND the ±pp delta together.
+    assert "archive/alpha" in md
     assert "50%" in md
-    assert "+50pp" in md
+    assert "100% (+50pp)" in md
 
 
 def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
     """Verify format markdown renders harness args."""
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline=None,
         arm_meta={
@@ -126,10 +128,10 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
     tmp_path: object,
 ) -> None:
     """Verify format markdown quotes harness args with spaces and backticks."""
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline=None,
         arm_meta={
@@ -148,10 +150,10 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
 
 def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
     """Verify format markdown omits empty harness args."""
-    seed_arm(tmp_path, "alpha", "baseline", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2)
 
     bench = report.build_benchmark(
-        tmp_path,
+        report.discover_eval_dirs(tmp_path),
         "label",
         baseline=None,
         arm_meta={"baseline": {"harness": "claude-code", "model": "sonnet"}},
@@ -164,18 +166,20 @@ def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
 
 def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
     """Verify build benchmark computes pass rates."""
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2)  # 100%
-    seed_arm(it, "alpha", "baseline", passes=0, total=2)  # 0%
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2)  # 100%
+    seed_arm(skills_root / "archive", "alpha", "baseline", passes=0, total=2)  # 0%
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline="baseline"
+    )
 
     assert bench["arms"]["trial"]["pass_rate"] == 1.0
     assert bench["arms"]["baseline"]["pass_rate"] == 0.0
     # Single sample → top-level max_samples == 1, per-eval samples == 1, stdev is None.
     assert bench["max_samples"] == 1
     trial_eval = bench["arms"]["trial"]["per_eval"][0]
+    assert trial_eval["group"] == "archive"
     assert trial_eval["samples"] == 1
     assert trial_eval["pass_rate_mean"] == 1.0
     assert trial_eval["pass_rate_stdev"] is None
@@ -185,11 +189,13 @@ def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
 
 def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
     """Verify build benchmark computes delta vs reference."""
-    eval_dir = tmp_path / "eval-alpha"
-    seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+    eval_dir = tmp_path / "archive" / "eval-alpha"
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
-    bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
 
     assert bench["baseline"] == "baseline"
     assert bench["arms"]["trial"]["delta_pp"] == pytest.approx(100.0)
@@ -199,10 +205,10 @@ def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
 
 def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
     """Verify build benchmark no reference absolute only."""
-    seed_arm(tmp_path, "alpha", "trial-opus", passes=1, total=2)
-    seed_arm(tmp_path, "alpha", "trial-sonnet", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=2, total=2)
 
-    bench = report.build_benchmark(tmp_path, "label", baseline=None)
+    bench = report.build_benchmark(report.discover_eval_dirs(tmp_path), "label", baseline=None)
 
     assert bench["baseline"] is None
     assert bench["arms"]["trial-opus"]["pass_rate"] == pytest.approx(0.5)
@@ -215,9 +221,11 @@ def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> N
     # A declared reference the run dropped (--skip-baseline / `baseline = false`) never
     # lands on disk: coerce reference to None and score the surviving arm absolutely,
     # instead of framing it against a baseline that never ran.
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
-    bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
 
     assert bench["baseline"] is None
     assert "delta_pp" not in bench["arms"]["trial"]
@@ -228,10 +236,12 @@ def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None
     """Verify build benchmark discovers arbitrary arm names."""
     # Arm names are arbitrary strings on disk, discovered by walking the eval dir's
     # subdirs — not pinned to a with_skill/without_skill literal.
-    seed_arm(tmp_path, "alpha", "claude-opus", passes=2, total=2)
-    seed_arm(tmp_path, "alpha", "opencode-sonnet", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "claude-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "opencode-sonnet", passes=1, total=2)
 
-    bench = report.build_benchmark(tmp_path, "label", baseline="claude-opus")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="claude-opus"
+    )
 
     assert set(bench["arms"]) == {"claude-opus", "opencode-sonnet"}
 
@@ -242,10 +252,12 @@ def test_delta_noise_pp_generalized(tmp_path: object) -> None:
     # a noise band in pp — assert it's computed (and non-negative), so the Δ-noise
     # rewrite away from the with_skill/without_skill literals is verified.
     for sample_index in range(4):
-        seed_arm(tmp_path, "eval", "baseline", passes=1, total=2, sample=sample_index)
-        seed_arm(tmp_path, "eval", "trial", passes=2, total=2, sample=sample_index)
+        seed_arm(tmp_path / "archive", "eval", "baseline", passes=1, total=2, sample=sample_index)
+        seed_arm(tmp_path / "archive", "eval", "trial", passes=2, total=2, sample=sample_index)
 
-    bench = report.build_benchmark(tmp_path, "label", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
 
     assert bench["arms"]["trial"]["delta_noise_pp"] >= 0
     band = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
@@ -257,12 +269,13 @@ def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
     """Verify errored arm excluded from stats."""
     # An errored sample (timeout/crash) is an infra failure, not a measurement — it
     # must not drag the mean pass rate / duration down.
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2)  # 100%, real
-    seed_arm(it, "beta", "trial", passes=0, total=2, errored=True)  # crashed
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2)  # 100%, real
+    seed_arm(skills_root / "archive", "beta", "trial", passes=0, total=2, errored=True)  # crashed
 
-    stats = report.build_benchmark(it, label="run", baseline=None)["arms"]["trial"]
+    stats = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="run", baseline=None
+    )["arms"]["trial"]
 
     assert stats["n"] == 1  # one (eval × sample) pair counts
     assert stats["pass_rate"] == 1.0  # the errored 0% is excluded
@@ -277,31 +290,35 @@ def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: object) -> None
     stats = report._arm_stats([eval_root / "eval-alpha"], "trial")
 
     assert stats["binder_degraded"] == 3
+    assert stats["per_eval"][0]["group"] == "archive"
 
 
 def test_write_benchmark_writes_files(tmp_path: object) -> None:
-    """Verify write benchmark writes files."""
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=1, total=2)
+    """Verify write benchmark writes files to the out_dir."""
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=1, total=2)
 
-    report.write_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    report.write_benchmark(
+        skills_root, report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
-    assert (it / "benchmark.json").is_file()
-    assert (it / "benchmark.md").is_file()
-    assert "Benchmark" in (it / "benchmark.md").read_text()
-    assert "iteration_01 · alpha" in (it / "benchmark.md").read_text()
+    assert (skills_root / "benchmark.json").is_file()
+    assert (skills_root / "benchmark.md").is_file()
+    assert "Benchmark" in (skills_root / "benchmark.md").read_text()
+    assert "iteration_01" in (skills_root / "benchmark.md").read_text()
 
 
 def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
     """Verify markdown headline shows delta vs reference."""
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
-    seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
 
-    report.write_benchmark(tmp_path, label="iteration_01 · demo", baseline="baseline")
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
 
     md = (tmp_path / "benchmark.md").read_text()
-    assert md.splitlines()[0] == "# Benchmark — iteration_01 · demo"
+    assert md.splitlines()[0] == "# Benchmark — iteration_01"
     # Headline lists each non-reference arm's `baseline <ref%> → <arm> <pct%> (Δpp)`.
     assert "baseline 0%" in md
     assert "trial 100%" in md
@@ -310,10 +327,12 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
 
 def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
     """Verify markdown headline absolute when no reference."""
-    seed_arm(tmp_path, "alpha", "trial-opus", passes=2, total=2)
-    seed_arm(tmp_path, "alpha", "trial-sonnet", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
 
-    report.write_benchmark(tmp_path, label="demo", baseline=None)
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="demo", baseline=None
+    )
 
     md = (tmp_path / "benchmark.md").read_text()
     # No Δ when there's no reference — just per-arm absolute rates.
@@ -325,9 +344,11 @@ def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
 def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> None:
     """Verify markdown headline reference only shows its rate."""
     # With the reference as the sole arm on disk, the headline shows its own rate.
-    seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
 
-    report.write_benchmark(tmp_path, label="demo", baseline="baseline")
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="demo", baseline="baseline"
+    )
 
     headline = (tmp_path / "benchmark.md").read_text().splitlines()[2]
     assert "baseline" in headline
@@ -348,10 +369,12 @@ def test_delta_line_reference_only_shows_its_rate(tmp_path: object) -> None:
 
 def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
     """Verify errored samples surface instead of vanishing."""
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2, sample=0)
-    seed_arm(tmp_path, "alpha", "trial", passes=0, total=2, sample=1, errored=True)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=0)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=0, total=2, sample=1, errored=True)
 
-    bench = report.write_benchmark(tmp_path, label="iteration_01 · demo", baseline=None)
+    bench = report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
 
     assert bench["arms"]["trial"]["errored_samples"] == 1
     assert bench["arms"]["trial"]["pass_rate"] == 1.0  # still excluded from rates
@@ -412,12 +435,13 @@ def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:
 
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
     """Verify multi sample stable zero stdev."""
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)  # 100%
-    seed_arm(it, "alpha", "trial", passes=2, total=2, sample=1)  # 100%
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)  # 100%
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=1)  # 100%
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
     assert bench["max_samples"] == 2
     stats = bench["arms"]["trial"]
@@ -434,12 +458,13 @@ def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
 
 def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
     """Verify multi sample flaky nonzero stdev."""
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)  # 100%
-    seed_arm(it, "alpha", "trial", passes=0, total=2, sample=1)  # 0%
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)  # 100%
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=0, total=2, sample=1)  # 0%
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
     stats = bench["arms"]["trial"]
     row = stats["per_eval"][0]
@@ -450,9 +475,11 @@ def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
     assert row["passed_total"] == 2
     assert row["total_total"] == 4
 
-    report.write_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    report.write_benchmark(
+        skills_root, report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
-    md = (it / "benchmark.md").read_text()
+    md = (skills_root / "benchmark.md").read_text()
     # Flakiness column shows ±X% when samples disagree.
     assert "±" in md
 
@@ -460,12 +487,15 @@ def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
 def test_multi_sample_with_errored_sample_excluded(tmp_path: object) -> None:
     """Verify multi sample with errored sample excluded."""
     # One errored sample shouldn't drag the mean/stdev for the other.
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)  # 100%
-    seed_arm(it, "alpha", "trial", passes=0, total=2, sample=1, errored=True)  # excluded
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)  # 100%
+    seed_arm(
+        skills_root / "archive", "alpha", "trial", passes=0, total=2, sample=1, errored=True
+    )  # excluded
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
     stats = bench["arms"]["trial"]
     row = stats["per_eval"][0]
@@ -479,11 +509,10 @@ def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
     """Verify sample dirs sorted numerically."""
     # sample-10 sorts before sample-2 lexicographically — the report must use a
     # numeric key for any user-visible ordering.
-    it = tmp_path / "iteration-1"
-    it.mkdir()
+    skills_root = tmp_path / "iteration-1"
     for sample_index in (0, 2, 10):
         seed_arm(
-            it,
+            skills_root / "archive",
             "alpha",
             "trial",
             passes=sample_index,
@@ -491,7 +520,9 @@ def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
             sample=sample_index,
         )
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
     row = bench["arms"]["trial"]["per_eval"][0]
     assert row["samples"] == 3
@@ -502,15 +533,16 @@ def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
     """Verify sample dirs skips non numeric siblings."""
     # A stray sibling whose suffix isn't a clean integer (e.g., a manual
     # `cp -r sample-0 sample-0bak`) must be skipped, not crash the int() parse.
-    it = tmp_path / "iteration-1"
-    it.mkdir()
-    seed_arm(it, "alpha", "trial", passes=2, total=2, sample=0)
+    skills_root = tmp_path / "iteration-1"
+    seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)
     # Forge a malformed sibling alongside the real sample-0/.
-    bad = it / "eval-alpha" / "trial" / "sample-0bak"
+    bad = skills_root / "archive" / "eval-alpha" / "trial" / "sample-0bak"
     bad.mkdir()
     (bad / "grading.json").write_text("{}")  # would crash if parsed
 
-    bench = report.build_benchmark(it, label="iteration_01 · alpha", baseline=None)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(skills_root), label="iteration_01", baseline=None
+    )
 
     row = bench["arms"]["trial"]["per_eval"][0]
     assert row["samples"] == 1  # only the well-formed sample counted
@@ -518,11 +550,11 @@ def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
 
 def test_benchmark_carries_format_version(tmp_path: object) -> None:
     """Verify benchmark carries format version."""
-    seed_arm(tmp_path, "alpha", "trial", passes=1, total=1)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
 
-    bench = report.build_benchmark(tmp_path, label="demo", baseline=None)
+    bench = report.build_benchmark(report.discover_eval_dirs(tmp_path), label="demo", baseline=None)
 
-    assert bench["format_version"] == 1
+    assert bench["format_version"] == 2
 
 
 def test_index_rows_flatten_evals(tmp_path: object) -> None:
@@ -571,12 +603,15 @@ def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
 
 def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
     """Verify noise band computed from arm stdevs."""
+    archive = tmp_path / "archive"
     for sample_index, passes in enumerate((2, 0, 2)):  # trial: 100%, 0%, 100% → noisy
-        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=sample_index)
+        seed_arm(archive, "alpha", "trial", passes=passes, total=2, sample=sample_index)
     for sample_index in range(3):
-        seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2, sample=sample_index)
+        seed_arm(archive, "alpha", "baseline", passes=1, total=2, sample=sample_index)
 
-    bench = report.build_benchmark(tmp_path, label="alpha", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="alpha", baseline="baseline"
+    )
     band = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
 
     assert band is not None
@@ -585,10 +620,12 @@ def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
 
 def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
     """Verify noise band none for single sample."""
-    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
-    seed_arm(tmp_path, "alpha", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
 
-    bench = report.build_benchmark(tmp_path, label="alpha", baseline="baseline")
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="alpha", baseline="baseline"
+    )
 
     assert report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"]) is None
 
@@ -596,15 +633,123 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
 def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None:
     """Verify within noise label in markdown and delta line."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
+    archive = tmp_path / "archive"
     for sample_index, passes in enumerate((2, 0, 1)):
-        seed_arm(tmp_path, "alpha", "trial", passes=passes, total=2, sample=sample_index)
+        seed_arm(archive, "alpha", "trial", passes=passes, total=2, sample=sample_index)
     for sample_index, passes in enumerate((0, 1, 1)):
-        seed_arm(tmp_path, "alpha", "baseline", passes=passes, total=2, sample=sample_index)
+        seed_arm(archive, "alpha", "baseline", passes=passes, total=2, sample=sample_index)
 
-    bench = report.write_benchmark(tmp_path, label="alpha", baseline="baseline")
+    bench = report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="alpha", baseline="baseline"
+    )
     md = (tmp_path / "benchmark.md").read_text()
 
     assert "within noise" in md
     assert "within noise" in report.delta_line("demo", bench, tmp_path / "benchmark.md")
 
 
+def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: object) -> None:
+    """Verify an all-errored eval still gets a roster row with a — cell."""
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "ghost", "trial", passes=0, total=2, errored=True)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
+    md = report._format_markdown(bench)
+
+    # The all-errored eval has no per_eval row in any arm, so a per_eval-union matrix
+    # would drop it — the roster keeps it with a — cell.
+    assert "| archive/ghost | — |" in md
+
+
+def test_matrix_column_present_for_wholly_missing_arm(tmp_path: object) -> None:
+    """Verify an arm configured but absent from disk gets a — column and footer."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        label="iteration_01",
+        baseline="baseline",
+        arm_meta={
+            "baseline": {"harness": "claude-code"},
+            "trial": {"harness": "opencode"},
+        },
+    )
+    md = report._format_markdown(bench)
+
+    assert "trial (opencode)" in md
+    assert bench["arms"]["trial"]["pass_rate"] is None
+    assert "| archive/alpha | 50% | — |" in md
+    assert "| All evals | 50% | — |" in md
+
+
+def test_matrix_distinguishes_same_eval_id_across_groups(tmp_path: object) -> None:
+    """Verify the same eval_id in two groups renders two distinct group/eval rows."""
+    seed_arm(tmp_path / "archive", "summary", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "ingest", "summary", "trial", passes=1, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
+    md = report._format_markdown(bench)
+
+    assert "| archive/summary |" in md
+    assert "| ingest/summary |" in md
+
+
+def test_matrix_all_evals_footer_equals_arm_headline_single_group(tmp_path: object) -> None:
+    """Verify the All evals footer equals each arm's headline pass_rate (single group)."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=2, total=2)  # 100%
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+    md = report._format_markdown(bench)
+
+    baseline_rate = bench["arms"]["baseline"]["pass_rate"]  # pooled (0.5 + 1.0)/2 = 0.75
+    trial_rate = bench["arms"]["trial"]["pass_rate"]  # 1.0
+    trial_delta_pp = bench["arms"]["trial"]["delta_pp"]  # +25pp
+    assert (
+        f"| All evals | {baseline_rate:.0%} | {trial_rate:.0%} ({trial_delta_pp:+.0f}pp) |" in md
+    )
+
+
+def test_matrix_all_evals_footer_is_run_level_pooled_mean_multi_group(tmp_path: object) -> None:
+    """Verify the All evals footer baseline is the run-level pooled mean across groups."""
+    # archive contributes two baseline samples (100% and 0%); ingest contributes one (50%).
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2, sample=0)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2, sample=1)
+    seed_arm(tmp_path / "ingest", "beta", "baseline", passes=1, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+    md = report._format_markdown(bench)
+
+    # Pooled over every surviving (eval×sample) rate: (1.0 + 0.0 + 0.5) / 3 = 0.5.
+    assert bench["arms"]["baseline"]["pass_rate"] == 0.5
+    assert "| All evals | 50% |" in md
+
+
+def test_matrix_non_baseline_cell_shows_rate_and_delta(tmp_path: object) -> None:
+    """Verify non-baseline cells show rate and delta; a no-baseline build shows absolute only."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
+
+    with_baseline = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+    absolute_only = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
+
+    with_baseline_md = report._format_markdown(with_baseline)
+    assert "| archive/alpha | 50% | 100% (+50pp) |" in with_baseline_md
+    assert "| All evals | 50% | 100% (+50pp) |" in with_baseline_md
+    absolute_only_md = report._format_markdown(absolute_only)
+    assert "| archive/alpha | 50% | 100% |" in absolute_only_md
+    assert "| All evals | 50% | 100% |" in absolute_only_md

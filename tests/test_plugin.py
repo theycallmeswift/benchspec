@@ -527,14 +527,14 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
 
     assert ("separator", "evalspec benchmark") in terminal_reporter.events
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert any("archive" in message and "+100pp" in message for message in lines)
-    assert (skill_results_dir / "benchmark.md").is_file()
+    assert any("iteration_01" in message and "+100pp" in message for message in lines)
+    assert (skill_results_dir.parent.parent / "benchmark.md").is_file()
 
 
 def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
     """Verify terminal summary multi skill single header."""
-    # Two skills with eval-* children emit exactly one header and one delta line
-    # each (sorted: archive before ingest).
+    # Two skills with eval-* children pool into ONE run-level table and one run-level
+    # delta line, under a single header (rows sorted: archive before ingest).
     monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -553,10 +553,15 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     assert terminal_reporter.events.count(("separator", "evalspec benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert len(lines) == 2
+    assert len(lines) == 1
 
-    benchmark = json.loads((archive_dir / "benchmark.json").read_text())
-    assert benchmark["label"] == "iteration_01 · archive"
+    iteration_root = skills.parent
+    benchmark = json.loads((iteration_root / "benchmark.json").read_text())
+    assert benchmark["label"] == "iteration_01"
+    markdown = (iteration_root / "benchmark.md").read_text()
+    assert "| archive/alpha |" in markdown
+    assert "| ingest/beta |" in markdown
+    assert "| All evals |" in markdown
 
 
 def test_build_manifest_assembles_shape_by_value() -> None:
@@ -692,14 +697,14 @@ arms = [
     assert "started_at" in meta
     assert "evalspec_version" in meta
 
-    benchmark = json.loads((skill_results_dir / "benchmark.json").read_text())
+    benchmark = json.loads((skill_results_dir.parent.parent / "benchmark.json").read_text())
     assert benchmark["arms"]["baseline"]["harness_args"] == ["--set-flag"]
     assert benchmark["arms"]["trial"]["harness_args"] == [
         "--set-flag",
         "--plugin-dir",
         "/project",
     ]
-    benchmark_markdown = (skill_results_dir / "benchmark.md").read_text()
+    benchmark_markdown = (skill_results_dir.parent.parent / "benchmark.md").read_text()
     assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in benchmark_markdown
 
 
@@ -1094,6 +1099,87 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 0
+
+
+def test_fail_under_isolates_regressing_group(tmp_path: object, monkeypatch: object) -> None:
+    """Verify a single regressing group trips the per-group gate even when the pool is up."""
+    # Group A dominates by sample weight (trial +100pp over 4 samples) while group B
+    # regresses (trial -100pp). The run-level pooled trial Δ is +33pp, so a pooled gate
+    # would NOT fire — only a per-group gate catches group B.
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    for sample_index in range(4):
+        seed_arm(skills / "archive", "alpha", "baseline", passes=0, total=1, sample=sample_index)
+        seed_arm(skills / "archive", "alpha", "trial", passes=1, total=1, sample=sample_index)
+    for sample_index in range(2):
+        seed_arm(skills / "ingest", "beta", "baseline", passes=1, total=1, sample=sample_index)
+        seed_arm(skills / "ingest", "beta", "trial", passes=0, total=1, sample=sample_index)
+
+    config = _FakeConfig(tmp_path, fail_under=0.0)
+    session = _FakeSession(config)
+    plugin.pytest_sessionfinish(session, 0)
+
+    assert session.exitstatus == 1
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
+    assert any("FAIL fail-under: ingest/trial" in line for line in terminal_reporter.lines)
+    benchmark = json.loads((skills.parent / "benchmark.json").read_text())
+    assert benchmark["arms"]["trial"]["delta_pp"] > 0  # pooled Δ is positive → pooled gate misses
+
+
+def test_fail_under_exempts_group_missing_baseline_arm(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify a group that never ran the baseline stays exempt from the per-group gate."""
+    # Group A runs both arms with trial below threshold → it fails. Group B ran only
+    # trial, so its configured baseline column has no rate (pass_rate=None), coercing
+    # the group's baseline to None → no Δ to gate → exempt.
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    seed_arm(skills / "archive", "alpha", "baseline", passes=2, total=2)  # 100%
+    seed_arm(skills / "archive", "alpha", "trial", passes=0, total=2)  # 0% → Δ -100pp
+    seed_arm(skills / "ingest", "beta", "trial", passes=0, total=2)  # only trial, no baseline
+
+    config = _FakeConfig(tmp_path, fail_under=0.0)
+    session = _FakeSession(config)
+    plugin.pytest_sessionfinish(session, 0)
+
+    assert session.exitstatus == 1
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
+    assert any("FAIL fail-under: archive/trial" in line for line in terminal_reporter.lines)
+    assert not any("FAIL fail-under: ingest" in line for line in terminal_reporter.lines)
+
+
+def test_sessionfinish_writes_single_run_level_benchmark(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify exactly one run-level benchmark lands at the iteration root, none per group."""
+    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    seed_arm(skills / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(skills / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(skills / "ingest", "beta", "trial", passes=1, total=2)
+    seed_arm(skills / "ingest", "beta", "baseline", passes=1, total=2)
+
+    _finish_and_summarize(tmp_path)
+
+    iteration_root = skills.parent
+    assert (iteration_root / "benchmark.json").is_file()
+    assert not (skills / "archive" / "benchmark.json").exists()
+    assert not (skills / "ingest" / "benchmark.json").exists()
+    benchmark = json.loads((iteration_root / "benchmark.json").read_text())
+    assert benchmark["format_version"] == 2
+    assert {(entry["group"], entry["eval_id"]) for entry in benchmark["roster"]} == {
+        ("archive", "alpha"),
+        ("ingest", "beta"),
+    }
 
 
 def test_binder_degraded_warns_in_terminal_summary(tmp_path: object, monkeypatch: object) -> None:
