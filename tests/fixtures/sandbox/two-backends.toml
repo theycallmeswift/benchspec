@@ -7,9 +7,8 @@
 # selected, so the docker set's SchemaError fails the file even when only `micro` is
 # requested; pytest maps it to a UsageError, i.e. exit 2. Execution stays on the
 # microsandbox default until Phase 8 — nothing here is "resolved" to a backend.
-# `evalspec sandbox:build` has no `--config` flag yet and never reads this sets table;
-# Task 7 (this PR) threads `--config` through so `sandbox:build --config <this>` also
-# exits 2 on the docker set.
+# `evalspec sandbox:build --config tests/fixtures/sandbox/two-backends.toml` (Task 7)
+# also exits 2 selecting either set, for the same eager-validation reason.
 [tool.evalspec]
 default-set = "micro"
 

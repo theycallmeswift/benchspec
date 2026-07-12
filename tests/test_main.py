@@ -13,6 +13,7 @@ from textwrap import dedent
 import pytest
 
 from evalspec import __main__
+from evalspec.schema import SchemaError
 
 
 def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:
@@ -102,7 +103,9 @@ def test_sandbox_build_calls_preflight_then_cli_build(monkeypatch: object) -> No
     built_roots: list[Path] = []
     monkeypatch.setattr(__main__.sandbox, "preflight", lambda: ran_preflight.append(True))
     monkeypatch.setattr(
-        __main__.sandbox, "cli_build", lambda repo_root: built_roots.append(repo_root)
+        __main__.sandbox,
+        "cli_build",
+        lambda repo_root, *, set_name=None, config=None: built_roots.append(repo_root),
     )
 
     exit_code = __main__.main(["sandbox:build", "some/dir"])
@@ -112,10 +115,75 @@ def test_sandbox_build_calls_preflight_then_cli_build(monkeypatch: object) -> No
     assert built_roots == [Path("some/dir").resolve()]
 
 
+def test_sandbox_build_threads_set_and_config(monkeypatch: object) -> None:
+    """`--set` / `--config` reach cli_build so the resolved set drives the build."""
+    seen: dict = {}
+    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
+
+    def fake_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Record what the CLI threaded into the build."""
+        seen["root"] = repo_root
+        seen["set_name"] = set_name
+        seen["config"] = config
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", fake_cli_build)
+
+    exit_code = __main__.main(
+        ["sandbox:build", "some/dir", "--set", "micro", "--config", "cfg.toml"]
+    )
+
+    assert exit_code == 0
+    assert seen["set_name"] == "micro"
+    assert seen["config"] == "cfg.toml"
+
+
+def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None:
+    """Bare `sandbox:build` threads set_name=None, config=None (Phase-5 path preserved)."""
+    seen: dict = {}
+    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
+
+    def fake_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Record the bare invocation's threaded values."""
+        seen["set_name"] = set_name
+        seen["config"] = config
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", fake_cli_build)
+
+    assert __main__.main(["sandbox:build", "some/dir"]) == 0
+    assert seen == {"set_name": None, "config": None}
+
+
+def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object) -> None:
+    """A set whose sandbox is `docker` fails fast at exit 2 before any build."""
+    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
+
+    def failing_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Raise the SchemaError a docker set produces at resolution."""
+        raise SchemaError(
+            "[tool.evalspec.sets.dock]: unsupported sandbox `docker` "
+            "(supported: ['microsandbox']). Docker is not implemented."
+        )
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
+
+    exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
+
+    assert exit_code == 2
+    assert "docker" in capsys.readouterr().err
+
+
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
     """Verify a no-op cli_build (snapshot already present) yields exit 0."""
     monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
-    monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
+    )
 
     exit_code = __main__.main(["sandbox:build"])
 
@@ -132,7 +200,9 @@ def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object) -> None:
 
     monkeypatch.setattr(__main__.sandbox, "preflight", failing_preflight)
     monkeypatch.setattr(
-        __main__.sandbox, "cli_build", lambda repo_root: called_cli_build.append(True)
+        __main__.sandbox,
+        "cli_build",
+        lambda repo_root, *, set_name=None, config=None: called_cli_build.append(True),
     )
 
     exit_code = __main__.main(["sandbox:build"])
@@ -145,7 +215,7 @@ def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object
     """Verify a build-time MicrosandboxError (not a RuntimeError) exits 1 with a clean error."""
     from microsandbox.errors import MicrosandboxError
 
-    def failing_build(repo_root: Path) -> None:
+    def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
         """Fail provisioning the way a real snapshot build does."""
         raise MicrosandboxError("snapshot build failed")
 
@@ -186,7 +256,9 @@ def test_subcommand_registered(monkeypatch: object, command: str) -> None:
     monkeypatch.setattr(__main__.analyze, "run", lambda root: 0)
     monkeypatch.setattr(__main__.run, "run", lambda args: 0)
     monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
-    monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
+    )
 
     assert __main__.main([command, "some/dir"]) == 0
 

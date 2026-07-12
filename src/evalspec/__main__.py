@@ -93,7 +93,7 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
     from microsandbox.errors import MicrosandboxError
 
     try:
-        sandbox.cli_build(repo_root=root)
+        sandbox.cli_build(root, set_name=args.set, config=args.config)
     except (RuntimeError, MicrosandboxError) as error:
         print(f"error: {error}", file=sys.stderr)
         return ExitCode.FINDING
@@ -119,8 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_root_argument(run_parser)
     _add_run_flags(run_parser)
-    _add_root_argument(
-        sub.add_parser("sandbox:build", help="build the agent-ready sandbox snapshot")
+    sandbox_build_parser = sub.add_parser(
+        "sandbox:build", help="build the agent-ready sandbox snapshot"
+    )
+    _add_root_argument(sandbox_build_parser)
+    sandbox_build_parser.add_argument(
+        "--set", help="eval set whose sandbox backend + env drive the build"
+    )
+    sandbox_build_parser.add_argument(
+        "--config", help="config file layered over pyproject for set resolution"
     )
 
     if argv is None:

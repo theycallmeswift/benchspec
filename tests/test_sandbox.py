@@ -164,15 +164,6 @@ def test_snapshot_name_changes_when_script_bytes_change() -> None:
     assert base != changed
 
 
-def test_snapshot_exists_checks_microsandbox_dir(tmp_path: object, monkeypatch: object) -> None:
-    """Verify snapshot exists checks microsandbox dir."""
-    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path)
-    name = "evalspec-claude-code-1.2.3"
-    assert sandbox.snapshot_exists(name) is False
-    (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
-    assert sandbox.snapshot_exists(name) is True
-
-
 def test_preflight_collects_backend_and_credential_failures(monkeypatch: object) -> None:
     """Preflight surfaces both backend host errors and the shared credential error."""
     from evalspec import backend as backend_mod
@@ -292,12 +283,18 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
 def test_cli_build_resolves_environment_from_repo_root(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Verify cli_build reads its environment config from the given repo_root, not cwd."""
-    monkeypatch.setattr(sandbox, "preflight", lambda: None)
+    """Bare cli_build reads its environment config from the given repo_root, not cwd."""
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
-    monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: True)
-    monkeypatch.setattr(sandbox, "build_snapshot", lambda agent, name, env: None)
-    resolved_roots = []
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
+    )
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "build_snapshot", lambda self, agent, name, env: None
+    )
+    resolved_roots: list = []
     monkeypatch.setattr(
         sandbox,
         "resolve_environment_config",
@@ -307,6 +304,65 @@ def test_cli_build_resolves_environment_from_repo_root(
     sandbox.cli_build(repo_root=tmp_path)
 
     assert resolved_roots == [tmp_path]
+
+
+def test_cli_build_with_microsandbox_set_resolves_and_builds(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """A microsandbox set drives the real cli_build path to a backend build call."""
+    from evalspec import backend as backend_mod
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.evalspec]\n"
+        'default-set = "micro"\n'
+        "[tool.evalspec.sets.micro]\n"
+        'model = "sonnet"\n'
+        'sandbox = "microsandbox"\n'
+        'baseline = "baseline"\n'
+        'arms = [{ name = "baseline", harness = "claude-code" }]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+    )
+    built: list = []
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend,
+        "build_snapshot",
+        lambda self, agent, name, env: built.append(name),
+    )
+
+    sandbox.cli_build(repo_root=tmp_path, set_name="micro")
+
+    assert len(built) == 1
+    assert built[0].startswith("evalspec-microsandbox-")
+
+
+def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:
+    """A docker set fails fast at resolution, never reaching preflight or the build."""
+    from evalspec.schema import SchemaError
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.evalspec]\n"
+        'default-set = "dock"\n'
+        "[tool.evalspec.sets.dock]\n"
+        'model = "sonnet"\n'
+        'sandbox = "docker"\n'
+        'baseline = "baseline"\n'
+        'arms = [{ name = "baseline", harness = "claude-code" }]\n',
+        encoding="utf-8",
+    )
+    called_preflight: list = []
+    monkeypatch.setattr(
+        sandbox, "preflight", lambda backend=None: called_preflight.append(True)
+    )
+
+    with pytest.raises(SchemaError):
+        sandbox.cli_build(repo_root=tmp_path, set_name="dock")
+
+    assert called_preflight == []
 
 
 def test_plugin_dir_for(tmp_path: object) -> None:

@@ -12,8 +12,9 @@ from pathlib import Path
 
 from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
+from evalspec.arms import parse_sets, resolve_set
 from evalspec.backend import SandboxBackend, resolve_sandbox
-from evalspec.discovery import EnvConfig, resolve_environment_config
+from evalspec.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from evalspec.room import (
     changed_paths,
     parse_artifact_stream,
@@ -22,11 +23,11 @@ from evalspec.room import (
     sha_snapshot_script,
     to_display_paths,
 )
+from evalspec.schema import SchemaError
 from evalspec.trigger import RoutingError
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
-BASE_IMAGE = "ubuntu:latest"
 
 
 def snapshot_name(
@@ -39,11 +40,6 @@ def snapshot_name(
     """
     fingerprint = backend.cache_fingerprint(agent, env or EnvConfig())
     return f"evalspec-{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
-
-
-def snapshot_exists(name: str) -> bool:
-    """Return whether a named microsandbox snapshot exists on disk."""
-    return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
 
 def preflight(backend: SandboxBackend | None = None) -> None:
@@ -472,29 +468,74 @@ def route_in_sandbox(
     )
 
 
-def cli_build(repo_root: Path | None = None) -> None:
-    """Build the agent-ready snapshot up front (loud on error).
+def _layer_build_config(table: dict, config_path: str | None) -> dict:
+    """Merge a `--config` file's [tool.evalspec.sets.*] over the pyproject table.
+
+    Mirrors plugin._layer_config_sets for the build path. A malformed config (missing
+    [tool.evalspec]) raises SchemaError, which the CLI maps to exit 2.
+    """
+    if not config_path:
+        return table
+    import tomllib
+
+    try:
+        raw = tomllib.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as err:
+        raise SchemaError(f"--config {config_path}: {err}") from None
+    scratch = raw.get("tool", {}).get("evalspec")
+    if not isinstance(scratch, dict):
+        raise SchemaError(
+            f"--config {config_path}: expected a [tool.evalspec] table with "
+            "[tool.evalspec.sets.<name>]"
+        )
+    merged = dict(table)
+    merged["sets"] = {**table.get("sets", {}), **scratch.get("sets", {})}
+    if scratch.get("default-set"):
+        merged["default-set"] = scratch["default-set"]
+    return merged
+
+
+def cli_build(
+    repo_root: Path | None = None, *, set_name: str | None = None, config: str | None = None
+) -> None:
+    """Build the agent-ready snapshot (loud on error).
+
+    With neither `--set` nor `--config`, preserves the Phase-5 bare-build path: a single
+    `make_agent()`, env from the repo root, and the default microsandbox backend — NO sets
+    table required. With `--set`/`--config`, layers config over pyproject, resolves the set,
+    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2).
 
     Args:
-        repo_root: Repo root whose environment config selects the base image and
-            build steps. Defaults to the current working directory.
+        repo_root: Repo root whose pyproject + environment config drive the build.
+            Defaults to the current working directory.
+        set_name: The eval set to resolve (`--set`); None with no config selects the bare path.
+        config: An optional `--config` file layered over pyproject.
     """
-    preflight()
-    agent = make_agent()
     root = repo_root or Path.cwd()
+    if set_name or config:
+        table = _layer_build_config(pyproject_table(root), config)
+        rawsets, default_set = parse_sets(table)
+        resolved = resolve_set(rawsets, default_set, set_name=set_name)
+        backend = resolve_sandbox(resolved.sandbox)
+    else:
+        backend = resolve_sandbox("microsandbox")
+    preflight(backend)
+    agent = make_agent()
     env = resolve_environment_config(root)
-    # NOTE: `snapshot_name` now requires a `backend` keyword (Task 3); this bare call is
-    # left broken pending Task 7's rewrite of `cli_build` (which threads a resolved
-    # backend end-to-end, including `--set`/`--config`). Only the dangling reference to
-    # the now-deleted module-level `build_snapshot` is patched here so `sandbox.py` keeps
-    # importing cleanly; this line is unreachable until Task 7 fixes the line above it.
-    name = snapshot_name(agent, env)
-    if snapshot_exists(name):
+    name = snapshot_name(agent, env, backend=backend)
+    if backend.snapshot_exists(name):
         print(f"snapshot {name} already present")
         return
-    print(f"building snapshot {name} from {env.base_image or BASE_IMAGE} ...")
-    resolve_sandbox("microsandbox").build_snapshot(agent, name, env)
+    print(f"building snapshot {name} from {_display_base_image(env)} ...")
+    backend.build_snapshot(agent, name, env)
     print(f"built {name}")
+
+
+def _display_base_image(env: EnvConfig) -> str:
+    """Return the base image label for the build message (default when unset)."""
+    from evalspec.backend import BASE_IMAGE
+
+    return env.base_image or BASE_IMAGE
 
 
 def cli_clean(repo_root: Path) -> None:
