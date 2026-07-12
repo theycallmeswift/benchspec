@@ -314,30 +314,33 @@ async def _run_arm_turns(
 def _capture_sandbox_provenance(
     agent: object, backend: object, snapshot: str, repo_root: Path
 ) -> SandboxProvenance | None:
-    """Assemble the arm's static sandbox identity, or None if it cannot be read.
+    """Assemble the arm's static sandbox identity, or None when there is no sandbox.
 
     Reads the fingerprint from the backend's shared `fingerprint_inputs` helper (never a
     re-hash or a snapshot-name parse) and the native image digest from the backend's typed
     `image_identity`. `image_identity` runs its own `asyncio.run` internally, so this is
-    called from the synchronous body — never nested inside the arm's event loop. Any
-    failure to read the fingerprint inputs yields None rather than aborting a run whose
-    graded result is otherwise complete.
+    called from the synchronous body — never nested inside the arm's event loop.
+
+    This runs before the agent/grading, so there is no completed result to shield: a
+    genuine capture failure (e.g. a bad environment config) must propagate and fail the
+    arm loudly, not silently vanish it from `observed_arms`. A `None` agent is the sole
+    no-sandbox case — unit tests stub the harness away — and returns `None` up front;
+    every other error is a real config or programming bug and is left to raise.
     """
-    try:
-        env = resolve_environment_config(repo_root)
-        fingerprint = backend.fingerprint_inputs(agent, env)
-        identity = backend.image_identity(snapshot)
-        return SandboxProvenance.from_image_identity(
-            backend=backend.id,
-            snapshot=snapshot,
-            fingerprint=fingerprint.digest,
-            base_image_ref=fingerprint.base_image_ref,
-            install_fingerprint=fingerprint.install_fingerprint,
-            env_script_sha256=fingerprint.env_script_sha256,
-            image_identity=identity,
-        )
-    except Exception:
+    if agent is None:
         return None
+    env = resolve_environment_config(repo_root)
+    fingerprint = backend.fingerprint_inputs(agent, env)
+    identity = backend.image_identity(snapshot)
+    return SandboxProvenance.from_image_identity(
+        backend=backend.id,
+        snapshot=snapshot,
+        fingerprint=fingerprint.digest,
+        base_image_ref=fingerprint.base_image_ref,
+        install_fingerprint=fingerprint.install_fingerprint,
+        env_script_sha256=fingerprint.env_script_sha256,
+        image_identity=identity,
+    )
 
 
 def _build_runtime_provenance(
@@ -512,8 +515,8 @@ def run_eval_arm(
     )
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
     # Runtime provenance for this arm's resolved snapshot/runtime, beside the sample so
-    # xdist workers and offline analysis retain it; absent only when the sandbox identity
-    # could not be captured (e.g. a stubbed backend in unit tests).
+    # xdist workers and offline analysis retain it; absent only on the no-sandbox path
+    # (a stubbed-away harness in unit tests), never in a real run.
     provenance = _build_runtime_provenance(arm_name, sandbox_prov, arm_run)
     if provenance is not None:
         (run_dir / "provenance.json").write_text(

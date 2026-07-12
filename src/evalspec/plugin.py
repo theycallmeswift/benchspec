@@ -549,7 +549,7 @@ def _write_manifest(
     (iteration_root / "meta.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
-def _aggregate_observed_arms(skills_root: Path) -> dict:
+def _aggregate_observed_arms(skills_root: Path, run_set: EvalSet | None) -> dict:
     """Aggregate every persisted `provenance.json` under the skills root by arm.
 
     Walks for the runtime records execution wrote beside each sample (`provenance.json`
@@ -558,11 +558,29 @@ def _aggregate_observed_arms(skills_root: Path) -> dict:
     deselected, skipped, or never-sampled arm. Identical records for one arm dedupe;
     records that disagree on snapshot/digest/version raise loudly (see `aggregate_observed`)
     rather than silently combining unlike environments into one report.
+
+    Two defensive checks run per record before aggregation, so a corrupt or mislocated
+    label can't quietly key a column: the record's `arm` must match the arm name in its
+    own path (the `<arm>` component of `…/<arm>/sample-K/provenance.json`, per
+    `workspace.arm_dir`), and it must belong to the configured roster. A trigger-only run
+    resolves no set (`run_set is None`), so roster validation is skipped there.
     """
-    records = [
-        RuntimeProvenance.from_disk_dict(json.loads(provenance_path.read_text()))
-        for provenance_path in sorted(skills_root.rglob("provenance.json"))
-    ]
+    roster = None if run_set is None else {arm["name"] for arm in report.planned_arms(run_set)}
+    records = []
+    for provenance_path in sorted(skills_root.rglob("provenance.json")):
+        record = RuntimeProvenance.from_disk_dict(json.loads(provenance_path.read_text()))
+        dir_arm = provenance_path.parent.parent.name
+        if record.arm != dir_arm:
+            raise ValueError(
+                f"provenance arm mismatch in `{provenance_path}`: record arm `{record.arm}` "
+                f"disagrees with its directory arm `{dir_arm}`"
+            )
+        if roster is not None and record.arm not in roster:
+            raise ValueError(
+                f"provenance arm `{record.arm}` in `{provenance_path}` is not in the "
+                f"configured roster {sorted(roster)}"
+            )
+        records.append(record)
     return aggregate_observed(records)
 
 
@@ -601,7 +619,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     # the skills root the same walk below reads, so meta.json must not be written with a
     # stale/empty observed_arms. Conflicting records raise here and abort the write, which
     # is the intended loud failure.
-    observed_arms = _aggregate_observed_arms(skills_root)
+    observed_arms = _aggregate_observed_arms(skills_root, run_set)
     _write_manifest(
         config, skills_root.parent, iteration, repo_root, run_set, judge_meta, observed_arms
     )

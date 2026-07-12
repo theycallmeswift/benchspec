@@ -1054,6 +1054,54 @@ def test_conflicting_provenance_raises(tmp_path: object, monkeypatch: object) ->
         plugin.pytest_sessionfinish(session, 0)
 
 
+def test_provenance_arm_directory_mismatch_raises(tmp_path: object, monkeypatch: object) -> None:
+    """A record whose `arm` disagrees with its own directory raises, naming both."""
+    # `baseline` is a real roster arm, so only the directory-vs-record mismatch can fire
+    # here (the record sits in the `trial/` dir): a mislocated label never keys a column.
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    trial_sample = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+    _seed_provenance(trial_sample, "baseline")  # arm label disagrees with the trial/ dir
+
+    config = _FakeConfig(tmp_path)
+    session = _FakeSession(config)
+    with pytest.raises(ValueError, match="provenance arm mismatch.*`baseline`.*`trial`"):
+        plugin.pytest_sessionfinish(session, 0)
+
+
+def test_provenance_arm_outside_roster_raises(tmp_path: object, monkeypatch: object) -> None:
+    """A record for an arm the roster never configured raises, naming the arm."""
+    # `ghost` sits in a matching `ghost/` dir (so the directory check passes) but is not
+    # in the configured roster {baseline, trial} — the roster check must reject it.
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    ghost_sample = seed_arm(skill_results_dir, "alpha", "ghost", passes=1, total=1)
+    _seed_provenance(ghost_sample, "ghost")
+
+    config = _FakeConfig(tmp_path)
+    session = _FakeSession(config)
+    with pytest.raises(ValueError, match="provenance arm `ghost`.*not in the configured roster"):
+        plugin.pytest_sessionfinish(session, 0)
+
+
+def test_aggregate_observed_arms_trigger_only_skips_roster(tmp_path: object) -> None:
+    """A trigger-only run (run_set None) aggregates without roster validation."""
+    # No eval set resolves for a trigger-only run, so there is no roster to check against;
+    # the walk must still aggregate the record rather than reject every arm.
+    workspace.set_current_iteration("iteration_01")
+    skills_root = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    ghost_sample = seed_arm(skills_root / "archive", "alpha", "ghost", passes=1, total=1)
+    _seed_provenance(ghost_sample, "ghost")
+
+    observed = plugin._aggregate_observed_arms(skills_root, None)
+
+    assert set(observed) == {"ghost"}  # off-roster arm accepted when no set is configured
+
+
 def test_binder_identity_carries_no_key_material(tmp_path: object, monkeypatch: object) -> None:
     """Verify meta.json binder identity never leaks GEMINI_API_KEY."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())

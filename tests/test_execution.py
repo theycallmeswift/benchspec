@@ -14,6 +14,7 @@ from evalspec.discovery import EvalCase
 from evalspec.execution import run_eval_arm
 from evalspec.provenance import ImageIdentity
 from evalspec.runner import RunResult
+from evalspec.schema import SchemaError
 
 TRIAL = Arm("trial", "claude-code", "opus")
 BASELINE = Arm("baseline", "claude-code", "opus")
@@ -2018,3 +2019,39 @@ def test_image_identity_failure_is_unavailable_but_run_completes(
     assert sandbox["image_digest"] is None
     assert sandbox["image_digest_status"] == "unavailable"
     assert sandbox["image_digest_error"] == "manifest read failed"
+
+
+def test_capture_error_on_real_arm_raises_loudly(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """A genuine capture failure fails the arm loudly, not by silently dropping provenance."""
+    # Capture runs before the agent/grading, so there is no completed result to shield: a
+    # bad environment config must propagate here, like a stray prompt placeholder does.
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+
+    def _raise_config(repo_root: object) -> NoReturn:
+        """Stand in for a real config defect surfaced at capture time."""
+        raise SchemaError("[tool.evalspec] base_image must be a non-empty string")
+
+    monkeypatch.setattr("evalspec.execution.resolve_environment_config", _raise_config)
+
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    with pytest.raises(SchemaError, match="base_image"):
+        run_eval_arm(
+            eval_case, TRIAL, workdir, {}, tmp_path,
+            today="2099-01-01", repo_root=tmp_path, sample=0,
+            session_factory=_live_sandbox_session_factory(object(), result),
+            grade=_grade_all_pass, bind=_punt_all,
+        )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    assert not (run_dir / "provenance.json").exists()  # failed loudly, wrote nothing
