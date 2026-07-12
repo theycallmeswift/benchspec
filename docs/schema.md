@@ -152,6 +152,23 @@ Authoritative validator: `evalspec.schema` (plus `evalspec.mdformat` for Markdow
 
 ---
 
+## `benchmark.json` — derived artifact
+
+The run-level benchmark. One `benchmark.json` (plus its rendered `benchmark.md`) is written per run at the **iteration root** — `tmp/evals/iteration_NN/benchmark.json`, beside `meta.json` and `index.jsonl` — aggregating every group in the run into a single report. It is a derived artifact rebuilt from the per-sample `grading.json` files on disk, not an input schema and not validated at collection.
+
+| Field | Notes |
+|---|---|
+| `format_version` | `2`. Distinct from the `meta.json` run-manifest `format_version` (still `1`); the two version independently. |
+| `label` | The run name (`iteration_NN`). The report spans the whole run, so there is no per-group suffix. |
+| `baseline` | The baseline arm name the Δ columns measure against, or `null` when the set names none — or when the named baseline produced no graded sample. |
+| `max_samples` | The highest per-cell sample count observed (from `--count N`). |
+| `roster` | The run's eval roster: a list of `{group, eval_id}` objects, one per discovered `<group>/eval-*` directory, sorted by `(group, eval_id)`. It drives the matrix rows, so an all-errored eval (no graded sample in any arm) still appears as an all-`—` row. |
+| `arms` | Per-arm stats keyed by declared arm name — `pass_rate`, `pass_rate_stdev`, `n`, `delta_pp` / `delta_noise_pp` (vs baseline), harness/model/env metadata, and a `per_eval` list. An arm configured but absent from disk is still a column (`pass_rate: null`). Each `per_eval` row carries its own `group` and `eval_id` — matched against the roster by that composite key — plus `pass_rate_mean` and `samples`. |
+
+The Markdown renders the composite `group/eval_id` for each row and column-per-arm; the JSON keeps `group` and `eval_id` as separate machine fields on every `roster` entry and `per_eval` row. Authoritative shape: `evalspec.report.build_benchmark`. When this document drifts, the code wins.
+
+---
+
 ## Trajectory event schema — derived artifact
 
 The structured trajectory `evalspec.trajectory` derives from a `session.jsonl` — not an input schema, not validated at collection. The run consumes it in-process (judge process facts, `transcript.json` counts); regenerate on demand with `trajectory_from_session(session_text)`. Each turn contributes an ordered list of two event kinds:

@@ -17,7 +17,7 @@ evalspec runs each `(eval × arm)` as a parametrized pytest case. The agent runs
 - **Iteration** — one full evalspec run. Artifacts land under `tmp/evals/iteration_NN/`, zero-padded and incrementing per run (e.g. `iteration_01`, `iteration_41`). The plugin picks the name once on the controller and shares it with xdist workers via `EVALSPEC_ITERATION`, so `-n 8` writes one iteration tree, not eight.
 - **meta.json** — the run manifest written at the iteration root (`tmp/evals/iteration_NN/meta.json`) once per run: `run_id`/`commit`/`config_hash` identity, agent + versions, the eval `set` name + per-arm `arms` roster (each arm's harness/model/effort/env/harness_args), the resolved `judge` object (harness/model/effort/timeout/env/harness_args), start time, `format_version`. The join key for post-hoc aggregation across runs.
 - **index.jsonl** — flat per-sample results at the iteration root (`tmp/evals/iteration_NN/index.jsonl`): one line per (eval × arm × sample). The aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout.
-- **Label** — the benchmark's human-readable title, `"iteration_NN · <skill>"`. It's `benchmark["label"]` in the JSON and the `# Benchmark — …` heading in the Markdown. The arms it scores are keyed by their declared arm name under `benchmark["arms"]`.
+- **Label** — the benchmark's human-readable title, the run name `"iteration_NN"` (the whole run is one report, so there is no per-skill suffix). It's `benchmark["label"]` in the JSON and the `# Benchmark — …` heading in the Markdown. The arms it scores are keyed by their declared arm name under `benchmark["arms"]`.
 - **Fired** — an arm actually invoked the skill (didn't hand-roll the task). Each turn's stream is scanned via `agent.detect_dispatch`; the arm's dispatched-skills set drives the `skill_invoked` activation assertion. A trial arm normally fires; a baseline arm does not, and fails the activation assertion accordingly.
 - **Errored** — the agent run (`claude -p`, `opencode run`, etc.) crashed, timed out, or exited non-zero, OR the cell's `setup.sh` exited non-zero, OR the judge CLI failed at the infra level. Excluded from the benchmark — infra failures, not measurements.
 - **Trajectory** — a turn's ordered `tool_call`/`tool_result` events, derived from its raw stream (every arm streams). Not persisted: `evalspec.trajectory.trajectory_from_session` regenerates it deterministically from `session.jsonl`. Feeds the judge's process facts and the `tool_call_count` / `skills_dispatched` summary in `transcript.json`. Event shape in [`schema.md`](schema.md).
@@ -76,13 +76,16 @@ Artifacts per (eval × arm × sample)
 Benchmark aggregation (sessionfinish, controller only)
   └─ <repo_root>/tmp/evals/iteration_NN/meta.json         # run manifest
   └─ <repo_root>/tmp/evals/iteration_NN/index.jsonl       # flat per-sample results
-  └─ <repo_root>/tmp/evals/iteration_NN/skills/<skill>/benchmark.json + benchmark.md
+  └─ <repo_root>/tmp/evals/iteration_NN/benchmark.json + benchmark.md
+     # ONE run-level report at the iteration root, beside meta.json / index.jsonl
   └─ benchmark.md leads with one Δ line per contrast arm vs the baseline arm
      ("<arm>: baseline <ref%> → <arm> <pct%> (Δpp)"; absolute per-arm rates when no
-     baseline ran), then a "## Matrix" eval×arm table (evals down the left,
-     "<arm> (<harness>)" across the top) and per-arm sections with
-     "- Harness: … · Model: …" / "- Env: …" (env redacted), tokens, and duration
-  └─ One summary line per skill: per-arm Δ vs baseline, label: "iteration_NN · <skill>"
+     baseline ran), then one "## Matrix" table spanning the whole run — rows keyed
+     "<group>/<eval_id>" (from the roster), "<arm> (<harness>)" columns, non-baseline
+     cells "<rate> (+Npp)" (absolute rate AND Δ), closed by an "All evals" footer —
+     and per-arm sections with "- Harness: … · Model: …" / "- Env: …" (env redacted),
+     tokens, and duration
+  └─ One run-level summary line: per-arm Δ vs baseline, label: "iteration_NN"
 ```
 
 `meta.json` is the run manifest at the iteration root (one per run, above `skills/`): `run_id`/`commit`/`config_hash` identity plus agent + versions, the eval `set` name + per-arm `arms` roster (including resolved `harness_args`), the resolved `judge` object (harness/model/effort/timeout/env/harness_args), start time, and `format_version`. It's the join key a post-hoc aggregator uses to stitch separate runs back together on metadata alone.
@@ -122,4 +125,4 @@ An arm's pass rate alone is not a measurement — it's a number. The signal is t
 
 ## Sampling noise and the noise band
 
-A Δ that's smaller than the sampling noise it rides on isn't evidence of a lift — it's a coin flip. evalspec computes a noise band (in percentage points) for each arm-vs-baseline Δ: the standard error of the difference of the two arms' per-sample pass rates, `SE = sqrt(s_arm²/n_arm + s_ref²/n_ref)`. This is a macro-mean approximation (averaged over eval×sample pairs, not a properly paired test) — a rough guardrail against over-reading a small Δ, not a substitute for statistical rigour. It needs at least two samples per arm to exist (a one-sample arm has no stdev, so the band is omitted and no label is shown). When `|Δ| ≤ SE`, the headline in `benchmark.md` and the terminal summary line both add a **within noise** label. The `--evalspec-fail-under` CI gate uses the **raw Δ**, not the noise-adjusted one — the label is there to keep you from shipping a noisy win, not to suppress the gate.
+A Δ that's smaller than the sampling noise it rides on isn't evidence of a lift — it's a coin flip. evalspec computes a noise band (in percentage points) for each arm-vs-baseline Δ: the standard error of the difference of the two arms' per-sample pass rates, `SE = sqrt(s_arm²/n_arm + s_ref²/n_ref)`. Each arm's rate is the pooled/sample-weighted mean over its surviving `(eval × sample)` assertion-fraction rates (an eval with more surviving samples weighs more — not a true per-eval macro-mean), and this SE is not a properly paired test — a rough guardrail against over-reading a small Δ, not a substitute for statistical rigour. It needs at least two samples per arm to exist (a one-sample arm has no stdev, so the band is omitted and no label is shown). When `|Δ| ≤ SE`, the headline in `benchmark.md` and the terminal summary line both add a **within noise** label. The `--evalspec-fail-under` CI gate uses the **raw Δ**, not the noise-adjusted one — the label is there to keep you from shipping a noisy win, not to suppress the gate.
