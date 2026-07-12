@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import fcntl
 import os
-import platform
 import shlex
 from dataclasses import replace
 from pathlib import Path
@@ -50,29 +49,15 @@ def snapshot_exists(name: str) -> bool:
     return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
 
-def _microsandbox_installed() -> bool:
-    """Return whether the microsandbox package can be imported."""
-    try:
-        import microsandbox
-    except ImportError:
-        return False
-    return bool(microsandbox.is_installed())
+def preflight(backend: SandboxBackend | None = None) -> None:
+    """Fail fast if the host can't run sandboxed evals.
 
-
-def preflight() -> None:
-    """Fail fast if the host can't run sandboxed evals."""
-    errs: list[str] = []
-    system = platform.system()
-    if system == "Darwin":
-        if platform.machine() != "arm64":
-            errs.append("x86_64 macOS is unsupported; microsandbox needs Apple Silicon")
-    elif system == "Linux":
-        if not Path("/dev/kvm").exists():
-            errs.append("KVM not available (/dev/kvm missing)")
-    else:
-        errs.append(f"unsupported platform: {system} (need Apple Silicon or Linux+KVM)")
-    if not _microsandbox_installed():
-        errs.append("microsandbox runtime not installed — run `make evals:build`")
+    Host-readiness checks come from the resolved backend (default: microsandbox); the
+    credential check is shared across backends. Raises RuntimeError (the exit-2 signal)
+    listing every failure.
+    """
+    backend = backend or resolve_sandbox("microsandbox")
+    errs: list[str] = list(backend.preflight())
     cred_err = credential_preflight_error()
     if cred_err:
         errs.append(cred_err)

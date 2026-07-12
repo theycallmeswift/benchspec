@@ -169,9 +169,11 @@ def test_snapshot_exists_checks_microsandbox_dir(tmp_path: object, monkeypatch: 
     assert sandbox.snapshot_exists(name) is True
 
 
-def test_preflight_collects_all_failures(monkeypatch: object) -> None:
-    """Verify preflight collects all failures."""
-    monkeypatch.setattr(sandbox.platform, "system", lambda: "Windows")
+def test_preflight_collects_backend_and_credential_failures(monkeypatch: object) -> None:
+    """Preflight surfaces both backend host errors and the shared credential error."""
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(backend_mod.platform, "system", lambda: "Windows")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     with pytest.raises(RuntimeError) as exc_info:
@@ -182,12 +184,14 @@ def test_preflight_collects_all_failures(monkeypatch: object) -> None:
 
 
 def test_preflight_passes_on_supported(monkeypatch: object) -> None:
-    """Verify preflight passes on supported."""
-    monkeypatch.setattr(sandbox.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(sandbox.platform, "machine", lambda: "arm64")
+    """A supported host with a credential set passes without raising."""
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(backend_mod.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(backend_mod.platform, "machine", lambda: "arm64")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setattr(sandbox, "_microsandbox_installed", lambda: True)
+    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "installed", lambda self: True)
     sandbox.preflight()  # no raise
 
 
