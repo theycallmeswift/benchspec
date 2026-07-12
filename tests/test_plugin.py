@@ -904,6 +904,24 @@ arms = [
     assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in benchmark_markdown
 
 
+def test_sessionfinish_retains_planned_config_when_all_evals_fail(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify a fully failed run retains its configured set, runner, and arms."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills_root = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    skills_root.mkdir(parents=True)
+
+    _finish_and_summarize(tmp_path)
+
+    meta = json.loads((skills_root.parent / "meta.json").read_text())
+    assert meta["set"] == "default"
+    assert meta["runner"] == "pytest"
+    assert [arm["name"] for arm in meta["arms"]] == ["baseline", "trial"]
+
+
 def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes nested judge object."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())

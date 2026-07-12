@@ -285,6 +285,35 @@ class TestAggregateObserved:
         assert set(observed) == {"opus"}
         assert observed["opus"] == sample_0.to_observed_dict()
 
+    def test_unavailable_diagnostics_do_not_conflict_for_same_identity(self) -> None:
+        """Transient diagnostic text does not make equivalent unavailable records conflict."""
+        sample_0 = _runtime(
+            arm="opus",
+            actual_version=None,
+            actual_version_status="unavailable",
+            actual_version_error="guest probe timed out after 10 seconds",
+            sandbox=_sandbox(
+                image_digest=None,
+                image_digest_status="unavailable",
+                image_digest_error="registry request timed out",
+            ),
+        )
+        sample_1 = _runtime(
+            arm="opus",
+            actual_version=None,
+            actual_version_status="unavailable",
+            actual_version_error="guest probe connection reset",
+            sandbox=_sandbox(
+                image_digest=None,
+                image_digest_status="unavailable",
+                image_digest_error="registry returned 503",
+            ),
+        )
+
+        observed = aggregate_observed([sample_0, sample_1])
+
+        assert observed == {"opus": sample_0.to_observed_dict()}
+
     def test_multiple_arms_each_get_an_entry(self) -> None:
         """Verify each arm with a record gets its own observed entry."""
         opus = _runtime(arm="opus")

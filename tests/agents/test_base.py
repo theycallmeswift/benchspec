@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
+from evalspec.agents import base as agent_base
 from evalspec.agents.base import probe_guest_version
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
@@ -37,6 +40,15 @@ class _FakeGuestAgent:
     def for_host(cls: object) -> object:
         """Fail the test — the guest probe must never rebind to the host."""
         raise AssertionError("probe_guest_version must not call for_host()")
+
+
+class _HangingGuestBackend:
+    """A guest backend whose version command never completes on its own."""
+
+    async def guest_shell(self: object, sandbox: object, agent: object, script: str) -> str | None:
+        """Wait forever to exercise the probe's internal deadline."""
+        await asyncio.Event().wait()
+        return None
 
 
 def test_probe_guest_version_success_uses_guest_seam() -> None:
@@ -79,6 +91,22 @@ def test_probe_guest_version_unparseable_output_is_explained_failure() -> None:
     agent = _FakeGuestAgent()
 
     version, error = asyncio.run(probe_guest_version(backend, object(), agent))
+
+    assert version is None
+    assert error
+
+
+def test_probe_guest_version_times_out_as_explained_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stuck guest command is bounded and reported instead of blocking the run."""
+    monkeypatch.setattr(agent_base, "GUEST_VERSION_PROBE_TIMEOUT_SECONDS", 0.01, raising=False)
+    backend = _HangingGuestBackend()
+    agent = _FakeGuestAgent()
+
+    version, error = asyncio.run(
+        asyncio.wait_for(probe_guest_version(backend, object(), agent), timeout=0.1)
+    )
 
     assert version is None
     assert error

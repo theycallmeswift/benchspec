@@ -10,10 +10,11 @@ import pytest
 from evalspec import workspace
 from evalspec.arms import Arm
 from evalspec.backend import FingerprintInputs
-from evalspec.discovery import EvalCase
+from evalspec.discovery import EnvConfig, EvalCase
 from evalspec.execution import run_eval_arm
 from evalspec.provenance import ImageIdentity
 from evalspec.runner import RunResult
+from evalspec.sandbox import ensure_snapshot
 from evalspec.schema import SchemaError
 
 TRIAL = Arm("trial", "claude-code", "opus")
@@ -2055,3 +2056,107 @@ def test_capture_error_on_real_arm_raises_loudly(
 
     run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
     assert not (run_dir / "provenance.json").exists()  # failed loudly, wrote nothing
+
+
+def test_provenance_json_survives_binder_failure_after_sandbox_use(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """A sandbox that ran remains observed when later binding aborts the arm."""
+    from evalspec.binder import BinderAuthError
+
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    def bind(text: object) -> NoReturn:
+        """Simulate an authentication failure after the sandbox task completed."""
+        raise BinderAuthError("gemini api key rejected")
+
+    with pytest.raises(BinderAuthError):
+        run_eval_arm(
+            eval_case, TRIAL, workdir, {}, tmp_path,
+            today="2099-01-01", repo_root=tmp_path, sample=0,
+            session_factory=_live_sandbox_session_factory(object(), result),
+            grade=_grade_all_pass, bind=bind,
+        )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    provenance = json.loads((run_dir / "provenance.json").read_text())
+    assert provenance["actual_version"] == "1.2.3"
+    assert provenance["sandbox"]["snapshot"] == "snap"
+
+
+def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Recorded fingerprint inputs match the environment used for snapshot selection."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    class SnapshotAgent(_FakeAgent):
+        """Agent double exposing snapshot naming identity."""
+
+        id = "claude-code"
+
+        def version(self) -> str:
+            """Return a stable host version for snapshot naming."""
+            return "1.2.3"
+
+    @dataclass
+    class EnvironmentBackend(_FakeBackend):
+        """Backend double whose snapshot fingerprint reflects its environment input."""
+
+        def cache_fingerprint(self, agent: object, env: EnvConfig) -> str:
+            """Use the base image as an observable snapshot cache identity."""
+            return str(env.base_image)
+
+        def snapshot_exists(self, name: str) -> bool:
+            """Treat every computed snapshot as already built."""
+            return True
+
+        def fingerprint_inputs(self, agent: object, env: EnvConfig) -> FingerprintInputs:
+            """Expose the environment used when provenance is captured."""
+            return FingerprintInputs(
+                backend_id=self.id,
+                base_image_ref=str(env.base_image),
+                install_fingerprint="deadbeef1234",
+                env_script_sha256=_CANNED_FINGERPRINT.env_script_sha256,
+                digest=str(env.base_image),
+            )
+
+    agent = SnapshotAgent()
+    backend = EnvironmentBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    environments = iter(
+        [EnvConfig(base_image="snapshot-image"), EnvConfig(base_image="changed-image")]
+    )
+
+    def resolve_environment(repo_root: object) -> EnvConfig:
+        """Return a changed config if production resolves the environment twice."""
+        return next(environments)
+
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.execution.ensure_snapshot", ensure_snapshot)
+    monkeypatch.setattr("evalspec.sandbox.resolve_environment_config", resolve_environment)
+    monkeypatch.setattr("evalspec.execution.resolve_environment_config", resolve_environment)
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=_live_sandbox_session_factory(object(), result),
+        grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    provenance = json.loads((run_dir / "provenance.json").read_text())
+    assert provenance["sandbox"]["snapshot"].endswith("-snapshot-image")
+    assert provenance["sandbox"]["base_image_ref"] == "snapshot-image"
