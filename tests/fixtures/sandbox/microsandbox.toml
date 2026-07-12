@@ -1,0 +1,12 @@
+# tests/fixtures/sandbox/microsandbox.toml
+# Accept-and-build fixture: a single microsandbox set that parses and resolves cleanly.
+#   evalspec run           --config tests/fixtures/sandbox/microsandbox.toml   -> resolves MicrosandboxBackend
+#   evalspec sandbox:build --config tests/fixtures/sandbox/microsandbox.toml   -> builds the snapshot
+[tool.evalspec]
+default-set = "micro"
+
+[tool.evalspec.sets.micro]
+model = "sonnet"
+sandbox = "microsandbox"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]

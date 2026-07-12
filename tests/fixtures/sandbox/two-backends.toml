@@ -1,0 +1,21 @@
+# tests/fixtures/sandbox/two-backends.toml
+# Fail-fast fixture. This file contains an unsupported `sandbox = "docker"` set, and
+# validation is eager in parse_sets, so LOADING OR SELECTING ANY set in this file exits 2:
+#   evalspec run        --config tests/fixtures/sandbox/two-backends.toml   -> exit 2
+#   evalspec run --set micro --config tests/fixtures/sandbox/two-backends.toml -> exit 2 (still)
+#   evalspec sandbox:build --config tests/fixtures/sandbox/two-backends.toml -> exit 2
+# The docker set is rejected at config resolution, before any paid task arm executes.
+[tool.evalspec]
+default-set = "micro"
+
+[tool.evalspec.sets.micro]
+model = "sonnet"
+sandbox = "microsandbox"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]
+
+[tool.evalspec.sets.dock]
+model = "sonnet"
+sandbox = "docker"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]
