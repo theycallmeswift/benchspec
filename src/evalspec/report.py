@@ -206,12 +206,23 @@ def discover_eval_dirs(skills_root: Path) -> list[Path]:
     )
 
 
-def index_rows(skill_dir: Path, skill: str) -> list[dict]:
+def index_rows(
+    skill_dir: Path, skill: str, arm_axes: dict[str, dict] | None = None
+) -> list[dict]:
     """Flat per-sample rows for the iteration-level index.jsonl.
 
     Emits one line per eval sample. An aggregator reads these without tree-walking;
     everything here is also in the per-sample artifacts.
+
+    `arm_axes` maps an arm name to its three core configured axes
+    (`{harness, model, effort}`) — built by the caller from `planned_arms(run_set)`.
+    When an arm resolves in the lookup, those three axes are denormalized onto its
+    rows so a reader learns them without a meta.json join (spec 104–110); nothing
+    heavier (sandbox/version/provenance) belongs here. A configured arm is always
+    present in the lookup; a row whose arm is somehow absent simply omits the axes
+    rather than emitting misleading nulls.
     """
+    axes = arm_axes or {}
     rows: list[dict] = []
     eval_dirs = sorted(
         entry for entry in skill_dir.iterdir() if entry.is_dir() and entry.name.startswith("eval-")
@@ -221,18 +232,31 @@ def index_rows(skill_dir: Path, skill: str) -> list[dict]:
             (entry for entry in eval_dir.iterdir() if entry.is_dir()),
             key=lambda entry: entry.name,
         ):
+            arm_meta = axes.get(arm_dir.name)
             for sample_dir in _sample_dirs(arm_dir):
                 grading = _load_json(sample_dir / "grading.json")
                 if grading is None:
                     continue
                 timing = _load_json(sample_dir / "timing.json") or {}
                 assertions = grading.get("assertions", [])
+                # Core axes sit right after `arm` so the row reads config-first, then
+                # results. Omitted entirely for an unrecognized arm, never faked as null.
+                core_axes = (
+                    {
+                        "harness": arm_meta.get("harness"),
+                        "model": arm_meta.get("model"),
+                        "effort": arm_meta.get("effort"),
+                    }
+                    if arm_meta is not None
+                    else {}
+                )
                 rows.append(
                     {
                         "skill": skill,
                         "kind": "eval",
                         "eval_id": eval_dir.name.removeprefix("eval-"),
                         "arm": arm_dir.name,
+                        **core_axes,
                         "sample": int(sample_dir.name.removeprefix("sample-")),
                         "errored": bool(grading.get("errored")),
                         "passed": sum(1 for assertion in assertions if assertion.get("passed")),
@@ -355,6 +379,39 @@ def _matrix_table(benchmark: dict) -> list[str]:
     return lines
 
 
+def _provenance_lines(benchmark: dict) -> list[str]:
+    """Render a compact Provenance section below the matrix.
+
+    One line per configured arm (the matrix columns): its observed guest version,
+    snapshot, and image digest as available. Configured-but-unobserved arms — those
+    with no persisted runtime record — are labeled `not observed` rather than shown
+    with fabricated identity (spec 174, 213). Adds no matrix columns.
+    """
+    arms = benchmark["arms"]
+    if not arms:
+        return []
+    observed = benchmark.get("observed_arms") or {}
+    lines = ["## Provenance", ""]
+    for name in arms:
+        entry = observed.get(name)
+        if entry is None:
+            lines.append(f"- **{name}**: not observed")
+            continue
+        parts = []
+        version = entry.get("actual_version")
+        parts.append(f"version `{version}`" if version else "version unavailable")
+        sandbox = entry.get("sandbox") or {}
+        snapshot = sandbox.get("snapshot")
+        if snapshot:
+            parts.append(f"snapshot `{snapshot}`")
+        digest = sandbox.get("image_digest")
+        if digest:
+            parts.append(f"digest `{digest}`")
+        lines.append(f"- **{name}**: " + " · ".join(parts))
+    lines.append("")
+    return lines
+
+
 def _format_markdown(benchmark: dict) -> str:
     """Render benchmark results as a Markdown report."""
     arms = benchmark["arms"]
@@ -417,6 +474,8 @@ def _format_markdown(benchmark: dict) -> str:
 
         lines.append("")
 
+    lines += _provenance_lines(benchmark)
+
     return "\n".join(lines)
 
 
@@ -434,6 +493,10 @@ def build_benchmark(
     *,
     baseline: str | None = None,
     arm_meta: dict | None = None,
+    planned: list[dict] | None = None,
+    observed_arms: dict | None = None,
+    runner: str | None = None,
+    binder: dict | None = None,
 ) -> dict:
     """Build the machine-readable run-level benchmark report object.
 
@@ -445,9 +508,19 @@ def build_benchmark(
         arm_meta: Per-arm run config (harness/model/effort/env/harness_args), keyed by
             arm name. Its keys also declare the arm column order and force a
             configured-but-absent arm to appear as an empty column.
+        planned: The complete configured arm roster in `planned_arms` shape — the same
+            planned metadata carried by meta.json. Configured-but-unobserved arms are
+            listed here (and remain empty matrix columns) but acquire no observed entry.
+        observed_arms: Aggregated per-arm runtime provenance (the `aggregate_observed`
+            mapping). Only arms that actually resolved and used a snapshot appear;
+            provenance is never fabricated for an absent arm (spec 112–115). Defaults
+            to empty so the per-skill fail-under build needs no provenance.
+        runner: The run's runner (e.g. `pytest`), or None for a trigger-only run.
+        binder: The fixed run-level binder transport identity (no key material).
 
     Returns:
-        The benchmark dict: format_version, label, baseline, max_samples, roster, arms.
+        The benchmark dict: format_version, label, baseline, max_samples, roster,
+        arms, runner, binder, planned_arms, observed_arms.
     """
     configured = list(arm_meta) if arm_meta else []
     # Require a graded sample so a stray subdir (__pycache__, editor temp) never becomes
@@ -506,12 +579,18 @@ def build_benchmark(
     )
 
     return {
-        "format_version": 2,
+        "format_version": 3,
         "label": label,
         "baseline": baseline,
         "max_samples": max_samples,
         "roster": roster,
         "arms": arm_stats,
+        "runner": runner,
+        "binder": binder,
+        # Planned config vs observed execution, mirroring meta.json v2: `planned_arms` is
+        # the full configured roster; `observed_arms` holds only arms with a runtime record.
+        "planned_arms": planned or [],
+        "observed_arms": observed_arms or {},
     }
 
 
@@ -522,6 +601,10 @@ def write_benchmark(
     *,
     baseline: str | None = None,
     arm_meta: dict | None = None,
+    planned: list[dict] | None = None,
+    observed_arms: dict | None = None,
+    runner: str | None = None,
+    binder: dict | None = None,
 ) -> dict:
     """Build over eval_dirs then write out_dir/benchmark.{json,md}.
 
@@ -531,11 +614,24 @@ def write_benchmark(
         label: Human-readable report label (the run/iteration name).
         baseline: Arm name every other arm's Δ is measured against, or None.
         arm_meta: Per-arm run config keyed by arm name.
+        planned: The complete configured arm roster (`planned_arms` shape).
+        observed_arms: Aggregated per-arm runtime provenance; absent arms have none.
+        runner: The run's runner, or None for a trigger-only run.
+        binder: The fixed run-level binder transport identity (no key material).
 
     Returns:
         The benchmark dict (also written to disk).
     """
-    benchmark = build_benchmark(eval_dirs, label, baseline=baseline, arm_meta=arm_meta)
+    benchmark = build_benchmark(
+        eval_dirs,
+        label,
+        baseline=baseline,
+        arm_meta=arm_meta,
+        planned=planned,
+        observed_arms=observed_arms,
+        runner=runner,
+        binder=binder,
+    )
     (out_dir / "benchmark.json").write_text(json.dumps(benchmark, indent=2) + "\n")
     (out_dir / "benchmark.md").write_text(_format_markdown(benchmark))
     return benchmark

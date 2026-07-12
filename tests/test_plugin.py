@@ -1338,6 +1338,63 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
     assert sum(1 for record in lines if record["kind"] == "eval") == 2
 
 
+def test_index_jsonl_rows_carry_core_axes(tmp_path: object, monkeypatch: object) -> None:
+    """Verify index.jsonl rows gain harness/model/effort from the planned arm roster."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    seed_arm(skills / "archive", "alpha", "trial", passes=1, total=1)
+    seed_arm(skills / "archive", "alpha", "baseline", passes=0, total=1)
+
+    _finish_and_summarize(tmp_path)
+
+    rows = [json.loads(line) for line in (skills.parent / "index.jsonl").read_text().splitlines()]
+    trial_row = next(row for row in rows if row["arm"] == "trial")
+    assert trial_row["harness"] == "claude-code"
+    assert trial_row["model"] == "opus"  # trial overrides the set default
+    assert "effort" in trial_row
+    baseline_row = next(row for row in rows if row["arm"] == "baseline")
+    assert baseline_row["model"] == "sonnet"  # inherits the set default
+
+
+def test_benchmark_json_carries_runner_binder_observed(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify the run-level benchmark.json carries runner + binder + observed_arms."""
+    # These must agree with meta.json written by the same sessionfinish: the observed
+    # provenance is aggregated once and threaded into both artifacts.
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
+    trial_sample = seed_arm(skills / "archive", "alpha", "trial", passes=1, total=1)
+    _seed_provenance(trial_sample, "trial", actual_version="1.2.3")
+    seed_arm(skills / "archive", "alpha", "baseline", passes=0, total=1)  # no provenance.json
+
+    _finish_and_summarize(tmp_path)
+
+    iteration_root = skills.parent
+    benchmark = json.loads((iteration_root / "benchmark.json").read_text())
+    meta = json.loads((iteration_root / "meta.json").read_text())
+
+    assert benchmark["format_version"] == 3
+    assert benchmark["runner"] == meta["runner"] == "pytest"
+    assert benchmark["binder"] == meta["binder"]
+    assert benchmark["binder"]["provider"] == "gemini"
+    # Observed provenance agrees with meta.json and excludes the unrun baseline arm.
+    assert benchmark["observed_arms"] == meta["observed_arms"]
+    assert set(benchmark["observed_arms"]) == {"trial"}
+    assert "absent" not in benchmark["observed_arms"]
+    # `absent`/`baseline` still valid empty matrix columns; provenance simply not fabricated.
+    assert "baseline" in benchmark["arms"]
+    assert {arm["name"] for arm in benchmark["planned_arms"]} == {"baseline", "trial"}
+    # The markdown Provenance section labels the unobserved baseline arm.
+    markdown = (iteration_root / "benchmark.md").read_text()
+    assert "## Provenance" in markdown
+    assert "- **baseline**: not observed" in markdown
+
+
 def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:
     """Verify fail under sets exit status."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
@@ -1469,7 +1526,7 @@ def test_sessionfinish_writes_single_run_level_benchmark(
     assert not (skills / "archive" / "benchmark.json").exists()
     assert not (skills / "ingest" / "benchmark.json").exists()
     benchmark = json.loads((iteration_root / "benchmark.json").read_text())
-    assert benchmark["format_version"] == 2
+    assert benchmark["format_version"] == 3
     assert {(entry["group"], entry["eval_id"]) for entry in benchmark["roster"]} == {
         ("archive", "alpha"),
         ("ingest", "beta"),

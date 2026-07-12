@@ -627,6 +627,14 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         if run_set
         else None
     )
+    # Planned roster (same builder meta.json uses) drives the benchmark's planned/observed
+    # split and the three core axes denormalized onto each index.jsonl row.
+    planned = report.planned_arms(run_set)
+    arm_axes = {
+        arm["name"]: {"harness": arm["harness"], "model": arm["model"], "effort": arm["effort"]}
+        for arm in planned
+    }
+    runner = run_set.runner if run_set else None
 
     # One run-level benchmark at the iteration root (beside meta.json / index.jsonl).
     # Skipped when no eval-* dirs were discovered, so an eval-less run writes no artifact.
@@ -639,6 +647,10 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             label=iteration,
             baseline=baseline,
             arm_meta=arm_meta,
+            planned=planned,
+            observed_arms=observed_arms,
+            runner=runner,
+            binder=binder_identity(),
         )
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
@@ -678,7 +690,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
                         )
                         if session.exitstatus == 0:
                             session.exitstatus = 1
-        index_lines += [json.dumps(row) for row in report.index_rows(skill_dir, skill)]
+        index_lines += [
+            json.dumps(row) for row in report.index_rows(skill_dir, skill, arm_axes)
+        ]
     if index_lines:
         (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
     if binder_degraded_total:
