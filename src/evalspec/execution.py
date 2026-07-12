@@ -20,11 +20,13 @@ from pathlib import Path
 
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
+from evalspec.agents.base import probe_guest_version
 from evalspec.arms import Arm, expand_env
 from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
-from evalspec.discovery import EvalCase
+from evalspec.discovery import EvalCase, resolve_environment_config
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
+from evalspec.provenance import RuntimeProvenance, SandboxProvenance
 from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
 from evalspec.sandbox import (
@@ -69,6 +71,11 @@ class _ArmRun:
     total_cache_creation: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    # Guest task-harness version probed inside the live snapshot. The default is the
+    # not-probed sentinel: version None + a non-empty reason, which the available/
+    # unavailable contract accepts as an explained-unavailable field.
+    guest_version: str | None = None
+    guest_version_error: str | None = "guest task-harness version not probed"
 
 
 def _turn_transcript(*, prompt: str, result: object, tree: str) -> dict:
@@ -260,6 +267,17 @@ async def _run_arm_turns(
         harness_args=harness_args,
         backend=backend,
     ) as run:
+        # Probe the task-harness binary INSIDE the live snapshot before the task runs, so
+        # provenance records the version actually installed (never the host binding or the
+        # `latest` selector). `run` is the session's bound `_run` method, so `run.__self__`
+        # is the session and `._sandbox` the live guest; a plain-closure fake `run` (unit
+        # tests) has no `__self__`, so the probe is skipped rather than crashing.
+        live_sandbox = getattr(getattr(run, "__self__", None), "_sandbox", None)
+        if live_sandbox is not None:
+            version, version_error = await probe_guest_version(backend, live_sandbox, agent)
+            run_acc.guest_version = version
+            run_acc.guest_version_error = version_error
+
         # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
         # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
         # host side of the same mount.
@@ -291,6 +309,61 @@ async def _run_arm_turns(
         run_acc.raw = result.raw
 
     return run_acc
+
+
+def _capture_sandbox_provenance(
+    agent: object, backend: object, snapshot: str, repo_root: Path
+) -> SandboxProvenance | None:
+    """Assemble the arm's static sandbox identity, or None if it cannot be read.
+
+    Reads the fingerprint from the backend's shared `fingerprint_inputs` helper (never a
+    re-hash or a snapshot-name parse) and the native image digest from the backend's typed
+    `image_identity`. `image_identity` runs its own `asyncio.run` internally, so this is
+    called from the synchronous body — never nested inside the arm's event loop. Any
+    failure to read the fingerprint inputs yields None rather than aborting a run whose
+    graded result is otherwise complete.
+    """
+    try:
+        env = resolve_environment_config(repo_root)
+        fingerprint = backend.fingerprint_inputs(agent, env)
+        identity = backend.image_identity(snapshot)
+        return SandboxProvenance.from_image_identity(
+            backend=backend.id,
+            snapshot=snapshot,
+            fingerprint=fingerprint.digest,
+            base_image_ref=fingerprint.base_image_ref,
+            install_fingerprint=fingerprint.install_fingerprint,
+            env_script_sha256=fingerprint.env_script_sha256,
+            image_identity=identity,
+        )
+    except Exception:
+        return None
+
+
+def _build_runtime_provenance(
+    arm_name: str, sandbox_prov: SandboxProvenance | None, arm_run: _ArmRun
+) -> RuntimeProvenance | None:
+    """Fold the guest version probe onto the static sandbox identity into one record.
+
+    Returns None when the sandbox identity could not be captured (no partial record is
+    persisted). The guest version follows the available/unavailable contract: a probed
+    version is `available` with a null error; a missing one is `unavailable` with the
+    probe's non-empty explanation.
+    """
+    if sandbox_prov is None:
+        return None
+    if arm_run.guest_version is not None:
+        version, status, error = arm_run.guest_version, "available", None
+    else:
+        version, status = None, "unavailable"
+        error = arm_run.guest_version_error or "guest task-harness version not probed"
+    return RuntimeProvenance(
+        arm=arm_name,
+        actual_version=version,
+        actual_version_status=status,
+        actual_version_error=error,
+        sandbox=sandbox_prov,
+    )
 
 
 def run_eval_arm(
@@ -332,6 +405,10 @@ def run_eval_arm(
     agent = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
     snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
+    # Static sandbox identity (fingerprint inputs + native image digest) is read here in the
+    # sync body — `image_identity` runs its own asyncio.run and must not nest inside the
+    # per-arm loop below. The guest version probe is folded in after the session returns.
+    sandbox_prov = _capture_sandbox_provenance(agent, backend, snapshot, repo_root)
 
     # History block (context) first, then the one graded prompt — both rendered with the
     # same `today`. render_history emits a trailing blank line, so the prompt follows cleanly.
@@ -435,6 +512,14 @@ def run_eval_arm(
         + "\n"
     )
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
+    # Runtime provenance for this arm's resolved snapshot/runtime, beside the sample so
+    # xdist workers and offline analysis retain it; absent only when the sandbox identity
+    # could not be captured (e.g. a stubbed backend in unit tests).
+    provenance = _build_runtime_provenance(arm_name, sandbox_prov, arm_run)
+    if provenance is not None:
+        (run_dir / "provenance.json").write_text(
+            json.dumps(provenance.to_disk_dict(), indent=2) + "\n"
+        )
     (run_dir / "transcript.json").write_text(json.dumps(arm_run.transcript, indent=2) + "\n")
     # One raw stream for the arm, preceded by a {TURN_DELIM: 1} delimiter line so the
     # structured trajectory regenerates from it deterministically (trajectory_from_session)
