@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import logging
 import platform
@@ -35,22 +36,31 @@ logger = logging.getLogger(__name__)
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
 BASE_IMAGE = "ubuntu:latest"
+# The only implemented backend today; the single source other modules default to.
+DEFAULT_SANDBOX = "microsandbox"
 # Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
 VM_MEMORY_MIB = 2048
 
 
+@functools.cache
 def resolve_image_digest(base_image: str) -> str:
     """Resolve a (possibly floating) base-image tag to a content digest.
 
     A moved upstream tag (`ubuntu:latest` re-pointed) yields a new digest, so the snapshot
     fingerprint changes and the VM rebuilds instead of silently reusing a stale image.
 
+    Memoized per `base_image` for the life of the process: `cache_fingerprint` and the
+    warm-cache `snapshot_exists` check both resolve the digest on every call, and shelling
+    out to `skopeo inspect` (up to a 60s timeout) on each one is wasteful for a value that
+    cannot change mid-run.
+
     This is the seam tests monkeypatch, so the suite never touches the network. In
     production it shells to `skopeo inspect`. If skopeo is unavailable or fails, it falls
     back to the tag string — but does so LOUDLY (a logged warning), never silently
     pretending an unpinned tag is pinned, so an operator can see that digest-pinning is
-    inactive on this host.
+    inactive on this host. Because the result is cached, that warning fires once per
+    distinct `base_image` per process, not on every call.
     """
     if shutil.which("skopeo") is None:
         logger.warning(
@@ -142,7 +152,7 @@ class SandboxBackend(Protocol):
 class MicrosandboxBackend:
     """The microsandbox implementation of `SandboxBackend`."""
 
-    id = "microsandbox"
+    id = DEFAULT_SANDBOX
 
     def installed(self: object) -> bool:
         """Return whether the microsandbox package can be imported and is installed."""
@@ -279,6 +289,8 @@ class MicrosandboxBackend:
 
         volumes = {GUEST_WORKDIR: Volume.bind(str(host_workdir), readonly=False)}
         if host_repo_root is not None:
+            # The project mounts read-only so a per-eval setup.sh can install the
+            # suite-specific skill without risking a write back into the host checkout.
             volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)
         volumes.update(extra_volumes(agent, Volume))
         return await Sandbox.create(
@@ -322,7 +334,7 @@ class MicrosandboxBackend:
         return sandbox
 
 
-_REGISTRY: dict[str, type] = {"microsandbox": MicrosandboxBackend}
+_REGISTRY: dict[str, type] = {DEFAULT_SANDBOX: MicrosandboxBackend}
 
 # Known-but-unimplemented backends: named so the fail-fast message can be specific.
 _NOT_IMPLEMENTED = {"docker": "Docker is not implemented"}

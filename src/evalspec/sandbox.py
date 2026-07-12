@@ -13,7 +13,7 @@ from pathlib import Path
 from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
 from evalspec.arms import parse_sets, resolve_set
-from evalspec.backend import SandboxBackend, resolve_sandbox
+from evalspec.backend import BASE_IMAGE, DEFAULT_SANDBOX, SandboxBackend, resolve_sandbox
 from evalspec.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from evalspec.room import (
     changed_paths,
@@ -49,7 +49,7 @@ def preflight(backend: SandboxBackend | None = None) -> None:
     credential check is shared across backends. Raises RuntimeError (the exit-2 signal)
     listing every failure.
     """
-    backend = backend or resolve_sandbox("microsandbox")
+    backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errs: list[str] = list(backend.preflight())
     cred_err = credential_preflight_error()
     if cred_err:
@@ -450,7 +450,7 @@ def route_in_sandbox(
     # Resolve agent + snapshot up-front: a missing snapshot triggers build_snapshot
     # → asyncio.run, which can't nest inside the asyncio.run below.
     agent = make_agent()
-    backend = resolve_sandbox("microsandbox")
+    backend = resolve_sandbox(DEFAULT_SANDBOX)
     snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
     return asyncio.run(
         _route_in_sandbox_async(
@@ -518,7 +518,7 @@ def cli_build(
         resolved = resolve_set(rawsets, default_set, set_name=set_name)
         backend = resolve_sandbox(resolved.sandbox)
     else:
-        backend = resolve_sandbox("microsandbox")
+        backend = resolve_sandbox(DEFAULT_SANDBOX)
     preflight(backend)
     agent = make_agent()
     env = resolve_environment_config(root)
@@ -533,8 +533,6 @@ def cli_build(
 
 def _display_base_image(env: EnvConfig) -> str:
     """Return the base image label for the build message (default when unset)."""
-    from evalspec.backend import BASE_IMAGE
-
     return env.base_image or BASE_IMAGE
 
 

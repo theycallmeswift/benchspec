@@ -555,7 +555,9 @@ def test_resolve_set_defaults_runner_and_sandbox() -> None:
             }
         )
     )
+
     resolved = resolve_set(rawsets, default)
+
     assert resolved.runner == "pytest"
     assert resolved.sandbox == "microsandbox"
 
@@ -575,7 +577,9 @@ def test_resolve_set_carries_declared_runner_and_sandbox() -> None:
             }
         )
     )
+
     resolved = resolve_set(rawsets, default)
+
     assert resolved.runner == "pytest"
     assert resolved.sandbox == "microsandbox"
 
@@ -589,6 +593,7 @@ def test_two_backends_fixture_fails_whole_file() -> None:
     raw = tomllib.loads(
         Path("tests/fixtures/sandbox/two-backends.toml").read_text(encoding="utf-8")
     )
+
     with pytest.raises(SchemaError, match="docker.*not implemented"):
         parse_sets(raw["tool"]["evalspec"])
 
@@ -602,6 +607,8 @@ def test_microsandbox_fixture_parses_and_resolves() -> None:
     raw = tomllib.loads(
         Path("tests/fixtures/sandbox/microsandbox.toml").read_text(encoding="utf-8")
     )
+
     rawsets, default = parse_sets(raw["tool"]["evalspec"])
     resolved = resolve_set(rawsets, default)
+
     assert resolved.sandbox == "microsandbox"

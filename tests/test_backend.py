@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from evalspec import backend
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.discovery import EnvConfig
 from evalspec.schema import SchemaError
+
+# Captured before the autouse fixture below ever runs, so this always refers to the real
+# `lru_cache`-wrapped function — not whatever stub a given test's `monkeypatch.setattr`
+# swaps onto the `backend.resolve_image_digest` module attribute.
+_real_resolve_image_digest = backend.resolve_image_digest
 
 
 @pytest.fixture(autouse=True)
@@ -55,11 +62,33 @@ def test_cache_fingerprint_changes_with_resolved_image_digest(monkeypatch: objec
     """A moved base-image tag (new resolved digest) changes the fingerprint."""
     mb = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(base_image="ubuntu:latest")
+
     monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:aaaa")
     first = mb.cache_fingerprint(_agent(), env)
     monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:bbbb")
     second = mb.cache_fingerprint(_agent(), env)
+
     assert first != second
+
+
+def test_resolve_image_digest_memoizes_per_base_image(monkeypatch: object) -> None:
+    """`resolve_image_digest` shells out to skopeo at most once per distinct base image."""
+    _real_resolve_image_digest.cache_clear()
+    call_count = 0
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal call_count
+        call_count += 1
+        return subprocess.CompletedProcess(args=(), returncode=0, stdout="sha256:cafe\n", stderr="")
+
+    monkeypatch.setattr(backend.shutil, "which", lambda name: "/usr/bin/skopeo")
+    monkeypatch.setattr(backend.subprocess, "run", fake_run)
+
+    first = _real_resolve_image_digest("ubuntu:latest")
+    second = _real_resolve_image_digest("ubuntu:latest")
+
+    assert first == second == "sha256:cafe"
+    assert call_count == 1
 
 
 def test_cache_fingerprint_stable_when_digest_stable(monkeypatch: object) -> None:
@@ -70,13 +99,14 @@ def test_cache_fingerprint_stable_when_digest_stable(monkeypatch: object) -> Non
     assert mb.cache_fingerprint(_agent(), env) == mb.cache_fingerprint(_agent(), env)
 
 
-def test_cache_fingerprint_changes_with_install_fingerprint() -> None:
+def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object) -> None:
     """A changed agent install fingerprint changes the cache fingerprint."""
     mb = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(script=b"echo one\n", script_path="s.sh")
     agent_a = _agent()
     agent_b = _agent()
-    agent_b.install_fingerprint = lambda: "installer-rev-9"  # type: ignore[method-assign]
+    monkeypatch.setattr(agent_b, "install_fingerprint", lambda: "installer-rev-9")
+
     assert mb.cache_fingerprint(agent_a, env) != mb.cache_fingerprint(agent_b, env)
 
 
@@ -93,7 +123,9 @@ def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None
     mb = backend.resolve_sandbox("microsandbox")
     monkeypatch.setattr(backend.platform, "system", lambda: "Windows")
     monkeypatch.setattr(mb, "installed", lambda: False)
+
     errs = mb.preflight()
+
     assert any("unsupported platform" in e for e in errs)
     assert any("microsandbox runtime not installed" in e for e in errs)
 
@@ -104,6 +136,7 @@ def test_microsandbox_preflight_clean_on_supported_host(monkeypatch: object) -> 
     monkeypatch.setattr(backend.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(backend.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(mb, "installed", lambda: True)
+
     assert mb.preflight() == []
 
 

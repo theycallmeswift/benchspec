@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from evalspec.agents import known_harnesses
-from evalspec.backend import resolve_sandbox
+from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.schema import SchemaError
 
 
@@ -39,7 +39,6 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 SUPPORTED_RUNNERS = {"pytest"}
 _DEFAULT_RUNNER = "pytest"
-_DEFAULT_SANDBOX = "microsandbox"
 
 
 @dataclass(frozen=True)
@@ -50,7 +49,7 @@ class Set:
     arms: list[Arm]
     baseline: str | None
     runner: str = _DEFAULT_RUNNER
-    sandbox: str = _DEFAULT_SANDBOX
+    sandbox: str = DEFAULT_SANDBOX
 
 
 @dataclass(frozen=True)
@@ -62,7 +61,7 @@ class RawSet:
     raw_arms: list[dict]
     baseline: str | None
     runner: str = _DEFAULT_RUNNER
-    sandbox: str = _DEFAULT_SANDBOX
+    sandbox: str = DEFAULT_SANDBOX
 
 
 def _arm_name_from_model(model: str) -> str:
@@ -160,7 +159,7 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
                 f"{where}: unsupported runner `{runner}` (supported: {sorted(SUPPORTED_RUNNERS)})"
             )
 
-        sandbox_name = body.get("sandbox", _DEFAULT_SANDBOX)
+        sandbox_name = body.get("sandbox", DEFAULT_SANDBOX)
         # resolve_sandbox raises SchemaError on docker/unknown with the specific
         # "not implemented" wording; re-raise with the set's `where` prefix so the
         # message names the offending [tool.evalspec.sets.<name>] (spec example).

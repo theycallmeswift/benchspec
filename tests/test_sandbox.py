@@ -7,6 +7,7 @@ from typing import NoReturn
 
 import pytest
 
+from evalspec import backend as backend_mod
 from evalspec import sandbox
 from evalspec.agents.base import FIXED_SKILLS_HOME
 from evalspec.agents.claude import ClaudeCodeAgent
@@ -25,8 +26,6 @@ def _claude_agent() -> object:
 @pytest.fixture(autouse=True)
 def _stub_image_digest(monkeypatch: object) -> None:
     """Keep every sandbox test off the network when the backend resolves an image digest."""
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(
         backend_mod, "resolve_image_digest", lambda image: f"sha256:stub-{image}"
     )
@@ -105,8 +104,6 @@ def _route_via_fake_vm(
             """Stop."""
             return None
 
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
     monkeypatch.setattr(sandbox, "make_agent", agent_factory)
 
@@ -129,8 +126,6 @@ def _route_via_fake_vm(
 
 def test_snapshot_name_carries_backend_id() -> None:
     """The snapshot name is prefixed with the backend id."""
-    from evalspec import backend as backend_mod
-
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     mb = backend_mod.resolve_sandbox("microsandbox")
     name = sandbox.snapshot_name(agent, EnvConfig(), backend=mb)
@@ -139,8 +134,6 @@ def test_snapshot_name_carries_backend_id() -> None:
 
 def test_snapshot_name_changes_when_base_image_changes() -> None:
     """A different base image changes the snapshot name."""
-    from evalspec import backend as backend_mod
-
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     mb = backend_mod.resolve_sandbox("microsandbox")
     base = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"), backend=mb)
@@ -151,8 +144,6 @@ def test_snapshot_name_changes_when_base_image_changes() -> None:
 
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
     """Different environment script bytes change the snapshot name."""
-    from evalspec import backend as backend_mod
-
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     mb = backend_mod.resolve_sandbox("microsandbox")
     base = sandbox.snapshot_name(
@@ -166,8 +157,6 @@ def test_snapshot_name_changes_when_script_bytes_change() -> None:
 
 def test_preflight_collects_backend_and_credential_failures(monkeypatch: object) -> None:
     """Preflight surfaces both backend host errors and the shared credential error."""
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(backend_mod.platform, "system", lambda: "Windows")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
@@ -186,8 +175,6 @@ def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> Non
     a regression that inlines the old Darwin/KVM/installed checks would produce
     plausible-looking message text but never touch this sentinel, so it would fail here.
     """
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(
         backend_mod.MicrosandboxBackend, "preflight", lambda self: ["SENTINEL_HOST_ERR"]
     )
@@ -204,8 +191,6 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch:
     (dispatch AND the shared credential check are both wired, independently of each
     other).
     """
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(backend_mod.MicrosandboxBackend, "preflight", lambda self: [])
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
@@ -216,8 +201,6 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch:
 
 def test_preflight_passes_on_supported(monkeypatch: object) -> None:
     """A supported host with a credential set passes without raising."""
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(backend_mod.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(backend_mod.platform, "machine", lambda: "arm64")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
@@ -228,8 +211,6 @@ def test_preflight_passes_on_supported(monkeypatch: object) -> None:
 
 def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
     """A present snapshot is returned without a build."""
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "snapshot_exists", lambda name: True)
     built: list = []
@@ -242,8 +223,6 @@ def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path:
 
 def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: object) -> None:
     """A missing snapshot is built exactly once under the lock."""
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     states = iter([False, False])  # missing before lock, still missing inside
     monkeypatch.setattr(mb, "snapshot_exists", lambda name: next(states))
@@ -257,8 +236,6 @@ def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: obje
 
 def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path: object) -> None:
     """The env config from repo_root reaches both the snapshot name and the build."""
-    from evalspec import backend as backend_mod
-
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
@@ -284,8 +261,6 @@ def test_cli_build_resolves_environment_from_repo_root(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Bare cli_build reads its environment config from the given repo_root, not cwd."""
-    from evalspec import backend as backend_mod
-
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(
@@ -310,8 +285,6 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """A microsandbox set drives the real cli_build path to a backend build call."""
-    from evalspec import backend as backend_mod
-
     (tmp_path / "pyproject.toml").write_text(
         "[tool.evalspec]\n"
         'default-set = "micro"\n'
@@ -414,8 +387,6 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         fake.create_kwargs = kwargs
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -447,8 +418,6 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
     async def boom(**kwargs: object) -> NoReturn:
         """Boom."""
         raise RuntimeError("boot failed")
-
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", boom)
@@ -678,8 +647,6 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         """Fake create."""
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -710,7 +677,6 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
 def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
     """Verify snapshot artifact shas returns none on shell failure."""
     # Failed snapshots return None, while genuinely empty successful snapshots return {}.
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -745,8 +711,6 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     async def fake_create(**kwargs: object) -> object:
         """Fake create."""
         return fake
-
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
@@ -939,8 +903,6 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
         """Fake create."""
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -998,8 +960,6 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         """Fake create."""
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1045,8 +1005,6 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
     async def fake_create(**kwargs: object) -> object:
         """Fake create."""
         return fake
-
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
@@ -1096,8 +1054,6 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
         """Fake create."""
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1134,8 +1090,6 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
         """Fake create."""
         return fake
 
-    from evalspec import backend as backend_mod
-
     mb = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(mb, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1169,7 +1123,6 @@ def test_build_runs_skills_home_bridge_after_provision(monkeypatch: object) -> N
     # bridge, environment script.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1189,7 +1142,6 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
     # A broken bridge must fail the build, never seal a snapshot that can't load skills.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1266,7 +1218,6 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     """Verify build passes base image to sandbox create."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1279,7 +1230,6 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     """Verify build defaults base image when env has none."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1291,7 +1241,6 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
     """Verify build runs environment script after provision."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1315,7 +1264,6 @@ def test_build_runs_base_image_and_environment_script_together(
     # The worked-example shape: custom base image AND an extra-tools script.
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1339,7 +1287,6 @@ def test_build_no_environment_script_runs_only_provision(monkeypatch: object) ->
     """Verify build no environment script runs only provision."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1352,7 +1299,6 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
     """Verify build raises for when environment script fails."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
-    from evalspec import backend as backend_mod
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")

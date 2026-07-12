@@ -21,7 +21,7 @@ from pathlib import Path
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
-from evalspec.backend import resolve_sandbox
+from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
@@ -304,7 +304,7 @@ def run_eval_arm(
     repo_root: Path,
     sample: int,
     eval_set: str = "",
-    sandbox_name: str = "microsandbox",
+    sandbox_name: str = DEFAULT_SANDBOX,
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
     session_factory: Callable[..., SandboxSession] = arm_session,
