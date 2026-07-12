@@ -211,28 +211,30 @@ class OpenCodeAgent(BaseAgent):
         multi_turn=False,
         token_split=False,
     )
-    PROVISION_SCRIPT = (
-        dedent("""\
-        apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
-        """)
-        + 'npm i -g "opencode-ai@${EVALSPEC_OPENCODE_VERSION:-latest}" && '
-        # Bake the evalspec bootstrap plugin into the snapshot, plus a global
-        # opencode.json that registers it.
-        "mkdir -p /root/.config/opencode/plugins/evalspec-bootstrap && "
-        + "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
-        + _BOOTSTRAP_PACKAGE_JSON
-        + "\nEOF_PKG\n"
-        "cat > /root/.config/opencode/plugins/evalspec-bootstrap/index.js <<'EOF_JS'\n"
-        + _BOOTSTRAP_PLUGIN_JS
-        + "EOF_JS\n"
-        "cat > /root/.config/opencode/opencode.json <<'EOF_CFG'\n"
-        + _OPENCODE_CONFIG_JSON
-        + "\nEOF_CFG\n"
-        # Warm OpenCode's one-time SQLite migration at snapshot-build time.
-        + "/usr/local/bin/opencode auth list > /dev/null 2>&1 && "
-        # Fail provisioning loudly if the migration did not bake the DB into the snapshot.
-        + "test -f /root/.local/share/opencode/opencode.db"
-    )
+    def provision_script(self: object) -> str:
+        """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
+        return (
+            dedent("""\
+            apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
+            """)
+            + f'npm i -g "opencode-ai@{self._version}" && '
+            # Bake the evalspec bootstrap plugin into the snapshot, plus a global
+            # opencode.json that registers it.
+            "mkdir -p /root/.config/opencode/plugins/evalspec-bootstrap && "
+            + "cat > /root/.config/opencode/plugins/evalspec-bootstrap/package.json <<'EOF_PKG'\n"
+            + _BOOTSTRAP_PACKAGE_JSON
+            + "\nEOF_PKG\n"
+            "cat > /root/.config/opencode/plugins/evalspec-bootstrap/index.js <<'EOF_JS'\n"
+            + _BOOTSTRAP_PLUGIN_JS
+            + "EOF_JS\n"
+            "cat > /root/.config/opencode/opencode.json <<'EOF_CFG'\n"
+            + _OPENCODE_CONFIG_JSON
+            + "\nEOF_CFG\n"
+            # Warm OpenCode's one-time SQLite migration at snapshot-build time.
+            + "/usr/local/bin/opencode auth list > /dev/null 2>&1 && "
+            # Fail provisioning loudly if the migration did not bake the DB into the snapshot.
+            + "test -f /root/.local/share/opencode/opencode.db"
+        )
 
     def __init__(
         self: object,
@@ -366,7 +368,7 @@ class OpenCodeAgent(BaseAgent):
 
     async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sandbox.shell(self.PROVISION_SCRIPT, env=self.guest_env())
+        res = await sandbox.shell(self.provision_script(), env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"

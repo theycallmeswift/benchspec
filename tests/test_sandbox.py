@@ -1283,7 +1283,7 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
     )
 
     shells = [call for call in fake.calls if call[0] == "shell"]
-    # provision runs PROVISION_SCRIPT first (claude.py.provision issues exactly one
+    # provision runs provision_script() first (claude.py.provision issues exactly one
     # shell); the skills-home bridge second; the environment script third.
     assert len(shells) == 3
     assert "claude.ai/install.sh" in shells[0][1]  # agent.provision

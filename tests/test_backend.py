@@ -66,11 +66,11 @@ def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object)
 
 
 def test_install_fingerprint_changes_with_provision_script(monkeypatch: object) -> None:
-    """Changing bytes consumed by provision invalidates the agent install fingerprint."""
+    """Changing the resolved provision script invalidates the agent install fingerprint."""
     agent = _agent()
     original = agent.install_fingerprint()
 
-    monkeypatch.setattr(ClaudeCodeAgent, "PROVISION_SCRIPT", "install a different revision")
+    monkeypatch.setattr(agent, "provision_script", lambda: "install a different revision")
 
     assert agent.install_fingerprint() != original
 

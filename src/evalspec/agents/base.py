@@ -39,10 +39,15 @@ class BaseAgent:
     # for_host() rebinds to the name PATH resolves on the host (judge mode).
     agent_bin: str
 
-    # The exact commands that install the CLI into the guest during `provision()`. Concrete
-    # task adapters override it; it participates in the snapshot cache key (install_fingerprint)
-    # so a changed installer rebuilds the snapshot even when `version()` is unchanged.
-    PROVISION_SCRIPT: str = ""
+    def provision_script(self: object) -> str:
+        """The fully-resolved commands this instance runs to install the CLI in the guest.
+
+        Concrete task adapters override it, baking in any instance state (e.g. a pinned
+        version). `provision()` runs exactly this, and `install_fingerprint()` hashes it — so
+        every install-affecting input is captured in the cache key structurally, with nothing
+        to fold by hand. Empty on the base (host/judge agents install nothing in a guest).
+        """
+        return ""
 
     def binary_version(self: object) -> str | None:
         """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
@@ -57,15 +62,15 @@ class BaseAgent:
         return proc.stdout.strip() or None
 
     def install_fingerprint(self: object) -> str:
-        """Cache-key fingerprint of the CLI install inputs beyond `version()`.
+        """Cache-key fingerprint of the CLI install: a hash of the resolved provision script.
 
-        Folds `version()` together with `PROVISION_SCRIPT` — the exact commands the adapter
-        runs to install the CLI in the guest — so changing the installer (a new revision,
-        package list, or bootstrap commands) rebuilds the snapshot even when `version()` is
-        unchanged (notably when it reports a floating `latest`).
+        `provision_script()` is the single source of truth for what installs the CLI, so
+        changing the installer (a new revision, package list, pinned version, or bootstrap
+        commands) rebuilds the snapshot. The agent version also appears directly in the
+        snapshot name, so a version bump rebuilds even for an adapter whose installer does not
+        embed the version.
         """
-        payload = b"\0".join((self.version().encode(), self.PROVISION_SCRIPT.encode()))
-        return hashlib.sha256(payload).hexdigest()[:12]
+        return hashlib.sha256(self.provision_script().encode()).hexdigest()[:12]
 
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""
@@ -120,8 +125,12 @@ class CodingAgent(Protocol):
         """Return the agent CLI version string."""
         ...
 
+    def provision_script(self: object) -> str:
+        """Return the fully-resolved commands that install the CLI in the guest."""
+        ...
+
     def install_fingerprint(self: object) -> str:
-        """Return the CLI install fingerprint (defaults to `version()`)."""
+        """Return the CLI install fingerprint (a hash of `provision_script()`)."""
         ...
 
     def bridge_skills_home_script(

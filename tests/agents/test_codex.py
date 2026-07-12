@@ -517,9 +517,9 @@ def test_provision_runs_install_script() -> None:
     kind, script, kw = sandbox.calls[0]
     assert kind == "shell"
     assert "CODEX_NON_INTERACTIVE=1" in script
-    assert "EVALSPEC_CODEX_VERSION" in script
     assert "npm i -g" in script
-    assert "@openai/codex" in script
+    # The version is baked into the ref (not a guest env var), so the cache key tracks it.
+    assert "@openai/codex@latest" in script
     assert "codex" in script
     assert "codex.openai.com" not in script
     assert kw["env"]["CODEX_HOME"] == "/root/.codex"

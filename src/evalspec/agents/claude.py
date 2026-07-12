@@ -102,10 +102,12 @@ class ClaudeCodeAgent(BaseAgent):
         multi_turn=True,
         token_split=True,
     )
-    PROVISION_SCRIPT = (
-        "apt-get update && apt-get install -y curl ca-certificates && "
-        "curl -fsSL https://claude.ai/install.sh | bash"
-    )
+    def provision_script(self: object) -> str:
+        """Install script — the Claude installer always fetches latest; no version is baked in."""
+        return (
+            "apt-get update && apt-get install -y curl ca-certificates && "
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        )
 
     def __init__(
         self: object,
@@ -219,7 +221,7 @@ class ClaudeCodeAgent(BaseAgent):
 
     async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sandbox.shell(self.PROVISION_SCRIPT, env={"HOME": self.guest_home})
+        res = await sandbox.shell(self.provision_script(), env={"HOME": self.guest_home})
         if res.exit_code != 0:
             raise RuntimeError(
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
