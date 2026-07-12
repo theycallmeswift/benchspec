@@ -1226,14 +1226,15 @@ def _patch_build_primitives(monkeypatch: object, fake: object) -> None:
 
 
 def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
-    """Verify build passes base image to sandbox create."""
+    """Verify build passes the digest-pinned base image to sandbox create and seals it."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     mb.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
-    assert fake.create_image == "python:3.12-slim"
+
+    assert fake.create_image == "python:3.12-slim@sha256:stub-python:3.12-slim"
     assert fake.sealed is True
 
 
@@ -1260,7 +1261,9 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     mb = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     mb.build_snapshot(agent, "snap", EnvConfig())
-    assert fake.create_image == backend_mod.BASE_IMAGE
+
+    default_image = backend_mod.BASE_IMAGE
+    assert fake.create_image == f"{default_image}@sha256:stub-{default_image}"
 
 
 def test_build_runs_environment_script_after_provision(monkeypatch: object) -> None:
@@ -1302,7 +1305,7 @@ def test_build_runs_base_image_and_environment_script_together(
             script_path="s.sh",
         ),
     )
-    assert fake.create_image == "python:3.12-slim"
+    assert fake.create_image == "python:3.12-slim@sha256:stub-python:3.12-slim"
     shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 3  # provision, bridge, environment script
     assert "apt-get install -y jq" in shells[2][1]

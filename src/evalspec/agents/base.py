@@ -14,6 +14,7 @@ is a parameter of the call, not a code path baked into each harness.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -38,6 +39,11 @@ class BaseAgent:
     # for_host() rebinds to the name PATH resolves on the host (judge mode).
     agent_bin: str
 
+    # The exact commands that install the CLI into the guest during `provision()`. Concrete
+    # task adapters override it; it participates in the snapshot cache key (install_fingerprint)
+    # so a changed installer rebuilds the snapshot even when `version()` is unchanged.
+    PROVISION_SCRIPT: str = ""
+
     def binary_version(self: object) -> str | None:
         """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
         try:
@@ -51,12 +57,15 @@ class BaseAgent:
         return proc.stdout.strip() or None
 
     def install_fingerprint(self: object) -> str:
-        """Extra cache-key input for the CLI install beyond `version()`.
+        """Cache-key fingerprint of the CLI install inputs beyond `version()`.
 
-        Adapters that pin an installer revision or lockfile override this; the default
-        is the version string, so the snapshot rebuilds only when `version()` moves.
+        Folds `version()` together with `PROVISION_SCRIPT` — the exact commands the adapter
+        runs to install the CLI in the guest — so changing the installer (a new revision,
+        package list, or bootstrap commands) rebuilds the snapshot even when `version()` is
+        unchanged (notably when it reports a floating `latest`).
         """
-        return self.version()
+        payload = b"\0".join((self.version().encode(), self.PROVISION_SCRIPT.encode()))
+        return hashlib.sha256(payload).hexdigest()[:12]
 
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""

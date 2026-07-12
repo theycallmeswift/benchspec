@@ -488,8 +488,16 @@ def _layer_build_config(table: dict, config_path: str | None) -> dict:
             f"--config {config_path}: expected a [tool.evalspec] table with "
             "[tool.evalspec.sets.<name>]"
         )
+    # Both layers' `sets` must be tables; a scalar/array (e.g. `sets = ["oops"]`) would raise a
+    # bare `TypeError: ... is not a mapping` on the unpack below instead of the exit-2 SchemaError.
+    base_sets = table.get("sets", {})
+    if not isinstance(base_sets, dict):
+        raise SchemaError("pyproject [tool.evalspec].sets must be a table")
+    scratch_sets = scratch.get("sets", {})
+    if not isinstance(scratch_sets, dict):
+        raise SchemaError(f"--config {config_path}: [tool.evalspec].sets must be a table")
     merged = dict(table)
-    merged["sets"] = {**table.get("sets", {}), **scratch.get("sets", {})}
+    merged["sets"] = {**base_sets, **scratch_sets}
     if scratch.get("default-set"):
         merged["default-set"] = scratch["default-set"]
     return merged

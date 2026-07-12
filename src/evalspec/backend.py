@@ -106,6 +106,21 @@ def resolve_image_digest(base_image: str) -> str:
     return digest
 
 
+def immutable_image(base_image: str) -> str:
+    """Return the exact image reference the cache key names, so the build pulls that image.
+
+    Resolving the tag once (memoized) and using `base_image@digest` for BOTH the fingerprint
+    and `Sandbox.create` closes the TOCTOU window where the tag moves between hashing and the
+    pull — otherwise a different image could be sealed under a snapshot name that claims the
+    old digest and then reused forever. When digest resolution is unavailable (loud fallback),
+    `resolve_image_digest` returns the tag unchanged and pinning is skipped.
+    """
+    digest = resolve_image_digest(base_image)
+    if digest == base_image:
+        return base_image
+    return f"{base_image}@{digest}"
+
+
 @runtime_checkable
 class SandboxBackend(Protocol):
     """The sandbox-runtime boundary a set's `sandbox` value selects."""
@@ -197,7 +212,7 @@ class MicrosandboxBackend:
         payload = b"\0".join(
             (
                 self.id.encode(),
-                resolve_image_digest(base_image).encode(),
+                immutable_image(base_image).encode(),
                 agent.install_fingerprint().encode(),
                 env.script,
             )
@@ -239,7 +254,11 @@ class MicrosandboxBackend:
         base_image = env.base_image or BASE_IMAGE
         build_name = f"evalspec-build-{agent.id}"
         sandbox = await Sandbox.create(
-            build_name, image=base_image, cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True
+            build_name,
+            image=immutable_image(base_image),
+            cpus=VM_CPUS,
+            memory=VM_MEMORY_MIB,
+            replace=True,
         )
         try:
             await agent.provision(sandbox)

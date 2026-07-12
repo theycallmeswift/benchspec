@@ -154,12 +154,18 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
                 )
 
         runner = body.get("runner", _DEFAULT_RUNNER)
+        # TOML permits arrays/tables here; a non-string would raise an unhashable-key
+        # TypeError on the membership check below instead of the documented exit-2 diagnostic.
+        if not isinstance(runner, str) or not runner:
+            raise SchemaError(f"{where}: runner must be a non-empty string")
         if runner not in SUPPORTED_RUNNERS:
             raise SchemaError(
                 f"{where}: unsupported runner `{runner}` (supported: {sorted(SUPPORTED_RUNNERS)})"
             )
 
         sandbox_name = body.get("sandbox", DEFAULT_SANDBOX)
+        if not isinstance(sandbox_name, str) or not sandbox_name:
+            raise SchemaError(f"{where}: sandbox must be a non-empty string")
         # resolve_sandbox raises SchemaError on docker/unknown with the specific
         # "not implemented" wording; re-raise with the set's `where` prefix so the
         # message names the offending [tool.evalspec.sets.<name>] (spec example).
