@@ -21,9 +21,10 @@ from dotenv import load_dotenv
 
 import evalspec
 from evalspec import report, workspace
-from evalspec.agents import make_agent, resolve_agent_name
+from evalspec.agents import resolve_agent_name
 from evalspec.arms import Set as EvalSet
 from evalspec.arms import parse_sets, resolve_set
+from evalspec.binder import binder_identity
 from evalspec.discovery import (
     discover_eval_cases,
     pyproject_table,
@@ -31,6 +32,8 @@ from evalspec.discovery import (
     resolve_repo_root,
 )
 from evalspec.judges import JudgeConfig, resolve_judge_config
+from evalspec.judges.registry import probe_judge_version
+from evalspec.provenance import RuntimeProvenance, aggregate_observed
 from evalspec.schema import SchemaError
 
 _CASES = Path(__file__).parent / "cases.py"
@@ -442,28 +445,56 @@ def build_manifest(
     commit: str | None,
     iteration: str,
     cfg: dict,
-    token_split: bool | None,
+    observed_arms: dict,
 ) -> dict:
     """Assemble the run manifest from already-resolved identity + config values.
 
     Pure: the uuid/clock/git/agent reads happen in the caller, so the manifest shape
     (and the order-independent config_hash) is testable by value without IO.
+
+    `cfg` is the planned configuration (set/runner/arms/judge/binder). `config_hash`
+    hashes only the planned selectors, so it stays stable across runs of identical config.
+    `observed_arms` is runtime observation aggregated from persisted records; it lands
+    top-level and is deliberately EXCLUDED from `config_hash` — folding what ran into a
+    config identity would make two runs of one config hash differently. `judge.actual_version`
+    is the same kind of host-probed observation, so it is stripped before hashing too (the
+    full judge object, `actual_version` included, is still emitted). `arms[].requested_version`
+    stays hashed — it is a configured install selector, not a probe.
     """
     return {
-        "format_version": 1,
+        "format_version": 2,
         "run_id": run_id,
         "commit": commit,
-        "config_hash": hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:12],
+        "config_hash": _config_hash(cfg),
         "iteration": iteration,
         "started_at": started_at,
         "evalspec_version": evalspec.__version__,
-        "token_split": token_split,
+        "observed_arms": observed_arms,
         **cfg,
     }
 
 
+def _config_hash(cfg: dict) -> str:
+    """Hash the planned configuration, excluding host-probed runtime observations.
+
+    `judge.actual_version` is a probe of the host judge binary, not a configured value, so
+    it varies with where the run happens rather than with the config. Stripping it keeps
+    two runs of one config hash-identical even when their judge binary differs or is absent.
+    """
+    judge = cfg.get("judge")
+    if isinstance(judge, dict) and "actual_version" in judge:
+        planned_judge = {key: value for key, value in judge.items() if key != "actual_version"}
+        cfg = {**cfg, "judge": planned_judge}
+    return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _judge_meta(judge_config: JudgeConfig) -> dict:
-    """The resolved judge, structurally shaped for meta.json."""
+    """The resolved judge, structurally shaped for meta.json.
+
+    `actual_version` is the host-side probe of the judge binary (the judge runs on the
+    host, not in a guest snapshot), distinct from every arm's guest-probed
+    `observed_arms[arm].actual_version`. Best-effort: a missing binary probes to null.
+    """
     return {
         "harness": judge_config.harness,
         "model": judge_config.model,
@@ -471,6 +502,7 @@ def _judge_meta(judge_config: JudgeConfig) -> dict:
         "timeout": judge_config.timeout,
         "env": report.redact_env(judge_config.env),
         "harness_args": judge_config.harness_args,
+        "actual_version": probe_judge_version(judge_config.harness),
     }
 
 
@@ -481,6 +513,7 @@ def _write_manifest(
     repo_root: Path,
     run_set: EvalSet | None,
     judge_meta: dict,
+    observed_arms: dict,
 ) -> None:
     """What produced this run — identity + resolved config, so artifacts self-describe.
 
@@ -488,40 +521,22 @@ def _write_manifest(
     metadata alone. Thin shell: read nondeterministic identity, hand off to pure
     `build_manifest`.
 
-    Run-level `agent`/`agent_version` come from the default harness, so they name only one
-    harness even for a multi-harness set; the per-arm roster records each arm's own
-    `harness`/`model`/`effort`/`env` (env redacted). Per-arm agent versions aren't probed.
-    `run_set` is None for a run with no eval set — `set`/`arms` degrade to null/empty.
-    `judge_meta` is the already-resolved judge object (see `_judge_meta`).
+    meta.json v2 separates planned config from observed execution. `arms` is the COMPLETE
+    configured roster (including arms that never ran, each carrying its own install
+    selector + capabilities via `report.planned_arms`); `observed_arms` holds only the
+    arms with a persisted runtime record, aggregated by the caller and never synthesized
+    here. The v1 run-level `agent`/`agent_version`/`token_split` fields are gone with no
+    aliases — the selector and capabilities live per planned arm. `run_set` is None for a
+    run with no eval set — `set`/`runner` degrade to null and `arms` to empty. `judge_meta`
+    is the already-resolved judge object (see `_judge_meta`); `binder` is the fixed
+    run-level binder transport identity (no key material).
     """
-    agent_version = token_split = None
-    try:
-        agent = make_agent()
-        agent_version = agent.version()
-        token_split = agent.capabilities.token_split
-    except Exception:
-        # Any failure probing the agent (no credential, missing CLI, version error):
-        # best-effort identity stays null, the resolved config is still recorded.
-        pass
-
     cfg = {
-        "agent": os.environ.get("EVALSPEC_AGENT", "claude-code"),
-        "agent_version": agent_version,
         "set": run_set.name if run_set else None,
-        "arms": [
-            {
-                "name": arm.name,
-                "harness": arm.harness,
-                "model": arm.model,
-                "effort": arm.effort,
-                "env": report.redact_env(arm.env),
-                "harness_args": arm.harness_args,
-            }
-            for arm in run_set.arms
-        ]
-        if run_set
-        else [],
+        "runner": run_set.runner if run_set else None,
+        "arms": report.planned_arms(run_set),
         "judge": judge_meta,
+        "binder": binder_identity(),
     }
     manifest = build_manifest(
         run_id=uuid.uuid4().hex,
@@ -529,9 +544,26 @@ def _write_manifest(
         commit=_git_commit(repo_root),
         iteration=iteration,
         cfg=cfg,
-        token_split=token_split,
+        observed_arms=observed_arms,
     )
     (iteration_root / "meta.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def _aggregate_observed_arms(skills_root: Path) -> dict:
+    """Aggregate every persisted `provenance.json` under the skills root by arm.
+
+    Walks for the runtime records execution wrote beside each sample (`provenance.json`
+    sits next to `grading.json`), reloads them, and folds them into the `observed_arms`
+    mapping. Only arms with a persisted record appear — nothing is synthesized for a
+    deselected, skipped, or never-sampled arm. Identical records for one arm dedupe;
+    records that disagree on snapshot/digest/version raise loudly (see `aggregate_observed`)
+    rather than silently combining unlike environments into one report.
+    """
+    records = [
+        RuntimeProvenance.from_disk_dict(json.loads(provenance_path.read_text()))
+        for provenance_path in sorted(skills_root.rglob("provenance.json"))
+    ]
+    return aggregate_observed(records)
 
 
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
@@ -565,7 +597,14 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     run_set = run_set_when_needed(config, needs_set=needs_set)
     judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
     judge_meta = _judge_meta(judge_config)
-    _write_manifest(config, skills_root.parent, iteration, repo_root, run_set, judge_meta)
+    # Aggregate observed provenance BEFORE writing the manifest — the records live under
+    # the skills root the same walk below reads, so meta.json must not be written with a
+    # stale/empty observed_arms. Conflicting records raise here and abort the write, which
+    # is the intended loud failure.
+    observed_arms = _aggregate_observed_arms(skills_root)
+    _write_manifest(
+        config, skills_root.parent, iteration, repo_root, run_set, judge_meta, observed_arms
+    )
     lines = []
     index_lines = []
     fail_under = config.getoption("evalspec_fail_under")

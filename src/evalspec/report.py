@@ -21,6 +21,12 @@ import math
 import re
 import statistics
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from evalspec.agents import make_agent
+
+if TYPE_CHECKING:
+    from evalspec.arms import Set as EvalSet
 
 # Credential-shaped env key names are masked in reports. URLs and other config pass through.
 _SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)
@@ -32,6 +38,40 @@ def redact_env(env: dict | None) -> dict:
         key: ("***" if _SECRET_KEY.search(key) else value)
         for key, value in (env or {}).items()
     }
+
+
+def planned_arms(run_set: EvalSet | None) -> list[dict]:
+    """The complete configured arm roster, in the per-arm meta.json shape.
+
+    One source of the planned-arm shape, reused by meta.json (`_write_manifest`),
+    the benchmark join, and index rows. `requested_version` is the install selector
+    the arm's harness resolves to (`make_agent(harness).version()`, e.g. `"latest"`) —
+    configured intent, not the concrete binary that ran (that lives in `observed_arms`).
+    `capabilities.token_split` replaces the removed run-level `token_split` field.
+
+    Side-effect free and independent of any run artifacts: it reflects config only, so it
+    lists every configured arm including those that never ran. `env` is redacted. Returns
+    `[]` for a trigger-only run with no eval set. A genuinely unknown harness raises via
+    `make_agent`; arms are schema-validated upstream, so that only fires on a real bug.
+    """
+    if run_set is None:
+        return []
+    arms = []
+    for arm in run_set.arms:
+        agent = make_agent(arm.harness)
+        arms.append(
+            {
+                "name": arm.name,
+                "harness": arm.harness,
+                "model": arm.model,
+                "effort": arm.effort,
+                "env": redact_env(arm.env),
+                "harness_args": arm.harness_args,
+                "requested_version": agent.version(),
+                "capabilities": {"token_split": agent.capabilities.token_split},
+            }
+        )
+    return arms
 
 
 def _load_json(path: Path) -> dict | None:

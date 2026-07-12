@@ -8,12 +8,12 @@ runs; we assert on the parametrized node ids the plugin generates. Each project 
 import json
 import textwrap
 from pathlib import Path
-from typing import NoReturn
 
 import pytest
 
-from evalspec import plugin, workspace
+from evalspec import plugin, report, workspace
 from evalspec.agents.base import AgentCapabilities
+from evalspec.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
 ALPHA_MD = textwrap.dedent(
@@ -604,6 +604,17 @@ class _StubAgent:
         return "9.9.9"
 
 
+@pytest.fixture(autouse=True)
+def _stub_judge_probe(monkeypatch: object) -> None:
+    """Pin the host judge-version probe so sessionfinish tests stay hermetic.
+
+    `_judge_meta` shells out to `<judge binary> --version`; on a dev box with the harness
+    installed that is nondeterministic and non-hermetic. Pin it to a sentinel so the judge
+    `actual_version` is predictable and the dedicated test can assert it flows through.
+    """
+    monkeypatch.setattr(plugin, "probe_judge_version", lambda harness: "judge-1.0.0")
+
+
 def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> object:
     """Drive the post-run pipeline the way pytest does.
 
@@ -619,7 +630,7 @@ def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> objec
 
 def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) -> None:
     """Verify terminal summary prints delta."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -638,7 +649,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     """Verify terminal summary multi skill single header."""
     # Two skills with eval-* children pool into ONE run-level table and one run-level
     # delta line, under a single header (rows sorted: archive before ingest).
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
@@ -673,19 +684,21 @@ def test_build_manifest_assembles_shape_by_value() -> None:
     # injects identity. Pins the spread of cfg and the hash, which the IO-bound
     # sessionfinish test below can only presence-check.
     cfg = {
-        "agent": "claude-code",
-        "agent_version": "9.9.9",
-        "model": "sonnet",
+        "set": "default",
+        "runner": "pytest",
+        "arms": [{"name": "baseline", "requested_version": "latest"}],
         "judge": {
             "harness": "claude-code",
             "model": "sonnet",
-            "effort_level": "medium",
+            "effort": "medium",
             "timeout": 300,
             "env": {},
             "harness_args": [],
+            "actual_version": "1.2.3",
         },
-        "eval_effort": "medium",
+        "binder": {"provider": "gemini", "model": "x", "api_path": "y"},
     }
+    observed = {"baseline": {"actual_version": "1.2.3", "actual_version_status": "available"}}
 
     manifest = plugin.build_manifest(
         run_id="r" * 32,
@@ -693,19 +706,85 @@ def test_build_manifest_assembles_shape_by_value() -> None:
         commit="abc123",
         iteration="iteration_07",
         cfg=cfg,
-        token_split=True,
+        observed_arms=observed,
     )
 
-    assert manifest["format_version"] == 1
+    assert manifest["format_version"] == 2
     assert manifest["run_id"] == "r" * 32
     assert manifest["commit"] == "abc123"
     assert manifest["started_at"] == "2026-06-13T00:00:00+00:00"
     assert manifest["iteration"] == "iteration_07"
-    assert manifest["token_split"] is True
-    assert manifest["model"] == "sonnet"  # cfg spread in
+    assert manifest["set"] == "default"  # cfg spread in
+    assert manifest["runner"] == "pytest"
+    assert manifest["observed_arms"] == observed
     assert len(manifest["config_hash"]) == 12
     assert manifest["judge"]["harness"] == "claude-code"  # nested judge spread in whole
-    assert manifest["judge"]["model"] == "sonnet"
+    assert manifest["binder"]["provider"] == "gemini"
+    # No v1 run-level identity fields survive.
+    assert "agent" not in manifest
+    assert "agent_version" not in manifest
+    assert "token_split" not in manifest
+
+
+def test_build_manifest_config_hash_excludes_observed_arms() -> None:
+    """Verify config_hash hashes only cfg, never the runtime observation."""
+    # config_hash must be stable across runs of one config; folding observed_arms into it
+    # would make two runs of the same config hash differently. Same cfg + different
+    # observed_arms ⇒ identical config_hash.
+    cfg = {
+        "set": "default",
+        "runner": "pytest",
+        "arms": [{"name": "baseline"}],
+        "judge": {"harness": "claude-code"},
+        "binder": {"provider": "gemini"},
+    }
+
+    manifest_a = plugin.build_manifest(
+        run_id="a" * 32,
+        started_at="t1",
+        commit="c1",
+        iteration="iteration_01",
+        cfg=cfg,
+        observed_arms={"baseline": {"actual_version": "1.0.0"}},
+    )
+    manifest_b = plugin.build_manifest(
+        run_id="b" * 32,
+        started_at="t2",
+        commit="c2",
+        iteration="iteration_99",
+        cfg=cfg,
+        observed_arms={},
+    )
+
+    assert manifest_a["config_hash"] == manifest_b["config_hash"]
+
+
+def test_build_manifest_config_hash_ignores_judge_actual_version() -> None:
+    """Verify the host-probed judge actual_version never shifts config_hash."""
+    # actual_version is a probe of the host judge binary, not a configured selector; two
+    # runs of one config on machines whose judge binary differs (or is absent → null) must
+    # still hash identically. The full judge object, actual_version included, is still emitted.
+    base_judge = {"harness": "claude-code", "model": "sonnet", "effort": "medium"}
+    cfg_probed = {
+        "set": "default",
+        "runner": "pytest",
+        "arms": [{"name": "baseline"}],
+        "judge": {**base_judge, "actual_version": "1.2.3"},
+        "binder": {"provider": "gemini"},
+    }
+    cfg_null = {**cfg_probed, "judge": {**base_judge, "actual_version": None}}
+
+    probed = plugin.build_manifest(
+        run_id="a" * 32, started_at="t", commit="c", iteration="i",
+        cfg=cfg_probed, observed_arms={},
+    )
+    null = plugin.build_manifest(
+        run_id="b" * 32, started_at="t", commit="c", iteration="i",
+        cfg=cfg_null, observed_arms={},
+    )
+
+    assert probed["config_hash"] == null["config_hash"]
+    assert probed["judge"]["actual_version"] == "1.2.3"  # still emitted in the output
 
 
 def test_build_manifest_config_hash_is_order_independent() -> None:
@@ -713,18 +792,19 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
     # config_hash hashes cfg with sort_keys, so two cfgs that differ only in key
     # order (and in the non-cfg identity fields) hash identically.
     cfg = {
-        "agent": "claude-code",
-        "agent_version": None,
-        "model": "sonnet",
+        "set": "default",
+        "runner": "pytest",
+        "arms": [{"name": "baseline"}],
         "judge": {
             "harness": "claude-code",
             "model": "sonnet",
-            "effort_level": "medium",
+            "effort": "medium",
             "timeout": 300,
             "env": {},
             "harness_args": [],
+            "actual_version": None,
         },
-        "eval_effort": "medium",
+        "binder": {"provider": "gemini", "model": "x", "api_path": "y"},
     }
     reordered = dict(reversed(list(cfg.items())))
 
@@ -734,7 +814,7 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         commit="c1",
         iteration="iteration_01",
         cfg=cfg,
-        token_split=True,
+        observed_arms={},
     )
     manifest_b = plugin.build_manifest(
         run_id="b" * 32,
@@ -742,7 +822,7 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
         commit="c2",
         iteration="iteration_99",
         cfg=reordered,
-        token_split=False,
+        observed_arms={},
     )
 
     assert manifest_a["config_hash"] == manifest_b["config_hash"]
@@ -750,7 +830,7 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
 
 def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes run manifest."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent(
             """\
@@ -777,17 +857,25 @@ arms = [
     _finish_and_summarize(tmp_path)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
-    assert meta["format_version"] == 1
+    assert meta["format_version"] == 2
     assert len(meta["run_id"]) == 32  # uuid4 hex
     assert len(meta["config_hash"]) == 12
     assert meta["iteration"] == "iteration_01"
-    assert meta["agent"] == "claude-code"
-    assert meta["agent_version"] == "9.9.9"
+    # v1 run-level identity fields are fully removed — no aliases.
+    assert "agent" not in meta
+    assert "agent_version" not in meta
+    assert "token_split" not in meta
     assert meta["set"] == "default"
+    assert meta["runner"] == "pytest"
     assert [arm["name"] for arm in meta["arms"]] == ["baseline", "trial"]
     assert meta["arms"][0]["harness_args"] == ["--set-flag"]
     assert meta["arms"][1]["harness_args"] == ["--set-flag", "--plugin-dir", "/project"]
     assert meta["arms"][1]["model"] == "opus"  # trial arm declared its own model
+    # Per-arm install selector + capabilities replace the removed run-level fields.
+    assert meta["arms"][0]["requested_version"] == "9.9.9"
+    assert meta["arms"][0]["capabilities"] == {"token_split": True}
+    # observed_arms is present and, with no provenance.json seeded, empty (never synthesized).
+    assert meta["observed_arms"] == {}
     assert "judge_model" not in meta
     assert meta["judge"]["harness"] == "claude-code"
     assert meta["judge"]["model"] == "sonnet"
@@ -795,7 +883,12 @@ arms = [
     assert meta["judge"]["timeout"] == 300
     assert meta["judge"]["env"] == {}
     assert meta["judge"]["harness_args"] == []
-    assert meta["token_split"] is True
+    assert meta["judge"]["actual_version"] == "judge-1.0.0"  # host probe path
+    assert meta["binder"] == {
+        "provider": "gemini",
+        "model": "gemini-3.1-flash-lite",
+        "api_path": "generativelanguage.googleapis.com/v1beta",
+    }
     assert "commit" in meta
     assert "started_at" in meta
     assert "evalspec_version" in meta
@@ -813,7 +906,7 @@ arms = [
 
 def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes nested judge object."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     # harness=claude-code, model=sonnet/opus arms
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -831,6 +924,7 @@ def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch:
     assert meta["judge"]["timeout"] == 300
     assert meta["judge"]["env"] == {}
     assert meta["judge"]["harness_args"] == []
+    assert meta["judge"]["actual_version"] == "judge-1.0.0"  # host-side probe
     assert "warnings" not in meta["judge"]
 
 
@@ -842,7 +936,7 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     # trivially passes even if the report.redact_env(...) call around the judge env
     # were dropped. Use a secret-shaped key (matches report._SECRET_KEY) so this test
     # only passes if the value is actually masked before it hits meta.json.
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(JUDGE_ENV_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -857,16 +951,16 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     assert "sk-live-supersecret123" not in raw_text
 
 
-def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatch: object) -> None:
-    """Verify manifest survives missing agent credential."""
+def test_manifest_writes_without_agent_credential(tmp_path: object, monkeypatch: object) -> None:
+    """Verify a credential-less environment still writes a valid v2 manifest.
 
-    # No credential / missing CLI must not kill the manifest: identity fields go
-    # null, the run configuration is still recorded.
-    def boom() -> NoReturn:
-        """Boom."""
-        raise RuntimeError("no credential")
-
-    monkeypatch.setattr(plugin, "make_agent", boom)
+    `requested_version` is a pure install selector (`version()`), not a credentialed probe,
+    so a run with no agent credential still records every planned arm with a concrete
+    selector — here the real claude-code default of `latest`. Uses the real `make_agent`
+    (no stub) precisely to prove the selector resolves without credentials.
+    """
+    for env_var in ("EVALSPEC_CLAUDE_VERSION", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
+        monkeypatch.delenv(env_var, raising=False)
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -875,14 +969,111 @@ def test_manifest_survives_missing_agent_credential(tmp_path: object, monkeypatc
     _finish_and_summarize(tmp_path)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
-    assert meta["agent_version"] is None
-    assert meta["token_split"] is None
+    assert meta["format_version"] == 2
     assert meta["set"] == "default"
+    assert [arm["requested_version"] for arm in meta["arms"]] == ["latest", "latest"]
+    assert "agent_version" not in meta
+    assert "token_split" not in meta
+
+
+def _seed_provenance(
+    sample_dir: object,
+    arm: object,
+    *,
+    actual_version: object = "1.2.3",
+    snapshot: object = "snap-abc",
+    digest: object = "sha256:dead",
+) -> None:
+    """Write a `provenance.json` beside a seeded sample's grading.json.
+
+    Mirrors what execution persists per sample, so the sessionfinish aggregation walk
+    (`skills_root.rglob('provenance.json')`) picks it up into `observed_arms`.
+    """
+    record = RuntimeProvenance(
+        arm=arm,
+        actual_version=actual_version,
+        actual_version_status="available",
+        actual_version_error=None,
+        sandbox=SandboxProvenance.from_image_identity(
+            backend="microsandbox",
+            snapshot=snapshot,
+            fingerprint="ab12cd34",
+            base_image_ref="ubuntu:latest",
+            install_fingerprint="if-sha",
+            env_script_sha256="env-sha",
+            image_identity=ImageIdentity.available(digest),
+        ),
+    )
+    (sample_dir / "provenance.json").write_text(json.dumps(record.to_disk_dict()))
+
+
+def test_observed_arms_excludes_unrun_arm(tmp_path: object, monkeypatch: object) -> None:
+    """Verify observed_arms holds only arms with a persisted record; planned holds all."""
+    # `trial` ran and persisted provenance; `baseline` is configured but has no record.
+    # Planned `arms` must list both; `observed_arms` must contain `trial` only, never a
+    # synthesized `baseline`. The install selector ("9.9.9" here)
+    # coexists with a distinct concrete guest `actual_version` ("1.2.3").
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    trial_sample = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+    _seed_provenance(trial_sample, "trial", actual_version="1.2.3")
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)  # no provenance.json
+
+    _finish_and_summarize(tmp_path)
+
+    meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
+    assert sorted(arm["name"] for arm in meta["arms"]) == ["baseline", "trial"]
+    assert set(meta["observed_arms"]) == {"trial"}  # baseline excluded — never synthesized
+    trial_planned = next(arm for arm in meta["arms"] if arm["name"] == "trial")
+    assert trial_planned["requested_version"] == "9.9.9"  # install selector
+    observed_trial = meta["observed_arms"]["trial"]
+    assert observed_trial["actual_version"] == "1.2.3"  # concrete guest version
+    assert observed_trial["actual_version_status"] == "available"
+    assert observed_trial["sandbox"]["snapshot"] == "snap-abc"
+    assert observed_trial["sandbox"]["image_digest"] == "sha256:dead"
+
+
+def test_conflicting_provenance_raises(tmp_path: object, monkeypatch: object) -> None:
+    """Verify two disagreeing records for one arm raise a clear aggregation error."""
+    # Records that disagree on actual_version describe unlike environments; aggregation
+    # must fail loudly rather than silently combine them into one report.
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    sample0 = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1, sample=0)
+    sample1 = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1, sample=1)
+    _seed_provenance(sample0, "trial", actual_version="1.2.3")
+    _seed_provenance(sample1, "trial", actual_version="9.9.9")
+
+    config = _FakeConfig(tmp_path)
+    session = _FakeSession(config)
+    with pytest.raises(ValueError, match="conflicting runtime provenance for arm `trial`"):
+        plugin.pytest_sessionfinish(session, 0)
+
+
+def test_binder_identity_carries_no_key_material(tmp_path: object, monkeypatch: object) -> None:
+    """Verify meta.json binder identity never leaks GEMINI_API_KEY."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-supersecret")
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+
+    _finish_and_summarize(tmp_path)
+
+    raw_text = (skill_results_dir.parent.parent / "meta.json").read_text()
+    meta = json.loads(raw_text)
+    assert set(meta["binder"]) == {"provider", "model", "api_path"}
+    assert "sk-gemini-supersecret" not in raw_text
 
 
 def test_terminal_summary_noop_without_artifacts(tmp_path: object, monkeypatch: object) -> None:
     """Verify terminal summary noop without artifacts."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     workspace.set_current_iteration("iteration_01")
 
     _, terminal_reporter = _finish_and_summarize(tmp_path)
@@ -1130,7 +1321,7 @@ def test_non_dict_scratch_judge_table_fails_loudly(pytester: object) -> None:
 
 def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object) -> None:
     """Verify sessionfinish writes index jsonl."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
@@ -1149,7 +1340,7 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
 
 def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:
     """Verify fail under sets exit status."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -1168,7 +1359,7 @@ def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> N
 
 def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> None:
     """Verify fail under quiet when met."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -1186,7 +1377,7 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     """Verify fail under skipped without reference."""
     # A set with no `baseline` → absolute scores, no Δ to gate; the fail-under
     # threshold is a no-op rather than failing the run.
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\ndefault-set = "default"\n'
         '[tool.evalspec.sets.default]\nharness = "claude-code"\nmodel = "sonnet"\n'
@@ -1209,7 +1400,7 @@ def test_fail_under_isolates_regressing_group(tmp_path: object, monkeypatch: obj
     # Group A dominates by sample weight (trial +100pp over 4 samples) while group B
     # regresses (trial -100pp). The run-level pooled trial Δ is +33pp, so a pooled gate
     # would NOT fire — only a per-group gate catches group B.
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
@@ -1239,7 +1430,7 @@ def test_fail_under_exempts_group_missing_baseline_arm(
     # Group A runs both arms with trial below threshold → it fails. Group B ran only
     # trial, so its configured baseline column has no rate (pass_rate=None), coercing
     # the group's baseline to None → no Δ to gate → exempt.
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
@@ -1262,7 +1453,7 @@ def test_sessionfinish_writes_single_run_level_benchmark(
     tmp_path: object, monkeypatch: object
 ) -> None:
     """Verify exactly one run-level benchmark lands at the iteration root, none per group."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
@@ -1287,7 +1478,7 @@ def test_sessionfinish_writes_single_run_level_benchmark(
 
 def test_binder_degraded_warns_in_terminal_summary(tmp_path: object, monkeypatch: object) -> None:
     """Verify a nonzero binder_degraded total prints a WARN line, doesn't fail the run."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -1306,7 +1497,7 @@ def test_binder_degraded_warns_in_terminal_summary(tmp_path: object, monkeypatch
 
 def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) -> None:
     """Verify no binder WARN line when nothing degraded."""
-    monkeypatch.setattr(plugin, "make_agent", lambda: _StubAgent())
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
