@@ -183,6 +183,42 @@ def test_preflight_collects_backend_and_credential_failures(monkeypatch: object)
     assert "credential" in message
 
 
+def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> None:
+    """`sandbox.preflight()` must call `MicrosandboxBackend.preflight()`, not reimplement.
+
+    host checks inline. Pin this by returning a sentinel from the backend method and
+    asserting the sentinel (not platform/KVM/installed text) reaches the raised error —
+    a regression that inlines the old Darwin/KVM/installed checks would produce
+    plausible-looking message text but never touch this sentinel, so it would fail here.
+    """
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "preflight", lambda self: ["SENTINEL_HOST_ERR"]
+    )
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with pytest.raises(RuntimeError) as exc_info:
+        sandbox.preflight()
+    assert "SENTINEL_HOST_ERR" in str(exc_info.value)
+
+
+def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch: object) -> None:
+    """The credential check still surfaces when the backend reports a clean host.
+
+    (dispatch AND the shared credential check are both wired, independently of each
+    other).
+    """
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "preflight", lambda self: [])
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError) as exc_info:
+        sandbox.preflight()
+    assert "credential" in str(exc_info.value)
+
+
 def test_preflight_passes_on_supported(monkeypatch: object) -> None:
     """A supported host with a credential set passes without raising."""
     from evalspec import backend as backend_mod
