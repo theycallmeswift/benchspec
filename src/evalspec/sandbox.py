@@ -13,6 +13,7 @@ from pathlib import Path
 
 from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
+from evalspec.backend import SandboxBackend, resolve_sandbox
 from evalspec.discovery import EnvConfig, resolve_environment_config
 from evalspec.room import (
     changed_paths,
@@ -32,12 +33,16 @@ VM_CPUS = 2
 VM_MEMORY_MIB = 2048
 
 
-def snapshot_name(agent: CodingAgent, env: EnvConfig | None = None) -> str:
-    """Build the snapshot cache name for an agent and environment."""
-    base = f"evalspec-{agent.id}-{agent.version()}"
-    if env:
-        return f"{base}-{env.digest()}"
-    return base
+def snapshot_name(
+    agent: CodingAgent, env: EnvConfig | None = None, *, backend: SandboxBackend
+) -> str:
+    """Build the snapshot cache name for an agent, environment, and backend.
+
+    The backend id prefixes the name (two backends over one agent+env never collide)
+    and the backend owns the fingerprint (base-image digest, install inputs, env bytes).
+    """
+    fingerprint = backend.cache_fingerprint(agent, env or EnvConfig())
+    return f"evalspec-{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
 
 
 def snapshot_exists(name: str) -> bool:
@@ -191,22 +196,21 @@ def build_snapshot(agent: object, name: str, env: EnvConfig) -> None:
     asyncio.run(_build_snapshot_async(agent, name, env))
 
 
-def ensure_snapshot(agent: object, *, repo_root: object) -> str:
+def ensure_snapshot(agent: object, *, repo_root: object, backend: SandboxBackend) -> str:
     """Return the snapshot name, building it once (file-locked) if missing.
 
     Resolves the host's optional environment config from `repo_root` and folds it into
-    both the snapshot name (cache identity) and the build, so any change to `base_image`
-    or `environment_script` auto-rebuilds. The lock serializes concurrent xdist workers:
-    losers wait, then find the snapshot already built and return.
+    both the snapshot name (cache identity) and the build via the backend. The lock
+    serializes concurrent xdist workers: losers wait, then return the built snapshot.
     """
     env = resolve_environment_config(repo_root)
-    name = snapshot_name(agent, env)
-    if snapshot_exists(name):
+    name = snapshot_name(agent, env, backend=backend)
+    if backend.snapshot_exists(name):
         return name
     lock_path = workspace.workspace_parent(repo_root) / f".evalspec-snapshot-{name}.lock"
     with _file_lock(lock_path):
-        if not snapshot_exists(name):
-            build_snapshot(agent, name, env)
+        if not backend.snapshot_exists(name):
+            backend.build_snapshot(agent, name, env)
     return name
 
 

@@ -22,6 +22,16 @@ def _claude_agent() -> object:
     return ClaudeCodeAgent(auth_value="test-token", version="v")
 
 
+@pytest.fixture(autouse=True)
+def _stub_image_digest(monkeypatch: object) -> None:
+    """Keep every sandbox test off the network when the backend resolves an image digest."""
+    from evalspec import backend as backend_mod
+
+    monkeypatch.setattr(
+        backend_mod, "resolve_image_digest", lambda image: f"sha256:stub-{image}"
+    )
+
+
 class _FakeEvent:
     """One microsandbox `exec_stream` event: a `stdout` chunk, or a terminal.
 
@@ -113,38 +123,41 @@ def _route_via_fake_vm(
     )
 
 
-def test_snapshot_name() -> None:
-    """Verify snapshot name."""
-    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    assert sandbox.snapshot_name(agent) == "evalspec-claude-code-1.2.3"
+def test_snapshot_name_carries_backend_id() -> None:
+    """The snapshot name is prefixed with the backend id."""
+    from evalspec import backend as backend_mod
 
-
-def test_snapshot_name_unchanged_when_env_absent() -> None:
-    """Verify snapshot name unchanged when env absent."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    # An empty EnvConfig is falsy ⇒ no suffix, identical to the no-arg form.
-    assert sandbox.snapshot_name(agent, EnvConfig()) == "evalspec-claude-code-1.2.3"
+    mb = backend_mod.resolve_sandbox("microsandbox")
+    name = sandbox.snapshot_name(agent, EnvConfig(), backend=mb)
+    assert name.startswith("evalspec-microsandbox-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_base_image_changes() -> None:
-    """Verify snapshot name changes when base image changes."""
+    """A different base image changes the snapshot name."""
+    from evalspec import backend as backend_mod
+
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    base_snapshot = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"))
-    changed_snapshot = sandbox.snapshot_name(agent, EnvConfig(base_image="ubuntu:22.04"))
-    assert base_snapshot != changed_snapshot
-    assert base_snapshot.startswith("evalspec-claude-code-1.2.3-")
+    mb = backend_mod.resolve_sandbox("microsandbox")
+    base = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"), backend=mb)
+    changed = sandbox.snapshot_name(agent, EnvConfig(base_image="ubuntu:22.04"), backend=mb)
+    assert base != changed
+    assert base.startswith("evalspec-microsandbox-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
-    """Verify snapshot name changes when script bytes change."""
+    """Different environment script bytes change the snapshot name."""
+    from evalspec import backend as backend_mod
+
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    base_snapshot = sandbox.snapshot_name(
-        agent, EnvConfig(script=b"echo one\n", script_path="s.sh")
+    mb = backend_mod.resolve_sandbox("microsandbox")
+    base = sandbox.snapshot_name(
+        agent, EnvConfig(script=b"echo one\n", script_path="s.sh"), backend=mb
     )
-    changed_snapshot = sandbox.snapshot_name(
-        agent, EnvConfig(script=b"echo two\n", script_path="s.sh")
+    changed = sandbox.snapshot_name(
+        agent, EnvConfig(script=b"echo two\n", script_path="s.sh"), backend=mb
     )
-    assert base_snapshot != changed_snapshot
+    assert base != changed
 
 
 def test_snapshot_exists_checks_microsandbox_dir(tmp_path: object, monkeypatch: object) -> None:
@@ -179,43 +192,55 @@ def test_preflight_passes_on_supported(monkeypatch: object) -> None:
 
 
 def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
-    """Verify ensure snapshot skips build when present."""
-    monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: True)
-    built = []
-    monkeypatch.setattr(sandbox, "build_snapshot", lambda *args, **kwargs: built.append(args))
+    """A present snapshot is returned without a build."""
+    from evalspec import backend as backend_mod
+
+    mb = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(mb, "snapshot_exists", lambda name: True)
+    built: list = []
+    monkeypatch.setattr(mb, "build_snapshot", lambda *a, **k: built.append(a))
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
-    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path)
-    assert name == "evalspec-claude-code-v1"
+    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=mb)
+    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
     assert built == []
 
 
 def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: object) -> None:
-    """Verify ensure snapshot builds when missing."""
+    """A missing snapshot is built exactly once under the lock."""
+    from evalspec import backend as backend_mod
+
+    mb = backend_mod.resolve_sandbox("microsandbox")
     states = iter([False, False])  # missing before lock, still missing inside
-    monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: next(states))
-    built = []
-    monkeypatch.setattr(sandbox, "build_snapshot", lambda agent, name, env: built.append(name))
+    monkeypatch.setattr(mb, "snapshot_exists", lambda name: next(states))
+    built: list = []
+    monkeypatch.setattr(mb, "build_snapshot", lambda agent, name, env: built.append(name))
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
-    sandbox.ensure_snapshot(agent, repo_root=tmp_path)
-    assert built == ["evalspec-claude-code-v1"]
+    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=mb)
+    assert built == [name]
+    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
 
 
 def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path: object) -> None:
-    """Verify ensure snapshot name reflects env config."""
+    """The env config from repo_root reaches both the snapshot name and the build."""
+    from evalspec import backend as backend_mod
+
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
-    monkeypatch.setattr(sandbox, "snapshot_exists", lambda name: False)
-    captured = {}
+    mb = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(mb, "snapshot_exists", lambda name: False)
+    captured: dict = {}
     monkeypatch.setattr(
-        sandbox,
+        mb,
         "build_snapshot",
         lambda agent, name, env: captured.update(name=name, image=env.base_image),
     )
     name = sandbox.ensure_snapshot(
-        agent=ClaudeCodeAgent(auth_value="test-token", version="v1"), repo_root=tmp_path
+        agent=ClaudeCodeAgent(auth_value="test-token", version="v1"),
+        repo_root=tmp_path,
+        backend=mb,
     )
-    assert name.startswith("evalspec-claude-code-v1-")  # digest suffix present
+    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
     assert captured["name"] == name
     assert captured["image"] == "python:3.12-slim"
 
