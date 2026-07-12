@@ -61,7 +61,10 @@ def _sample_dirs(parent: Path) -> list[Path]:
 def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
     """Compute aggregate pass-rate and token statistics for an arm."""
     per_eval: list[dict] = []
-    pair_rates: list[float] = []  # one rate per (eval × sample) — the macro-mean unit
+    # One assertion-fraction rate per surviving (eval × sample) pair; the headline pools
+    # these with equal weight, so an eval with more surviving samples weighs more — a
+    # sample-weighted mean, NOT a true per-eval macro-mean.
+    pair_rates: list[float] = []
     durations: list[int] = []
     judge_ms: list[int] = []
     tokens: list[int] = []
@@ -123,7 +126,8 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         pair_rates.extend(sample_rates)
 
     return {
-        # Macro-mean across surviving eval/sample pairs; errored samples are excluded.
+        # Pooled (sample-weighted, micro-style) mean over every surviving (eval × sample)
+        # assertion-fraction rate; errored samples are excluded.
         "pass_rate": statistics.mean(pair_rates) if pair_rates else None,
         "pass_rate_stdev": statistics.stdev(pair_rates) if len(pair_rates) > 1 else None,
         "duration_ms_mean": statistics.mean(durations) if durations else None,
