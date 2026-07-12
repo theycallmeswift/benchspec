@@ -63,9 +63,8 @@ def _sample_dirs(parent: Path) -> list[Path]:
 def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
     """Compute aggregate pass-rate and token statistics for an arm."""
     per_eval: list[dict] = []
-    # One assertion-fraction rate per surviving (eval × sample) pair; the headline pools
-    # these with equal weight, so an eval with more surviving samples weighs more — a
-    # sample-weighted mean, NOT a true per-eval macro-mean.
+    # Pooled with equal weight per (eval × sample) pair — sample-weighted, not a
+    # per-eval macro-mean.
     pair_rates: list[float] = []
     durations: list[int] = []
     judge_ms: list[int] = []
@@ -89,8 +88,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
                 continue
             binder_degraded_total += grading.get("binder_degraded", 0)
             if grading.get("errored"):
-                # Infra failure — excluded from rates, counted so the report can't
-                # present a half-crashed run as a clean one.
+                # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
             assertions = grading.get("assertions", [])
@@ -129,7 +127,6 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         pair_rates.extend(sample_rates)
 
     return {
-        # Errored samples were already excluded from pair_rates.
         "pass_rate": statistics.mean(pair_rates) if pair_rates else None,
         "pass_rate_stdev": statistics.stdev(pair_rates) if len(pair_rates) > 1 else None,
         "duration_ms_mean": statistics.mean(durations) if durations else None,
@@ -412,11 +409,9 @@ def build_benchmark(
     Returns:
         The benchmark dict: format_version, label, baseline, max_samples, roster, arms.
     """
-    # Configured arms (from the run set) declare the column order and guarantee a column
-    # even when an arm never landed on disk. Discovered arms are the on-disk subdirs;
-    # require a graded sample so a stray subdir (__pycache__, an editor temp) never
-    # becomes an empty zero-sample arm.
     configured = list(arm_meta) if arm_meta else []
+    # Require a graded sample so a stray subdir (__pycache__, editor temp) never becomes
+    # an empty zero-sample arm.
     discovered = sorted(
         {
             arm_dir.name
@@ -428,16 +423,14 @@ def build_benchmark(
     arm_names = configured + [name for name in discovered if name not in configured]
     arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name) for arm_name in arm_names}
 
-    # A declared baseline with no rate on disk (its arm never ran, or every sample
-    # errored) coerces to None, so the report scores arms absolutely exactly as the run
-    # did, instead of framing every other arm against an absent baseline.
+    # A declared baseline with no rate on disk (never ran, or all samples errored) coerces
+    # to None, so arms score absolutely instead of against an absent baseline.
     if baseline is not None and (
         baseline not in arm_stats or arm_stats[baseline]["pass_rate"] is None
     ):
         baseline = None
 
-    # Per-arm metadata (harness/model/effort/env/harness_args) is joined by arm name onto the
-    # on-disk stats — it's the run config, not anything derivable from the artifacts.
+    # Run config joined onto the on-disk stats by arm name — not derivable from artifacts.
     meta = arm_meta or {}
     for name, stats in arm_stats.items():
         metadata = meta.get(name, {})
@@ -447,8 +440,7 @@ def build_benchmark(
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
 
-    # Δ is measured against the baseline arm — when one ran. Each non-baseline arm
-    # carries its delta_pp + noise band; with no baseline, arms report absolute rates.
+    # Each non-baseline arm's Δ and noise band against the baseline rate.
     ref_stats = arm_stats.get(baseline) if baseline is not None else None
     ref_rate = ref_stats["pass_rate"] if ref_stats is not None else None
     for name, stats in arm_stats.items():
