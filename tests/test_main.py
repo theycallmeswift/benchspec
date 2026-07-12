@@ -139,6 +139,24 @@ def test_sandbox_build_threads_set_and_config(monkeypatch: object) -> None:
     assert seen["config"] == "cfg.toml"
 
 
+def test_sandbox_build_does_not_preflight_before_backend_resolution(
+    monkeypatch: object,
+) -> None:
+    """The build handler lets cli_build resolve and preflight the selected backend once."""
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "preflight",
+        lambda: pytest.fail("preflight ran before the selected backend was resolved"),
+    )
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "cli_build",
+        lambda repo_root, *, set_name=None, config=None: None,
+    )
+
+    assert __main__.main(["sandbox:build", "--set", "micro"]) == 0
+
+
 def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None:
     """Bare `sandbox:build` threads set_name=None, config=None (Phase-5 path preserved)."""
     seen: dict = {}

@@ -110,6 +110,16 @@ def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object)
     assert mb.cache_fingerprint(agent_a, env) != mb.cache_fingerprint(agent_b, env)
 
 
+def test_install_fingerprint_changes_with_provision_script(monkeypatch: object) -> None:
+    """Changing bytes consumed by provision invalidates the agent install fingerprint."""
+    agent = _agent()
+    original = agent.install_fingerprint()
+
+    monkeypatch.setattr(ClaudeCodeAgent, "PROVISION_SCRIPT", "install a different revision")
+
+    assert agent.install_fingerprint() != original
+
+
 def test_cache_fingerprint_changes_with_env_script_bytes() -> None:
     """Different environment script bytes yield a different fingerprint."""
     mb = backend.resolve_sandbox("microsandbox")

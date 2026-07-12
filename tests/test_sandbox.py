@@ -338,6 +338,17 @@ def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path:
     assert called_preflight == []
 
 
+def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:
+    """A malformed scratch sets value raises a contextual schema error."""
+    from evalspec.schema import SchemaError
+
+    config = tmp_path / "config.toml"
+    config.write_text('[tool.evalspec]\nsets = ["oops"]\n', encoding="utf-8")
+
+    with pytest.raises(SchemaError, match=r"--config.*sets.*table"):
+        sandbox._layer_build_config({}, str(config))
+
+
 def test_plugin_dir_for(tmp_path: object) -> None:
     """Verify plugin dir for."""
     assert sandbox._plugin_dir_for(None) is None
@@ -1224,6 +1235,21 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     mb.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
     assert fake.create_image == "python:3.12-slim"
     assert fake.sealed is True
+
+
+def test_build_uses_same_resolved_image_as_cache_fingerprint(monkeypatch: object) -> None:
+    """The immutable image used in the cache key is also used to build the snapshot."""
+    fake = FakeSandbox()
+    _patch_build_primitives(monkeypatch, fake)
+    monkeypatch.setattr(backend_mod, "resolve_image_digest", lambda image: "sha256:resolved")
+
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    env = EnvConfig(base_image="python:3.12-slim")
+    microsandbox_backend.cache_fingerprint(agent, env)
+    microsandbox_backend.build_snapshot(agent, "snap", env)
+
+    assert fake.create_image == "python:3.12-slim@sha256:resolved"
 
 
 def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> None:

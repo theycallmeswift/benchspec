@@ -111,6 +111,26 @@ def test_parse_sets_unknown_harness_fails() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("runner", ["pytest"]), ("sandbox", ["microsandbox"])],
+)
+def test_parse_sets_backend_fields_require_strings(field: str, value: object) -> None:
+    """Malformed runner and sandbox values fail as schema errors, not type errors."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "opus",
+                "arms": [{"name": "alpha", "harness": "claude-code"}],
+                field: value,
+            }
+        }
+    )
+
+    with pytest.raises(SchemaError, match=field):
+        parse_sets(table)
+
+
 def test_parse_sets_default_set_undeclared_fails() -> None:
     """Verify parse sets default set undeclared fails."""
     with pytest.raises(SchemaError, match="default-set.*undeclared"):
