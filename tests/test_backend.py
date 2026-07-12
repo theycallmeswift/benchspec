@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from evalspec import backend
@@ -85,6 +87,91 @@ def test_cache_fingerprint_changes_with_env_script_bytes() -> None:
         _agent(), EnvConfig(script=b"echo two\n", script_path="s.sh")
     )
     assert one != two
+
+
+def test_fingerprint_inputs_digest_matches_cache_fingerprint() -> None:
+    """`fingerprint_inputs(...).digest` equals `cache_fingerprint(...)` for the same args."""
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    env = EnvConfig(script=b"echo one\n", script_path="s.sh")
+    agent = _agent()
+
+    inputs = microsandbox_backend.fingerprint_inputs(agent, env)
+
+    assert inputs.digest == microsandbox_backend.cache_fingerprint(agent, env)
+
+
+def test_fingerprint_inputs_carries_structured_fields() -> None:
+    """`fingerprint_inputs` exposes the raw ingredients the digest was built from."""
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    env = EnvConfig(base_image="ubuntu:22.04", script=b"echo hi\n", script_path="s.sh")
+    agent = _agent()
+
+    inputs = microsandbox_backend.fingerprint_inputs(agent, env)
+
+    assert inputs.backend_id == "microsandbox"
+    assert inputs.base_image_ref == "ubuntu:22.04"
+    assert inputs.install_fingerprint == agent.install_fingerprint()
+    assert inputs.env_script_sha256 == hashlib.sha256(b"echo hi\n").hexdigest()
+
+
+def test_fingerprint_inputs_defaults_base_image_ref_when_unset() -> None:
+    """With no declared base image, `base_image_ref` falls back to `backend.BASE_IMAGE`."""
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    inputs = microsandbox_backend.fingerprint_inputs(_agent(), EnvConfig())
+
+    assert inputs.base_image_ref == backend.BASE_IMAGE
+
+
+def test_image_identity_available_on_successful_digest_read(monkeypatch: object) -> None:
+    """`image_identity` returns available with the digest when the backend read succeeds."""
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    async def _fake_digest(snapshot: str) -> str:
+        """Fake a successful microsandbox manifest-digest read."""
+        return "sha256:abc123"
+
+    monkeypatch.setattr(microsandbox_backend, "_image_manifest_digest_async", _fake_digest)
+
+    identity = microsandbox_backend.image_identity(
+        "evalspec-microsandbox-claude-code-latest-ab12cd34"
+    )
+
+    assert identity.image_digest == "sha256:abc123"
+    assert identity.image_digest_status == "available"
+    assert identity.image_digest_error is None
+
+
+def test_image_identity_unavailable_with_error_when_read_raises(monkeypatch: object) -> None:
+    """`image_identity` returns unavailable with a non-empty error when the read raises."""
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    async def _raise_digest(snapshot: str) -> str:
+        """Fake a failing microsandbox manifest-digest read."""
+        raise RuntimeError("snapshot not found")
+
+    monkeypatch.setattr(microsandbox_backend, "_image_manifest_digest_async", _raise_digest)
+
+    identity = microsandbox_backend.image_identity("missing-snapshot")
+
+    assert identity.image_digest is None
+    assert identity.image_digest_status == "unavailable"
+    assert identity.image_digest_error == "snapshot not found"
+
+
+def test_image_identity_unavailable_when_microsandbox_not_installed() -> None:
+    """Without the microsandbox package installed, image_identity degrades, never raises.
+
+    This environment genuinely lacks the `microsandbox` package, so this exercises the
+    defensive wrapping end-to-end (no mocking) rather than relying on a faked failure.
+    """
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    identity = microsandbox_backend.image_identity("any-snapshot")
+
+    assert identity.image_digest is None
+    assert identity.image_digest_status == "unavailable"
+    assert identity.image_digest_error
 
 
 def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None:

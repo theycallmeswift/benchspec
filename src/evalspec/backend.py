@@ -20,11 +20,13 @@ import asyncio
 import contextlib
 import hashlib
 import platform
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from evalspec.agents import CodingAgent
 from evalspec.discovery import EnvConfig
+from evalspec.provenance import ImageIdentity
 from evalspec.schema import SchemaError
 
 GUEST_WORKDIR = "/workspace"
@@ -35,6 +37,22 @@ DEFAULT_SANDBOX = "microsandbox"
 # Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
 VM_MEMORY_MIB = 2048
+
+
+@dataclass(frozen=True)
+class FingerprintInputs:
+    """The raw ingredients behind a snapshot cache fingerprint, plus the digest itself.
+
+    `snapshot_name()` and provenance capture both read fingerprint data from one
+    `fingerprint_inputs()` call rather than re-hashing or parsing the snapshot-name
+    suffix — this is the single source both consumers share.
+    """
+
+    backend_id: str
+    base_image_ref: str
+    install_fingerprint: str
+    env_script_sha256: str
+    digest: str
 
 
 @runtime_checkable
@@ -51,8 +69,16 @@ class SandboxBackend(Protocol):
         """Return whether a named snapshot already exists on disk."""
         ...
 
+    def fingerprint_inputs(self: object, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
+        """Return the structured inputs and digest behind the snapshot cache fingerprint."""
+        ...
+
     def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the cache fingerprint folding backend id, image digest, install, env."""
+        ...
+
+    def image_identity(self: object, snapshot: str) -> ImageIdentity:
+        """Return the snapshot's native image manifest digest, or why it is unavailable."""
         ...
 
     def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
@@ -117,25 +143,60 @@ class MicrosandboxBackend:
         """Return whether a named microsandbox snapshot exists on disk."""
         return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
-    def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
-        """Return the snapshot cache fingerprint for this backend, agent, and env.
+    def fingerprint_inputs(self: object, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
+        """Return the structured inputs and digest behind the snapshot cache fingerprint.
 
         Folds in: the backend id, the DECLARED base-image reference (the tag/ref as
         configured — evalspec does not resolve it to a digest; a floating tag is therefore
         not reproducible across time/machines, and the backend records the actual pulled
         digest in Phase-8 artifacts), the agent install fingerprint (installer inputs beyond
-        `version()`), and the raw environment script bytes.
+        `version()`), and the raw environment script bytes. `snapshot_name()` and provenance
+        capture both call this instead of re-hashing or parsing the snapshot name.
         """
-        base_image = env.base_image or BASE_IMAGE
+        base_image_ref = env.base_image or BASE_IMAGE
+        install_fingerprint = agent.install_fingerprint()
+        env_script_sha256 = hashlib.sha256(env.script).hexdigest()
         payload = b"\0".join(
             (
                 self.id.encode(),
-                base_image.encode(),
-                agent.install_fingerprint().encode(),
+                base_image_ref.encode(),
+                install_fingerprint.encode(),
                 env.script,
             )
         )
-        return hashlib.sha256(payload).hexdigest()[:8]
+        digest = hashlib.sha256(payload).hexdigest()[:8]
+        return FingerprintInputs(
+            backend_id=self.id,
+            base_image_ref=base_image_ref,
+            install_fingerprint=install_fingerprint,
+            env_script_sha256=env_script_sha256,
+            digest=digest,
+        )
+
+    def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
+        """Return the snapshot cache fingerprint for this backend, agent, and env."""
+        return self.fingerprint_inputs(agent, env).digest
+
+    def image_identity(self: object, snapshot: str) -> ImageIdentity:
+        """Return `snapshot`'s native image manifest digest, or why it is unavailable.
+
+        Reads the digest via the microsandbox `Snapshot` handle. Any exception —
+        the snapshot missing on disk, a corrupt manifest, a client error — becomes
+        an explained `unavailable` result rather than propagating: a backend lookup
+        failure must never abort provenance capture or artifact aggregation.
+        """
+        try:
+            digest = asyncio.run(self._image_manifest_digest_async(snapshot))
+        except Exception as error:
+            return ImageIdentity.unavailable(str(error) or "microsandbox image digest read failed")
+        return ImageIdentity.available(digest)
+
+    async def _image_manifest_digest_async(self: object, snapshot: str) -> str:
+        """Open `snapshot` and return its native image manifest digest."""
+        from microsandbox import Snapshot
+
+        handle = await Snapshot.open(snapshot)
+        return handle.image_manifest_digest
 
     async def guest_shell(self: object, sandbox: object, agent: object, script: str) -> str | None:
         """Run `script` in the guest, returning stdout on success or None on any failure."""

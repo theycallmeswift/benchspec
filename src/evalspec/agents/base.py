@@ -15,6 +15,7 @@ is a parameter of the call, not a code path baked into each harness.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from evalspec.runner import RunResult
 
 if TYPE_CHECKING:
+    from evalspec.backend import SandboxBackend
     from evalspec.environments import ExecutionEnv
     from evalspec.judges.config import JudgeConfig
 
@@ -29,6 +31,56 @@ if TYPE_CHECKING:
 # symlinks its own load dir here once at provision, so the install path is identical
 # across agents and the per-agent load dir is the only agent-specific fact.
 FIXED_SKILLS_HOME = "/home/evalspec/skills"
+
+# Matches the first dotted-numeric token in `--version` output, e.g. the "1.2.3" in
+# both "claude-code 1.2.3" and "codex-cli 0.144.1". Shared by every guest-version parse
+# so adapters never hand-roll their own extraction.
+_VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
+
+
+def _parse_version_token(output: str) -> str | None:
+    """Extract a dotted version token (e.g. "1.2.3") from raw `--version` output."""
+    match = _VERSION_TOKEN_RE.search(output)
+    return match.group(0) if match else None
+
+
+async def probe_guest_version(
+    backend: SandboxBackend, sandbox: object, agent: object
+) -> tuple[str | None, str | None]:
+    """Measure the task-harness binary's version inside the live guest sandbox.
+
+    Runs `<agent.agent_bin> --version` through the backend's guest command seam
+    (`backend.guest_shell`) against the already-booted `sandbox` instance. This is the
+    guest task-harness probe: it reads the binary actually installed in the selected
+    snapshot, never the host binding (`for_host()`) or the pinned install selector
+    (`agent.version()`, e.g. `"latest"`).
+
+    Never raises: any failure to reach the guest, or to parse a version out of what it
+    returns, is reported as an explained `(None, error)` pair rather than an
+    unexplained null (ground rule: explained unavailable).
+
+    Args:
+        backend: The resolved `SandboxBackend` driving this arm's sandbox.
+        sandbox: The live sandbox instance for the running arm session.
+        agent: The `CodingAgent` whose `agent_bin` is probed.
+
+    Returns:
+        `(version, None)` on success, or `(None, error)` describing why the probe
+        could not produce a version.
+    """
+    script = f"{agent.agent_bin} --version"
+    try:
+        # Broad on purpose: this probe's contract is "never raise" (see docstring), and
+        # guest_shell's own concrete failure modes vary by backend.
+        output = await backend.guest_shell(sandbox, agent, script)
+    except Exception as error:
+        return None, f"guest_shell raised {type(error).__name__}: {error}"
+    if output is None:
+        return None, f"guest_shell returned no output for `{script}`"
+    version = _parse_version_token(output)
+    if version is None:
+        return None, f"could not parse a version from guest output: {output.strip()!r}"
+    return version, None
 
 
 class BaseAgent:
