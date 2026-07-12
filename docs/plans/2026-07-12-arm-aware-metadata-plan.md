@@ -121,23 +121,41 @@ null+error (spec 185, 190–191).
 
 ## Task 4 — Capture provenance in `run_eval_arm`
 
-**Goal:** build a `RuntimeProvenance` immediately after `ensure_snapshot()` and before the
-task harness runs; persist it beside the sample.
+**Goal:** build a `RuntimeProvenance` for the arm's resolved snapshot/runtime and persist it
+beside the sample — captured before the task harness produces its result.
 
-**Where:** `src/evalspec/execution.py:296–334` (`run_eval_arm`).
+**Where:** `src/evalspec/execution.py:296–365` (`run_eval_arm` + `_run_arm_turns`).
+
+> **Placement (validated Codex finding #2).** The guest version probe (Task 3) needs a
+> **live** sandbox object, which only exists inside the async `_run_arm_turns` session (the
+> `asyncio.run(...)` block at execution.py:344), **not** at the synchronous point right after
+> `ensure_snapshot()` (execution.py:334, which yields only a snapshot *name*). Do not probe
+> at line 334. Split the capture:
 
 **Change:**
-- After `ensure_snapshot(...)` (execution.py:334) and before running the task: assemble
-  `SandboxProvenance` from the shared fingerprint helper (Task 2) + `backend.image_identity(snapshot)`,
-  run the guest probe (Task 3), build `RuntimeProvenance(arm=arm.name, …)`.
-- Persist as `provenance.json` beside the sample's other artifacts (same dir as
-  `grading.json`/`timing.json`) so xdist workers and offline analysis retain it
-  (spec 132–135).
+- **Static sandbox identity** — assemble `SandboxProvenance` from the shared fingerprint
+  helper (Task 2) around execution.py:332–334 where `agent`/`backend`/`snapshot` are already
+  resolved. `backend.image_identity(snapshot)` may be sync or may need the async context
+  depending on the backend client; if it needs the live async client, capture it inside the
+  session alongside the guest probe. Keep it out of the hot path either way and never let it
+  raise (Task 2 guarantees typed unavailable).
+- **Guest version probe** — run inside `_run_arm_turns` (execution.py:344–365) against the
+  live sandbox via the guest seam (Task 3), before/around the task turns. Return the probe
+  result (and any image-identity captured there) up to `run_eval_arm` as part of the
+  `arm_run` result, or via a small out-param, so the synchronous body can persist it.
+- Assemble `RuntimeProvenance(arm=arm.name, actual_version=…, sandbox=SandboxProvenance(…))`
+  in the sync body once the async session returns, then persist as `provenance.json` beside
+  the sample's other artifacts (same dir as `grading.json`/`timing.json`) so xdist workers and
+  offline analysis retain it (spec 132–135). Persisting after the session returns is fine —
+  the *facts* (snapshot, digest, guest version) are all observed before the graded result is
+  finalized, satisfying "captured before the task harness runs" in the sense the spec means
+  (the environment identity is fixed at session start, not mutated by the run).
 - Thread the resolved `sandbox_name` from the caller (Task 5) rather than the hardcoded
   default.
 
-**Tests:** `tests/test_execution.py` — provenance persisted with the sample; captured
-before task run (order); uses the passed-in backend, not `DEFAULT_SANDBOX`.
+**Tests:** `tests/test_execution.py` — provenance persisted with the sample; the guest probe
+runs against the live sandbox (assert the guest seam is used, not `for_host()`); uses the
+passed-in backend, not `DEFAULT_SANDBOX`.
 
 ---
 
@@ -156,6 +174,16 @@ runs keep the default.
 - `_sandbox_preflight` passes the resolved backend to `sandbox.preflight(backend)`
   (sandbox.py:45). No eval set ⇒ default backend path preserved (spec 153–154).
 - `test_eval` passes `sandbox_name=<resolved>` into `run_eval_arm` (spec 155–156).
+
+> **Fixture mechanism (validated Codex finding #9).** `_sandbox_preflight` (cases.py:97–100)
+> is `scope="session", autouse=True` and takes **no** fixture args today. A session-scoped
+> fixture **cannot** depend on the function-scoped `eval_set_name`/`eval_arm` fixtures
+> (scope mismatch). Resolve the set from `request.config` directly instead: add a `request`
+> param and reuse the exact guard `pytest_generate_tests`/`sessionfinish` already apply
+> (`plugin.py:532–538`, mirrored at ~`plugin.py:649`) so a **trigger-only** project with no
+> sets table does not force `resolved_run_set()` to parse/raise. Factor that "resolve the run
+> set only when eval cases exist" logic into one helper shared by the fixture and
+> `sessionfinish` rather than duplicating the guard.
 
 **Tests:** `tests/test_execution.py` / `tests/test_plugin.py` (or `tests/test_cases*`):
 resolved backend drives preflight + execution; trigger-only retains default (spec 203).
@@ -184,6 +212,13 @@ from persisted records, never synthesized.
   registry at judges/registry.py:66–79).
 - `pytest_sessionfinish`: load every `provenance.json` under the skills root, run
   `aggregate_observed` (Task 1). Absent arms ⇒ no observed entry (Ground rule 4).
+
+> **Ordering (validated Codex finding #5).** `_write_manifest` is called at plugin.py:541,
+> **before** the skill-dir walk (plugin.py:582–617) where `provenance.json` records live.
+> Aggregate observed provenance **first** and pass the `observed_arms` dict into
+> `_write_manifest`/`build_manifest` as a parameter — do not let `meta.json` be written with
+> an empty or stale `observed_arms`. Move the aggregation walk (or a dedicated
+> `provenance.json`-only walk) ahead of the manifest write.
 
 **Tests:** `tests/test_plugin.py` — meta `format_version == 2`; v1 fields absent
 (Ground rule 3); planned includes a configured-but-unrun arm while observed excludes it
@@ -275,7 +310,11 @@ but does **not** auto-refresh the snapshot or make a run reproducible by itself 
 1. `make test` — green (unit tests fully cover the logic; backends mocked).
 2. `make lint` — green.
 3. `evalspec lint` / `evalspec analyze` import & run with `microsandbox` absent
-   (spec 207) — runnable here.
+   (spec 207) — runnable here. The existing
+   `tests/test_backend.py::test_microsandbox_imported_only_under_allowlist` enforces this
+   by grepping `src/evalspec/*.py` for `microsandbox` imports outside an allowlist. Keep new
+   types in the fresh `provenance.py` (no microsandbox import); `image_identity` lands in the
+   already-allowlisted `backend.py`. Re-run this test after Task 2.
 4. `sandbox:build --set <two-harness-fixture>` and a same-harness two-arm fixture — via
    unit tests with fake backends (spec 205).
 5. Real microsandbox fixture run recording digest + guest version (spec 199, 243) —
