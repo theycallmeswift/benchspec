@@ -50,6 +50,14 @@ class BaseAgent:
             return None
         return proc.stdout.strip() or None
 
+    def install_fingerprint(self: object) -> str:
+        """Extra cache-key input for the CLI install beyond `version()`.
+
+        Adapters that pin an installer revision or lockfile override this; the default
+        is the version string, so the snapshot rebuilds only when `version()` moves.
+        """
+        return self.version()
+
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""
         skill_dir = self.skill_load_dir
@@ -101,6 +109,10 @@ class CodingAgent(Protocol):
 
     def version(self: object) -> str:
         """Return the agent CLI version string."""
+        ...
+
+    def install_fingerprint(self: object) -> str:
+        """Return the CLI install fingerprint (defaults to `version()`)."""
         ...
 
     def bridge_skills_home_script(
