@@ -267,6 +267,15 @@ def _per_eval_rate(arm_stats: dict, group: str, eval_id: str) -> float | None:
     )
 
 
+def _rate_cell(rate: float | None, delta_pp: float | None) -> str:
+    """Render one matrix cell: — for no rate, bare % for no delta, else `rate (+Npp)`."""
+    if rate is None:
+        return "—"
+    if delta_pp is None:
+        return f"{rate:.0%}"
+    return f"{rate:.0%} ({delta_pp:+.0f}pp)"
+
+
 def _matrix_table(benchmark: dict) -> list[str]:
     """Return the run-level group/eval-by-arm matrix with an All evals footer."""
     arms = benchmark["arms"]
@@ -294,24 +303,15 @@ def _matrix_table(benchmark: dict) -> list[str]:
         cells = []
         for arm_name in names:
             rate = _per_eval_rate(arms[arm_name], group, eval_id)
-            if rate is None:
-                cells.append("—")
-            elif arm_name == baseline or ref_rate is None:
-                cells.append(f"{rate:.0%}")
-            else:
-                cells.append(f"{rate:.0%} ({(rate - ref_rate) * 100:+.0f}pp)")
+            measured = arm_name != baseline and ref_rate is not None and rate is not None
+            delta_pp = (rate - ref_rate) * 100 if measured else None
+            cells.append(_rate_cell(rate, delta_pp))
         lines.append(f"| {group}/{eval_id} | " + " | ".join(cells) + " |")
 
     footer_cells = []
     for arm_name in names:
-        arm_rate = arms[arm_name]["pass_rate"]
-        delta_pp = arms[arm_name].get("delta_pp")
-        if arm_rate is None:
-            footer_cells.append("—")
-        elif arm_name == baseline or delta_pp is None:
-            footer_cells.append(f"{arm_rate:.0%}")
-        else:
-            footer_cells.append(f"{arm_rate:.0%} ({delta_pp:+.0f}pp)")
+        delta_pp = None if arm_name == baseline else arms[arm_name].get("delta_pp")
+        footer_cells.append(_rate_cell(arms[arm_name]["pass_rate"], delta_pp))
     lines.append("| All evals | " + " | ".join(footer_cells) + " |")
 
     lines.append("")
