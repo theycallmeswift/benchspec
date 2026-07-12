@@ -137,10 +137,10 @@ First run takes a few minutes — downloads Ubuntu, installs Claude Code into th
 .venv/bin/evalspec run --set default
 ```
 
-Two parametrized tests run (`test_eval[hello-greets-by-name-baseline]` and `test_eval[hello-greets-by-name-trial]`), then a benchmark line — one Δ per contrast arm vs the baseline:
+Two parametrized tests run (`test_eval[hello-greets-by-name-baseline]` and `test_eval[hello-greets-by-name-trial]`), then a run-level benchmark line — one Δ per contrast arm vs the baseline:
 
 ```
-hello: baseline 0% -> trial 100%  (delta +100pp)  -> tmp/evals/iteration_01/skills/hello/benchmark.md
+iteration_01: baseline 0% -> trial 100%  (delta +100pp)  -> tmp/evals/iteration_01/benchmark.md
 ```
 
 Numbers will vary — the baseline arm may guess the right shape, the trial arm may miss an assertion. What matters is that both arms ran and produced graded output.
@@ -157,10 +157,10 @@ tree tmp/evals/iteration_01
 tmp/evals/iteration_01
 ├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, the resolved judge object (harness/model/effort/timeout/env/harness_args), efforts, start time, format_version; the join key for cross-run aggregation
 ├── index.jsonl                     # flat per-sample results — the aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout
+├── benchmark.json                  # ONE run-level report across every group in the run (format_version 2)
+├── benchmark.md                    # the same, rendered — one matrix keyed <group>/<eval_id>
 └── skills
     └── hello
-        ├── benchmark.json
-        ├── benchmark.md
         └── eval-greets-by-name
             ├── trial
             │   └── sample-0
@@ -176,7 +176,7 @@ tmp/evals/iteration_01
                     └── session.jsonl    # every arm streams, so the baseline gets one too
 ```
 
-Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. `benchmark.md` opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a `## Matrix` eval×arm table (evals down the left, `<arm> (<harness>)` across the top — baseline cells show absolute rates, every other cell its ±pp delta) and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration. `benchmark.json` is the same data, machine-readable, keyed by `arms`. `meta.json` at the iteration root records what produced the run. The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
+Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. A run writes exactly one `benchmark.md` at the iteration root, spanning every group. It opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a single `## Matrix` table — rows keyed `<group>/<eval_id>` (down the left), `<arm> (<harness>)` columns across the top, baseline cells show the absolute rate and every non-baseline cell shows `<rate> (+Npp)` (absolute rate AND its ±pp delta), closed by an `All evals` footer that rolls each arm up to its headline pass rate — and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration. `benchmark.json` is the same data, machine-readable, keyed by `arms` with a top-level `roster` (see [`schema.md`](schema.md#benchmarkjson)). `meta.json` at the iteration root records what produced the run. The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
 
 ## Common first-run failures
 

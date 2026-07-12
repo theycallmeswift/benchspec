@@ -562,38 +562,56 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         else None
     )
 
+    # One run-level benchmark at the iteration root (beside meta.json / index.jsonl).
+    # Skipped when no eval-* dirs were discovered, so an eval-less run writes no artifact.
     binder_degraded_total = 0
-    for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
-        if not any(
-            child_dir.is_dir() and child_dir.name.startswith("eval-")
-            for child_dir in skill_dir.iterdir()
-        ):
-            continue
-        skill = skill_dir.name
+    all_eval_dirs = report.discover_eval_dirs(skills_root)
+    if all_eval_dirs:
         benchmark = report.write_benchmark(
-            skill_dir,
-            label=f"{iteration} · {skill}",
+            skills_root.parent,
+            all_eval_dirs,
+            label=iteration,
             baseline=baseline,
             arm_meta=arm_meta,
         )
-        binder_degraded_total += sum(
+        binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
-        lines.append(report.delta_line(skill, benchmark, skill_dir / "benchmark.md"))
-        if fail_under is not None and benchmark["baseline"] is not None:
-            # Gate every non-baseline arm's Δ against the threshold; arms with no Δ
-            # (a missing rate on either side) are skipped, not failed.
-            for arm_name, stats in benchmark["arms"].items():
-                if arm_name == benchmark["baseline"]:
-                    continue
-                delta_pp = stats.get("delta_pp")
-                if delta_pp is not None and delta_pp < fail_under:
-                    lines.append(
-                        f"FAIL fail-under: {skill}/{arm_name} delta {delta_pp:+.0f}pp "
-                        f"< {fail_under:+.0f}pp"
-                    )
-                    if session.exitstatus == 0:
-                        session.exitstatus = 1
+        lines.append(report.delta_line(iteration, benchmark, skills_root.parent / "benchmark.md"))
+
+    for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
+        skill = skill_dir.name
+        group_eval_dirs = sorted(
+            child
+            for child in skill_dir.iterdir()
+            if child.is_dir() and child.name.startswith("eval-")
+        )
+        if not group_eval_dirs:
+            continue
+        # The report is pooled across the whole run, but the fail-under gate stays
+        # per-group: rebuild each group's benchmark in memory (never written to disk)
+        # and gate its per-arm Δ, so a regression in any single group still trips exit 1.
+        if fail_under is not None and baseline is not None:
+            group_benchmark = report.build_benchmark(
+                group_eval_dirs,
+                label=f"{iteration} · {skill}",
+                baseline=baseline,
+                arm_meta=arm_meta,
+            )
+            if group_benchmark["baseline"] is not None:
+                # Gate every non-baseline arm's Δ against the threshold; arms with no Δ
+                # (a missing rate on either side) are skipped, not failed.
+                for arm_name, stats in group_benchmark["arms"].items():
+                    if arm_name == group_benchmark["baseline"]:
+                        continue
+                    delta_pp = stats.get("delta_pp")
+                    if delta_pp is not None and delta_pp < fail_under:
+                        lines.append(
+                            f"FAIL fail-under: {skill}/{arm_name} delta {delta_pp:+.0f}pp "
+                            f"< {fail_under:+.0f}pp"
+                        )
+                        if session.exitstatus == 0:
+                            session.exitstatus = 1
         index_lines += [json.dumps(row) for row in report.index_rows(skill_dir, skill)]
     if index_lines:
         (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
