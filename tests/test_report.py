@@ -736,20 +736,28 @@ def test_matrix_all_evals_footer_is_run_level_pooled_mean_multi_group(tmp_path: 
 
 
 def test_matrix_non_baseline_cell_shows_rate_and_delta(tmp_path: object) -> None:
-    """Verify non-baseline cells show rate and delta; a no-baseline build shows absolute only."""
+    """Verify a non-baseline cell shows its rate and the ±pp delta vs the baseline."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
 
-    with_baseline = report.build_benchmark(
+    bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
     )
-    absolute_only = report.build_benchmark(
+    md = report._format_markdown(bench)
+
+    assert "| archive/alpha | 50% | 100% (+50pp) |" in md
+    assert "| All evals | 50% | 100% (+50pp) |" in md
+
+
+def test_matrix_non_baseline_cell_absolute_without_baseline(tmp_path: object) -> None:
+    """Verify a no-baseline build shows each arm's absolute rate with no delta."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
+
+    bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
     )
+    md = report._format_markdown(bench)
 
-    with_baseline_md = report._format_markdown(with_baseline)
-    assert "| archive/alpha | 50% | 100% (+50pp) |" in with_baseline_md
-    assert "| All evals | 50% | 100% (+50pp) |" in with_baseline_md
-    absolute_only_md = report._format_markdown(absolute_only)
-    assert "| archive/alpha | 50% | 100% |" in absolute_only_md
-    assert "| All evals | 50% | 100% |" in absolute_only_md
+    assert "| archive/alpha | 50% | 100% |" in md
+    assert "| All evals | 50% | 100% |" in md

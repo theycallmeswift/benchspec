@@ -563,8 +563,8 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     )
 
     # One run-level benchmark pooled across every group, written to the iteration root
-    # beside meta.json / index.jsonl. Guarded like the old per-skill loop's eval-*
-    # check, so an eval-less run writes no benchmark artifact.
+    # beside meta.json / index.jsonl. Skipped entirely when the run discovered no eval-*
+    # dirs, so an eval-less run writes no benchmark artifact.
     binder_degraded_total = 0
     all_eval_dirs = report.discover_eval_dirs(skills_root)
     if all_eval_dirs:

@@ -129,8 +129,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         pair_rates.extend(sample_rates)
 
     return {
-        # Pooled (sample-weighted, micro-style) mean over every surviving (eval × sample)
-        # assertion-fraction rate; errored samples are excluded.
+        # Errored samples were already excluded from pair_rates.
         "pass_rate": statistics.mean(pair_rates) if pair_rates else None,
         "pass_rate_stdev": statistics.stdev(pair_rates) if len(pair_rates) > 1 else None,
         "duration_ms_mean": statistics.mean(durations) if durations else None,
