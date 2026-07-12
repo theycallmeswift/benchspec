@@ -108,10 +108,17 @@ mkdir -p /home/evalspec/skills/hello
 cp ../../SKILL.md /home/evalspec/skills/hello/SKILL.md
 ```
 
-Validate the suite parses before booting a VM — `--collect-only` runs discovery without running anything. The `pip install` registered evalspec as a pytest plugin, so plain `pytest` already loads it (no `-p` flag needed):
+Check the suite statically before booting a VM. `evalspec lint` flags assertions the judge can't fairly grade; `evalspec analyze` classifies each assertion as deterministic or judge-backed (it binds through the real binder, so it needs `GEMINI_API_KEY`):
 
 ```bash
-.venv/bin/pytest -k hello --collect-only
+.venv/bin/evalspec lint
+.venv/bin/evalspec analyze
+```
+
+To confirm discovery without grading, `evalspec run` forwards everything after `--` straight to pytest — `--collect-only` lists the cells without running them:
+
+```bash
+.venv/bin/evalspec run -- -k hello --collect-only
 ```
 
 You should see two collected items, `test_eval[hello-greets-by-name-baseline]` and `test_eval[hello-greets-by-name-trial]` — one per declared arm. A malformed suite fails here with the offending path quoted.
@@ -119,15 +126,15 @@ You should see two collected items, `test_eval[hello-greets-by-name-baseline]` a
 ## Step 4 — Build the snapshot
 
 ```bash
-.venv/bin/python -c "from dotenv import load_dotenv; load_dotenv(); from evalspec import sandbox; sandbox.cli_build()"
+.venv/bin/evalspec sandbox:build
 ```
 
-First run takes a few minutes — downloads Ubuntu, installs Claude Code into the VM, snapshots it. Later runs reuse it.
+First run takes a few minutes — downloads Ubuntu, installs Claude Code into the VM, snapshots it. Later runs reuse it. This step is optional: `evalspec run` builds the snapshot on demand too, so run it up front only when you'd rather pay the build cost before the first arm. (Phase 5 ships `sandbox:build` in its **bare** form — no `--set`/`--config`; see [`configuration.md`](configuration.md#building-the-sandbox--evalspec-sandboxbuild).)
 
 ## Step 5 — Run the eval
 
 ```bash
-.venv/bin/pytest -k hello
+.venv/bin/evalspec run --set default
 ```
 
 Two parametrized tests run (`test_eval[hello-greets-by-name-baseline]` and `test_eval[hello-greets-by-name-trial]`), then a benchmark line — one Δ per contrast arm vs the baseline:
@@ -137,6 +144,8 @@ hello: baseline 0% -> trial 100%  (delta +100pp)  -> tmp/evals/iteration_01/skil
 ```
 
 Numbers will vary — the baseline arm may guess the right shape, the trial arm may miss an assertion. What matters is that both arms ran and produced graded output.
+
+`--set default` names the eval set to resolve; since `default` is also the `default-set`, plain `evalspec run` resolves it too. A few more flags: `--config <file.toml>` layers a scratch set without editing tracked config, and `--fail-under <pp>` turns the run into a CI gate that exits `1` when any arm's Δ falls below the threshold. Everything after `--` still passes to pytest, so `evalspec run --set default -- -k hello -x` scopes and stops on first failure. See [`configuration.md`](configuration.md#running-a-benchmark--evalspec-run) for every run flag and the exit-code contract.
 
 ## Step 6 — Inspect the artifacts
 
@@ -190,7 +199,7 @@ model = "gpt-5.5"
 Or override per run without editing `pyproject.toml`:
 
 ```bash
-pytest --evalspec-judge-harness codex --evalspec-judge-model gpt-5.5
+evalspec run --judge-harness codex --judge-model gpt-5.5
 ```
 
 A Codex judge needs the `codex` CLI installed and on `PATH` with valid credentials (the run preflights the binary and fails loudly if it's missing). See [`configuration.md`](configuration.md#the-judge--toolevalspecjudge) for the full precedence chain and every `--evalspec-judge-*` flag.

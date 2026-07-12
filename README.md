@@ -106,13 +106,14 @@ arms = [
 # 1. Lint the suite — static, no credentials or sandbox required:
 evalspec lint
 
-# 2. Run it — boots a fresh microVM per arm and grades with the judge:
-pytest -k archive-source-from-inbox
+# 2. Build the agent snapshot once, then run — a fresh microVM per arm, graded by the judge:
+evalspec sandbox:build
+evalspec run
 ```
 
-Output-eval test ids are `<group>-<eval_id>-<arm>`, so `-k` filters by the group or eval id — not by an enclosing skill directory.
+Output-eval test ids are `<group>-<eval_id>-<arm>`, so `-k` filters by the group or eval id — not by an enclosing skill directory. `evalspec run` forwards anything after `--` to pytest, so `evalspec run -- -k archive-source-from-inbox` (equivalently `pytest -k archive-source-from-inbox`) scopes a run to one group.
 
-Start with `evalspec lint`: it flags assertions the judge can't fairly grade *before* you spend a token. The first `pytest` run builds the agent's microVM snapshot (a few minutes); later runs reuse it. Full walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
+Start with `evalspec lint`: it flags assertions the judge can't fairly grade *before* you spend a token. `evalspec sandbox:build` warms the agent's microVM snapshot (a few minutes); `evalspec run` builds it on demand too, then reuses it. Full walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
 
 ## Host requirements
 
