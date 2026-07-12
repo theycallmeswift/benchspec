@@ -415,3 +415,26 @@ def test_preflight_gemini_key_passes_when_set(monkeypatch: object) -> None:
     """Verify preflight passes with a non-empty key."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     binder.preflight_gemini_key()  # no raise
+
+
+def test_binder_identity_matches_spec_shape() -> None:
+    """Verify binder_identity() returns the exact spec 82-86 dict."""
+    assert binder.binder_identity() == {
+        "provider": "gemini",
+        "model": "gemini-3.1-flash-lite",
+        "api_path": "generativelanguage.googleapis.com/v1beta",
+    }
+
+
+def test_binder_identity_contains_no_key_material(monkeypatch: object) -> None:
+    """Verify binder_identity() never reads or leaks GEMINI_API_KEY."""
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-value")
+    identity = binder.binder_identity()
+    assert "GEMINI_API_KEY" not in repr(identity)
+    assert "super-secret-value" not in repr(identity)
+    assert set(identity) == {"provider", "model", "api_path"}
+
+
+def test_gemini_url_is_built_from_the_api_path_constant() -> None:
+    """Verify `_GEMINI_URL` stays a single source of truth with `GEMINI_API_PATH`."""
+    assert binder._GEMINI_URL.startswith(f"https://{binder.GEMINI_API_PATH}")

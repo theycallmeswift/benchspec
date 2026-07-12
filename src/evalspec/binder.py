@@ -17,7 +17,8 @@ from evalspec.schema import SchemaError, _validate_checker_obj
 
 GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
 
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_API_PATH = "generativelanguage.googleapis.com/v1beta"
+_GEMINI_URL = f"https://{GEMINI_API_PATH}/models/{{model}}:generateContent"
 _GEMINI_TIMEOUT_SECONDS = 60.0
 _AUTH_HTTP_CODES = {401, 403}
 
@@ -337,6 +338,19 @@ def preflight_gemini_key() -> None:
             "GEMINI_API_KEY is required — the binder calls the Gemini API for every "
             "graded run. Set it in the environment or a repo-root .env."
         )
+
+
+def binder_identity() -> dict:
+    """Return the configured binder's transport identity for artifact metadata.
+
+    Fixed and run-level — describes the assertion binder, not the grader. Never
+    reads or includes `GEMINI_API_KEY` or any other key material.
+    """
+    return {
+        "provider": "gemini",
+        "model": GEMINI_BINDER_MODEL,
+        "api_path": GEMINI_API_PATH,
+    }
 
 
 def bind(
