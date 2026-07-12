@@ -105,12 +105,14 @@ class CodexAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
     capabilities = AgentCapabilities(efforts=(), multi_turn=False, token_split=True)
-    PROVISION_SCRIPT = dedent("""\
-        apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
-        export CODEX_NON_INTERACTIVE=1 &&
-        npm i -g "@openai/codex@${EVALSPEC_CODEX_VERSION:-latest}" &&
-        test -x /usr/local/bin/codex
-    """)
+    def provision_script(self: object) -> str:
+        """Install the instance's pinned Codex CLI version (baked in so the cache key tracks it)."""
+        return dedent(f"""\
+            apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
+            export CODEX_NON_INTERACTIVE=1 &&
+            npm i -g "@openai/codex@{self._version}" &&
+            test -x /usr/local/bin/codex
+        """)
 
     def __init__(
         self: object,
@@ -287,7 +289,7 @@ class CodexAgent(BaseAgent):
 
     async def provision(self: object, sandbox: object) -> None:
         """Install the agent CLI and credentials inside the guest."""
-        res = await sandbox.shell(self.PROVISION_SCRIPT, env=self.guest_env())
+        res = await sandbox.shell(self.provision_script(), env=self.guest_env())
         if res.exit_code != 0:
             raise RuntimeError(
                 f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"

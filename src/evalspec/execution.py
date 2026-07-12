@@ -21,6 +21,7 @@ from pathlib import Path
 from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.arms import Arm, expand_env
+from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.discovery import EvalCase
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
@@ -232,6 +233,7 @@ async def _run_arm_turns(
     prompt: object,
     project_marker: object,
     setup_reldir: object,
+    backend: object,
     arm_env: object = None,
     eval_set: object = "",
     harness_args: object = None,
@@ -256,6 +258,7 @@ async def _run_arm_turns(
         arm_env=arm_env,
         eval_set=eval_set,
         harness_args=harness_args,
+        backend=backend,
     ) as run:
         # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
         # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
@@ -301,6 +304,7 @@ def run_eval_arm(
     repo_root: Path,
     sample: int,
     eval_set: str = "",
+    sandbox_name: str = DEFAULT_SANDBOX,
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
     session_factory: Callable[..., SandboxSession] = arm_session,
@@ -319,11 +323,15 @@ def run_eval_arm(
     # mounts a staged project distinct from repo_root must address this.
     setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
 
-    # Resolve the agent + snapshot BEFORE the per-arm asyncio.run: building a missing
-    # snapshot itself calls asyncio.run, which can't nest inside a running loop. The agent
-    # is selected per arm so a multi-harness set runs each column on its own harness.
+    # Resolve the agent + backend + snapshot BEFORE the per-arm asyncio.run: building a
+    # missing snapshot itself calls asyncio.run, which can't nest inside a running loop.
+    # The agent is selected per arm so a multi-harness set runs each column on its own
+    # harness. `sandbox_name` defaults to "microsandbox" (the only implemented backend);
+    # the sole caller (cases.py) does not yet thread a resolved `Set.sandbox` value here
+    # (Phase 8).
     agent = make_agent(arm.harness)
-    snapshot = ensure_snapshot(agent, repo_root=repo_root)
+    backend = resolve_sandbox(sandbox_name)
+    snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
 
     # History block (context) first, then the one graded prompt — both rendered with the
     # same `today`. render_history emits a trailing blank line, so the prompt follows cleanly.
@@ -347,6 +355,7 @@ def run_eval_arm(
             prompt=prompt,
             project_marker=project_marker,
             setup_reldir=setup_reldir,
+            backend=backend,
             # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
             # actually runs, never at collection (a deselected arm's secret is never read).
             arm_env=expand_env(arm.env, os.environ),

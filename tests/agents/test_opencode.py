@@ -662,9 +662,11 @@ def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> Non
 
 def test_provision_script_verifies_warmed_db() -> None:
     """Verify provision script verifies warmed db."""
-    assert "opencode.db" in OpenCodeAgent.PROVISION_SCRIPT
+    script = OpenCodeAgent().provision_script()
+
+    assert "opencode.db" in script
     # the warm step must be followed by an existence check, not just fire-and-forget
-    assert "test -f /root/.local/share/opencode/opencode.db" in OpenCodeAgent.PROVISION_SCRIPT
+    assert "test -f /root/.local/share/opencode/opencode.db" in script
 
 
 def test_invoke_nonzero_exit_is_error() -> None:

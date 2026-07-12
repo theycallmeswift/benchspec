@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import tomllib
 
 from evalspec.arms import (
     Arm,
@@ -109,6 +112,26 @@ def test_parse_sets_unknown_harness_fails() -> None:
                 }
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("runner", ["pytest"]), ("sandbox", ["microsandbox"])],
+)
+def test_parse_sets_backend_fields_require_strings(field: str, value: object) -> None:
+    """Malformed runner and sandbox values fail as schema errors, not type errors."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "opus",
+                "arms": [{"name": "alpha", "harness": "claude-code"}],
+                field: value,
+            }
+        }
+    )
+
+    with pytest.raises(SchemaError, match=field):
+        parse_sets(table)
 
 
 def test_parse_sets_default_set_undeclared_fails() -> None:
@@ -504,3 +527,103 @@ def test_resolve_set_models_sweep_dedupes_sanitized_name_collisions() -> None:
 
     assert [arm.name for arm in resolved_set.arms] == ["a", "a-2", "a-3"]
     assert len({arm.name for arm in resolved_set.arms}) == len(resolved_set.arms)
+
+
+def test_parse_sets_unsupported_runner_fails() -> None:
+    """An unsupported runner fails fast naming the set, field, and supported values."""
+    with pytest.raises(
+        SchemaError, match=r"tool\.evalspec\.sets\.default.*runner.*jest.*pytest"
+    ):
+        parse_sets(
+            _sets_table(
+                {
+                    "default": {
+                        "model": "sonnet",
+                        "runner": "jest",
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
+                    }
+                }
+            )
+        )
+
+
+def test_parse_sets_unsupported_sandbox_fails_naming_set() -> None:
+    """An unsupported sandbox (docker) fails fast naming Docker and the offending set."""
+    with pytest.raises(
+        SchemaError, match=r"tool\.evalspec\.sets\.default.*docker.*not implemented"
+    ):
+        parse_sets(
+            _sets_table(
+                {
+                    "default": {
+                        "model": "sonnet",
+                        "sandbox": "docker",
+                        "arms": [{"name": "alpha", "harness": "claude-code"}],
+                    }
+                }
+            )
+        )
+
+
+def test_resolve_set_defaults_runner_and_sandbox() -> None:
+    """Omitted runner/sandbox default to pytest/microsandbox on the resolved Set."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "baseline": "baseline",
+                    "arms": [{"name": "baseline", "harness": "claude-code"}],
+                }
+            }
+        )
+    )
+
+    resolved = resolve_set(rawsets, default)
+
+    assert resolved.runner == "pytest"
+    assert resolved.sandbox == "microsandbox"
+
+
+def test_resolve_set_carries_declared_runner_and_sandbox() -> None:
+    """Declared runner/sandbox values reach the resolved Set."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "runner": "pytest",
+                    "sandbox": "microsandbox",
+                    "baseline": "baseline",
+                    "arms": [{"name": "baseline", "harness": "claude-code"}],
+                }
+            }
+        )
+    )
+
+    resolved = resolve_set(rawsets, default)
+
+    assert resolved.runner == "pytest"
+    assert resolved.sandbox == "microsandbox"
+
+
+def test_two_backends_fixture_fails_whole_file() -> None:
+    """The fail-fast fixture: the docker set makes the whole file fail to parse."""
+    raw = tomllib.loads(
+        Path("tests/fixtures/sandbox/two-backends.toml").read_text(encoding="utf-8")
+    )
+
+    with pytest.raises(SchemaError, match="docker.*not implemented"):
+        parse_sets(raw["tool"]["evalspec"])
+
+
+def test_microsandbox_fixture_parses_and_resolves() -> None:
+    """The accept fixture: parses cleanly and resolves to a microsandbox set."""
+    raw = tomllib.loads(
+        Path("tests/fixtures/sandbox/microsandbox.toml").read_text(encoding="utf-8")
+    )
+
+    rawsets, default = parse_sets(raw["tool"]["evalspec"])
+    resolved = resolve_set(rawsets, default)
+
+    assert resolved.sandbox == "microsandbox"

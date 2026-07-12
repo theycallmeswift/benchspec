@@ -14,6 +14,7 @@ is a parameter of the call, not a code path baked into each harness.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -38,6 +39,16 @@ class BaseAgent:
     # for_host() rebinds to the name PATH resolves on the host (judge mode).
     agent_bin: str
 
+    def provision_script(self: object) -> str:
+        """The fully-resolved commands this instance runs to install the CLI in the guest.
+
+        Concrete task adapters override it, baking in any instance state (e.g. a pinned
+        version). `provision()` runs exactly this, and `install_fingerprint()` hashes it — so
+        every install-affecting input is captured in the cache key structurally, with nothing
+        to fold by hand. Empty on the base (host/judge agents install nothing in a guest).
+        """
+        return ""
+
     def binary_version(self: object) -> str | None:
         """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
         try:
@@ -49,6 +60,17 @@ class BaseAgent:
         if proc.returncode != 0:
             return None
         return proc.stdout.strip() or None
+
+    def install_fingerprint(self: object) -> str:
+        """Cache-key fingerprint of the CLI install: a hash of the resolved provision script.
+
+        `provision_script()` is the single source of truth for what installs the CLI, so
+        changing the installer (a new revision, package list, pinned version, or bootstrap
+        commands) rebuilds the snapshot. The agent version also appears directly in the
+        snapshot name, so a version bump rebuilds even for an adapter whose installer does not
+        embed the version.
+        """
+        return hashlib.sha256(self.provision_script().encode()).hexdigest()[:12]
 
     def bridge_skills_home_script(self: object) -> str:
         """Bridge skills home script."""
@@ -101,6 +123,14 @@ class CodingAgent(Protocol):
 
     def version(self: object) -> str:
         """Return the agent CLI version string."""
+        ...
+
+    def provision_script(self: object) -> str:
+        """Return the fully-resolved commands that install the CLI in the guest."""
+        ...
+
+    def install_fingerprint(self: object) -> str:
+        """Return the CLI install fingerprint (a hash of `provision_script()`)."""
         ...
 
     def bridge_skills_home_script(

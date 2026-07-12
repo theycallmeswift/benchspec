@@ -10,7 +10,7 @@ Run a passing eval against a trivial skill. You'll end up with a workspace dir, 
 - **A provider credential**: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`, exported or in a repo-root `.env`.
 - **`GEMINI_API_KEY`** — the binder's classifier credential, required for every graded run (exported or in a repo-root `.env`). Unrelated to the Claude Code credential above.
 
-Missing any of these and preflight fails with a remediation message before boot.
+Missing any of the above and preflight fails with a remediation message before boot.
 
 ## Step 1 — Create the repo
 
@@ -129,7 +129,7 @@ You should see two collected items, `test_eval[hello-greets-by-name-baseline]` a
 .venv/bin/evalspec sandbox:build
 ```
 
-First run takes a few minutes — downloads Ubuntu, installs Claude Code into the VM, snapshots it. Later runs reuse it. This step is optional: `evalspec run` builds the snapshot on demand too, so run it up front only when you'd rather pay the build cost before the first arm. (Phase 5 ships `sandbox:build` in its **bare** form — no `--set`/`--config`; see [`configuration.md`](configuration.md#building-the-sandbox--evalspec-sandboxbuild).)
+First run takes a few minutes — downloads Ubuntu, installs Claude Code into the VM, snapshots it. Later runs reuse it. This step is optional: `evalspec run` builds the snapshot on demand too, so run it up front only when you'd rather pay the build cost before the first arm. `evalspec sandbox:build` also takes `--set`/`--config` to build through a specific set's sandbox backend — see [`configuration.md`](configuration.md#building-the-sandbox--evalspec-sandboxbuild).
 
 ## Step 5 — Run the eval
 

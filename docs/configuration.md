@@ -15,6 +15,10 @@ Each `[tool.evalspec.sets.<name>]` declares one self-contained eval set. A run r
 | `env` | table | Set-level default env injected into each arm's `setup.sh` AND the agent exec. Shallow-merged with an arm's own `env` (arm keys win). A value of the form `$VAR`/`${VAR}` expands from the host environment at arm *execution* time (an unset referenced var raises then, never at collection) — literals pass through. Use for a leaky-OpenRouter arm (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN = "$OPENROUTER_API_KEY"`). Must be a table. |
 | `harness_args` | string[] | Raw CLI tokens appended by the selected harness adapter. Set-level args are inherited; arm-level args append after them, preserving order. Must be a list of strings. Use for harness-specific opt-ins such as `["--plugin-dir", "/project"]`; do not pass secrets here. Args that would override evalspec-owned identity/control (`model`, `effort`, prompt/print delivery, output/input format, resume/session handling, permission mode, etc.) are reserved and rejected by the adapter, including aliases and equals-form long flags. |
 | `baseline` | string | Names the arm every other arm's Δ is measured against (Δ = arm − baseline, in pp). Optional: with no `baseline`, each arm reports its absolute pass rate. A `baseline` naming an undeclared arm fails fast. |
+| `runner` | string | Set-level, default `pytest`. The test runner for the set — today the runner *is* the pytest plugin, so `pytest` is the only supported value. Any other value fails fast (exit `2`) naming the field and the supported values. |
+| `sandbox` | string | Set-level, default `microsandbox`. The sandbox backend the set runs in — only `microsandbox` is implemented. `sandbox = "docker"` is registered but explicitly rejected as not implemented; any other unknown value fails fast (exit `2`) naming the field and the supported values. |
+
+`runner` and `sandbox` are **set-level only** — there is no arm-level override and no `--evalspec-*` scalar-override flag for either. Both validate fail-fast at config-read time, the same as every other structural check in this table.
 
 `default-set` (a top-level `[tool.evalspec]` key) names the set a plain run resolves. Required; a `default-set` naming an undeclared set fails fast.
 
@@ -93,16 +97,18 @@ All four `evalspec` subcommands (`lint`, `analyze`, `run`, `sandbox:build`) shar
 |---|---|
 | `0` | success |
 | `1` | a finding or gate failure — `lint` warnings, or a `run --fail-under` gate tripped |
-| `2` | usage error — a bad flag, an unknown `--set`, or an unreadable `--config`, caught before any paid arm runs |
+| `2` | usage error — a bad flag, an unknown `--set`, an unreadable `--config`, or a resolved set whose `runner`/`sandbox` names an unsupported value (e.g. `sandbox = "docker"`), caught before any paid arm runs |
 | `5` | nothing to do — no evals discovered under `root` |
+
+The unsupported-`runner`/`sandbox` case exits `2` through **both** `evalspec run` and `evalspec sandbox:build` — set resolution (and therefore this validation) happens the same way in each.
 
 `run` detects an empty selection **up front** — it reuses the plugin's own discovery before spawning pytest — so a root with no evals returns `5` with a readable message and never boots a VM. One consequence of that ordering: because emptiness short-circuits first, a bad `--set` (or an unreadable `--config`) against an **empty** root also returns `5`, not `2` — the set and config are only validated once there are cells to parametrize. The exit-`2`-for-a-bad-set contract therefore holds for a **populated** repo.
 
 ## Building the sandbox — `evalspec sandbox:build`
 
-`evalspec sandbox:build [root]` builds (or reuses) the microsandbox snapshot for the repo's agent up front, so the first `evalspec run` doesn't pay the build cost. It resolves the agent and environment from `root` alone; a failed host preflight exits `2`, a build failure exits `1`.
+`evalspec sandbox:build [root]` builds (or reuses) the sandbox snapshot for the repo's agent up front, so the first `evalspec run` doesn't pay the build cost. With neither `--set` nor `--config`, it resolves the agent and environment from `root` alone and builds through the default `microsandbox` backend — the bare form is unchanged. A failed host preflight exits `2`, a build failure exits `1`.
 
-> **Bare in Phase 5.** The spec sketches `evalspec sandbox:build --set default`, but this phase ships the **bare** form with no `--set`/`--config`: a single-agent, root-resolved build doesn't vary by eval set (so `--set` would be inert), and threading `--config` into environment resolution lands in a later phase. Use `evalspec sandbox:build [root]`.
+`--set <name>` resolves that eval set and builds through *its* `sandbox` backend and `env` instead of the bare defaults; `--config <file>` layers a scratch TOML over pyproject for that set resolution (same shape as `--evalspec-config`). A `--set` whose `sandbox` names an unsupported value (e.g. `docker`) exits `2` (usage) before any preflight runs.
 
 ## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
 
@@ -159,7 +165,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | Key | Type | Notes |
 |---|---|---|
 | `default-set` | string | Names the eval set a plain run resolves (the one `make evals` uses). Required. `--evalspec-set` overrides it per run. A `default-set` naming an undeclared set fails fast. |
-| `sets.<name>` | table | One eval set — `arms` + set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults + `baseline`. See [Eval sets](#eval-sets--toolevalspecsetsname) above. |
+| `sets.<name>` | table | One eval set — `arms` + set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults + `baseline` + `runner`/`sandbox`. See [Eval sets](#eval-sets--toolevalspecsetsname) above. |
 | `agent` | string | Run-level default coding agent (the `__route__` sandbox path and `make_agent()` default; task arms select their harness per arm). Below `EVALSPEC_AGENT` and `--evalspec-agent`, above the built-in default (`claude-code`). Use to make a project default to `opencode` without setting env vars. |
 | `eval_paths` | string[] | The sole discovery knob — directories (relative to repo root) whose trees are walked for `eval.md` / `*.eval.md`. Below `--evalspec-eval-paths`, above the built-in default (`skills`, `tests`, `evals`, `benchmarks`). |
 | `base_image` | string | OCI image ref for the eval sandbox; default `ubuntu:latest`. Swaps the pre-baked base before the agent provisions. Must be a Debian/apt-family image with glibc — the agent's provision step runs `apt-get` and installs glibc-linked CLIs. Folds into the snapshot cache identity: changing it auto-rebuilds. Opt-in; absent ⇒ `ubuntu:latest`. |

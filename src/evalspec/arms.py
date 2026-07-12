@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from evalspec.agents import known_harnesses
+from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.schema import SchemaError
 
 
@@ -31,6 +32,15 @@ class Arm:
     harness_args: list[str] = field(default_factory=list, hash=False)
 
 
+_SET_DEFAULT_KEYS = ("harness", "model", "effort", "env", "harness_args")
+_VAR = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
+_DEFAULT_EFFORT = "medium"
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+SUPPORTED_RUNNERS = {"pytest"}
+_DEFAULT_RUNNER = "pytest"
+
+
 @dataclass(frozen=True)
 class Set:
     """Describe one named eval set and its arms."""
@@ -38,6 +48,8 @@ class Set:
     name: str
     arms: list[Arm]
     baseline: str | None
+    runner: str = _DEFAULT_RUNNER
+    sandbox: str = DEFAULT_SANDBOX
 
 
 @dataclass(frozen=True)
@@ -48,12 +60,8 @@ class RawSet:
     defaults: dict
     raw_arms: list[dict]
     baseline: str | None
-
-
-_SET_DEFAULT_KEYS = ("harness", "model", "effort", "env", "harness_args")
-_VAR = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
-_DEFAULT_EFFORT = "medium"
-_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+    runner: str = _DEFAULT_RUNNER
+    sandbox: str = DEFAULT_SANDBOX
 
 
 def _arm_name_from_model(model: str) -> str:
@@ -144,7 +152,31 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
                     f"{where}: baseline `{baseline}` names an undeclared arm "
                     f"(declared: {sorted(seen)})"
                 )
-        rawsets[set_name] = RawSet(set_name, defaults, raw_arms, baseline)
+
+        runner = body.get("runner", _DEFAULT_RUNNER)
+        # TOML permits arrays/tables here; a non-string would raise an unhashable-key
+        # TypeError on the membership check below instead of the documented exit-2 diagnostic.
+        if not isinstance(runner, str) or not runner:
+            raise SchemaError(f"{where}: runner must be a non-empty string")
+        if runner not in SUPPORTED_RUNNERS:
+            raise SchemaError(
+                f"{where}: unsupported runner `{runner}` (supported: {sorted(SUPPORTED_RUNNERS)})"
+            )
+
+        sandbox_name = body.get("sandbox", DEFAULT_SANDBOX)
+        if not isinstance(sandbox_name, str) or not sandbox_name:
+            raise SchemaError(f"{where}: sandbox must be a non-empty string")
+        # resolve_sandbox raises SchemaError on docker/unknown with the specific
+        # "not implemented" wording; re-raise with the set's `where` prefix so the
+        # message names the offending [tool.evalspec.sets.<name>] (spec example).
+        try:
+            resolve_sandbox(sandbox_name)
+        except SchemaError as err:
+            raise SchemaError(f"{where}: {err}") from None
+
+        rawsets[set_name] = RawSet(
+            set_name, defaults, raw_arms, baseline, runner=runner, sandbox=sandbox_name
+        )
 
     default_set = table.get("default-set")
     if not isinstance(default_set, str) or not default_set:
@@ -244,7 +276,7 @@ def resolve_set(
             _materialize_arm(safe_name, {"name": safe_name, "model": model}, defaults, where)
             for safe_name, model in zip(unique, models, strict=False)
         ]
-        return Set(rs.name, arms, baseline=unique[0])
+        return Set(rs.name, arms, baseline=unique[0], runner=rs.runner, sandbox=rs.sandbox)
 
     arms = [_materialize_arm(raw_arm["name"], raw_arm, defaults, where) for raw_arm in rs.raw_arms]
-    return Set(rs.name, arms, baseline=rs.baseline)
+    return Set(rs.name, arms, baseline=rs.baseline, runner=rs.runner, sandbox=rs.sandbox)

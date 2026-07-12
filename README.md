@@ -124,7 +124,7 @@ Start with `evalspec lint`: it flags assertions the judge can't fairly grade *be
 
 ## Features
 
-- **Named eval sets, one signal.** Declare a `[tool.evalspec.sets.<name>]` whose `arms` are `harness × model` columns; each arm runs the same prompt in an isolated microVM, and the Δpp of each arm vs the set's `baseline` arm is the headline. A set's columns may span harnesses; `--evalspec-set` / `--evalspec-models` pick or sweep without editing tracked config.
+- **Named eval sets, one signal.** Declare a `[tool.evalspec.sets.<name>]` whose `arms` are `harness × model` columns; each arm runs the same prompt in an isolated microVM, and the Δpp of each arm vs the set's `baseline` arm is the headline. A set's columns may span harnesses; `--evalspec-set` / `--evalspec-models` pick or sweep without editing tracked config. Each set also names its `runner` (`pytest`, the only supported value) and `sandbox` backend (`microsandbox`; `docker` fails fast as not implemented) — see [`docs/configuration.md`](docs/configuration.md).
 - **Prose assertions, bound at grade time.** Every assertion is one plain `- [ ]` line (or a display-only parent `- [ ]` with indented `- [ ]` children that each flatten to one assertion — one nesting level). The binder maps it to a deterministic host-side checker when confident, else punts to the judge — the author writes no checker syntax.
 - **A linter for unjudgeable assertions.** `evalspec lint` flags vague adverbs, files outside the workdir, and unanchored comparatives. Warnings exit non-zero.
 - **Judge fed facts, not recall.** The judge reasons from the final message, workdir tree, file contents, SHA-256s, and the tools/sub-skills the agent invoked.
@@ -140,7 +140,7 @@ Other eval tools (promptfoo, DeepEval, Inspect) grade a model's *output*. evalsp
 
 A few deliberate bets adopters inherit:
 
-- **One sandbox: microsandbox.** No `Sandbox` protocol, no Docker backend — Apple Silicon or Linux+KVM, sub-1.0 runtime.
+- **One sandbox backend: microsandbox.** A `SandboxBackend` seam exists so a second backend is additive, but Docker is explicitly not implemented (`sandbox = "docker"` fails fast) — Apple Silicon or Linux+KVM, sub-1.0 runtime.
 - **Cross-agent task arms are an integration test, not a benchmark.** OpenCode running the same suite as Claude Code proves the protocol abstraction holds; pass rates across agents aren't directly comparable.
 - **The judge runs on the host** for a consistent grader across the matrix, behind the agent protocol so an agent can override it.
 

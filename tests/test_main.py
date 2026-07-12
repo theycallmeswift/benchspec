@@ -13,6 +13,7 @@ from textwrap import dedent
 import pytest
 
 from evalspec import __main__
+from evalspec.schema import SchemaError
 
 
 def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:
@@ -96,60 +97,135 @@ def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
     assert exit_code == 7
 
 
-def test_sandbox_build_calls_preflight_then_cli_build(monkeypatch: object) -> None:
-    """Verify `sandbox:build <dir>` runs preflight, then builds from the resolved root, exit 0."""
-    ran_preflight: list[bool] = []
+def test_sandbox_build_resolves_root_into_cli_build(monkeypatch: object) -> None:
+    """Verify `sandbox:build <dir>` builds from the resolved root, exit 0."""
     built_roots: list[Path] = []
-    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: ran_preflight.append(True))
     monkeypatch.setattr(
-        __main__.sandbox, "cli_build", lambda repo_root: built_roots.append(repo_root)
+        __main__.sandbox,
+        "cli_build",
+        lambda repo_root, *, set_name=None, config=None: built_roots.append(repo_root),
     )
 
     exit_code = __main__.main(["sandbox:build", "some/dir"])
 
     assert exit_code == 0
-    assert ran_preflight == [True]
     assert built_roots == [Path("some/dir").resolve()]
+
+
+def test_sandbox_build_threads_set_and_config(monkeypatch: object) -> None:
+    """`--set` / `--config` reach cli_build so the resolved set drives the build."""
+    seen: dict = {}
+
+    def fake_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Record what the CLI threaded into the build."""
+        seen["root"] = repo_root
+        seen["set_name"] = set_name
+        seen["config"] = config
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", fake_cli_build)
+
+    exit_code = __main__.main(
+        ["sandbox:build", "some/dir", "--set", "micro", "--config", "cfg.toml"]
+    )
+
+    assert exit_code == 0
+    assert seen["set_name"] == "micro"
+    assert seen["config"] == "cfg.toml"
+
+
+def test_sandbox_build_does_not_preflight_before_backend_resolution(
+    monkeypatch: object,
+) -> None:
+    """The build handler lets cli_build resolve and preflight the selected backend once."""
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "preflight",
+        lambda: pytest.fail("preflight ran before the selected backend was resolved"),
+    )
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "cli_build",
+        lambda repo_root, *, set_name=None, config=None: None,
+    )
+
+    assert __main__.main(["sandbox:build", "--set", "micro"]) == 0
+
+
+def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None:
+    """Bare `sandbox:build` threads set_name=None, config=None (Phase-5 path preserved)."""
+    seen: dict = {}
+
+    def fake_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Record the bare invocation's threaded values."""
+        seen["set_name"] = set_name
+        seen["config"] = config
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", fake_cli_build)
+
+    assert __main__.main(["sandbox:build", "some/dir"]) == 0
+    assert seen == {"set_name": None, "config": None}
+
+
+def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object) -> None:
+    """A set whose sandbox is `docker` fails fast at exit 2 before any build."""
+
+    def failing_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Raise the SchemaError a docker set produces at resolution."""
+        raise SchemaError(
+            "[tool.evalspec.sets.dock]: unsupported sandbox `docker` "
+            "(supported: ['microsandbox']). Docker is not implemented."
+        )
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
+
+    exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
+
+    assert exit_code == 2
+    assert "docker" in capsys.readouterr().err
 
 
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
     """Verify a no-op cli_build (snapshot already present) yields exit 0."""
-    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
-    monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
+    )
 
     exit_code = __main__.main(["sandbox:build"])
 
     assert exit_code == 0
 
 
-def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object) -> None:
-    """Verify a preflight RuntimeError exits 2 before cli_build is ever called."""
-    called_cli_build: list[bool] = []
+def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object, capsys: object) -> None:
+    """Verify a host-preflight RuntimeError from cli_build maps to exit 2, not a build failure."""
 
-    def failing_preflight() -> None:
-        """Reject the host the way an unsupported platform does."""
+    def failing_cli_build(
+        repo_root: Path, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Reject the host the way the resolved backend's preflight does."""
         raise RuntimeError("microsandbox host unsupported")
 
-    monkeypatch.setattr(__main__.sandbox, "preflight", failing_preflight)
-    monkeypatch.setattr(
-        __main__.sandbox, "cli_build", lambda repo_root: called_cli_build.append(True)
-    )
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
 
     exit_code = __main__.main(["sandbox:build"])
 
     assert exit_code == 2
-    assert called_cli_build == []
+    assert "microsandbox host unsupported" in capsys.readouterr().err
 
 
 def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object) -> None:
     """Verify a build-time MicrosandboxError (not a RuntimeError) exits 1 with a clean error."""
     from microsandbox.errors import MicrosandboxError
 
-    def failing_build(repo_root: Path) -> None:
+    def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
         """Fail provisioning the way a real snapshot build does."""
         raise MicrosandboxError("snapshot build failed")
 
-    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
     monkeypatch.setattr(__main__.sandbox, "cli_build", failing_build)
 
     exit_code = __main__.main(["sandbox:build"])
@@ -185,8 +261,9 @@ def test_subcommand_registered(monkeypatch: object, command: str) -> None:
     monkeypatch.setattr(__main__.lint, "run", lambda root: 0)
     monkeypatch.setattr(__main__.analyze, "run", lambda root: 0)
     monkeypatch.setattr(__main__.run, "run", lambda args: 0)
-    monkeypatch.setattr(__main__.sandbox, "preflight", lambda: None)
-    monkeypatch.setattr(__main__.sandbox, "cli_build", lambda repo_root: None)
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
+    )
 
     assert __main__.main([command, "some/dir"]) == 0
 
@@ -197,17 +274,19 @@ def test_sandbox_build_missing_package_exits_two_before_importing_errors(
     """Verify a host without microsandbox hits preflight's exit 2, never the errors import.
 
     Poisoning `microsandbox.errors` makes `from microsandbox.errors import MicrosandboxError`
-    raise `ImportError`. Because that import now follows `preflight`, a missing-package
-    preflight `RuntimeError` returns USAGE (2) first — proving the import no longer precedes
-    preflight. Were the import still first, the poisoned module would raise an uncaught
-    `ImportError` instead of yielding 2.
+    raise `ImportError`. `cli_build` preflights before any microsandbox import, so a
+    missing-package preflight `RuntimeError` is caught as USAGE (2) on a branch that never
+    imports the error type. Were the import to precede that catch, the poisoned module would
+    raise an uncaught `ImportError` instead of yielding 2.
     """
     monkeypatch.setitem(sys.modules, "microsandbox.errors", None)
 
-    def missing_package_preflight() -> None:
-        """Reject the host the way an absent microsandbox package does."""
+    def missing_package_cli_build(
+        repo_root: Path, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Reject the host the way an absent microsandbox package does at preflight."""
         raise RuntimeError("microsandbox runtime not installed")
 
-    monkeypatch.setattr(__main__.sandbox, "preflight", missing_package_preflight)
+    monkeypatch.setattr(__main__.sandbox, "cli_build", missing_package_cli_build)
 
     assert __main__.main(["sandbox:build", "some/dir"]) == 2
