@@ -53,20 +53,22 @@ def test_resolve_sandbox_unknown_fails() -> None:
 
 def test_cache_fingerprint_stable_when_nothing_changes() -> None:
     """The fingerprint is reproducible for the same backend, agent, and env."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(script=b"echo one\n", script_path="s.sh")
-    assert mb.cache_fingerprint(_agent(), env) == mb.cache_fingerprint(_agent(), env)
+    assert microsandbox_backend.cache_fingerprint(
+        _agent(), env
+    ) == microsandbox_backend.cache_fingerprint(_agent(), env)
 
 
 def test_cache_fingerprint_changes_with_resolved_image_digest(monkeypatch: object) -> None:
     """A moved base-image tag (new resolved digest) changes the fingerprint."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(base_image="ubuntu:latest")
 
     monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:aaaa")
-    first = mb.cache_fingerprint(_agent(), env)
+    first = microsandbox_backend.cache_fingerprint(_agent(), env)
     monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:bbbb")
-    second = mb.cache_fingerprint(_agent(), env)
+    second = microsandbox_backend.cache_fingerprint(_agent(), env)
 
     assert first != second
 
@@ -93,21 +95,25 @@ def test_resolve_image_digest_memoizes_per_base_image(monkeypatch: object) -> No
 
 def test_cache_fingerprint_stable_when_digest_stable(monkeypatch: object) -> None:
     """A pinned digest that does not move keeps the fingerprint stable."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(base_image="ubuntu:latest")
     monkeypatch.setattr(backend, "resolve_image_digest", lambda image: "sha256:aaaa")
-    assert mb.cache_fingerprint(_agent(), env) == mb.cache_fingerprint(_agent(), env)
+    assert microsandbox_backend.cache_fingerprint(
+        _agent(), env
+    ) == microsandbox_backend.cache_fingerprint(_agent(), env)
 
 
 def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object) -> None:
     """A changed agent install fingerprint changes the cache fingerprint."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     env = EnvConfig(script=b"echo one\n", script_path="s.sh")
     agent_a = _agent()
     agent_b = _agent()
     monkeypatch.setattr(agent_b, "install_fingerprint", lambda: "installer-rev-9")
 
-    assert mb.cache_fingerprint(agent_a, env) != mb.cache_fingerprint(agent_b, env)
+    assert microsandbox_backend.cache_fingerprint(
+        agent_a, env
+    ) != microsandbox_backend.cache_fingerprint(agent_b, env)
 
 
 def test_install_fingerprint_changes_with_provision_script(monkeypatch: object) -> None:
@@ -122,42 +128,59 @@ def test_install_fingerprint_changes_with_provision_script(monkeypatch: object) 
 
 def test_cache_fingerprint_changes_with_env_script_bytes() -> None:
     """Different environment script bytes yield a different fingerprint."""
-    mb = backend.resolve_sandbox("microsandbox")
-    one = mb.cache_fingerprint(_agent(), EnvConfig(script=b"echo one\n", script_path="s.sh"))
-    two = mb.cache_fingerprint(_agent(), EnvConfig(script=b"echo two\n", script_path="s.sh"))
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    one = microsandbox_backend.cache_fingerprint(
+        _agent(), EnvConfig(script=b"echo one\n", script_path="s.sh")
+    )
+    two = microsandbox_backend.cache_fingerprint(
+        _agent(), EnvConfig(script=b"echo two\n", script_path="s.sh")
+    )
     assert one != two
 
 
 def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None:
     """The backend preflight returns the platform + install errors as a list."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     monkeypatch.setattr(backend.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(mb, "installed", lambda: False)
+    monkeypatch.setattr(microsandbox_backend, "installed", lambda: False)
 
-    errs = mb.preflight()
+    errors = microsandbox_backend.preflight()
 
-    assert any("unsupported platform" in e for e in errs)
-    assert any("microsandbox runtime not installed" in e for e in errs)
+    assert any("unsupported platform" in error for error in errors)
+    assert any("microsandbox runtime not installed" in error for error in errors)
 
 
 def test_microsandbox_preflight_clean_on_supported_host(monkeypatch: object) -> None:
     """A supported host with the runtime installed yields no preflight errors."""
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     monkeypatch.setattr(backend.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(backend.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(mb, "installed", lambda: True)
+    monkeypatch.setattr(microsandbox_backend, "installed", lambda: True)
 
-    assert mb.preflight() == []
+    assert microsandbox_backend.preflight() == []
 
 
-def test_microsandbox_snapshot_exists_checks_dir(tmp_path: object, monkeypatch: object) -> None:
-    """snapshot_exists checks ~/.microsandbox/snapshots/<name> on the backend."""
+def test_microsandbox_snapshot_exists_false_when_dir_absent(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """snapshot_exists is False when ~/.microsandbox/snapshots/<name> is absent."""
     monkeypatch.setattr(backend.Path, "home", lambda: tmp_path)
-    mb = backend.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
     name = "evalspec-microsandbox-claude-code-1.2.3-abcd1234"
-    assert mb.snapshot_exists(name) is False
+
+    assert microsandbox_backend.snapshot_exists(name) is False
+
+
+def test_microsandbox_snapshot_exists_true_when_dir_present(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """snapshot_exists is True when ~/.microsandbox/snapshots/<name> exists on disk."""
+    monkeypatch.setattr(backend.Path, "home", lambda: tmp_path)
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    name = "evalspec-microsandbox-claude-code-1.2.3-abcd1234"
     (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
-    assert mb.snapshot_exists(name) is True
+
+    assert microsandbox_backend.snapshot_exists(name) is True
 
 
 def test_microsandbox_imported_only_under_allowlist() -> None:

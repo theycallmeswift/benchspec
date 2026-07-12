@@ -71,7 +71,7 @@ def resolve_image_digest(base_image: str) -> str:
         )
         return base_image
     try:
-        proc = subprocess.run(
+        result = subprocess.run(
             [
                 "skopeo",
                 "inspect",
@@ -88,19 +88,19 @@ def resolve_image_digest(base_image: str) -> str:
             text=True,
             timeout=60,
         )
-    except (OSError, subprocess.TimeoutExpired) as err:
+    except (OSError, subprocess.TimeoutExpired) as error:
         logger.warning(
             "evalspec: `skopeo inspect` failed for %r (%s); base image is NOT digest-pinned.",
             base_image,
-            err,
+            error,
         )
         return base_image
-    digest = proc.stdout.strip()
-    if proc.returncode != 0 or not digest:
+    digest = result.stdout.strip()
+    if result.returncode != 0 or not digest:
         logger.warning(
             "evalspec: `skopeo inspect` returned no digest for %r (exit %s); NOT digest-pinned.",
             base_image,
-            proc.returncode,
+            result.returncode,
         )
         return base_image
     return digest
@@ -183,19 +183,19 @@ class MicrosandboxBackend:
         The microsandbox-specific remedy (`make evals:build`) lives here, not in the
         shared preflight, so a future backend supplies its own host checks and remedy.
         """
-        errs: list[str] = []
+        errors: list[str] = []
         system = platform.system()
         if system == "Darwin":
             if platform.machine() != "arm64":
-                errs.append("x86_64 macOS is unsupported; microsandbox needs Apple Silicon")
+                errors.append("x86_64 macOS is unsupported; microsandbox needs Apple Silicon")
         elif system == "Linux":
             if not Path("/dev/kvm").exists():
-                errs.append("KVM not available (/dev/kvm missing)")
+                errors.append("KVM not available (/dev/kvm missing)")
         else:
-            errs.append(f"unsupported platform: {system} (need Apple Silicon or Linux+KVM)")
+            errors.append(f"unsupported platform: {system} (need Apple Silicon or Linux+KVM)")
         if not self.installed():
-            errs.append("microsandbox runtime not installed — run `make evals:build`")
-        return errs
+            errors.append("microsandbox runtime not installed — run `make evals:build`")
+        return errors
 
     def snapshot_exists(self: object, name: str) -> bool:
         """Return whether a named microsandbox snapshot exists on disk."""
@@ -224,10 +224,10 @@ class MicrosandboxBackend:
         from microsandbox.errors import MicrosandboxError
 
         try:
-            res = await sandbox.shell(script, env=agent.guest_env())
+            result = await sandbox.shell(script, env=agent.guest_env())
         except (MicrosandboxError, asyncio.TimeoutError, OSError):
             return None
-        return res.stdout_text if res.exit_code == 0 else None
+        return result.stdout_text if result.exit_code == 0 else None
 
     async def stop_quietly(self: object, sandbox: object) -> None:
         """Best-effort VM teardown that never masks the real flow."""
@@ -274,10 +274,11 @@ class MicrosandboxBackend:
 
     async def _bridge_skills_home(self: object, sandbox: object, agent: object) -> None:
         """Link the agent skill directory to the fixed skills-home path."""
-        res = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
-        if res.exit_code != 0:
+        result = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
+        if result.exit_code != 0:
             raise RuntimeError(
-                f"skills-home bridge failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
+                f"skills-home bridge failed (exit {result.exit_code}): "
+                f"{result.stderr_text[-2000:]}"
             )
 
     async def _run_environment_script(
@@ -287,10 +288,11 @@ class MicrosandboxBackend:
         if not env.script:
             return
         script = b"set -e\n" + env.script
-        res = await sandbox.shell(script.decode(), env=agent.guest_env())
-        if res.exit_code != 0:
+        result = await sandbox.shell(script.decode(), env=agent.guest_env())
+        if result.exit_code != 0:
             raise RuntimeError(
-                f"environment_script failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
+                f"environment_script failed (exit {result.exit_code}): "
+                f"{result.stderr_text[-2000:]}"
             )
 
     async def create_sandbox(

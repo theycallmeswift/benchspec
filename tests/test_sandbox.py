@@ -127,17 +127,21 @@ def _route_via_fake_vm(
 def test_snapshot_name_carries_backend_id() -> None:
     """The snapshot name is prefixed with the backend id."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    name = sandbox.snapshot_name(agent, EnvConfig(), backend=mb)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    name = sandbox.snapshot_name(agent, EnvConfig(), backend=microsandbox_backend)
     assert name.startswith("evalspec-microsandbox-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_base_image_changes() -> None:
     """A different base image changes the snapshot name."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    base = sandbox.snapshot_name(agent, EnvConfig(base_image="python:3.12-slim"), backend=mb)
-    changed = sandbox.snapshot_name(agent, EnvConfig(base_image="ubuntu:22.04"), backend=mb)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    base = sandbox.snapshot_name(
+        agent, EnvConfig(base_image="python:3.12-slim"), backend=microsandbox_backend
+    )
+    changed = sandbox.snapshot_name(
+        agent, EnvConfig(base_image="ubuntu:22.04"), backend=microsandbox_backend
+    )
     assert base != changed
     assert base.startswith("evalspec-microsandbox-claude-code-1.2.3-")
 
@@ -145,12 +149,12 @@ def test_snapshot_name_changes_when_base_image_changes() -> None:
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
     """Different environment script bytes change the snapshot name."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     base = sandbox.snapshot_name(
-        agent, EnvConfig(script=b"echo one\n", script_path="s.sh"), backend=mb
+        agent, EnvConfig(script=b"echo one\n", script_path="s.sh"), backend=microsandbox_backend
     )
     changed = sandbox.snapshot_name(
-        agent, EnvConfig(script=b"echo two\n", script_path="s.sh"), backend=mb
+        agent, EnvConfig(script=b"echo two\n", script_path="s.sh"), backend=microsandbox_backend
     )
     assert base != changed
 
@@ -211,25 +215,27 @@ def test_preflight_passes_on_supported(monkeypatch: object) -> None:
 
 def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
     """A present snapshot is returned without a build."""
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "snapshot_exists", lambda name: True)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: True)
     built: list = []
-    monkeypatch.setattr(mb, "build_snapshot", lambda *a, **k: built.append(a))
+    monkeypatch.setattr(microsandbox_backend, "build_snapshot", lambda *a, **k: built.append(a))
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
-    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=mb)
+    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=microsandbox_backend)
     assert name.startswith("evalspec-microsandbox-claude-code-v1-")
     assert built == []
 
 
 def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: object) -> None:
     """A missing snapshot is built exactly once under the lock."""
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     states = iter([False, False])  # missing before lock, still missing inside
-    monkeypatch.setattr(mb, "snapshot_exists", lambda name: next(states))
+    monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: next(states))
     built: list = []
-    monkeypatch.setattr(mb, "build_snapshot", lambda agent, name, env: built.append(name))
+    monkeypatch.setattr(
+        microsandbox_backend, "build_snapshot", lambda agent, name, env: built.append(name)
+    )
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
-    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=mb)
+    name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=microsandbox_backend)
     assert built == [name]
     assert name.startswith("evalspec-microsandbox-claude-code-v1-")
 
@@ -239,18 +245,18 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.evalspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "snapshot_exists", lambda name: False)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: False)
     captured: dict = {}
     monkeypatch.setattr(
-        mb,
+        microsandbox_backend,
         "build_snapshot",
         lambda agent, name, env: captured.update(name=name, image=env.base_image),
     )
     name = sandbox.ensure_snapshot(
         agent=ClaudeCodeAgent(auth_value="test-token", version="v1"),
         repo_root=tmp_path,
-        backend=mb,
+        backend=microsandbox_backend,
     )
     assert name.startswith("evalspec-microsandbox-claude-code-v1-")
     assert captured["name"] == name
@@ -398,8 +404,8 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         fake.create_kwargs = kwargs
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -413,7 +419,7 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
             host_repo_root=tmp_path,
             model="sonnet",
             effort="medium",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="archive")
 
@@ -430,8 +436,8 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
         """Boom."""
         raise RuntimeError("boot failed")
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", boom)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", boom)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> None:
@@ -445,7 +451,7 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
             host_repo_root=None,
             model="sonnet",
             effort="medium",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             await run("p", resume_session_id=None, detect_skill=None)
 
@@ -544,7 +550,7 @@ def _drive_route_with_stdout_events(
     return _route_via_fake_vm(
         monkeypatch,
         tmp_path,
-        events=[_FakeEvent(et, data=data) for et, data in events],
+        events=[_FakeEvent(event_type, data=data) for event_type, data in events],
         agent_factory=_opencode_agent,
         model="google/gemini-3.5-flash",
     )
@@ -658,8 +664,8 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -673,7 +679,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
             host_repo_root=tmp_path,
             model="sonnet",
             effort="medium",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="writing-agent-skills")
 
@@ -689,14 +695,17 @@ def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
     """Verify snapshot artifact shas returns none on shell failure."""
     # Failed snapshots return None, while genuinely empty successful snapshots return {}.
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     failing = FakeSandbox(shell_output=FakeExecOutput(exit_code=1))
-    assert asyncio.run(sandbox._snapshot_artifact_shas(failing, agent, mb)) is None
+    assert (
+        asyncio.run(sandbox._snapshot_artifact_shas(failing, agent, microsandbox_backend))
+        is None
+    )
 
     ok_empty = FakeSandbox(shell_output=FakeExecOutput(exit_code=0, stdout_text=""))
-    assert asyncio.run(sandbox._snapshot_artifact_shas(ok_empty, agent, mb)) == {}
+    assert asyncio.run(sandbox._snapshot_artifact_shas(ok_empty, agent, microsandbox_backend)) == {}
 
 
 def test_baseline_snapshot_failure_captures_no_artifacts(
@@ -723,8 +732,8 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -738,7 +747,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
             host_repo_root=tmp_path,
             model="sonnet",
             effort="medium",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="writing-agent-skills")
 
@@ -914,8 +923,8 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -931,7 +940,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
             arm="trial",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
@@ -971,8 +980,8 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -988,7 +997,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
             arm="trial",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
@@ -1017,8 +1026,8 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -1035,7 +1044,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
             setup_reldir="skills/ingest/evals/x",
             arm="trial",
             harness_args=["--plugin-dir", "/project"],
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
@@ -1065,8 +1074,8 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -1080,7 +1089,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
             host_repo_root=tmp_path,
             model="opus",
             effort="medium",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill=None)
 
@@ -1101,8 +1110,8 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
         """Fake create."""
         return fake
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(mb, "create_sandbox", fake_create)
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> None:
@@ -1118,7 +1127,7 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
             arm="trial",
-            backend=mb,
+            backend=microsandbox_backend,
         ) as run:
             await run("prompt", resume_session_id=None, detect_skill="ingest")
 
@@ -1135,9 +1144,11 @@ def test_build_runs_skills_home_bridge_after_provision(monkeypatch: object) -> N
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh"))
+    microsandbox_backend.build_snapshot(
+        agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
+    )
 
     shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 3
@@ -1154,7 +1165,7 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision (first shell) succeeds; the bridge (second shell) fails.
     outputs = iter([FakeExecOutput(0), FakeExecOutput(exit_code=1, stderr_text="ln failed")])
@@ -1166,7 +1177,7 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
 
     fake.shell = shell
     with pytest.raises(RuntimeError, match="bridge"):
-        mb.build_snapshot(agent, "snap", EnvConfig())
+        microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
     assert fake.sealed is False
 
 
@@ -1230,9 +1241,9 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
+    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
 
     assert fake.create_image == "python:3.12-slim@sha256:stub-python:3.12-slim"
     assert fake.sealed is True
@@ -1258,9 +1269,9 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(agent, "snap", EnvConfig())
+    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
 
     default_image = backend_mod.BASE_IMAGE
     assert fake.create_image == f"{default_image}@sha256:stub-{default_image}"
@@ -1271,9 +1282,11 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh"))
+    microsandbox_backend.build_snapshot(
+        agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
+    )
 
     shells = [call for call in fake.calls if call[0] == "shell"]
     # provision runs PROVISION_SCRIPT first (claude.py.provision issues exactly one
@@ -1294,9 +1307,9 @@ def test_build_runs_base_image_and_environment_script_together(
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(
+    microsandbox_backend.build_snapshot(
         agent,
         "snap",
         EnvConfig(
@@ -1317,9 +1330,9 @@ def test_build_no_environment_script_runs_only_provision(monkeypatch: object) ->
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    mb.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
+    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
     shells = [call for call in fake.calls if call[0] == "shell"]
     assert len(shells) == 2  # provision + skills-home bridge; no environment script declared
 
@@ -1329,7 +1342,7 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    mb = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision + bridge (first two shells) succeed; the environment script (third shell)
     # fails. Queue distinct outputs so the fail lands on the script, not provision/bridge.
@@ -1348,5 +1361,7 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
 
     fake.shell = shell
     with pytest.raises(RuntimeError, match="boom-detail"):
-        mb.build_snapshot(agent, "snap", EnvConfig(script=b"false\n", script_path="s.sh"))
+        microsandbox_backend.build_snapshot(
+            agent, "snap", EnvConfig(script=b"false\n", script_path="s.sh")
+        )
     assert fake.sealed is False  # never sealed a failed environment

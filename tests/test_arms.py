@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import tomllib
 
 from evalspec.arms import (
     Arm,
@@ -606,10 +609,6 @@ def test_resolve_set_carries_declared_runner_and_sandbox() -> None:
 
 def test_two_backends_fixture_fails_whole_file() -> None:
     """The fail-fast fixture: the docker set makes the whole file fail to parse."""
-    from pathlib import Path
-
-    import tomllib
-
     raw = tomllib.loads(
         Path("tests/fixtures/sandbox/two-backends.toml").read_text(encoding="utf-8")
     )
@@ -620,10 +619,6 @@ def test_two_backends_fixture_fails_whole_file() -> None:
 
 def test_microsandbox_fixture_parses_and_resolves() -> None:
     """The accept fixture: parses cleanly and resolves to a microsandbox set."""
-    from pathlib import Path
-
-    import tomllib
-
     raw = tomllib.loads(
         Path("tests/fixtures/sandbox/microsandbox.toml").read_text(encoding="utf-8")
     )
