@@ -246,23 +246,39 @@ class RuntimeProvenance:
         )
 
 
-_CONFLICT_FIELDS = ("snapshot", "image_digest", "actual_version")
+# The fields that define an arm's environment identity. Diagnostic `*_error` strings are
+# deliberately excluded: two unavailable records for one arm describe the same environment
+# even when their transient error text differs (a probe times out on one sample, resets on
+# the next), so they dedupe rather than abort every report as a false conflict.
+_CONFLICT_FIELDS = (
+    "actual_version",
+    "actual_version_status",
+    "snapshot",
+    "fingerprint",
+    "base_image_ref",
+    "install_fingerprint",
+    "env_script_sha256",
+    "image_digest",
+    "image_digest_status",
+)
 
 
 def _conflict_field_value(record: RuntimeProvenance, field_name: str) -> str | None:
-    """Read one of the fields `aggregate_observed` checks for cross-record conflicts."""
-    if field_name == "actual_version":
-        return record.actual_version
+    """Read one of the identity fields `aggregate_observed` checks for cross-record conflicts."""
+    if field_name in ("actual_version", "actual_version_status"):
+        return getattr(record, field_name)
     return getattr(record.sandbox, field_name)
 
 
 def aggregate_observed(records: Iterable[RuntimeProvenance]) -> dict[str, dict]:
     """Group persisted runtime records by arm into the `observed_arms` mapping.
 
-    Identical records for one arm (for example, one per sample) dedupe to a
-    single entry. Records for one arm that disagree on `snapshot`,
-    `image_digest`, or `actual_version` describe unlike environments and raise
-    rather than silently combining into one report.
+    Records for one arm with matching environment identity (for example, one per
+    sample) dedupe to a single entry — the first seen — even when their transient
+    `*_error` diagnostic text differs. Records for one arm that disagree on an
+    identity field (`snapshot`, `image_digest`, `actual_version`, either status,
+    or a fingerprint input) describe unlike environments and raise rather than
+    silently combining into one report.
 
     Args:
         records: Runtime-provenance records loaded from `provenance.json` files.
@@ -271,15 +287,13 @@ def aggregate_observed(records: Iterable[RuntimeProvenance]) -> dict[str, dict]:
         `{arm_name: observed_dict}`, one entry per arm with at least one record.
 
     Raises:
-        ValueError: If two records for the same arm conflict.
+        ValueError: If two records for the same arm disagree on any identity field.
     """
     by_arm: dict[str, RuntimeProvenance] = {}
     for record in records:
         existing = by_arm.get(record.arm)
         if existing is None:
             by_arm[record.arm] = record
-            continue
-        if existing == record:
             continue
 
         for field_name in _CONFLICT_FIELDS:
@@ -290,10 +304,6 @@ def aggregate_observed(records: Iterable[RuntimeProvenance]) -> dict[str, dict]:
                     f"conflicting runtime provenance for arm `{record.arm}`: "
                     f"`{field_name}` differs ({existing_value!r} vs {new_value!r})"
                 )
-        raise ValueError(
-            f"conflicting runtime provenance for arm `{record.arm}`: records differ "
-            "but none of the tracked fields (snapshot, image_digest, actual_version) "
-            "diverged"
-        )
+        # All identity fields agree; only diagnostic text may differ. Keep the first.
 
     return {arm: record.to_observed_dict() for arm, record in by_arm.items()}

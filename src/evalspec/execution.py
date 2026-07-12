@@ -312,24 +312,27 @@ async def _run_arm_turns(
 
 
 def _capture_sandbox_provenance(
-    agent: object, backend: object, snapshot: str, repo_root: Path
+    agent: object, backend: object, snapshot: str, env: object
 ) -> SandboxProvenance | None:
     """Assemble the arm's static sandbox identity, or None when there is no sandbox.
 
-    Reads the fingerprint from the backend's shared `fingerprint_inputs` helper (never a
-    re-hash or a snapshot-name parse) and the native image digest from the backend's typed
-    `image_identity`. `image_identity` runs its own `asyncio.run` internally, so this is
-    called from the synchronous body — never nested inside the arm's event loop.
+    `env` is the exact environment config that selected/built the snapshot (resolved once
+    by the caller and threaded through both `ensure_snapshot` and here), so the recorded
+    fingerprint inputs describe the environment behind this snapshot, not a second read
+    that could have drifted. Reads the fingerprint from the backend's shared
+    `fingerprint_inputs` helper (never a re-hash or a snapshot-name parse) and the native
+    image digest from the backend's typed `image_identity`. `image_identity` runs its own
+    `asyncio.run` internally, so this is called from the synchronous body — never nested
+    inside the arm's event loop.
 
     This runs before the agent/grading, so there is no completed result to shield: a
-    genuine capture failure (e.g. a bad environment config) must propagate and fail the
-    arm loudly, not silently vanish it from `observed_arms`. A `None` agent is the sole
-    no-sandbox case — unit tests stub the harness away — and returns `None` up front;
-    every other error is a real config or programming bug and is left to raise.
+    genuine capture failure must propagate and fail the arm loudly, not silently vanish it
+    from `observed_arms`. A `None` agent is the sole no-sandbox case — unit tests stub the
+    harness away — and returns `None` up front; every other error is a real config or
+    programming bug and is left to raise.
     """
     if agent is None:
         return None
-    env = resolve_environment_config(repo_root)
     fingerprint = backend.fingerprint_inputs(agent, env)
     identity = backend.image_identity(snapshot)
     return SandboxProvenance.from_image_identity(
@@ -406,11 +409,15 @@ def run_eval_arm(
     # it defaults to "microsandbox" (the only implemented backend) for other callers.
     agent = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
-    snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
+    # Resolve the host environment config ONCE and thread the same value into both snapshot
+    # selection and provenance capture — a second read could drift and record inputs for a
+    # different environment than the one that actually selected this snapshot.
+    env = resolve_environment_config(repo_root)
+    snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend, env=env)
     # Static sandbox identity (fingerprint inputs + native image digest) is read here in the
     # sync body — `image_identity` runs its own asyncio.run and must not nest inside the
     # per-arm loop below. The guest version probe is folded in after the session returns.
-    sandbox_prov = _capture_sandbox_provenance(agent, backend, snapshot, repo_root)
+    sandbox_prov = _capture_sandbox_provenance(agent, backend, snapshot, env)
 
     # History block (context) first, then the one graded prompt — both rendered with the
     # same `today`. render_history emits a trailing blank line, so the prompt follows cleanly.
@@ -442,6 +449,18 @@ def run_eval_arm(
             harness_args=arm.harness_args,
         )
     )
+
+    # Persist runtime provenance now — the sandbox has run, and binding/grading below can
+    # abort (BinderAuthError deliberately propagates). An arm whose sandbox actually ran
+    # must stay observed rather than vanish from observed_arms because a later step raised.
+    # Absent only on the no-sandbox path (a stubbed-away harness in unit tests).
+    run_dir = workspace.arm_dir(repo_root, eval_case.skill, eval_id, arm_name, sample=sample)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    provenance = _build_runtime_provenance(arm_name, sandbox_prov, arm_run)
+    if provenance is not None:
+        (run_dir / "provenance.json").write_text(
+            json.dumps(provenance.to_disk_dict(), indent=2) + "\n"
+        )
 
     # Bind once, up front: the binder's own output is the source of truth for which
     # assertions are activation checks — no separate recognizer.
@@ -495,10 +514,9 @@ def run_eval_arm(
         "binder_degraded": binder_degraded,
         "assertions": merged,
     }
-    run_dir = workspace.arm_dir(repo_root, eval_case.skill, eval_id, arm_name, sample=sample)
-    run_dir.mkdir(parents=True, exist_ok=True)
     # duration_ms = task time; judge_ms = grading time — separate so the benchmark can
-    # decompose where the wall-clock goes (task vs judge).
+    # decompose where the wall-clock goes (task vs judge). run_dir was created above when
+    # provenance was persisted.
     (run_dir / "timing.json").write_text(
         json.dumps(
             {
@@ -514,14 +532,6 @@ def run_eval_arm(
         + "\n"
     )
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
-    # Runtime provenance for this arm's resolved snapshot/runtime, beside the sample so
-    # xdist workers and offline analysis retain it; absent only on the no-sandbox path
-    # (a stubbed-away harness in unit tests), never in a real run.
-    provenance = _build_runtime_provenance(arm_name, sandbox_prov, arm_run)
-    if provenance is not None:
-        (run_dir / "provenance.json").write_text(
-            json.dumps(provenance.to_disk_dict(), indent=2) + "\n"
-        )
     (run_dir / "transcript.json").write_text(json.dumps(arm_run.transcript, indent=2) + "\n")
     # One raw stream for the arm, preceded by a {TURN_DELIM: 1} delimiter line so the
     # structured trajectory regenerates from it deterministically (trajectory_from_session)

@@ -100,14 +100,19 @@ async def _read_authored(
     return to_display_paths(parse_artifact_stream(out), agent.guest_home)
 
 
-def ensure_snapshot(agent: object, *, repo_root: object, backend: SandboxBackend) -> str:
+def ensure_snapshot(
+    agent: object, *, repo_root: object, backend: SandboxBackend, env: object = None
+) -> str:
     """Return the snapshot name, building it once (file-locked) if missing.
 
-    Resolves the host's optional environment config from `repo_root` and folds it into
-    both the snapshot name (cache identity) and the build via the backend. The lock
-    serializes concurrent xdist workers: losers wait, then return the built snapshot.
+    Folds the host's optional environment config into both the snapshot name (cache
+    identity) and the build via the backend. `env` may be passed pre-resolved so a caller
+    that also records provenance uses the exact same config that selected the snapshot;
+    when omitted it is resolved from `repo_root`. The lock serializes concurrent xdist
+    workers: losers wait, then return the built snapshot.
     """
-    env = resolve_environment_config(repo_root)
+    if env is None:
+        env = resolve_environment_config(repo_root)
     name = snapshot_name(agent, env, backend=backend)
     if backend.snapshot_exists(name):
         return name

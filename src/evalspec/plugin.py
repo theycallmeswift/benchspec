@@ -292,6 +292,21 @@ def resolved_run_set(config: object) -> EvalSet:
         raise pytest.UsageError(str(error)) from None
 
 
+def _has_configured_set(config: object) -> bool:
+    """True when the layered config declares a `[tool.evalspec.sets.*]` table.
+
+    This is the collection-time fact — an eval set is configured — not whether output
+    artifacts landed. A run whose every arm errored before writing its `eval-*` dir still
+    has a planned roster to record, so the run manifest must not degrade to trigger-only
+    metadata just because no output directory exists. A genuinely trigger-only project
+    declares no sets table and degrades to None.
+    """
+    repo_root = resolve_repo_root(config)
+    table = _layer_config_sets(pyproject_table(repo_root), config.getoption("evalspec_config"))
+    sets_table = table.get("sets")
+    return isinstance(sets_table, dict) and bool(sets_table)
+
+
 def run_set_when_needed(config: object, *, needs_set: bool) -> EvalSet | None:
     """Resolve this run's eval set, but only when the run actually needs one.
 
@@ -601,17 +616,12 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     skills_root = workspace.skills_root(repo_root)
     if not skills_root.is_dir():
         return
-    # Resolve the eval set only when this run produced output-eval artifacts — mirrors
-    # pytest_generate_tests' `if cases` guard so the hooks agree on whether a set is
-    # required. A project that declared no eval set resolves nothing here; resolving
-    # unconditionally would raise UsageError at finish for a config we tolerate.
-    # None → manifest/report degrade.
-    needs_set = any(
-        child_dir.is_dir() and child_dir.name.startswith("eval-")
-        for skill_dir in skills_root.iterdir()
-        if skill_dir.is_dir()
-        for child_dir in skill_dir.iterdir()
-    )
+    # Resolve the eval set whenever one is configured — the planned roster is a
+    # collection-time fact, independent of whether output artifacts landed. Inferring this
+    # from produced `eval-*` dirs would erase the roster for a run whose every arm errored
+    # before writing its dir. A trigger-only project declares no sets table and degrades to
+    # None here; resolving unconditionally would raise UsageError for a config we tolerate.
+    needs_set = _has_configured_set(config)
     run_set = run_set_when_needed(config, needs_set=needs_set)
     judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
     judge_meta = _judge_meta(judge_config)

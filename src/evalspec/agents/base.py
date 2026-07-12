@@ -14,6 +14,7 @@ is a parameter of the call, not a code path baked into each harness.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import subprocess
@@ -36,6 +37,11 @@ FIXED_SKILLS_HOME = "/home/evalspec/skills"
 # both "claude-code 1.2.3" and "codex-cli 0.144.1". Shared by every guest-version parse
 # so adapters never hand-roll their own extraction.
 _VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
+
+# The guest `--version` probe runs before the task on every sample. A wedged guest
+# command must not block the run forever, so the await is bounded and a timeout becomes
+# an explained-unavailable result like any other probe failure.
+GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
 
 
 def _parse_version_token(output: str) -> str | None:
@@ -70,10 +76,17 @@ async def probe_guest_version(
     """
     script = f"{agent.agent_bin} --version"
     try:
+        # Bounded so a wedged guest command surfaces as unavailable instead of hanging
+        # every sample before its task runs.
+        output = await asyncio.wait_for(
+            backend.guest_shell(sandbox, agent, script),
+            timeout=GUEST_VERSION_PROBE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return None, f"guest version probe timed out after {GUEST_VERSION_PROBE_TIMEOUT_SECONDS}s"
+    except Exception as error:
         # Broad on purpose: this probe's contract is "never raise" (see docstring), and
         # guest_shell's own concrete failure modes vary by backend.
-        output = await backend.guest_shell(sandbox, agent, script)
-    except Exception as error:
         return None, f"guest_shell raised {type(error).__name__}: {error}"
     if output is None:
         return None, f"guest_shell returned no output for `{script}`"
