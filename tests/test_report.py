@@ -554,7 +554,7 @@ def test_benchmark_carries_format_version(tmp_path: object) -> None:
 
     bench = report.build_benchmark(report.discover_eval_dirs(tmp_path), label="demo", baseline=None)
 
-    assert bench["format_version"] == 2
+    assert bench["format_version"] == 3
 
 
 def test_index_rows_flatten_evals(tmp_path: object) -> None:
@@ -761,3 +761,87 @@ def test_matrix_non_baseline_cell_absolute_without_baseline(tmp_path: object) ->
 
     assert "| archive/alpha | 50% | 100% |" in md
     assert "| All evals | 50% | 100% |" in md
+
+
+def test_benchmark_v3_carries_planned_observed_runner_binder(tmp_path: object) -> None:
+    """Verify v3 carries the planned/observed split plus runner and binder identity."""
+    # `trial` ran and has observed runtime provenance; `absent` is a configured column
+    # that never ran, so it stays a valid empty matrix column with NO observed entry —
+    # provenance is never fabricated for it.
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        label="iteration_01",
+        baseline=None,
+        arm_meta={"trial": {"harness": "claude-code"}, "absent": {"harness": "claude-code"}},
+        planned=[
+            {"name": "trial", "harness": "claude-code", "model": "opus", "effort": "medium"},
+            {"name": "absent", "harness": "claude-code", "model": "sonnet", "effort": "low"},
+        ],
+        observed_arms={"trial": {"actual_version": "1.2.3", "sandbox": {"snapshot": "snap-x"}}},
+        runner="pytest",
+        binder={"provider": "gemini", "model": "gemini-3.1-flash-lite"},
+    )
+
+    assert bench["format_version"] == 3
+    assert bench["runner"] == "pytest"
+    assert bench["binder"]["provider"] == "gemini"
+    assert {arm["name"] for arm in bench["planned_arms"]} == {"trial", "absent"}
+    # Configured-but-unobserved arm: present as a matrix column, absent from observed.
+    assert "absent" in bench["arms"]
+    assert set(bench["observed_arms"]) == {"trial"}
+
+
+def test_markdown_provenance_labels_unobserved_arm(tmp_path: object) -> None:
+    """Verify the Provenance section shows observed identity and labels unobserved arms."""
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        label="iteration_01",
+        baseline=None,
+        arm_meta={"trial": {"harness": "claude-code"}, "absent": {"harness": "claude-code"}},
+        observed_arms={
+            "trial": {
+                "actual_version": "1.2.3",
+                "sandbox": {"snapshot": "snap-x", "image_digest": "sha256:dead"},
+            }
+        },
+    )
+    md = report._format_markdown(bench)
+
+    assert "## Provenance" in md
+    assert "- **trial**: version `1.2.3` · snapshot `snap-x` · digest `sha256:dead`" in md
+    assert "- **absent**: not observed" in md
+
+
+def test_index_rows_carry_core_axes_and_no_heavy_provenance(tmp_path: object) -> None:
+    """Verify index rows gain harness/model/effort and nothing heavier."""
+    seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
+
+    rows = report.index_rows(
+        tmp_path,
+        "demo",
+        {"trial": {"harness": "claude-code", "model": "opus", "effort": "medium"}},
+    )
+
+    row = next(r for r in rows if r["arm"] == "trial")
+    assert row["harness"] == "claude-code"
+    assert row["model"] == "opus"
+    assert row["effort"] == "medium"
+    # Nothing heavier than the three core axes leaks onto the row.
+    heavy = {"sandbox", "snapshot", "image_digest", "actual_version", "fingerprint"}
+    assert not (heavy & set(row))
+
+
+def test_index_rows_omit_axes_for_unknown_arm(tmp_path: object) -> None:
+    """Verify a row whose arm isn't in the axes lookup omits the axes rather than faking null."""
+    seed_arm(tmp_path, "alpha", "mystery", passes=1, total=1)
+
+    rows = report.index_rows(tmp_path, "demo", {"trial": {"harness": "claude-code"}})
+
+    row = next(r for r in rows if r["arm"] == "mystery")
+    assert "harness" not in row
+    assert "model" not in row
+    assert "effort" not in row

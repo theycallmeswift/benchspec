@@ -2,15 +2,20 @@
 
 import contextlib
 import json
+from dataclasses import dataclass, field
 from typing import NoReturn
 
 import pytest
 
 from evalspec import workspace
 from evalspec.arms import Arm
-from evalspec.discovery import EvalCase
+from evalspec.backend import FingerprintInputs
+from evalspec.discovery import EnvConfig, EvalCase
 from evalspec.execution import run_eval_arm
+from evalspec.provenance import ImageIdentity
 from evalspec.runner import RunResult
+from evalspec.sandbox import ensure_snapshot
+from evalspec.schema import SchemaError
 
 TRIAL = Arm("trial", "claude-code", "opus")
 BASELINE = Arm("baseline", "claude-code", "opus")
@@ -797,6 +802,46 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
     )
 
     assert session_factory.calls[0]["harness_args"] == ["--plugin-dir", "/project"]
+
+
+def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify the caller's sandbox_name (not a hardcoded default) drives resolve_sandbox."""
+    # cases.test_eval threads the resolved set's `.sandbox` here; execution must resolve
+    # exactly that name, never silently fall back to DEFAULT_SANDBOX.
+    workspace.set_current_iteration("iteration_01")
+    captured = {}
+
+    def fake_resolve(name: object) -> object:
+        """Fake resolve."""
+        captured["name"] = name
+        return object()
+
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", fake_resolve)
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+
+    run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        sandbox_name="custombackend",
+        session_factory=fake_session_factory(
+            RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+        ),
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert captured["name"] == "custombackend"
 
 
 def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
@@ -1782,3 +1827,336 @@ def test_grading_is_self_describing(tmp_path: object) -> None:
     assert persisted["skill"] == "myskill"
     assert persisted["sample"] == 3
     assert persisted["arm"] == "trial"
+
+
+
+_CANNED_FINGERPRINT = FingerprintInputs(
+    backend_id="microsandbox",
+    base_image_ref="ubuntu:latest",
+    install_fingerprint="deadbeef1234",
+    env_script_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    digest="abc12345",
+)
+
+
+@dataclass
+class _FakeBackend:
+    """A backend double exposing only the provenance seams run_eval_arm reaches.
+
+    `fingerprint_inputs`/`image_identity` feed the static sandbox identity; `guest_shell`
+    is the guest command seam the version probe uses against the live sandbox.
+    """
+
+    image: ImageIdentity
+    id: str = "microsandbox"
+    guest_output: str | None = "claude 1.2.3"
+    guest_shell_calls: list = field(default_factory=list)
+
+    def fingerprint_inputs(self, agent: object, env: object) -> FingerprintInputs:
+        """Return the canned fingerprint inputs (ignores agent/env)."""
+        return _CANNED_FINGERPRINT
+
+    def image_identity(self, snapshot: object) -> ImageIdentity:
+        """Return the canned image identity (available or unavailable)."""
+        return self.image
+
+    async def guest_shell(self, sandbox: object, agent: object, script: str) -> str | None:
+        """Record the guest command and return the canned version output."""
+        self.guest_shell_calls.append((sandbox, agent, script))
+        return self.guest_output
+
+
+class _FakeAgent:
+    """A task-harness agent double carrying only what the version probe touches."""
+
+    def __init__(self) -> None:
+        """Bind the guest binary name and reset the host-binding tripwire."""
+        self.agent_bin = "claude"
+        self.for_host_called = False
+
+    def for_host(self) -> object:
+        """Trip a flag if the (wrong) host-binding path is ever taken by the probe."""
+        self.for_host_called = True
+        return self
+
+
+class _FakeArmSession:
+    """A live-sandbox session double: `__aenter__` returns the bound `_run` method.
+
+    Mirrors the real `SandboxSession` seam so `run.__self__._sandbox` reaches the live
+    guest — the exact path the guest version probe uses.
+    """
+
+    def __init__(self, sandbox: object, result: object) -> None:
+        """Hold the live sandbox and the single canned turn result."""
+        self._sandbox = sandbox
+        self._result = result
+
+    async def __aenter__(self) -> object:
+        """Enter the session, exposing the bound per-turn run method."""
+        return self._run
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Exit the session (no teardown needed for the double)."""
+        return None
+
+    async def _run(
+        self, prompt: object, *, resume_session_id: object, detect_skill: object
+    ) -> object:
+        """Return the canned RunResult for the arm's one turn."""
+        return self._result
+
+
+def _live_sandbox_session_factory(sandbox: object, result: object) -> object:
+    """Build a session factory whose session exposes a live `_sandbox` for probing."""
+
+    def factory(**kwargs: object) -> _FakeArmSession:
+        """Open a live-sandbox session double for one arm."""
+        return _FakeArmSession(sandbox, result)
+
+    return factory
+
+
+def test_provenance_json_written_with_arm_and_guest_version(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """A completed sample writes provenance.json with arm, fingerprint, and guest version."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=_live_sandbox_session_factory(object(), result),
+        grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    data = json.loads((run_dir / "provenance.json").read_text())
+    assert data["arm"] == "trial"
+    assert data["actual_version"] == "1.2.3"
+    assert data["actual_version_status"] == "available"
+    assert data["actual_version_error"] is None
+    sandbox = data["sandbox"]
+    assert sandbox["backend"] == "microsandbox"
+    assert sandbox["fingerprint"] == "abc12345"
+    assert sandbox["base_image_ref"] == "ubuntu:latest"
+    assert sandbox["install_fingerprint"] == "deadbeef1234"
+    assert sandbox["env_script_sha256"] == _CANNED_FINGERPRINT.env_script_sha256
+    assert sandbox["image_digest"] == "sha256:cafef00d"
+    assert sandbox["image_digest_status"] == "available"
+
+
+def test_guest_probe_uses_live_sandbox_seam_not_host(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """The version probe runs through the live-sandbox guest seam, never for_host()."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    live_sandbox = object()
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=_live_sandbox_session_factory(live_sandbox, result),
+        grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    assert len(backend.guest_shell_calls) == 1  # probed exactly once
+    probed_sandbox, probed_agent, script = backend.guest_shell_calls[0]
+    assert probed_sandbox is live_sandbox  # the LIVE sandbox, not a name/snapshot
+    assert probed_agent is agent
+    assert script == "claude --version"
+    assert agent.for_host_called is False  # never the host binding
+
+
+def test_image_identity_failure_is_unavailable_but_run_completes(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """An unavailable image digest is recorded explained, and other artifacts still write."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.unavailable("manifest read failed"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    outcome = run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=_live_sandbox_session_factory(object(), result),
+        grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    assert outcome.errored is False  # a digest failure never aborts the run
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    assert (run_dir / "grading.json").is_file()
+    assert (run_dir / "timing.json").is_file()
+    assert (run_dir / "transcript.json").is_file()
+    sandbox = json.loads((run_dir / "provenance.json").read_text())["sandbox"]
+    assert sandbox["image_digest"] is None
+    assert sandbox["image_digest_status"] == "unavailable"
+    assert sandbox["image_digest_error"] == "manifest read failed"
+
+
+def test_capture_error_on_real_arm_raises_loudly(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """A genuine capture failure fails the arm loudly, not by silently dropping provenance."""
+    # Capture runs before the agent/grading, so there is no completed result to shield: a
+    # bad environment config must propagate here, like a stray prompt placeholder does.
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+
+    def _raise_config(repo_root: object) -> NoReturn:
+        """Stand in for a real config defect surfaced at capture time."""
+        raise SchemaError("[tool.evalspec] base_image must be a non-empty string")
+
+    monkeypatch.setattr("evalspec.execution.resolve_environment_config", _raise_config)
+
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    with pytest.raises(SchemaError, match="base_image"):
+        run_eval_arm(
+            eval_case, TRIAL, workdir, {}, tmp_path,
+            today="2099-01-01", repo_root=tmp_path, sample=0,
+            session_factory=_live_sandbox_session_factory(object(), result),
+            grade=_grade_all_pass, bind=_punt_all,
+        )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    assert not (run_dir / "provenance.json").exists()  # failed loudly, wrote nothing
+
+
+def test_provenance_json_survives_binder_failure_after_sandbox_use(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """A sandbox that ran remains observed when later binding aborts the arm."""
+    from evalspec.binder import BinderAuthError
+
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    def bind(text: object) -> NoReturn:
+        """Simulate an authentication failure after the sandbox task completed."""
+        raise BinderAuthError("gemini api key rejected")
+
+    with pytest.raises(BinderAuthError):
+        run_eval_arm(
+            eval_case, TRIAL, workdir, {}, tmp_path,
+            today="2099-01-01", repo_root=tmp_path, sample=0,
+            session_factory=_live_sandbox_session_factory(object(), result),
+            grade=_grade_all_pass, bind=bind,
+        )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    provenance = json.loads((run_dir / "provenance.json").read_text())
+    assert provenance["actual_version"] == "1.2.3"
+    assert provenance["sandbox"]["snapshot"] == "snap"
+
+
+def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Recorded fingerprint inputs match the environment used for snapshot selection."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    class SnapshotAgent(_FakeAgent):
+        """Agent double exposing snapshot naming identity."""
+
+        id = "claude-code"
+
+        def version(self) -> str:
+            """Return a stable host version for snapshot naming."""
+            return "1.2.3"
+
+    @dataclass
+    class EnvironmentBackend(_FakeBackend):
+        """Backend double whose snapshot fingerprint reflects its environment input."""
+
+        def cache_fingerprint(self, agent: object, env: EnvConfig) -> str:
+            """Use the base image as an observable snapshot cache identity."""
+            return str(env.base_image)
+
+        def snapshot_exists(self, name: str) -> bool:
+            """Treat every computed snapshot as already built."""
+            return True
+
+        def fingerprint_inputs(self, agent: object, env: EnvConfig) -> FingerprintInputs:
+            """Expose the environment used when provenance is captured."""
+            return FingerprintInputs(
+                backend_id=self.id,
+                base_image_ref=str(env.base_image),
+                install_fingerprint="deadbeef1234",
+                env_script_sha256=_CANNED_FINGERPRINT.env_script_sha256,
+                digest=str(env.base_image),
+            )
+
+    agent = SnapshotAgent()
+    backend = EnvironmentBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    environments = iter(
+        [EnvConfig(base_image="snapshot-image"), EnvConfig(base_image="changed-image")]
+    )
+
+    def resolve_environment(repo_root: object) -> EnvConfig:
+        """Return a changed config if production resolves the environment twice."""
+        return next(environments)
+
+    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.execution.ensure_snapshot", ensure_snapshot)
+    monkeypatch.setattr("evalspec.sandbox.resolve_environment_config", resolve_environment)
+    monkeypatch.setattr("evalspec.execution.resolve_environment_config", resolve_environment)
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+
+    run_eval_arm(
+        eval_case, TRIAL, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=_live_sandbox_session_factory(object(), result),
+        grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    provenance = json.loads((run_dir / "provenance.json").read_text())
+    assert provenance["sandbox"]["snapshot"].endswith("-snapshot-image")
+    assert provenance["sandbox"]["base_image_ref"] == "snapshot-image"

@@ -21,9 +21,10 @@ from dotenv import load_dotenv
 
 import evalspec
 from evalspec import report, workspace
-from evalspec.agents import make_agent, resolve_agent_name
+from evalspec.agents import resolve_agent_name
 from evalspec.arms import Set as EvalSet
 from evalspec.arms import parse_sets, resolve_set
+from evalspec.binder import binder_identity
 from evalspec.discovery import (
     discover_eval_cases,
     pyproject_table,
@@ -31,6 +32,8 @@ from evalspec.discovery import (
     resolve_repo_root,
 )
 from evalspec.judges import JudgeConfig, resolve_judge_config
+from evalspec.judges.registry import probe_judge_version
+from evalspec.provenance import RuntimeProvenance, aggregate_observed
 from evalspec.schema import SchemaError
 
 _CASES = Path(__file__).parent / "cases.py"
@@ -289,6 +292,48 @@ def resolved_run_set(config: object) -> EvalSet:
         raise pytest.UsageError(str(error)) from None
 
 
+def _has_configured_set(config: object) -> bool:
+    """True when the layered config declares a `[tool.evalspec.sets.*]` table.
+
+    This is the collection-time fact — an eval set is configured — not whether output
+    artifacts landed. A run whose every arm errored before writing its `eval-*` dir still
+    has a planned roster to record, so the run manifest must not degrade to trigger-only
+    metadata just because no output directory exists. A genuinely trigger-only project
+    declares no sets table and degrades to None.
+    """
+    repo_root = resolve_repo_root(config)
+    table = _layer_config_sets(pyproject_table(repo_root), config.getoption("evalspec_config"))
+    sets_table = table.get("sets")
+    return isinstance(sets_table, dict) and bool(sets_table)
+
+
+def run_set_when_needed(config: object, *, needs_set: bool) -> EvalSet | None:
+    """Resolve this run's eval set, but only when the run actually needs one.
+
+    A trigger-only project declares no `[tool.evalspec.sets.*]` table, so calling
+    `resolved_run_set` there raises a UsageError. Both the session sandbox preflight
+    (via `session_run_set`) and `pytest_sessionfinish` compute their own "a set is
+    required" signal — the collection's eval cases, and the produced `eval-*` artifact
+    dirs respectively — then share this seam so the trigger-only path degrades to None
+    identically instead of parsing/raising.
+    """
+    return resolved_run_set(config) if needs_set else None
+
+
+def session_run_set(config: object) -> EvalSet | None:
+    """The eval set for the session sandbox preflight, or None for a trigger-only run.
+
+    Guards `resolved_run_set` on the same eval-case-existence signal
+    `pytest_generate_tests` uses to decide whether arms are required, so a trigger-only
+    project with no sets table degrades to the default backend instead of raising. Runs
+    at session start (before any `eval-*` artifact exists), so it discovers cases rather
+    than walking produced artifacts like `pytest_sessionfinish` does.
+    """
+    repo_root = resolve_repo_root(config)
+    cases = discover_eval_cases(repo_root, resolve_eval_paths(config))
+    return run_set_when_needed(config, needs_set=bool(cases))
+
+
 def _parse_judge_cli_table(config: object) -> dict:
     """The CLI-override layer for resolve_judge_config.
 
@@ -415,28 +460,56 @@ def build_manifest(
     commit: str | None,
     iteration: str,
     cfg: dict,
-    token_split: bool | None,
+    observed_arms: dict,
 ) -> dict:
     """Assemble the run manifest from already-resolved identity + config values.
 
     Pure: the uuid/clock/git/agent reads happen in the caller, so the manifest shape
     (and the order-independent config_hash) is testable by value without IO.
+
+    `cfg` is the planned configuration (set/runner/arms/judge/binder). `config_hash`
+    hashes only the planned selectors, so it stays stable across runs of identical config.
+    `observed_arms` is runtime observation aggregated from persisted records; it lands
+    top-level and is deliberately EXCLUDED from `config_hash` — folding what ran into a
+    config identity would make two runs of one config hash differently. `judge.actual_version`
+    is the same kind of host-probed observation, so it is stripped before hashing too (the
+    full judge object, `actual_version` included, is still emitted). `arms[].requested_version`
+    stays hashed — it is a configured install selector, not a probe.
     """
     return {
-        "format_version": 1,
+        "format_version": 2,
         "run_id": run_id,
         "commit": commit,
-        "config_hash": hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:12],
+        "config_hash": _config_hash(cfg),
         "iteration": iteration,
         "started_at": started_at,
         "evalspec_version": evalspec.__version__,
-        "token_split": token_split,
+        "observed_arms": observed_arms,
         **cfg,
     }
 
 
+def _config_hash(cfg: dict) -> str:
+    """Hash the planned configuration, excluding host-probed runtime observations.
+
+    `judge.actual_version` is a probe of the host judge binary, not a configured value, so
+    it varies with where the run happens rather than with the config. Stripping it keeps
+    two runs of one config hash-identical even when their judge binary differs or is absent.
+    """
+    judge = cfg.get("judge")
+    if isinstance(judge, dict) and "actual_version" in judge:
+        planned_judge = {key: value for key, value in judge.items() if key != "actual_version"}
+        cfg = {**cfg, "judge": planned_judge}
+    return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _judge_meta(judge_config: JudgeConfig) -> dict:
-    """The resolved judge, structurally shaped for meta.json."""
+    """The resolved judge, structurally shaped for meta.json.
+
+    `actual_version` is the host-side probe of the judge binary (the judge runs on the
+    host, not in a guest snapshot), distinct from every arm's guest-probed
+    `observed_arms[arm].actual_version`. Best-effort: a missing binary probes to null.
+    """
     return {
         "harness": judge_config.harness,
         "model": judge_config.model,
@@ -444,6 +517,7 @@ def _judge_meta(judge_config: JudgeConfig) -> dict:
         "timeout": judge_config.timeout,
         "env": report.redact_env(judge_config.env),
         "harness_args": judge_config.harness_args,
+        "actual_version": probe_judge_version(judge_config.harness),
     }
 
 
@@ -454,6 +528,7 @@ def _write_manifest(
     repo_root: Path,
     run_set: EvalSet | None,
     judge_meta: dict,
+    observed_arms: dict,
 ) -> None:
     """What produced this run — identity + resolved config, so artifacts self-describe.
 
@@ -461,40 +536,22 @@ def _write_manifest(
     metadata alone. Thin shell: read nondeterministic identity, hand off to pure
     `build_manifest`.
 
-    Run-level `agent`/`agent_version` come from the default harness, so they name only one
-    harness even for a multi-harness set; the per-arm roster records each arm's own
-    `harness`/`model`/`effort`/`env` (env redacted). Per-arm agent versions aren't probed.
-    `run_set` is None for a run with no eval set — `set`/`arms` degrade to null/empty.
-    `judge_meta` is the already-resolved judge object (see `_judge_meta`).
+    meta.json v2 separates planned config from observed execution. `arms` is the COMPLETE
+    configured roster (including arms that never ran, each carrying its own install
+    selector + capabilities via `report.planned_arms`); `observed_arms` holds only the
+    arms with a persisted runtime record, aggregated by the caller and never synthesized
+    here. The v1 run-level `agent`/`agent_version`/`token_split` fields are gone with no
+    aliases — the selector and capabilities live per planned arm. `run_set` is None for a
+    run with no eval set — `set`/`runner` degrade to null and `arms` to empty. `judge_meta`
+    is the already-resolved judge object (see `_judge_meta`); `binder` is the fixed
+    run-level binder transport identity (no key material).
     """
-    agent_version = token_split = None
-    try:
-        agent = make_agent()
-        agent_version = agent.version()
-        token_split = agent.capabilities.token_split
-    except Exception:
-        # Any failure probing the agent (no credential, missing CLI, version error):
-        # best-effort identity stays null, the resolved config is still recorded.
-        pass
-
     cfg = {
-        "agent": os.environ.get("EVALSPEC_AGENT", "claude-code"),
-        "agent_version": agent_version,
         "set": run_set.name if run_set else None,
-        "arms": [
-            {
-                "name": arm.name,
-                "harness": arm.harness,
-                "model": arm.model,
-                "effort": arm.effort,
-                "env": report.redact_env(arm.env),
-                "harness_args": arm.harness_args,
-            }
-            for arm in run_set.arms
-        ]
-        if run_set
-        else [],
+        "runner": run_set.runner if run_set else None,
+        "arms": report.planned_arms(run_set),
         "judge": judge_meta,
+        "binder": binder_identity(),
     }
     manifest = build_manifest(
         run_id=uuid.uuid4().hex,
@@ -502,9 +559,44 @@ def _write_manifest(
         commit=_git_commit(repo_root),
         iteration=iteration,
         cfg=cfg,
-        token_split=token_split,
+        observed_arms=observed_arms,
     )
     (iteration_root / "meta.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def _aggregate_observed_arms(skills_root: Path, run_set: EvalSet | None) -> dict:
+    """Aggregate every persisted `provenance.json` under the skills root by arm.
+
+    Walks for the runtime records execution wrote beside each sample (`provenance.json`
+    sits next to `grading.json`), reloads them, and folds them into the `observed_arms`
+    mapping. Only arms with a persisted record appear — nothing is synthesized for a
+    deselected, skipped, or never-sampled arm. Identical records for one arm dedupe;
+    records that disagree on snapshot/digest/version raise loudly (see `aggregate_observed`)
+    rather than silently combining unlike environments into one report.
+
+    Two defensive checks run per record before aggregation, so a corrupt or mislocated
+    label can't quietly key a column: the record's `arm` must match the arm name in its
+    own path (the `<arm>` component of `…/<arm>/sample-K/provenance.json`, per
+    `workspace.arm_dir`), and it must belong to the configured roster. A trigger-only run
+    resolves no set (`run_set is None`), so roster validation is skipped there.
+    """
+    roster = None if run_set is None else {arm["name"] for arm in report.planned_arms(run_set)}
+    records = []
+    for provenance_path in sorted(skills_root.rglob("provenance.json")):
+        record = RuntimeProvenance.from_disk_dict(json.loads(provenance_path.read_text()))
+        dir_arm = provenance_path.parent.parent.name
+        if record.arm != dir_arm:
+            raise ValueError(
+                f"provenance arm mismatch in `{provenance_path}`: record arm `{record.arm}` "
+                f"disagrees with its directory arm `{dir_arm}`"
+            )
+        if roster is not None and record.arm not in roster:
+            raise ValueError(
+                f"provenance arm `{record.arm}` in `{provenance_path}` is not in the "
+                f"configured roster {sorted(roster)}"
+            )
+        records.append(record)
+    return aggregate_observed(records)
 
 
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
@@ -524,21 +616,23 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     skills_root = workspace.skills_root(repo_root)
     if not skills_root.is_dir():
         return
-    # Resolve the eval set only when this run produced output-eval artifacts — mirrors
-    # pytest_generate_tests' `if cases` guard so the hooks agree on whether a set is
-    # required. A project that declared no eval set resolves nothing here; resolving
-    # unconditionally would raise UsageError at finish for a config we tolerate.
-    # None → manifest/report degrade.
-    needs_set = any(
-        child_dir.is_dir() and child_dir.name.startswith("eval-")
-        for skill_dir in skills_root.iterdir()
-        if skill_dir.is_dir()
-        for child_dir in skill_dir.iterdir()
-    )
-    run_set = resolved_run_set(config) if needs_set else None
+    # Resolve the eval set whenever one is configured — the planned roster is a
+    # collection-time fact, independent of whether output artifacts landed. Inferring this
+    # from produced `eval-*` dirs would erase the roster for a run whose every arm errored
+    # before writing its dir. A trigger-only project declares no sets table and degrades to
+    # None here; resolving unconditionally would raise UsageError for a config we tolerate.
+    needs_set = _has_configured_set(config)
+    run_set = run_set_when_needed(config, needs_set=needs_set)
     judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
     judge_meta = _judge_meta(judge_config)
-    _write_manifest(config, skills_root.parent, iteration, repo_root, run_set, judge_meta)
+    # Aggregate observed provenance BEFORE writing the manifest — the records live under
+    # the skills root the same walk below reads, so meta.json must not be written with a
+    # stale/empty observed_arms. Conflicting records raise here and abort the write, which
+    # is the intended loud failure.
+    observed_arms = _aggregate_observed_arms(skills_root, run_set)
+    _write_manifest(
+        config, skills_root.parent, iteration, repo_root, run_set, judge_meta, observed_arms
+    )
     lines = []
     index_lines = []
     fail_under = config.getoption("evalspec_fail_under")
@@ -561,6 +655,14 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         if run_set
         else None
     )
+    # Planned roster (same builder meta.json uses) drives the benchmark's planned/observed
+    # split and the three core axes denormalized onto each index.jsonl row.
+    planned = report.planned_arms(run_set)
+    arm_axes = {
+        arm["name"]: {"harness": arm["harness"], "model": arm["model"], "effort": arm["effort"]}
+        for arm in planned
+    }
+    runner = run_set.runner if run_set else None
 
     # One run-level benchmark at the iteration root (beside meta.json / index.jsonl).
     # Skipped when no eval-* dirs were discovered, so an eval-less run writes no artifact.
@@ -573,6 +675,10 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             label=iteration,
             baseline=baseline,
             arm_meta=arm_meta,
+            planned=planned,
+            observed_arms=observed_arms,
+            runner=runner,
+            binder=binder_identity(),
         )
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
@@ -612,7 +718,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
                         )
                         if session.exitstatus == 0:
                             session.exitstatus = 1
-        index_lines += [json.dumps(row) for row in report.index_rows(skill_dir, skill)]
+        index_lines += [
+            json.dumps(row) for row in report.index_rows(skill_dir, skill, arm_axes)
+        ]
     if index_lines:
         (skills_root.parent / "index.jsonl").write_text("\n".join(index_lines) + "\n")
     if binder_degraded_total:
@@ -646,7 +754,8 @@ def pytest_generate_tests(metafunc: object) -> None:
         cases = discover_eval_cases(repo_root, resolve_eval_paths(metafunc.config))
         # Resolve the set only when there are eval cases to cross with — an empty
         # collection has no eval_arm pairs and must not require an eval-set pyproject.
-        arms = resolved_run_set(metafunc.config).arms if cases else []
+        run_set = run_set_when_needed(metafunc.config, needs_set=bool(cases))
+        arms = run_set.arms if run_set else []
         if cases:
             # Structural judge preflight — before ANY paid task arm runs. Raises
             # pytest.UsageError at collection on a bad config; binary-on-PATH is

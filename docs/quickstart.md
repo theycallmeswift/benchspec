@@ -155,10 +155,10 @@ tree tmp/evals/iteration_01
 
 ```
 tmp/evals/iteration_01
-├── meta.json                       # run manifest — run_id/commit/config_hash identity, agent + versions, the resolved judge object (harness/model/effort/timeout/env/harness_args), efforts, start time, format_version; the join key for cross-run aggregation
-├── index.jsonl                     # flat per-sample results — the aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout
-├── benchmark.json                  # ONE run-level report across every group in the run (format_version 2)
-├── benchmark.md                    # the same, rendered — one matrix keyed <group>/<eval_id>
+├── meta.json                       # run manifest (format_version 2) — run_id/commit/config_hash identity, the planned `arms` roster + observed `observed_arms` runtime provenance, the resolved judge object, the binder identity, start time; the join key for cross-run aggregation
+├── index.jsonl                     # flat per-sample results, each row carrying its arm's harness/model/effort — the aggregator's entry point; derivable from the tree, persisted so external tools never hardcode the layout
+├── benchmark.json                  # ONE run-level report across every group in the run (format_version 3)
+├── benchmark.md                    # the same, rendered — one matrix keyed <group>/<eval_id>, plus a Provenance section
 └── skills
     └── hello
         └── eval-greets-by-name
@@ -167,16 +167,18 @@ tmp/evals/iteration_01
             │       ├── grading.json     # {"eval_id","skill","arm","sample","errored","assertions":[…]}  (each assertion carries its "type")
             │       ├── timing.json      # {"duration_ms","judge_ms","total_tokens","input_tokens","output_tokens","cache_read_tokens","cache_creation_tokens"}
             │       ├── transcript.json  # one entry per turn (prompt, result, fired, result_subtype, tool_call_count, workdir tree)
+            │       ├── provenance.json  # this sample's RuntimeProvenance — guest actual_version + sandbox identity; aggregated into meta.json's observed_arms
             │       └── session.jsonl    # lossless raw stream, each turn behind a {"turn": N} line
             └── baseline
                 └── sample-0
                     ├── grading.json
                     ├── timing.json
                     ├── transcript.json
+                    ├── provenance.json
                     └── session.jsonl    # every arm streams, so the baseline gets one too
 ```
 
-Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. A run writes exactly one `benchmark.md` at the iteration root, spanning every group. It opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a single `## Matrix` table — rows keyed `<group>/<eval_id>` (down the left), `<arm> (<harness>)` columns across the top, baseline cells show the absolute rate and every non-baseline cell shows `<rate> (+Npp)` (absolute rate AND its ±pp delta), closed by an `All evals` footer that rolls each arm up to its headline pass rate — and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration. `benchmark.json` is the same data, machine-readable, keyed by `arms` with a top-level `roster` (see [`schema.md`](schema.md#benchmarkjson)). `meta.json` at the iteration root records what produced the run. The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
+Each arm is sharded by sample (`sample-0`, `sample-1`, …) so a `--count N` run keeps every attempt's full artifacts side by side. A run writes exactly one `benchmark.md` at the iteration root, spanning every group. It opens with one Δ line per contrast arm vs the baseline arm (`baseline <ref%> → <arm> <pct%> (Δpp)`, or each arm's absolute rate when no baseline ran), then a single `## Matrix` table — rows keyed `<group>/<eval_id>` (down the left), `<arm> (<harness>)` columns across the top, baseline cells show the absolute rate and every non-baseline cell shows `<rate> (+Npp)` (absolute rate AND its ±pp delta), closed by an `All evals` footer that rolls each arm up to its headline pass rate — and per-arm sections carrying `- Harness: … · Model: …` / `- Env: …` (env redacted) plus tokens and duration, then a compact `## Provenance` section labeling each matrix-column arm's observed guest version/snapshot/digest, or `not observed` when the arm never produced a runtime record. `benchmark.json` is the same data, machine-readable, keyed by `arms` with a top-level `roster` plus the planned/observed provenance pair (`planned_arms`/`observed_arms`) mirroring `meta.json` (see [`schema.md`](schema.md#benchmarkjson)). `meta.json` at the iteration root records what produced the run — configured **and** observed (see [`schema.md`](schema.md#metajson)). The per-sample dirs let you diff transcripts across arms or samples. `session.jsonl` is the lossless source each arm streams; to read the structured tool-call trajectory it encodes, pass its text to `evalspec.trajectory.trajectory_from_session` (event shape in [`schema.md`](schema.md)).
 
 ## Common first-run failures
 

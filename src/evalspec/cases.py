@@ -20,11 +20,12 @@ from pathlib import Path
 import pytest
 
 from evalspec import binder, runner, sandbox
+from evalspec.backend import resolve_sandbox
 from evalspec.discovery import resolve_repo_root
 from evalspec.execution import run_eval_arm
 from evalspec.judges import JudgeConfig
 from evalspec.judges.registry import preflight_judge_binary
-from evalspec.plugin import resolved_judge_config
+from evalspec.plugin import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.room import seed_room
 
 
@@ -94,10 +95,36 @@ def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> objec
     return workdir, pre_run_shas
 
 
+def preflight_session_sandbox(config: object) -> None:
+    """Preflight the resolved eval set's sandbox backend before any arm runs.
+
+    Resolves the selected set from `config` (guarded so a trigger-only project with no
+    sets table degrades instead of raising) and drives `sandbox.preflight` with that
+    set's backend. No eval set ⇒ pass None, so preflight resolves the default backend.
+    """
+    run_set = session_run_set(config)
+    backend = resolve_sandbox(run_set.sandbox) if run_set else None
+    sandbox.preflight(backend)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _sandbox_preflight() -> None:
-    """Return a sandbox preflight error message when sandboxing is unavailable."""
-    sandbox.preflight()
+def _sandbox_preflight(request: object) -> None:
+    """Preflight the resolved set's sandbox once per session before eval arms run.
+
+    Session-scoped, so it resolves the set from `request.config` directly rather than
+    depending on the function-scoped `eval_set_name`/`eval_arm` fixtures (scope mismatch).
+    """
+    preflight_session_sandbox(request.config)
+
+
+@pytest.fixture
+def eval_sandbox(request: object) -> str:
+    """Return the sandbox backend name resolved for this run's eval set.
+
+    test_eval only runs when the set resolved (its `eval_arm` params came from that set),
+    so resolving here never hits the trigger-only no-set path.
+    """
+    return resolved_run_set(request.config).sandbox
 
 
 @pytest.mark.evalspec
@@ -110,6 +137,7 @@ def test_eval(
     project_marker: object,
     judge_config: object,
     sample_index: object,
+    eval_sandbox: object,
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -131,6 +159,7 @@ def test_eval(
         eval_set=eval_set_name,
         project_marker=project_marker,
         judge_config=judge_config,
+        sandbox_name=eval_sandbox,
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a
