@@ -55,7 +55,7 @@ The binder (`binder.py`) maps each prose assertion to a deterministic checker or
 
 A transient binder infra failure degrades that one assertion to judge grading rather than erroring the cell — this is by design (see [`concepts.md`](concepts.md#the-binder)) — but is never silent: each degraded assertion increments `binder_degraded` in the arm's `grading.json`, and the run prints a `WARN binder: N assertion(s) degraded…` summary line when the total is nonzero. A credential rejection (`BinderAuthError`) is never degraded — it fails the run outright.
 
-`EVALSPEC_BINDER_MODEL` overrides the binder model for the **corpus suite only** (`make evals:binder`, `evals/binder/`) — a candidate-model comparison knob with no production surface. Corpus runs call the real Gemini API directly and cost money; they are a separate concern from evalspec's own offline integration tests (`tests/test_execution.py -k bind`), which inject a fake `call_model` and never touch the network.
+`EVALSPEC_BINDER_MODEL` overrides the binder model for the **corpus suite only** (`make evals`, `evals/binder/`) — a candidate-model comparison knob with no production surface. Corpus runs call the real Gemini API directly and cost money; they are a separate concern from evalspec's own offline integration tests (`tests/test_execution.py -k bind`), which inject a fake `call_model` and never touch the network.
 
 ## Pre-run analysis — `evalspec analyze`
 
