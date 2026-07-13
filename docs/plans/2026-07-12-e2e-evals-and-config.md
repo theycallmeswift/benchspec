@@ -246,8 +246,10 @@ git commit -m "feat: declare the e2e eval set and Codex judge in [tool.evalspec]
 
 **Goal:** Author the skill under test and its two evals under `evals/e2e/hello/`, and
 prove — without booting a VM — that both are discovered under the `evals` search path
-with the exact `(group, eval_id)` identities the six-cell matrix depends on, and that
-each parses to a non-empty `## Prompt` and `## Assertions`.
+with the exact `(group, eval_id)` identities the six-cell matrix depends on, that each
+parses to a non-empty `## Prompt` and `## Assertions`, and that `setup.sh` itself has
+valid syntax, no-ops cleanly on the `baseline` arm, and resolves its `../../SKILL.md`
+reference to the real skill file — all without booting a VM.
 
 Design: the skill writes an exact, deterministic first line (`Hello, <name>!`) plus a
 warm second line, regardless of `GREETING_LOCALE` — so both the file-content assertion
@@ -277,21 +279,42 @@ parse to the expected `(group, eval_id)` pairs with non-empty prompt/assertions,
 - Consumes: `evalspec.discovery.discover_eval_cases(repo_root: Path, eval_paths:
   list[str] | None = None) -> list[EvalCase]` (`src/evalspec/discovery.py:231`) —
   `EvalCase.group: str`, `EvalCase.eval_id: str` (property), `EvalCase.prompt: str`
-  (property), `EvalCase.assertions: list[str]` (property). `REPO_ROOT` from Task 1.
+  (property), `EvalCase.assertions: list[str]` (property). `REPO_ROOT` from Task 1. Also
+  consumes the on-disk `evals/e2e/hello/evals/hello/setup.sh` this task creates, invoked
+  the same way `run_setup_sh` invokes it host-side (`src/evalspec/sandbox.py:184`: `cd
+  {eval_dir}; bash ./setup.sh`) — via the stdlib `subprocess` module, not a real sandbox.
 - Produces: the on-disk suite at `evals/e2e/hello/` that Task 3's `make e2e` target runs
   and Task 4's docs cross-reference.
 
 - [ ] **Step 1: Write the failing test**
 
-Add the `discover_eval_cases` import and a new test to `tests/test_e2e_suite.py` (the
-import line becomes `from evalspec.discovery import discover_eval_cases,
-pyproject_table`; the new test is appended after
-`test_e2e_judge_is_codex_and_distinct_from_the_task_harness`):
+Add two stdlib imports, the `discover_eval_cases` import, and four new tests to
+`tests/test_e2e_suite.py`. The stdlib import block (after `from __future__ import
+annotations`) becomes:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+```
+
+and the `evalspec.discovery` import line becomes `from evalspec.discovery import
+discover_eval_cases, pyproject_table`. The new tests are appended after
+`test_e2e_judge_is_codex_and_distinct_from_the_task_harness`:
 
 ```python
 def test_hello_evals_are_discovered_with_expected_identities() -> None:
-    """Verify both hello evals are discovered with a non-empty prompt and assertions."""
-    cases = discover_eval_cases(REPO_ROOT, eval_paths=["evals"])
+    """Verify both hello evals are discovered with a non-empty prompt and assertions.
+
+    Calls `discover_eval_cases(REPO_ROOT)` with no `eval_paths` override — the same call
+    shape production uses (`analyze.py:66`, `lint.py:72`) — so this test exercises the
+    real `eval_paths = ["evals"]` in `pyproject.toml` (Task 1), not a hardcoded stand-in.
+    That also proves the scoping does its job: `tests/fixtures/activation/evals/
+    activation-demo/eval.md`, which the *default* `eval_paths` (`skills`, `tests`,
+    `evals`, `benchmarks`) would pick up, must NOT appear in the discovered set.
+    """
+    cases = discover_eval_cases(REPO_ROOT)
+    groups = {case.group for case in cases}
     hello_cases = {(case.group, case.eval_id): case for case in cases if case.group == "hello"}
 
     assert set(hello_cases) == {
@@ -301,13 +324,70 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
     for case in hello_cases.values():
         assert case.prompt
         assert case.assertions
+    assert "activation-demo" not in groups
+
+
+def test_setup_sh_has_valid_bash_syntax() -> None:
+    """Verify setup.sh parses as valid bash without executing any of it."""
+    setup_sh = REPO_ROOT / "evals/e2e/hello/evals/hello/setup.sh"
+
+    result = subprocess.run(
+        ["bash", "-n", str(setup_sh)], capture_output=True, text=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_setup_sh_baseline_arm_is_a_no_op() -> None:
+    """Verify the baseline branch exits 0 before any filesystem write.
+
+    Runs the real script exactly as `run_setup_sh` invokes it host-side
+    (`src/evalspec/sandbox.py:184`: `cd <eval_dir>; bash ./setup.sh`), with
+    `EVALSPEC_ARM=baseline`. This does NOT exercise the trial/trial-overrides branches —
+    those `mkdir`/`cp` into the guest-only path `/home/evalspec/skills`, which only
+    exists inside a booted microVM, so they stay real-run-only (`make e2e`).
+    """
+    eval_dir = REPO_ROOT / "evals/e2e/hello/evals/hello"
+
+    result = subprocess.run(
+        ["bash", "./setup.sh"],
+        cwd=eval_dir,
+        env={**os.environ, "EVALSPEC_ARM": "baseline"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_setup_sh_relative_skill_path_resolves_to_the_real_skill_md() -> None:
+    """Verify setup.sh's `../../SKILL.md` reference resolves to the real skill file."""
+    eval_dir = REPO_ROOT / "evals/e2e/hello/evals/hello"
+
+    skill_md = (eval_dir / "../../SKILL.md").resolve()
+
+    assert skill_md == REPO_ROOT / "evals/e2e/hello/SKILL.md"
+    assert skill_md.is_file()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/test_e2e_suite.py::test_hello_evals_are_discovered_with_expected_identities -v`
-Expected: FAIL — `assert set() == {('hello', 'greets-by-name'), ('hello', 'writes-greeting-file')}`
-(no `evals/e2e/` tree exists yet).
+Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/test_e2e_suite.py -k "hello_evals_are_discovered or setup_sh" -v`
+Expected: FAIL, all four (no `evals/e2e/` tree exists yet):
+- `test_hello_evals_are_discovered_with_expected_identities` — `assert set() ==
+  {('hello', 'greets-by-name'), ('hello', 'writes-greeting-file')}` (the
+  `activation-demo` assertion never runs because the `set(hello_cases)` assertion above
+  it fails first).
+- `test_setup_sh_has_valid_bash_syntax` — `assert 127 == 0` (`bash -n` on a missing path
+  prints `No such file or directory` and exits `127`).
+- `test_setup_sh_baseline_arm_is_a_no_op` — ERROR, `FileNotFoundError: [Errno 2] No such
+  file or directory: '.../evals/e2e/hello/evals/hello'` (`subprocess.run`'s `cwd` doesn't
+  exist yet).
+- `test_setup_sh_relative_skill_path_resolves_to_the_real_skill_md` — `assert False`
+  on `skill_md.is_file()` (path arithmetic already resolves correctly via
+  `Path.resolve()`'s non-strict lexical normalization, but `SKILL.md` doesn't exist on
+  disk yet).
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -389,7 +469,7 @@ chmod +x evals/e2e/hello/evals/hello/setup.sh
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/test_e2e_suite.py -v`
-Expected: PASS — 4 passed.
+Expected: PASS — 7 passed (the 3 tests from Task 1 plus this task's 4).
 
 Also confirm the suite lints clean (static, no credentials/sandbox needed):
 
@@ -587,8 +667,8 @@ git commit -m "docs: cross-reference the evals/e2e/ suite and make e2e"
 
 Run after all four tasks land:
 
-- `make test` — Expected: full unit suite green, including the 4 new tests in
-  `tests/test_e2e_suite.py`.
+- `make test` — Expected: full unit suite green, including the 7 tests in
+  `tests/test_e2e_suite.py` (3 from Task 1, 4 from Task 2).
 - `make lint` — Expected: Ruff + houserules pass on `tests/test_e2e_suite.py` (the only
   new/modified Python file).
 - `uv run evalspec lint` — Expected: `0 warning(s)`, exit code `0` (assertions in both
@@ -629,9 +709,14 @@ Run after all four tasks land:
   the config/files/target side; the frozen-artifact-contract assertions are explicitly
   real-run-only (Behavior/Interface testing tiers) and called out as such in Verification
   rather than faked as no-boot unit tests.
-- Testing Plan → Logic tier is Tasks 1–2's four unit tests (config resolution incl.
+- Testing Plan → Logic tier is Tasks 1–2's seven unit tests (config resolution incl.
   baseline naming and judge distinctness, env inherit/override, discovery/parse of both
-  evals); Behavior/Interface tiers are explicitly real-VM-only and covered by the
+  evals against the real `eval_paths` config with an explicit check that it excludes the
+  `activation-demo` fixture, plus three no-VM `setup.sh` contract tests — syntax check,
+  a real `bash ./setup.sh` run of the `baseline` no-op branch, and pinning the
+  `../../SKILL.md` relative path); Behavior/Interface tiers are explicitly real-VM-only
+  (the `trial`/`trial-overrides` branches that write to the guest-only
+  `/home/evalspec/skills` path are not exercised host-side) and covered by the
   Verification section's `make e2e` entry, not faked as unit tests.
 - Documentation Plan (`Makefile`, `README.md`, `docs/quickstart.md`) → Tasks 3–4.
 - Out of Scope items (new checkers, CI microVM job, binder corpus changes, image
