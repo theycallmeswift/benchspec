@@ -91,7 +91,7 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests", "evals"]
 markers = [
-    "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals:binder`)",
+    "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals`)",
     "evalspec: skill-eval cases run via `make evals` (declared here too so importing evalspec.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
 ]
 addopts = "-m 'not binder_corpus'"
