@@ -95,3 +95,26 @@ markers = [
     "evalspec: skill-eval cases run via `make evals` (declared here too so importing evalspec.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
 ]
 addopts = "-m 'not binder_corpus'"
+
+[tool.evalspec]
+default-set = "e2e"
+# Scope discovery to evals/ — the default (skills, tests, evals, benchmarks) would also
+# pick up tests/fixtures/activation/evals/activation-demo/eval.md, an unrelated
+# test_analyze.py fixture, breaking the "six cells" collection count below.
+eval_paths = ["evals"]
+
+[tool.evalspec.sets.e2e]
+harness  = "claude-code"
+model    = "sonnet"
+effort   = "medium"
+baseline = "baseline"
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "baseline" },                                                   # installs no skill
+  { name = "trial" },                                                      # installs the skill, set defaults
+  { name = "trial-overrides", model = "opus", effort = "high", env = { GREETING_LOCALE = "en-GB" } },
+]
+
+[tool.evalspec.judge]
+harness = "codex"
+model   = "gpt-5.5"
