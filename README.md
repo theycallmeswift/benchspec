@@ -115,6 +115,12 @@ Output-eval test ids are `<group>-<eval_id>-<arm>`, so `-k` filters by the group
 
 Start with `evalspec lint`: it flags assertions the judge can't fairly grade *before* you spend a token. `evalspec sandbox:build` warms the agent's microVM snapshot (a few minutes); `evalspec run` builds it on demand too, then reuses it. Full walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
 
+evalspec dogfoods itself: [`evals/e2e/`](evals/e2e/) is the project's own end-to-end
+suite — a real `[tool.evalspec]` config, a `hello` skill, and its evals, run with `make
+e2e`. It's the framework's own smoke test that the whole path (config → arms → sandbox →
+binder → judge → matrix) still works, and a reference `[tool.evalspec]` + `.eval.md` +
+`setup.sh` shape to copy from.
+
 ## Host requirements
 
 - **Sandbox**: Apple Silicon Mac or Linux with `/dev/kvm`. microsandbox doesn't ship for x86_64 macOS or Linux without KVM.

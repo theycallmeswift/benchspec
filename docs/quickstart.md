@@ -123,6 +123,12 @@ To confirm discovery without grading, `evalspec run` forwards everything after `
 
 You should see two collected items, `test_eval[hello-greets-by-name-baseline]` and `test_eval[hello-greets-by-name-trial]` — one per declared arm. A malformed suite fails here with the offending path quoted.
 
+This walkthrough's `hello` skill and its two evals also live in-repo as a runnable
+suite, not just prose: [`evals/e2e/hello/`](../evals/e2e/hello/) follows exactly this
+shape — `SKILL.md`, `evals/hello/{greets-by-name,writes-greeting-file}.eval.md`, and
+`evals/hello/setup.sh` — under `evals/` instead of a user project's `skills/`, wired to
+the repo's own `e2e` eval set and run with `make e2e`.
+
 ## Step 4 — Build the snapshot
 
 ```bash
