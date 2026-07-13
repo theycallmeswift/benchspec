@@ -3,7 +3,7 @@
 Samples the real Gemini binder over the gold-labeled corpus and enforces the one hard
 gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
 so the run shows live per-item progress and a leak names the exact draw; `make
-evals:binder` shards the draws across xdist workers and the `binder_corpus` marker keeps
+evals` shards the draws across xdist workers and the `binder_corpus` marker keeps
 it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). Corpus-wide stats
 (infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
 per-draw records.

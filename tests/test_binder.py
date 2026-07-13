@@ -111,7 +111,7 @@ def test_activation_line_binds_via_model() -> None:
     """Verify an activation line reaches the model and binds to its checker.
 
     There is no offline skill recognizer — the binder handles activation like any other
-    assertion; the corpus gate (`make evals:binder`) covers the model's reliability.
+    assertion; the corpus gate (`make evals`) covers the model's reliability.
     """
     spec = bind(
         "Skill `ingest` invoked",

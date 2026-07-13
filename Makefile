@@ -12,6 +12,7 @@ test:  ## Run the unit test suite
 
 e2e:  ## Run evalspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
 	uv run evalspec run --set e2e
+	uv run python scripts/verify_e2e_artifacts.py tmp/evals
 
 # Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
 BINDER_WORKERS ?= 6

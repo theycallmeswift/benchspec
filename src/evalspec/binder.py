@@ -330,7 +330,7 @@ def preflight_gemini_key() -> None:
 
     A GEMINI_API_KEY set to the empty string counts as missing — python-dotenv
     never overrides an already-set environment variable, so `GEMINI_API_KEY=
-    make evals:binder` can't be silently repopulated from `.env`; this makes that
+    make evals` can't be silently repopulated from `.env`; this makes that
     invocation fail fast, before any paid call, exactly as intended.
     """
     if not os.environ.get("GEMINI_API_KEY"):

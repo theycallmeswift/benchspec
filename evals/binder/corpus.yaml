@@ -1,4 +1,4 @@
-# Labeled corpus for the binder false-positive gate (`make evals:binder`).
+# Labeled corpus for the binder false-positive gate (`make evals`).
 # Grouped by the binder's correct action; every entry is the assertion text verbatim.
 # A bind sub-key is the expected checker; a punt sub-key is the punt class. gold,
 # cohort, and expect_checker are positional — the gate reconstructs them on load.

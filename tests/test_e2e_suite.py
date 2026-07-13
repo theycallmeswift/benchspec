@@ -249,7 +249,8 @@ def test_removed_binder_make_alias_has_no_active_references() -> None:
                 relative_path = path.relative_to(REPO_ROOT)
                 references.append(f"{relative_path}:{line_number}: {line.strip()}")
 
-    failure_message = "active references to the removed binder make alias remain:\n"
-    failure_message += "\n".join(references)
+    failure_message = "\n".join(
+        ["active references to the removed binder make alias remain:", *references]
+    )
 
     assert references == [], failure_message
