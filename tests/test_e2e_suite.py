@@ -80,11 +80,11 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
     """Verify both hello evals are discovered with a non-empty prompt and assertions.
 
     Calls `discover_eval_cases(REPO_ROOT)` with no `eval_paths` override — the same call
-    shape production uses (`analyze.py:66`, `lint.py:72`) — so this test exercises the
-    real `eval_paths = ["evals"]` in `pyproject.toml` (Task 1), not a hardcoded stand-in.
-    That also proves the scoping does its job: `tests/fixtures/activation/evals/
-    activation-demo/eval.md`, which the *default* `eval_paths` (`skills`, `tests`,
-    `evals`, `benchmarks`) would pick up, must NOT appear in the discovered set.
+    shape production uses — so this test exercises the real `eval_paths = ["evals"]` in
+    `pyproject.toml`, not a hardcoded stand-in.
+    That also proves the scoping does its job: the `activation-demo` fixture eval,
+    which the *default* `eval_paths` (`skills`, `tests`, `evals`, `benchmarks`) would
+    pick up from the test-fixture tree, must NOT appear in the discovered set.
     """
     cases = discover_eval_cases(REPO_ROOT)
     groups = {case.group for case in cases}
@@ -114,9 +114,9 @@ def test_setup_sh_has_valid_bash_syntax() -> None:
 def test_setup_sh_baseline_arm_is_a_no_op() -> None:
     """Verify the baseline branch exits 0 before any filesystem write.
 
-    Runs the real script exactly as `run_setup_sh` invokes it host-side
-    (`src/evalspec/sandbox.py:184`: `cd <eval_dir>; bash ./setup.sh`), with
-    `EVALSPEC_ARM=baseline`. This does NOT exercise the trial/trial-overrides branches —
+    Runs the real script exactly as the sandbox invokes it in the guest
+    (`cd <eval_dir>; bash ./setup.sh`), with `EVALSPEC_ARM=baseline`.
+    This does NOT exercise the trial/trial-overrides branches —
     those `mkdir`/`cp` into the guest-only path `/home/evalspec/skills`, which only
     exists inside a booted microVM, so they stay real-run-only (`make e2e`).
     """
