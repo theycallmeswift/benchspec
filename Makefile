@@ -1,8 +1,8 @@
-.PHONY: help install test evals evals\:binder lint lint\:ruff lint\:houserules clean
+.PHONY: help install test e2e evals lint lint\:ruff lint\:houserules clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
-	@awk '/^[a-zA-Z_:\\-]+:.*## / {t=$$0; sub(/:[ \t]*##.*/,"",t); gsub(/\\/,"",t); d=$$0; sub(/^.*## /,"",d); printf "  \033[36m%-11s\033[0m %s\n", t, d}' $(MAKEFILE_LIST)
+	@awk '/^[a-zA-Z0-9_:\\-]+:.*## / {t=$$0; sub(/:[ \t]*##.*/,"",t); gsub(/\\/,"",t); d=$$0; sub(/^.*## /,"",d); printf "  \033[36m%-11s\033[0m %s\n", t, d}' $(MAKEFILE_LIST)
 
 install:  ## Create the venv and install dev dependencies
 	uv sync
@@ -10,13 +10,13 @@ install:  ## Create the venv and install dev dependencies
 test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
+e2e:  ## Run evalspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
+	uv run evalspec run --set e2e
+
 # Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
 BINDER_WORKERS ?= 6
-evals:  ## Run the live eval suite. Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
+evals:  ## Run the binder corpus (binder quality, not framework function). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
 	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/binder $(EVAL_ARGS)
-
-evals\:binder:  ## Alias for `make evals` while the binder corpus is the only live eval suite
-	$(MAKE) evals BINDER_WORKERS=$(BINDER_WORKERS) EVAL_ARGS="$(EVAL_ARGS)"
 
 lint:  ## Lint with Ruff and houserules
 	$(MAKE) lint:ruff
