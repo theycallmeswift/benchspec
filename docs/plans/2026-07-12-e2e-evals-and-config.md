@@ -531,7 +531,7 @@ Replace `Makefile` in full:
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
-	@awk '/^[a-zA-Z_:\\-]+:.*## / {t=$$0; sub(/:[ \t]*##.*/,"",t); gsub(/\\/,"",t); d=$$0; sub(/^.*## /,"",d); printf "  \033[36m%-11s\033[0m %s\n", t, d}' $(MAKEFILE_LIST)
+	@awk '/^[a-zA-Z0-9_:\\-]+:.*## / {t=$$0; sub(/:[ \t]*##.*/,"",t); gsub(/\\/,"",t); d=$$0; sub(/^.*## /,"",d); printf "  \033[36m%-11s\033[0m %s\n", t, d}' $(MAKEFILE_LIST)
 
 install:  ## Create the venv and install dev dependencies
 	uv sync
