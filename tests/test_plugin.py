@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import plugin, report, workspace
+from evalspec import plugin, workspace
 from evalspec.agents.base import AgentCapabilities
+from evalspec.reporting import report
 from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 

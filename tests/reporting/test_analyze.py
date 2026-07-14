@@ -13,15 +13,16 @@ from textwrap import dedent
 
 import pytest
 
-from evalspec import analyze, workspace
+from evalspec import workspace
 from evalspec.config.arms import Arm
 from evalspec.execution import run_eval_arm
 from evalspec.grading.binder import _bind_bare_exists
+from evalspec.reporting import analyze
 from evalspec.runner import RunResult
 from evalspec.specs import discovery
 from evalspec.specs.schema import SchemaError
 
-_ACTIVATION_FIXTURE = Path(__file__).parent / "fixtures" / "activation"
+_ACTIVATION_FIXTURE = Path(__file__).parent.parent / "fixtures" / "activation"
 
 
 def _bind_like_binder(text: object) -> object:

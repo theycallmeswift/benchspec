@@ -2,7 +2,7 @@
 
 import pytest
 
-from evalspec import report
+from evalspec.reporting import report
 from tests.support import seed_arm
 
 
