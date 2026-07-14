@@ -11,8 +11,9 @@ test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
 e2e:  ## Run evalspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
-	uv run evalspec run --set e2e
-	uv run python scripts/verify_e2e_artifacts.py tmp/evals
+	@existing_iterations="$$(find tmp/evals -maxdepth 1 -type d -name 'iteration_*' -exec basename {} \; 2>/dev/null)"; \
+	uv run evalspec run --set e2e && \
+	uv run python scripts/verify_e2e_artifacts.py tmp/evals --existing $$existing_iterations
 
 # Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
 BINDER_WORKERS ?= 6
