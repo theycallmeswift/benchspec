@@ -3,7 +3,7 @@
 The same adapter that runs a harness inside the sandbox (`invoke`) also grades with
 it (`judge`) — one class per harness, with the execution environment
 (`evalspec.environments`) deciding where the process runs. `run_judge` is the sync
-boundary the grading path calls: it expands config.env via evalspec.arms.expand_env
+boundary the grading path calls: it expands config.env via evalspec.config.arms.expand_env
 (the same function arms use, so judge env expansion is provably identical) and runs
 the adapter's async `judge` to completion in a Host environment. JudgeConfig is
 imported only under TYPE_CHECKING to avoid a circular import with `judges/config.py`.
@@ -18,7 +18,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from evalspec.agents import agent_class, known_harnesses
-from evalspec.arms import expand_env
+from evalspec.config.arms import expand_env
 
 if TYPE_CHECKING:
     from evalspec.grading.judges.config import JudgeConfig
@@ -51,7 +51,7 @@ def preflight_judge_binary(config: JudgeConfig) -> None:
 def run_judge(prompt: str, *, config: JudgeConfig) -> str:
     """Expand config.env like an arm's env, then judge with the harness's own adapter.
 
-    Uses evalspec.arms.expand_env — the same function, so judge env expansion is
+    Uses evalspec.config.arms.expand_env — the same function, so judge env expansion is
     provably identical to arm env expansion — and hands the adapter a config whose
     env is already resolved. Raises SchemaError for an unset referenced $VAR (never a
     silent empty string); RuntimeError propagates unchanged from the adapter for

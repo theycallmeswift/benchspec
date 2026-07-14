@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import tomllib
 
-from evalspec.arms import (
+from evalspec.config.arms import (
     Arm,
     expand_env,
     parse_sets,

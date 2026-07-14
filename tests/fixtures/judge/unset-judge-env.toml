@@ -2,7 +2,7 @@
 # Must exit nonzero: $EVALSPEC_JUDGE_FIXTURE_UNSET_VAR is (by construction) never set
 # in the environment this fixture is intended to be run in. Structurally valid at
 # collection (env values are strings) — the SchemaError fires lazily, at judge
-# EXECUTION time, via evalspec.arms.expand_env (the same function arm env uses),
+# EXECUTION time, via evalspec.config.arms.expand_env (the same function arm env uses),
 # proving judge env expansion never silently degrades to an empty string.
 [tool.evalspec]
 

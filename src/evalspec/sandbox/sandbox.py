@@ -12,7 +12,7 @@ from pathlib import Path
 
 from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
-from evalspec.arms import parse_sets, resolve_set
+from evalspec.config.arms import parse_sets, resolve_set
 from evalspec.grading.trigger import RoutingError
 from evalspec.room import (
     changed_paths,

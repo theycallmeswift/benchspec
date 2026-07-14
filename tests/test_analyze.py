@@ -14,7 +14,7 @@ from textwrap import dedent
 import pytest
 
 from evalspec import analyze, workspace
-from evalspec.arms import Arm
+from evalspec.config.arms import Arm
 from evalspec.execution import run_eval_arm
 from evalspec.grading.binder import _bind_bare_exists
 from evalspec.runner import RunResult

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from evalspec.agents import make_agent
 
 if TYPE_CHECKING:
-    from evalspec.arms import Set as EvalSet
+    from evalspec.config.arms import Set as EvalSet
 
 # Credential-shaped env key names are masked in reports. URLs and other config pass through.
 _SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)

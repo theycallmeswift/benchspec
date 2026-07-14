@@ -8,7 +8,7 @@ from typing import NoReturn
 import pytest
 
 from evalspec import workspace
-from evalspec.arms import Arm
+from evalspec.config.arms import Arm
 from evalspec.execution import run_eval_arm
 from evalspec.runner import RunResult
 from evalspec.sandbox.backend import FingerprintInputs

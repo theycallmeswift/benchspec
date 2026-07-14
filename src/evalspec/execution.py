@@ -21,7 +21,7 @@ from pathlib import Path
 from evalspec import workspace
 from evalspec.agents import make_agent
 from evalspec.agents.base import probe_guest_version
-from evalspec.arms import Arm, expand_env
+from evalspec.config.arms import Arm, expand_env
 from evalspec.grading import binder, checkers
 from evalspec.grading.judge import grade_run
 from evalspec.grading.judges import JudgeConfig

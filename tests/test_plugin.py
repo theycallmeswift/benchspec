@@ -420,7 +420,7 @@ def test_run_set_when_needed_degrades_without_resolving(tmp_path: object) -> Non
 def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object) -> None:
     """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
     from evalspec import cases
-    from evalspec.arms import Arm, Set
+    from evalspec.config.arms import Arm, Set
 
     fake_set = Set(
         "s", [Arm("a", "claude-code", "opus")], baseline=None, sandbox="custombackend"
@@ -1671,7 +1671,7 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
     # it. Full end-to-end (a real arm run reaching the judge) needs live credentials
     # and a microVM — out of scope for `make test`; see tests/grading/judges/test_judge_registry.py
     # ::test_run_judge_env_unset_var_raises_schemaerror for the unit-level proof, and
-    # tests/test_arms.py for expand_env's own unset-var coverage (the same function).
+    # tests/config/test_arms.py for expand_env's own unset-var coverage (the same function).
     import tomllib
 
     from evalspec.grading.judges import resolve_judge_config
