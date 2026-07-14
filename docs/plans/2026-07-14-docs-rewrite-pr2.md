@@ -31,15 +31,15 @@
 - Consumes: the post-reorg working tree at the tip of refactor/42-package-reorg; `.superpowers/sdd/docs-rewrite-prompt.md` (the spec appendix, verbatim).
 - Produces: the documentation plan (one line per doc: reader, job), the new files, the per-file self-check list of verified factual claims.
 
-- [ ] **Step 1:** Dispatch a subagent whose prompt is the extracted appendix verbatim, wrapped only with operational context (worktree path; do not commit; return the plan + file list + self-check list).
-- [ ] **Step 2:** Gate the output: documentation plan present; every replaced file deleted; self-check list cites a verification (command or file:line) per factual claim.
-- [ ] **Step 3:** Run `make test` (README example tests must pass) and `make lint`. Expected: 924+ passed; lint exit 0.
-- [ ] **Step 4:** Stale-path grep over README.md and docs/ for pre-reorg module paths (`evalspec.plugin`, `evalspec.arms`, `evalspec.discovery`, `evalspec.mdformat`, `evalspec.schema`, `evalspec.lint`, `evalspec.execution`, `evalspec.runner`, `evalspec.binder`, `evalspec.judge`, `evalspec.report`, `evalspec.analyze`, `evalspec.backend`, `evalspec.provenance`, `evalspec.sandbox.` as flat forms). Expected: zero hits.
+- [ ] **Step 1:** Verify the extracted prompt is byte-identical to the spec appendix before dispatch: extract the four-backtick fenced block from docs/specs/2026-07-14-package-reorg-and-docs-rewrite.md (the lines between the two fence lines under "Appendix: Docs-Rewrite Subagent Prompt") and `diff` it against `.superpowers/sdd/docs-rewrite-prompt.md`. Expected: no diff. Then dispatch a subagent whose prompt is the extracted appendix verbatim, wrapped only with operational context (worktree path; do not commit; return the plan + file list + self-check list).
+- [ ] **Step 2:** Gate the output: documentation plan present; every replaced file deleted; self-check list cites a verification (command or file:line) per factual claim, including at least one cited verification per non-mermaid code fence.
+- [ ] **Step 3:** Run `make test` (README example tests must pass), `make lint`, and the public-import smoke test `uv run python -c "from evalspec.agents import CodingAgent, make_agent; from evalspec.testing import FakeSandbox"`. Expected: exactly `924 passed, 950 deselected` (both counts must match; any deviation is a regression to investigate, not a pass); lint exit 0; smoke test exit 0.
+- [ ] **Step 4:** Stale-path grep scoped to README.md plus the newly written project docs only (explicitly excluding `docs/specs/`, `docs/plans/`, `docs/style/` — frozen history that legitimately contains old paths): `grep -rnE 'evalspec\.(plugin|arms|discovery|mdformat|schema|lint|execution|runner\b|binder|judge\b|report|analyze|backend|provenance|sandbox\.)' README.md <new docs/ files from the documentation plan>` — `\b` on `runner`/`judge` avoids the `runners`/`judges` prefix collision. Expected: zero hits.
 - [ ] **Step 5:** Commit: `docs: rewrite README and project docs from fresh eyes (Phase 10 PR 2)`
 
 ## Task 2: Editorial + accuracy review loop
 
-- [ ] **Step 1:** Codex adversarial review of the new docs (accuracy against tree, voice bar, scope discipline); independent validation of findings.
+- [ ] **Step 1:** Codex adversarial review of the new docs (accuracy against tree, voice bar, scope discipline); independent validation of findings. If `tests/test_readme_examples.py` was touched, verify the diff changes only string literals (the asserted `-k` example and the negative-match string) and not assertion count, structure, or the parse-and-must-not-raise check — any broadening or deletion of an assertion is a gate-weakening finding, not a disclosed literal update.
 - [ ] **Step 2:** Apply validated fixes via a fix subagent; re-run `make test`/`make lint`; commit `docs: address docs-rewrite review feedback`.
 
 ## Task 3: Roadmap bookkeeping (ship step)
