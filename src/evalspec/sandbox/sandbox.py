@@ -476,7 +476,7 @@ def route_in_sandbox(
 def _layer_build_config(table: dict, config_path: str | None) -> dict:
     """Merge a `--config` file's [tool.evalspec.sets.*] over the pyproject table.
 
-    Mirrors plugin._layer_config_sets for the build path. A malformed config (missing
+    Mirrors config.sets._layer_config_sets for the build path. A malformed config (missing
     [tool.evalspec]) raises SchemaError, which the CLI maps to exit 2.
     """
     if not config_path:

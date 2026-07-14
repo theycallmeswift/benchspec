@@ -19,13 +19,13 @@ from pathlib import Path
 
 import pytest
 
+from evalspec.config.sets import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.grading import binder
 from evalspec.grading.judges import JudgeConfig
 from evalspec.grading.judges.registry import preflight_judge_binary
 from evalspec.orchestration import results
 from evalspec.orchestration.execution import run_eval_arm
 from evalspec.orchestration.room import seed_room
-from evalspec.runners.pytest import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.sandbox import sandbox
 from evalspec.sandbox.backend import resolve_sandbox
 from evalspec.specs.discovery import resolve_repo_root
