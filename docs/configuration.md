@@ -70,7 +70,7 @@ Because binding reuses the real binder, `analyze` needs **`GEMINI_API_KEY`** set
 
 ## Running a benchmark — `evalspec run`
 
-`evalspec run [root]` (`python -m evalspec run [root]`) resolves one eval set, runs its `(eval × arm)` cells under pytest, and grades them — the same path `make evals` drives, behind a curated flag vocabulary. Each flag is shorthand for the underlying `--evalspec-*` pytest option; the option's semantics are documented in [CLI flags](#cli-flags-pytest-or-make-evals-eval_args) below.
+`evalspec run [root]` (`python -m evalspec run [root]`) resolves one eval set, runs its `(eval × arm)` cells under pytest, and grades them. Each flag is shorthand for the underlying `--evalspec-*` pytest option; the option's semantics are documented in [CLI flags](#cli-flags-pytest) below.
 
 | `evalspec run` flag | pytest option |
 |---|---|
@@ -110,7 +110,7 @@ The unsupported-`runner`/`sandbox` case exits `2` through **both** `evalspec run
 
 `--set <name>` resolves that eval set and builds through *its* `sandbox` backend and `env` instead of the bare defaults; `--config <file>` layers a scratch TOML over pyproject for that set resolution (same shape as `--evalspec-config`). A `--set` whose `sandbox` names an unsupported value (e.g. `docker`) exits `2` (usage) before any preflight runs.
 
-## CLI flags (`pytest`, or `make evals EVAL_ARGS=…`)
+## CLI flags (`pytest`)
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -148,7 +148,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 | `EVALSPEC_ARM` | Per-cell. The arm name for this cell. Set by the harness adapter **inside the sandbox** (`cell_env`), read by the eval group's `setup.sh` to decide whether to install the skill (trial) or no-op (baseline). Don't set by hand. |
 | `EVALSPEC_MODEL` | Per-cell. The arm's task model — **informational** for `setup.sh`; it does NOT route the task model (the harness already routes that). Set by the adapter inside the sandbox. |
 | `EVALSPEC_HARNESS` | Per-cell. The harness that ran this cell (`self.id` — the agent owns it): the arm's `harness`. Set by the adapter inside the sandbox; read by `setup.sh`. |
-| `EVALSPEC_SET` | Per-cell. Names the explicitly-selected set (`--evalspec-set` / `make evals SET=`), so `setup.sh` can branch on which set is running (alongside `EVALSPEC_ARM`); empty when the run falls back to the pyproject `default-set`. Set by the adapter inside the sandbox; read by `setup.sh`. |
+| `EVALSPEC_SET` | Per-cell. Names the explicitly-selected set (`--evalspec-set` / `evalspec run --set`), so `setup.sh` can branch on which set is running (alongside `EVALSPEC_ARM`); empty when the run falls back to the pyproject `default-set`. Set by the adapter inside the sandbox; read by `setup.sh`. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude credential (preferred over `ANTHROPIC_API_KEY`). From `claude setup-token`. |
 | `ANTHROPIC_API_KEY` | Claude credential fallback. Also OpenCode's second-choice provider when `OPENROUTER_API_KEY` is unset. |
 | `OPENROUTER_API_KEY` | OpenCode credential (highest precedence among OpenCode providers). |
@@ -164,7 +164,7 @@ Sampling for stability isn't an evalspec knob — it rides `pytest-repeat`: pass
 
 | Key | Type | Notes |
 |---|---|---|
-| `default-set` | string | Names the eval set a plain run resolves (the one `make evals` uses). Required. `--evalspec-set` overrides it per run. A `default-set` naming an undeclared set fails fast. |
+| `default-set` | string | Names the eval set a plain `evalspec run` resolves. Required. `--evalspec-set` overrides it per run. A `default-set` naming an undeclared set fails fast. |
 | `sets.<name>` | table | One eval set — `arms` + set-level `harness`/`model`/`effort`/`env`/`harness_args` defaults + `baseline` + `runner`/`sandbox`. See [Eval sets](#eval-sets--toolevalspecsetsname) above. |
 | `agent` | string | Run-level default coding agent (the `__route__` sandbox path and `make_agent()` default; task arms select their harness per arm). Below `EVALSPEC_AGENT` and `--evalspec-agent`, above the built-in default (`claude-code`). Use to make a project default to `opencode` without setting env vars. |
 | `eval_paths` | string[] | The sole discovery knob — directories (relative to repo root) whose trees are walked for `eval.md` / `*.eval.md`. Below `--evalspec-eval-paths`, above the built-in default (`skills`, `tests`, `evals`, `benchmarks`). |
@@ -243,11 +243,12 @@ In the host plugin's Makefile (external consumers replicate as needed):
 
 | Target | Effect |
 |---|---|
-| `make evals EVAL_ARGS="-k …"` | Wraps `pytest -p evalspec.plugin`. Runs the `default-set`. |
-| `make evals SET=<name>` | Resolve a named set instead of `default-set` (forwards `--evalspec-set <name>`). Combine with `EVAL_ARGS` for scope/overrides. |
-| `make evals:build` | Builds the microsandbox snapshot up front for the current `EVALSPEC_AGENT`. |
+| `make e2e` | Runs evalspec's own `e2e` set and validates its generated artifacts. |
+| `make evals EVAL_ARGS="…"` | Runs the paid binder corpus; `EVAL_ARGS` passes pytest collection options. |
 
-`make evals` and `make evals:build` predate the `evalspec` subcommands and stay as-is for now; they may become thin aliases for [`evalspec run`](#running-a-benchmark--evalspec-run) / [`evalspec sandbox:build`](#building-the-sandbox--evalspec-sandboxbuild) in a later phase (the `evals` → `e2e` target rename is deferred to Phase 9).
+Use [`evalspec run`](#running-a-benchmark--evalspec-run) for project skill evals and
+[`evalspec sandbox:build`](#building-the-sandbox--evalspec-sandboxbuild) to build a
+sandbox snapshot explicitly.
 
 ## Cross-agent runs
 

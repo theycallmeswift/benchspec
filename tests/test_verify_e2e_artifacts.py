@@ -51,7 +51,10 @@ EXPECTED_ARMS = [
         "capabilities": {"token_split": True},
     },
 ]
-EXPECTED_EVALS = ("greets-by-name", "writes-greeting-file")
+EXPECTED_EVALS = (
+    ("hello", "greets-by-name"),
+    ("hello-file", "writes-greeting-file"),
+)
 
 
 def _write_valid_iteration(root: Path, name: str = "iteration_02") -> Path:
@@ -93,7 +96,10 @@ def _write_valid_iteration(root: Path, name: str = "iteration_02") -> Path:
     benchmark = {
         "format_version": 3,
         "label": name,
-        "roster": [{"group": "hello", "eval_id": eval_id} for eval_id in EXPECTED_EVALS],
+        "roster": [
+            {"group": eval_group, "eval_id": eval_id}
+            for eval_group, eval_id in EXPECTED_EVALS
+        ],
         "arms": {
             arm["name"]: {
                 "pass_rate": 1.0, "pass_rate_stdev": 0.0, "duration_ms_mean": 1,
@@ -101,10 +107,10 @@ def _write_valid_iteration(root: Path, name: str = "iteration_02") -> Path:
                 "tokens_stdev": 0.0, "errored_samples": 0, "binder_degraded": 0,
                 "n": 2,
                 "per_eval": [
-                    {"group": "hello", "eval_id": eval_id, "samples": 1,
+                    {"group": eval_group, "eval_id": eval_id, "samples": 1,
                      "errored_samples": 0, "passed_total": 1, "total_total": 1,
                      "pass_rate_mean": 1.0, "pass_rate_stdev": None}
-                    for eval_id in EXPECTED_EVALS
+                    for eval_group, eval_id in EXPECTED_EVALS
                 ],
                 "harness": arm["harness"], "model": arm["model"],
                 "effort": arm["effort"], "env": arm["env"], "harness_args": [],
@@ -122,11 +128,13 @@ def _write_valid_iteration(root: Path, name: str = "iteration_02") -> Path:
     (iteration / "benchmark.json").write_text(json.dumps(benchmark))
     (iteration / "benchmark.md").write_text(
         "# Benchmark — iteration_02\n## Matrix\nAll evals\n"
-        "greets-by-name\nwrites-greeting-file\nbaseline\ntrial\ntrial-overrides\n## Provenance\n"
+        "| Eval | baseline (claude-code) | trial (claude-code) | "
+        "trial-overrides (claude-code) |\n"
+        "greets-by-name\nwrites-greeting-file\n## Provenance\n"
     )
     rows = []
     for arm in EXPECTED_ARMS:
-        for eval_id in EXPECTED_EVALS:
+        for _, eval_id in EXPECTED_EVALS:
             sample = iteration / "skills" / "hello" / f"eval-{eval_id}" / arm["name"] / "sample-0"
             sample.mkdir(parents=True)
             disk_provenance = RuntimeProvenance(
@@ -352,6 +360,32 @@ def test_rejects_missing_per_sample_provenance(tmp_path: Path, capsys: object) -
 
     assert result == 1
     assert "provenance.json: missing for index.jsonl:" in capsys.readouterr().out
+
+
+def test_rejects_boolean_index_total(tmp_path: Path, capsys: object) -> None:
+    """Reject JSON booleans where the artifact contract requires an integer total."""
+    iteration = _write_valid_iteration(tmp_path)
+    rows = [json.loads(line) for line in (iteration / "index.jsonl").read_text().splitlines()]
+    rows[0]["total"] = True
+    (iteration / "index.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    result = verifier.main(["verify_e2e_artifacts.py", str(tmp_path)])
+
+    assert result == 1
+    assert "index.jsonl:1: invalid result fields" in capsys.readouterr().out
+
+
+def test_rejects_missing_exact_markdown_arm_header(tmp_path: Path, capsys: object) -> None:
+    """Require each rendered matrix arm header without substring false positives."""
+    iteration = _write_valid_iteration(tmp_path)
+    markdown = (iteration / "benchmark.md").read_text()
+    malformed = markdown.replace("| trial (claude-code) |", "| xtrial (claude-code) |")
+    (iteration / "benchmark.md").write_text(malformed)
+
+    result = verifier.main(["verify_e2e_artifacts.py", str(tmp_path)])
+
+    assert result == 1
+    assert "trial (claude-code)" in capsys.readouterr().out
 
 
 def test_errored_index_row_still_requires_valid_provenance(tmp_path: Path, capsys: object) -> None:
