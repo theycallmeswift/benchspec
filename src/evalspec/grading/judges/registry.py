@@ -67,7 +67,7 @@ def probe_judge_version(harness: str) -> str | None:
     """Best-effort version probe for meta.json.
 
     Never raises — an unknown harness or any probe exception degrades to None,
-    matching the existing agent-version pattern in plugin._write_manifest.
+    matching the existing agent-version pattern in reporting.manifest.write_manifest.
     """
     try:
         adapter = agent_class(harness)

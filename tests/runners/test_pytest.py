@@ -424,11 +424,13 @@ class _StubAgent:
 def _stub_judge_probe(monkeypatch: object) -> None:
     """Pin the host judge-version probe so sessionfinish tests stay hermetic.
 
-    `_judge_meta` shells out to `<judge binary> --version`; on a dev box with the harness
-    installed that is nondeterministic and non-hermetic. Pin it to a sentinel so the judge
-    `actual_version` is predictable and the dedicated test can assert it flows through.
+    `manifest.judge_meta` shells out to `<judge binary> --version`; on a dev box with the
+    harness installed that is nondeterministic and non-hermetic. Pin it to a sentinel so the
+    judge `actual_version` is predictable and the dedicated test can assert it flows through.
     """
-    monkeypatch.setattr(plugin, "probe_judge_version", lambda harness: "judge-1.0.0")
+    monkeypatch.setattr(
+        "evalspec.reporting.manifest.probe_judge_version", lambda harness: "judge-1.0.0"
+    )
 
 
 def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> object:
@@ -492,156 +494,6 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     assert "| archive/alpha |" in markdown
     assert "| ingest/beta |" in markdown
     assert "| All evals |" in markdown
-
-
-def test_build_manifest_assembles_shape_by_value() -> None:
-    """Verify build manifest assembles shape by value."""
-    # The pure assembler is testable by value (no uuid/clock/git IO) — the shell
-    # injects identity. Pins the spread of cfg and the hash, which the IO-bound
-    # sessionfinish test below can only presence-check.
-    cfg = {
-        "set": "default",
-        "runner": "pytest",
-        "arms": [{"name": "baseline", "requested_version": "latest"}],
-        "judge": {
-            "harness": "claude-code",
-            "model": "sonnet",
-            "effort": "medium",
-            "timeout": 300,
-            "env": {},
-            "harness_args": [],
-            "actual_version": "1.2.3",
-        },
-        "binder": {"provider": "gemini", "model": "x", "api_path": "y"},
-    }
-    observed = {"baseline": {"actual_version": "1.2.3", "actual_version_status": "available"}}
-
-    manifest = plugin.build_manifest(
-        run_id="r" * 32,
-        started_at="2026-06-13T00:00:00+00:00",
-        commit="abc123",
-        iteration="iteration_07",
-        cfg=cfg,
-        observed_arms=observed,
-    )
-
-    assert manifest["format_version"] == 2
-    assert manifest["run_id"] == "r" * 32
-    assert manifest["commit"] == "abc123"
-    assert manifest["started_at"] == "2026-06-13T00:00:00+00:00"
-    assert manifest["iteration"] == "iteration_07"
-    assert manifest["set"] == "default"  # cfg spread in
-    assert manifest["runner"] == "pytest"
-    assert manifest["observed_arms"] == observed
-    assert len(manifest["config_hash"]) == 12
-    assert manifest["judge"]["harness"] == "claude-code"  # nested judge spread in whole
-    assert manifest["binder"]["provider"] == "gemini"
-    # No v1 run-level identity fields survive.
-    assert "agent" not in manifest
-    assert "agent_version" not in manifest
-    assert "token_split" not in manifest
-
-
-def test_build_manifest_config_hash_excludes_observed_arms() -> None:
-    """Verify config_hash hashes only cfg, never the runtime observation."""
-    # config_hash must be stable across runs of one config; folding observed_arms into it
-    # would make two runs of the same config hash differently. Same cfg + different
-    # observed_arms ⇒ identical config_hash.
-    cfg = {
-        "set": "default",
-        "runner": "pytest",
-        "arms": [{"name": "baseline"}],
-        "judge": {"harness": "claude-code"},
-        "binder": {"provider": "gemini"},
-    }
-
-    manifest_a = plugin.build_manifest(
-        run_id="a" * 32,
-        started_at="t1",
-        commit="c1",
-        iteration="iteration_01",
-        cfg=cfg,
-        observed_arms={"baseline": {"actual_version": "1.0.0"}},
-    )
-    manifest_b = plugin.build_manifest(
-        run_id="b" * 32,
-        started_at="t2",
-        commit="c2",
-        iteration="iteration_99",
-        cfg=cfg,
-        observed_arms={},
-    )
-
-    assert manifest_a["config_hash"] == manifest_b["config_hash"]
-
-
-def test_build_manifest_config_hash_ignores_judge_actual_version() -> None:
-    """Verify the host-probed judge actual_version never shifts config_hash."""
-    # actual_version is a probe of the host judge binary, not a configured selector; two
-    # runs of one config on machines whose judge binary differs (or is absent → null) must
-    # still hash identically. The full judge object, actual_version included, is still emitted.
-    base_judge = {"harness": "claude-code", "model": "sonnet", "effort": "medium"}
-    cfg_probed = {
-        "set": "default",
-        "runner": "pytest",
-        "arms": [{"name": "baseline"}],
-        "judge": {**base_judge, "actual_version": "1.2.3"},
-        "binder": {"provider": "gemini"},
-    }
-    cfg_null = {**cfg_probed, "judge": {**base_judge, "actual_version": None}}
-
-    probed = plugin.build_manifest(
-        run_id="a" * 32, started_at="t", commit="c", iteration="i",
-        cfg=cfg_probed, observed_arms={},
-    )
-    null = plugin.build_manifest(
-        run_id="b" * 32, started_at="t", commit="c", iteration="i",
-        cfg=cfg_null, observed_arms={},
-    )
-
-    assert probed["config_hash"] == null["config_hash"]
-    assert probed["judge"]["actual_version"] == "1.2.3"  # still emitted in the output
-
-
-def test_build_manifest_config_hash_is_order_independent() -> None:
-    """Verify build manifest config hash is order independent."""
-    # config_hash hashes cfg with sort_keys, so two cfgs that differ only in key
-    # order (and in the non-cfg identity fields) hash identically.
-    cfg = {
-        "set": "default",
-        "runner": "pytest",
-        "arms": [{"name": "baseline"}],
-        "judge": {
-            "harness": "claude-code",
-            "model": "sonnet",
-            "effort": "medium",
-            "timeout": 300,
-            "env": {},
-            "harness_args": [],
-            "actual_version": None,
-        },
-        "binder": {"provider": "gemini", "model": "x", "api_path": "y"},
-    }
-    reordered = dict(reversed(list(cfg.items())))
-
-    manifest_a = plugin.build_manifest(
-        run_id="a" * 32,
-        started_at="t1",
-        commit="c1",
-        iteration="iteration_01",
-        cfg=cfg,
-        observed_arms={},
-    )
-    manifest_b = plugin.build_manifest(
-        run_id="b" * 32,
-        started_at="t2",
-        commit="c2",
-        iteration="iteration_99",
-        cfg=reordered,
-        observed_arms={},
-    )
-
-    assert manifest_a["config_hash"] == manifest_b["config_hash"]
 
 
 def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object) -> None:
@@ -920,20 +772,6 @@ def test_provenance_arm_outside_roster_raises(tmp_path: object, monkeypatch: obj
     session = _FakeSession(config)
     with pytest.raises(ValueError, match="provenance arm `ghost`.*not in the configured roster"):
         plugin.pytest_sessionfinish(session, 0)
-
-
-def test_aggregate_observed_arms_trigger_only_skips_roster(tmp_path: object) -> None:
-    """A trigger-only run (run_set None) aggregates without roster validation."""
-    # No eval set resolves for a trigger-only run, so there is no roster to check against;
-    # the walk must still aggregate the record rather than reject every arm.
-    workspace.set_current_iteration("iteration_01")
-    skills_root = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
-    ghost_sample = seed_arm(skills_root / "archive", "alpha", "ghost", passes=1, total=1)
-    _seed_provenance(ghost_sample, "ghost")
-
-    observed = plugin._aggregate_observed_arms(skills_root, None)
-
-    assert set(observed) == {"ghost"}  # off-roster arm accepted when no set is configured
 
 
 def test_binder_identity_carries_no_key_material(tmp_path: object, monkeypatch: object) -> None:
