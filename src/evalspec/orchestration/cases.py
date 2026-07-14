@@ -19,7 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from evalspec.config.sets import resolved_judge_config, resolved_run_set, session_run_set
+from evalspec.config.arms import Arm
+from evalspec.config.sets import (
+    resolved_judge_config,
+    resolved_run_set,
+    run_set_when_needed,
+    session_run_set,
+)
 from evalspec.grading import binder
 from evalspec.grading.judges import JudgeConfig
 from evalspec.grading.judges.registry import preflight_judge_binary
@@ -28,7 +34,36 @@ from evalspec.orchestration.execution import run_eval_arm
 from evalspec.orchestration.room import seed_room
 from evalspec.sandbox import sandbox
 from evalspec.sandbox.backend import resolve_sandbox
-from evalspec.specs.discovery import resolve_repo_root
+from evalspec.specs.discovery import (
+    EvalCase,
+    discover_eval_cases,
+    resolve_eval_paths,
+    resolve_repo_root,
+)
+
+
+def eval_arm_params(config: object) -> tuple[list[tuple[EvalCase, Arm]], list[str]]:
+    """The (case × arm) pairs and ids that parametrize the eval_arm fixture."""
+    # One eval set per run — uniform columns across every skill (resolved once, not
+    # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
+    repo_root = resolve_repo_root(config)
+    cases = discover_eval_cases(repo_root, resolve_eval_paths(config))
+    # Resolve the set only when there are eval cases to cross with — an empty
+    # collection has no eval_arm pairs and must not require an eval-set pyproject.
+    run_set = run_set_when_needed(config, needs_set=bool(cases))
+    arms = run_set.arms if run_set else []
+    if cases:
+        # Structural judge preflight — before ANY paid task arm runs. Raises
+        # pytest.UsageError at collection on a bad config; binary-on-PATH is
+        # checked separately, later, only when tests actually execute.
+        resolved_judge_config(config)
+    pairs = []
+    ids = []
+    for case in cases:
+        for arm in arms:
+            pairs.append((case, arm))
+            ids.append(f"{case.param_id}-{arm.name}")
+    return pairs, ids
 
 
 @pytest.fixture

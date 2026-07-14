@@ -16,19 +16,18 @@ import pytest
 from dotenv import load_dotenv
 
 from evalspec.agents import resolve_agent_name
-from evalspec.config.sets import has_configured_set, resolved_judge_config, run_set_when_needed
+from evalspec.config.sets import (
+    has_configured_set,
+    resolved_judge_config,
+    run_set_when_needed,
+)
 from evalspec.grading.binder import binder_identity
 from evalspec.grading.judges import JudgeConfig
-from evalspec.orchestration import workspace
+from evalspec.orchestration import cases, workspace
 from evalspec.reporting import manifest, report
-from evalspec.specs.discovery import (
-    discover_eval_cases,
-    pyproject_table,
-    resolve_eval_paths,
-    resolve_repo_root,
-)
+from evalspec.specs.discovery import pyproject_table, resolve_repo_root
 
-_CASES = Path(__file__).parent.parent / "orchestration" / "cases.py"
+_CASES = Path(cases.__file__)
 
 _STARTED_AT = pytest.StashKey[str]()
 _SUMMARY_LINES = pytest.StashKey[list]()
@@ -390,25 +389,6 @@ def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config
 
 def pytest_generate_tests(metafunc: object) -> None:
     """Parametrize pytest items from discovered evalspec cases."""
-    fixtures = metafunc.fixturenames
-    if "eval_arm" in fixtures:
-        # One eval set per run — uniform columns across every skill (resolved once, not
-        # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
-        repo_root = resolve_repo_root(metafunc.config)
-        cases = discover_eval_cases(repo_root, resolve_eval_paths(metafunc.config))
-        # Resolve the set only when there are eval cases to cross with — an empty
-        # collection has no eval_arm pairs and must not require an eval-set pyproject.
-        run_set = run_set_when_needed(metafunc.config, needs_set=bool(cases))
-        arms = run_set.arms if run_set else []
-        if cases:
-            # Structural judge preflight — before ANY paid task arm runs. Raises
-            # pytest.UsageError at collection on a bad config; binary-on-PATH is
-            # checked separately, later, only when tests actually execute.
-            resolved_judge_config(metafunc.config)
-        pairs = []
-        ids = []
-        for case in cases:
-            for arm in arms:
-                pairs.append((case, arm))
-                ids.append(f"{case.param_id}-{arm.name}")
+    if "eval_arm" in metafunc.fixturenames:
+        pairs, ids = cases.eval_arm_params(metafunc.config)
         metafunc.parametrize("eval_arm", pairs, ids=ids)
