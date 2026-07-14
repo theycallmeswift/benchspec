@@ -98,9 +98,6 @@ addopts = "-m 'not binder_corpus'"
 
 [tool.evalspec]
 default-set = "e2e"
-# Scope discovery to evals/ — the default (skills, tests, evals, benchmarks) would also
-# pick up tests/fixtures/activation/evals/activation-demo/eval.md, an unrelated
-# test_analyze.py fixture, breaking the "six cells" collection count below.
 eval_paths = ["evals"]
 
 [tool.evalspec.sets.e2e]
