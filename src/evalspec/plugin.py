@@ -399,7 +399,7 @@ def pytest_configure(config: object) -> None:
     """Configure pytest state for evalspec collection."""
     load_dotenv()
     config.addinivalue_line(
-        "markers", "evalspec: skill-eval cases run via `make evals` (not `make test`)"
+        "markers", "evalspec: skill-eval cases run via `evalspec run` (not `make test`)"
     )
     repo_root = resolve_repo_root(config)
     try:

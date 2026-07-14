@@ -8,7 +8,10 @@ from pathlib import Path
 
 META_FORMAT_VERSION = 2
 BENCHMARK_FORMAT_VERSION = 3
-EXPECTED_EVALS = {("hello", "greets-by-name"), ("hello", "writes-greeting-file")}
+EXPECTED_EVALS = {
+    ("hello", "greets-by-name"),
+    ("hello-file", "writes-greeting-file"),
+}
 EXPECTED_ARMS = {
     "baseline": ("claude-code", "sonnet", "medium", "en-US"),
     "trial": ("claude-code", "sonnet", "medium", "en-US"),
@@ -304,12 +307,16 @@ def _check_benchmark(iteration: Path, meta: dict | None, problems: list[str]) ->
         "## Matrix",
         "All evals",
         "## Provenance",
-        *EXPECTED_ARMS,
         *(eval_id for _, eval_id in EXPECTED_EVALS),
     }
     for marker in sorted(required):
         if marker not in text:
             problems.append(f"benchmark.md: required content {marker!r} missing")
+    expected_header = "| Eval | " + " | ".join(
+        f"{name} ({axes[0]})" for name, axes in EXPECTED_ARMS.items()
+    ) + " |"
+    if expected_header not in text.splitlines():
+        problems.append(f"benchmark.md: required matrix header {expected_header!r} missing")
 
 
 def _check_samples(iteration: Path, problems: list[str]) -> None:
@@ -361,6 +368,7 @@ def _check_samples(iteration: Path, problems: list[str]) -> None:
             or not isinstance(row["passed"], int)
             or isinstance(row["passed"], bool)
             or not isinstance(row["total"], int)
+            or isinstance(row["total"], bool)
             or row["passed"] < 0
             or row["total"] < row["passed"]
             or any(

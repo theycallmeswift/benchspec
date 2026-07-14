@@ -13,6 +13,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from evalspec.arms import parse_sets, resolve_set
 from evalspec.discovery import discover_eval_cases, pyproject_table
 from evalspec.judges.config import resolve_judge_config
@@ -105,7 +107,7 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
 
     assert identities == {
         ("hello", "greets-by-name"),
-        ("hello", "writes-greeting-file"),
+        ("hello-file", "writes-greeting-file"),
     }
     for case in cases:
         assert case.prompt
@@ -115,9 +117,10 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
 def test_hello_evals_exercise_history_and_seeded_workspace() -> None:
     """Verify a live eval depends on authored history and a seeded workspace file."""
     cases = discover_eval_cases(REPO_ROOT)
-    cases_by_id = {case.eval_id: case for case in cases if case.group == "hello"}
+    cases_by_id = {case.eval_id: case for case in cases}
     context_case = cases_by_id["writes-greeting-file"]
-    request_file = REPO_ROOT / "evals/e2e/hello/evals/hello/workspace/request.md"
+    greeting_case = cases_by_id["greets-by-name"]
+    request_file = REPO_ROOT / "evals/e2e/hello/evals/hello-file/workspace/request.md"
 
     assert context_case.history
     assert any("Bob" in turn["content"] for turn in context_case.history)
@@ -127,11 +130,13 @@ def test_hello_evals_exercise_history_and_seeded_workspace() -> None:
     assert request_file.read_text(encoding="utf-8").strip()
     assert "Bob" not in request_file.read_text(encoding="utf-8")
     assert "./request.md" in context_case.prompt
+    assert greeting_case.workspace_dir is None
 
 
-def test_setup_sh_has_valid_bash_syntax() -> None:
+@pytest.mark.parametrize("group", ["hello", "hello-file"])
+def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     """Verify setup.sh parses as valid bash without executing any of it."""
-    setup_sh = REPO_ROOT / "evals/e2e/hello/evals/hello/setup.sh"
+    setup_sh = REPO_ROOT / "evals/e2e/hello/evals" / group / "setup.sh"
 
     result = subprocess.run(
         ["bash", "-n", str(setup_sh)], capture_output=True, text=True, check=False
@@ -140,11 +145,14 @@ def test_setup_sh_has_valid_bash_syntax() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path) -> None:
+@pytest.mark.parametrize("group", ["hello", "hello-file"])
+def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: str) -> None:
     """Verify the baseline branch exits without running an install command."""
-    eval_dir = REPO_ROOT / "evals/e2e/hello/evals/hello"
+    eval_dir = REPO_ROOT / "evals/e2e/hello/evals" / group
     command_dir = tmp_path / "bin"
     command_dir.mkdir()
+    _write_command_recorder(command_dir, "mkdir")
+    _write_command_recorder(command_dir, "cp")
     command_log = tmp_path / "commands.log"
     bash = shutil.which("bash")
     assert bash is not None
@@ -167,9 +175,12 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path) -> None:
     assert not command_log.exists()
 
 
-def test_setup_sh_trial_installs_the_real_skill_without_host_writes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("group", ["hello", "hello-file"])
+def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
+    tmp_path: Path, group: str
+) -> None:
     """Verify the trial branch installs the real skill at the fixed guest path."""
-    eval_dir = REPO_ROOT / "evals/e2e/hello/evals/hello"
+    eval_dir = REPO_ROOT / "evals/e2e/hello/evals" / group
     command_dir = tmp_path / "bin"
     command_dir.mkdir()
     _write_command_recorder(command_dir, "mkdir")

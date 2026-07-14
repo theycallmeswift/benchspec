@@ -252,14 +252,12 @@ valid syntax, no-ops cleanly on the `baseline` arm, and resolves its `../../SKIL
 reference to the real skill file — all without booting a VM.
 
 Design: the skill writes an exact, deterministic first line (`Hello, <name>!`) plus a
-warm second line, regardless of `GREETING_LOCALE` — so both the file-content assertion
-and the tone assertion stay true across all three arms even though `trial-overrides`
-runs with a different `GREETING_LOCALE`. The second line's wording branches only on
-`GREETING_STYLE` (`formal` vs. anything else), never on locale, and both branches read
-as warm — a first pass that had the skill emit `Style:`/`Locale:` metadata lines instead
-of prose was caught during recon: a judge would plausibly grade raw metadata lines as
-robotic, which would fail the trial arm's own tone assertion and contradict "WITH the
-skill passes everything." `greets-by-name.eval.md` carries one
+warm second line. The second line branches on `GREETING_STYLE`; its formal wording also
+branches on `GREETING_LOCALE`, and the `writes-greeting-file` eval deliberately asserts
+the en-GB phrase so `trial-overrides` proves its arm-level locale override. A first pass
+that had the skill emit `Style:`/`Locale:` metadata lines instead of prose was caught
+during recon: a judge would plausibly grade raw metadata lines as robotic.
+`greets-by-name.eval.md` carries one
 `skill_invoked`-bindable line, one deterministic file-content line, and one subjective
 tone line the binder must punt to the judge, so a capable agent *without* the skill still
 passes the tone line (partial baseline) but fails the other two; `writes-greeting-file.eval.md`
@@ -639,10 +637,10 @@ before the `## Step 4 — Build the snapshot` heading), insert:
 ```markdown
 
 This walkthrough's `hello` skill and its two evals also live in-repo as a runnable
-suite, not just prose: [`evals/e2e/hello/`](../evals/e2e/hello/) follows exactly this
-shape — `SKILL.md`, `evals/hello/{greets-by-name,writes-greeting-file}.eval.md`, and
-`evals/hello/setup.sh` — under `evals/` instead of a user project's `skills/`, wired to
-the repo's own `e2e` eval set and run with `make e2e`.
+suite, not just prose: [`evals/e2e/hello/`](../evals/e2e/hello/) builds on this shape
+under `evals/` instead of a user project's `skills/`. Its second eval adds authored
+`history:` and a seeded `workspace/request.md`, isolated in its own group directory.
+The suite is wired to the repo's own `e2e` eval set and run with `make e2e`.
 ```
 
 - [ ] **Step 4: Verify**
@@ -675,8 +673,8 @@ Run after all four tasks land:
   `hello` evals are fairly gradable; verified in Task 2).
 - `uv run evalspec run --set e2e -- --collect-only` — Expected: 6 collected items —
   `test_eval[hello-greets-by-name-baseline]`, `test_eval[hello-greets-by-name-trial]`,
-  `test_eval[hello-greets-by-name-trial-overrides]`, `test_eval[hello-writes-greeting-file-baseline]`,
-  `test_eval[hello-writes-greeting-file-trial]`, `test_eval[hello-writes-greeting-file-trial-overrides]`
+  `test_eval[hello-greets-by-name-trial-overrides]`, `test_eval[hello-file-writes-greeting-file-baseline]`,
+  `test_eval[hello-file-writes-greeting-file-trial]`, `test_eval[hello-file-writes-greeting-file-trial-overrides]`
   — no `activation-demo` cell, because `eval_paths = ["evals"]` (Task 1) scopes discovery
   away from `tests/fixtures/`.
 - `grep -n 'e2e' Makefile` — Expected: the `.PHONY` entry and the `e2e:  ##` target.
@@ -740,14 +738,6 @@ All config values (`e2e`, `baseline`/`trial`/`trial-overrides`, `claude-code`/`s
 `codex`/`gpt-5.5`) are identical between the `pyproject.toml` block (Task 1) and the
 assertions that check them (Task 1's tests).
 
-Every recon claim used to write this plan (config parsing signatures, discovery
-defaults, the `.eval.md` format, the checker registry, `setup.sh` auto-discovery, the
-judge resolution path, the Makefile's help convention, `pyproject.toml`'s current last
-section) was spot-verified against the live worktree at plan time — including running
-the real parsers/`evalspec lint` against the exact `SKILL.md`/`.eval.md`/`setup.sh`
-content this plan specifies, and running `discover_eval_cases` against the real repo
-root to confirm the `eval_paths` scoping requirement in Task 1.
-
 Two substantive defects were caught and fixed during drafting, not deferred as open
 questions:
 1. **`eval_paths = ["evals"]` is an addition beyond the issue's illustrative
@@ -759,5 +749,4 @@ questions:
    which a judge would plausibly grade as robotic — failing the trial arm's own tone
    assertion and contradicting the locked design decision "WITH the skill passes
    everything." Task 2's `SKILL.md` was rewritten so both style branches read as warm
-   prose while keeping the first line exact and deterministic; re-verified against the
-   real parser and `evalspec lint` after the fix.
+   prose while keeping the first line exact and deterministic.
