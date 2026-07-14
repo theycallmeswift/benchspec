@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -25,12 +26,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _write_command_recorder(command_dir: Path, command: str) -> None:
     """Write a PATH command shim that records its invocation without changing files."""
     recorder = command_dir / command
-    recorder.write_text(
-        "#!/bin/sh\n"
-        'printf "%s" "${0##*/}" >> "$EVALSPEC_COMMAND_LOG"\n'
-        'printf " %s" "$@" >> "$EVALSPEC_COMMAND_LOG"\n'
-        'printf "\\n" >> "$EVALSPEC_COMMAND_LOG"\n'
-    )
+    recorder.write_text(dedent("""\
+        #!/bin/sh
+        printf "%s" "${0##*/}" >> "$EVALSPEC_COMMAND_LOG"
+        printf " %s" "$@" >> "$EVALSPEC_COMMAND_LOG"
+        printf "\\n" >> "$EVALSPEC_COMMAND_LOG"
+    """))
     recorder.chmod(0o755)
 
 
