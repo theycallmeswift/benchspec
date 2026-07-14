@@ -32,7 +32,7 @@ dependencies = [
 claude = []
 codex = []
 opencode = []
-microsandbox = ["microsandbox>=0.5.6,<0.6"]
+microsandbox = ["microsandbox>=0.6.6,<0.7"]
 testing = []
 
 [dependency-groups]
@@ -42,7 +42,7 @@ dev = [
     "pytest-xdist>=3",
     "pytest-repeat>=0.9,<1",
     "ruff>=0.6",
-    "microsandbox>=0.5.6,<0.6",
+    "microsandbox>=0.6.6,<0.7",
 ]
 
 [project.urls]
