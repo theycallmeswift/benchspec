@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import plugin
 from evalspec.agents.base import AgentCapabilities
 from evalspec.orchestration import workspace
 from evalspec.reporting import report
+from evalspec.runners import pytest as plugin
 from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
@@ -105,7 +105,7 @@ def _collect(pytester: object, *extra: object) -> object:
     """Build the collect test fixture."""
     return pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--collect-only",
         "-q",
         "--evalspec-repo-root",
@@ -117,7 +117,7 @@ def _collect(pytester: object, *extra: object) -> object:
 
 def test_help_describes_eval_search_paths(pytester: object) -> None:
     """Verify the eval-paths option help names the default search paths."""
-    result = pytester.runpytest("-p", "evalspec.plugin", "--help")
+    result = pytester.runpytest("-p", "evalspec.runners.pytest", "--help")
 
     output = " ".join(result.stdout.str().split())
     assert result.ret == 0
@@ -152,7 +152,7 @@ def test_plugin_self_registers_cases_without_positional(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--collect-only",
         "-q",
         "--evalspec-repo-root",
@@ -172,7 +172,7 @@ def test_explicit_positional_is_respected(pytester: object, monkeypatch: object)
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--collect-only",
         "-q",
         "--evalspec-repo-root",
@@ -481,7 +481,7 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--evalspec-repo-root",
         str(pytester.path),
         "-k",
@@ -515,7 +515,7 @@ def test_eval(eval_arm, sample_index):
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "-p",
         "pytest_repeat",
         "--evalspec-repo-root",
@@ -1260,7 +1260,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     # `-k test_eval` keeps this to the real (parametrized) test_eval items.
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--evalspec-repo-root",
         str(pytester.path),
         "-k",
@@ -1290,7 +1290,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--evalspec-repo-root",
         str(pytester.path),
         "-k",
@@ -1313,7 +1313,7 @@ def test_gemini_key_preflight_skipped_under_collect_only(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--collect-only",
         "--evalspec-repo-root",
         str(pytester.path),
@@ -1645,7 +1645,7 @@ def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) 
 
 # On-disk --evalspec-config judge fixtures; each is driven end-to-end through the
 # real plugin hooks at collection time by the tests below.
-_FIXTURES = Path(__file__).parent / "fixtures" / "judge"
+_FIXTURES = Path(__file__).parent.parent / "fixtures" / "judge"
 
 
 def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> None:
@@ -1653,7 +1653,7 @@ def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> No
     _make_project(pytester)
     result = pytester.runpytest(
         "-p",
-        "evalspec.plugin",
+        "evalspec.runners.pytest",
         "--collect-only",
         "-q",
         "--evalspec-repo-root",

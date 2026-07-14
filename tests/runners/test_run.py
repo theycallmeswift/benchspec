@@ -11,8 +11,8 @@ import sys
 import textwrap
 from pathlib import Path
 
-from evalspec import run
-from evalspec.run import translate_run_flags
+from evalspec.runners import run
+from evalspec.runners.run import translate_run_flags
 
 # The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
 # child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,

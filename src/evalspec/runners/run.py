@@ -45,7 +45,7 @@ def translate_run_flags(args: argparse.Namespace) -> list[str]:
     Always emits `--evalspec-repo-root=<resolved root>` first so the subprocess
     resolves the same repo root the CLI did. Each curated scalar flag whose value is
     set emits one `option=value` token; each value of a repeatable flag emits its own
-    token. Absent flags emit nothing. The pytest launcher prefix, `-p evalspec.plugin`,
+    token. Absent flags emit nothing. The pytest launcher prefix, `-p evalspec.runners.pytest`,
     and any `--` passthrough are the caller's job — they are NOT emitted here.
 
     Args:
@@ -81,7 +81,7 @@ def run(
     empty parametrization, so relying on its status is impossible. When discovery finds
     nothing, the runner is never spawned. Otherwise the child inherits the environment
     with `PYTEST_DISABLE_PLUGIN_AUTOLOAD` scrubbed so the entry-point plugin loads exactly
-    once (no `-p evalspec.plugin`, which would double-register it), and the child's return
+    once (no `-p evalspec.runners.pytest`, which would double-register it), and the child's return
     code maps through the shared exit-code contract.
 
     Args:

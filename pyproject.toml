@@ -54,7 +54,7 @@ Issues = "https://github.com/theycallmeswift/evalspec/issues"
 evalspec = "evalspec.__main__:main"
 
 [project.entry-points.pytest11]
-evalspec = "evalspec.plugin"
+evalspec = "evalspec.runners.pytest"
 
 [tool.hatch.version]
 path = "src/evalspec/__init__.py"

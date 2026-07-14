@@ -1,6 +1,6 @@
 """Eval test bodies.
 
-Run via `make evals` (loads `-p evalspec.plugin`), never by `make test`. — this module
+Run via `make evals` (loads `-p evalspec.runners.pytest`), never by `make test`. — this module
 lives outside `tests/`, so the unit run never spawns `claude -p`.
 
 The plugin parametrizes the single `eval_arm` fixture over `(case, arm)` pairs; fixtures
@@ -25,7 +25,7 @@ from evalspec.grading.judges.registry import preflight_judge_binary
 from evalspec.orchestration import results
 from evalspec.orchestration.execution import run_eval_arm
 from evalspec.orchestration.room import seed_room
-from evalspec.plugin import resolved_judge_config, resolved_run_set, session_run_set
+from evalspec.runners.pytest import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.sandbox import sandbox
 from evalspec.sandbox.backend import resolve_sandbox
 from evalspec.specs.discovery import resolve_repo_root

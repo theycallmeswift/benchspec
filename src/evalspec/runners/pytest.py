@@ -37,7 +37,7 @@ from evalspec.specs.discovery import (
 )
 from evalspec.specs.schema import SchemaError
 
-_CASES = Path(__file__).parent / "orchestration" / "cases.py"
+_CASES = Path(__file__).parent.parent / "orchestration" / "cases.py"
 
 _STARTED_AT = pytest.StashKey[str]()
 _SUMMARY_LINES = pytest.StashKey[list]()
@@ -413,7 +413,7 @@ def pytest_configure(config: object) -> None:
     # Normalize into the env var make_agent() reads everywhere downstream — the
     # EVALSPEC_ITERATION handoff pattern; xdist workers inherit the controller env.
     os.environ["EVALSPEC_AGENT"] = agent_name
-    # Self-register the eval cases so `make evals` is just `pytest -p evalspec.plugin`
+    # Self-register the eval cases so `make evals` is just `pytest -p evalspec.runners.pytest`
     # (+ `-k`/flags) — no `evalspec/cases.py` positional to fat-finger or to union with
     # a `-k`-style nodeid (which silently re-collected test_eval). Respect a user-given
     # target. `make test` never loads this plugin, so cases.py stays out of the unit run.
