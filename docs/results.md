@@ -26,7 +26,7 @@ tmp/evals/iteration_01/
             │       ├── timing.json      # duration, judge time, token counts
             │       ├── transcript.json  # per-turn summary: prompt, result, tool counts
             │       ├── provenance.json  # what actually ran: guest version, snapshot
-            │       └── session.jsonl    # the lossless raw agent stream
+            │       └── session.jsonl    # the lossless raw agent stream (only when the harness produced output)
             └── trial/
                 └── sample-0/ …
 ```

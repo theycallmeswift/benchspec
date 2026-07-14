@@ -92,9 +92,12 @@ Each `(eval × arm)` pair becomes one parametrized pytest test. The arm boots a
 fresh microVM from a cached snapshot, seeds the eval's `workspace/` files into a
 clean room mounted at `/workspace`, runs the eval's own `setup.sh` (which branches
 on `$EVALSPEC_ARM` — the baseline arm installs nothing), and invokes the agent.
-That containment is the honesty contract: the agent can't see your repo, your
-docs, or anything it didn't write, so the baseline arm measures what the agent
-already knows and the delta measures what your skill actually taught it.
+That containment is the honesty contract: the agent's workdir starts with
+nothing but the eval's `workspace/` files — no docs, no peers, no project
+state — so the baseline arm measures what the agent already knows and the
+delta measures what your skill actually taught it. (The repo is also mounted
+read-only at `/project` so `setup.sh` can install the skill under test;
+nothing the agent does there can write back into your checkout.)
 
 ## Vocabulary
 

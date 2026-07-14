@@ -125,7 +125,9 @@ binary is preflighted when tests actually execute, not at collection.
 
 ## The command line
 
-`evalspec` has four subcommands, all sharing one exit-code contract (below):
+`evalspec` has four subcommands. `run` and `sandbox:build` follow the full
+exit-code contract below; `lint` and `analyze` never exit `5` — an empty root
+just reports zero findings/classifications and exits `0`.
 
 ```bash
 evalspec lint [root]            # static assertion checks — no credentials, no sandbox
@@ -185,7 +187,7 @@ match baseline in every group". The gate uses the raw delta; check the
 | `0` | Success. |
 | `1` | A finding: lint warnings, a failed cell, a tripped `--fail-under` gate, or a sandbox build failure. |
 | `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, or a failed host preflight. |
-| `5` | Nothing to do — no evals discovered under `root`. |
+| `5` | Nothing to do — no evals discovered under `root` (`run` only; `lint`/`analyze` exit `0` on an empty root). |
 
 > **Edge case:** `run` checks for emptiness *first* — with no evals discovered it
 > exits `5` before validating the set, so a bad `--set` against an empty root

@@ -163,8 +163,9 @@ exactly which agent version and sandbox snapshot each arm ran on. Alongside it:
 - `meta.json` — the run manifest: identity, planned arms, observed provenance.
 - `index.jsonl` — one row per `(eval × arm × sample)`, for aggregation.
 - `skills/hello/eval-greets-by-name/<arm>/sample-0/` — per-sample artifacts:
-  `grading.json`, `timing.json`, `transcript.json`, `provenance.json`, and the
-  lossless `session.jsonl` stream.
+  `grading.json`, `timing.json`, `transcript.json`, `provenance.json`, and —
+  when the harness produced any raw output — the lossless `session.jsonl`
+  stream (absent when the sandbox exec itself failed or timed out).
 
 [`results.md`](results.md) walks the whole tree.
 
