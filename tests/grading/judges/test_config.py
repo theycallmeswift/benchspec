@@ -2,7 +2,7 @@
 
 import pytest
 
-from evalspec.judges.config import JudgeConfig, _validate_judge_table, resolve_judge_config
+from evalspec.grading.judges.config import JudgeConfig, _validate_judge_table, resolve_judge_config
 from evalspec.specs.schema import SchemaError
 
 

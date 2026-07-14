@@ -458,7 +458,8 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
     import types
 
-    from evalspec import binder, cases
+    from evalspec import cases
+    from evalspec.grading import binder
     from evalspec.sandbox import sandbox
 
     _make_project(pytester)  # set with sandbox default = microsandbox
@@ -1666,14 +1667,14 @@ def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> No
 def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time() -> None:
     """Verify unset judge env fixture passes collection but fails at judge exec time."""
     # Collection-time only: proves the fixture's env value is structurally valid
-    # (a string) and does NOT raise until evalspec.judges.run_judge actually expands
+    # (a string) and does NOT raise until evalspec.grading.judges.run_judge actually expands
     # it. Full end-to-end (a real arm run reaching the judge) needs live credentials
-    # and a microVM — out of scope for `make test`; see tests/judges/test_judge_registry.py
+    # and a microVM — out of scope for `make test`; see tests/grading/judges/test_judge_registry.py
     # ::test_run_judge_env_unset_var_raises_schemaerror for the unit-level proof, and
     # tests/test_arms.py for expand_env's own unset-var coverage (the same function).
     import tomllib
 
-    from evalspec.judges import resolve_judge_config
+    from evalspec.grading.judges import resolve_judge_config
 
     with (_FIXTURES / "unset-judge-env.toml").open("rb") as fixture_file:
         raw = tomllib.load(fixture_file)
@@ -1683,7 +1684,7 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
 
     import os
 
-    from evalspec.judges.registry import run_judge
+    from evalspec.grading.judges.registry import run_judge
     from evalspec.specs.schema import SchemaError
 
     os.environ.pop("EVALSPEC_JUDGE_FIXTURE_UNSET_VAR", None)

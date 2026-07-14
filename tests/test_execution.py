@@ -1076,7 +1076,7 @@ def test_default_judge_config_used_by_default(tmp_path: object) -> None:
     # The judge is independent of the task eval_arm: the eval_arm can run any harness/model
     # (here opencode/gemini) while the judge still grades with the default JudgeConfig
     # (claude-code/sonnet) — grading never calls the task arm as judge.
-    from evalspec.judges import JudgeConfig
+    from evalspec.grading.judges import JudgeConfig
 
     workspace.set_current_iteration("iteration_01")
 
@@ -1116,7 +1116,7 @@ def test_default_judge_config_used_by_default(tmp_path: object) -> None:
 
 def test_judge_config_param_overrides_default(tmp_path: object) -> None:
     """Verify a passed judge_config overrides the default."""
-    from evalspec.judges import JudgeConfig
+    from evalspec.grading.judges import JudgeConfig
 
     workspace.set_current_iteration("iteration_01")
 
@@ -1357,7 +1357,7 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
     transcript = json.loads((run_dir / "transcript.json").read_text())
     assert transcript[0]["skills_dispatched"] == ["writing-prompts"]
     assert transcript[0]["tool_call_count"] == 1
-    from evalspec.trajectory import trajectory_from_session
+    from evalspec.grading.trajectory import trajectory_from_session
 
     eval_cases = trajectory_from_session(text)
     assert {
@@ -1637,7 +1637,7 @@ def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
 
 def test_run_eval_arm_propagates_binder_auth_error(tmp_path: object) -> None:
     """Verify a BinderAuthError is never caught or counted — it fails the run."""
-    from evalspec.binder import BinderAuthError
+    from evalspec.grading.binder import BinderAuthError
 
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
@@ -2062,7 +2062,7 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
     tmp_path: object, monkeypatch: object
 ) -> None:
     """A sandbox that ran remains observed when later binding aborts the arm."""
-    from evalspec.binder import BinderAuthError
+    from evalspec.grading.binder import BinderAuthError
 
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"

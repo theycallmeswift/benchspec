@@ -5,8 +5,8 @@ call, parse it.
 The judge reasons only from supplied evidence (assertion list, resulting file tree, file
 contents, runner-computed SHA-256s, agent final message) — not from recall. One retry on
 malformed JSON, then all assertions are marked errored. Spawning the judge subprocess is
-evalspec.judges.run_judge's job; this module is agent-agnostic — only the prompt build and the
-parse live here.
+evalspec.grading.judges.run_judge's job; this module is agent-agnostic — only the prompt
+build and the parse live here.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import json
 import subprocess
 import textwrap
 
-from evalspec.judges import JudgeConfig, run_judge
+from evalspec.grading.judges import JudgeConfig, run_judge
 
 
 def build_judge_prompt(

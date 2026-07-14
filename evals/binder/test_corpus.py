@@ -17,7 +17,7 @@ import pytest
 from conftest import _recording_call_model
 from test_corpus_integrity import CORPUS
 
-from evalspec.binder import _bind_bare_exists, bind
+from evalspec.grading.binder import _bind_bare_exists, bind
 
 pytestmark = pytest.mark.binder_corpus
 

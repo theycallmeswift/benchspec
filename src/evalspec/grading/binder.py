@@ -12,7 +12,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from evalspec.judge import _balanced_objects
+from evalspec.grading.judge import _balanced_objects
 from evalspec.specs.schema import SchemaError, _validate_checker_obj
 
 GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"

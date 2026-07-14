@@ -6,8 +6,8 @@ import pytest
 
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
-from evalspec.judges.config import JudgeConfig
-from evalspec.judges.registry import (
+from evalspec.grading.judges.config import JudgeConfig
+from evalspec.grading.judges.registry import (
     judge_binary,
     known_judge_harnesses,
     preflight_judge_binary,

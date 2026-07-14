@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import binder
+from evalspec.grading import binder
 
 _SUMMARY = pytest.StashKey[list]()
 _RAN = pytest.StashKey[bool]()

@@ -15,11 +15,11 @@ from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
 from evalspec.environments import ExecutionEnv, GuestSandbox, Host
+from evalspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from evalspec.runner import RunResult, parse_stream_run
-from evalspec.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 
 if TYPE_CHECKING:
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
 
 # Credentials Claude Code reads, in preference order. The runner injects whichever is set as
 # a microsandbox secret (substituted only for the Anthropic API host).

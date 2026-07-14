@@ -15,8 +15,8 @@ import pytest
 
 from evalspec import analyze, workspace
 from evalspec.arms import Arm
-from evalspec.binder import _bind_bare_exists
 from evalspec.execution import run_eval_arm
+from evalspec.grading.binder import _bind_bare_exists
 from evalspec.runner import RunResult
 from evalspec.specs import discovery
 from evalspec.specs.schema import SchemaError

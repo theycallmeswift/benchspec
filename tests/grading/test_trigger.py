@@ -1,8 +1,8 @@
-"""Tests for the retained skill-activation detection primitives in evalspec.trigger."""
+"""Tests for the retained skill-activation detection primitives in evalspec.grading.trigger."""
 
 import json
 
-from evalspec.trigger import (
+from evalspec.grading.trigger import (
     RoutingError,
     detect_skill_fired,
     dispatches_skill,

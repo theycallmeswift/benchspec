@@ -17,7 +17,7 @@ from textwrap import dedent
 import pytest
 
 from evalspec.arms import parse_sets, resolve_set
-from evalspec.judges.config import resolve_judge_config
+from evalspec.grading.judges.config import resolve_judge_config
 from evalspec.specs.discovery import discover_eval_cases, pyproject_table
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

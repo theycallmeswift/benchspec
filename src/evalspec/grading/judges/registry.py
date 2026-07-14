@@ -21,7 +21,7 @@ from evalspec.agents import agent_class, known_harnesses
 from evalspec.arms import expand_env
 
 if TYPE_CHECKING:
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
 
 
 def known_judge_harnesses() -> frozenset[str]:

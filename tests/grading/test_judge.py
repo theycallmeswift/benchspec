@@ -6,8 +6,8 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec.judge import build_judge_prompt, grade_run, parse_judge_json
-from evalspec.judges import JudgeConfig
+from evalspec.grading.judge import build_judge_prompt, grade_run, parse_judge_json
+from evalspec.grading.judges import JudgeConfig
 
 
 def test_judge_prompt_contains_assertions_facts_and_output_contract() -> None:
@@ -121,7 +121,7 @@ def test_grade_run_calls_run_judge_with_the_resolved_config(monkeypatch: object)
             '\\"passed\\": true, \\"evidence\\": \\"ok\\"}]}"}'
         )
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     judge_config = JudgeConfig(harness="codex", model="gpt-5.5")
     result = grade_run(
@@ -145,7 +145,7 @@ def test_grade_run_defaults_to_a_default_judge_config_when_none_given(monkeypatc
             '\\"passed\\": true, \\"evidence\\": \\"ok\\"}]}"}'
         )
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     grade_run(["a1"], "tree", {}, {}, "final message", "eval1", "trial")
 
@@ -159,7 +159,7 @@ def test_grade_run_timeout_records_error_not_raises(monkeypatch: object) -> None
         """Grade."""
         raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     grade = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
 
@@ -176,7 +176,7 @@ def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: object) -> Non
         """Grade."""
         return json.dumps({"result": inner})
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     grade = grade_run(["a1", "a2"], "tree", {}, {}, "msg", "e1", "with_skill")
 
@@ -191,7 +191,7 @@ def test_grade_run_happy_path(monkeypatch: object) -> None:
         """Grade."""
         return json.dumps({"result": inner})
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     grade = grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill")
     assert grade["assertions"] == [{"text": "a1", "passed": True, "evidence": "ok"}]
@@ -207,7 +207,7 @@ def test_grade_run_does_not_mask_judge_infra_error(monkeypatch: object) -> None:
         """Grade."""
         raise RuntimeError("host claude CLI not found on PATH")
 
-    monkeypatch.setattr("evalspec.judge.run_judge", boom)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", boom)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
         grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill")
@@ -219,7 +219,7 @@ def test_grade_run_does_not_catch_runtimeerror(monkeypatch: object) -> None:
         """Grade."""
         raise RuntimeError("host claude CLI returned is_error=true: Not logged in")
 
-    monkeypatch.setattr("evalspec.judge.run_judge", boom)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", boom)
 
     with pytest.raises(RuntimeError, match="Not logged in"):
         grade_run(["a1"], "tree", {}, {}, "final", "eval1", "trial")
@@ -235,7 +235,7 @@ def test_grade_run_passes_judge_config_through(monkeypatch: object) -> None:
         captured["config"] = config
         return json.dumps({"result": inner})
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     judge_config = JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6", timeout=42)
     grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill", judge_config=judge_config)
@@ -273,7 +273,7 @@ def test_grade_run_passes_process_facts_into_prompt(monkeypatch: object) -> None
             {"assertions": [{"text": "a", "passed": True, "evidence": "Skill(writing-prompts)"}]}
         )})
 
-    monkeypatch.setattr("evalspec.judge.run_judge", fake_run_judge)
+    monkeypatch.setattr("evalspec.grading.judge.run_judge", fake_run_judge)
 
     grade_run(["a"], "tree", {}, {}, "final", "e1", "with_skill",
               process_facts="Turn 1: Skill(writing-prompts)")

@@ -11,8 +11,8 @@ is a separate, unrelated direct Gemini API call, independent from this package.
 
 from __future__ import annotations
 
-from evalspec.judges.config import JudgeConfig, resolve_judge_config
-from evalspec.judges.registry import known_judge_harnesses, probe_judge_version, run_judge
+from evalspec.grading.judges.config import JudgeConfig, resolve_judge_config
+from evalspec.grading.judges.registry import known_judge_harnesses, probe_judge_version, run_judge
 
 __all__ = [
     "JudgeConfig",

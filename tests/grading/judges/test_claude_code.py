@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 from evalspec.agents.claude import ClaudeCodeAgent
-from evalspec.judges.config import JudgeConfig
+from evalspec.grading.judges.config import JudgeConfig
 
 
 def _fake_proc(

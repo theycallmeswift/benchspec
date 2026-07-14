@@ -6,8 +6,8 @@ import hashlib
 
 import pytest
 
-from evalspec import checkers
-from evalspec.checkers import GradeContext
+from evalspec.grading import checkers
+from evalspec.grading.checkers import GradeContext
 
 
 @pytest.fixture

@@ -19,10 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import binder, runner
+from evalspec import runner
 from evalspec.execution import run_eval_arm
-from evalspec.judges import JudgeConfig
-from evalspec.judges.registry import preflight_judge_binary
+from evalspec.grading import binder
+from evalspec.grading.judges import JudgeConfig
+from evalspec.grading.judges.registry import preflight_judge_binary
 from evalspec.plugin import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.room import seed_room
 from evalspec.sandbox import sandbox

@@ -13,8 +13,8 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 
-from evalspec.trajectory import extract_trajectory
-from evalspec.trigger import detect_skill_fired
+from evalspec.grading.trajectory import extract_trajectory
+from evalspec.grading.trigger import detect_skill_fired
 
 _TOKEN_FIELDS = (
     "input_tokens",

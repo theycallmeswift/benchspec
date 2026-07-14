@@ -18,12 +18,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evalspec import binder, checkers, workspace
+from evalspec import workspace
 from evalspec.agents import make_agent
 from evalspec.agents.base import probe_guest_version
 from evalspec.arms import Arm, expand_env
-from evalspec.judge import grade_run
-from evalspec.judges import JudgeConfig
+from evalspec.grading import binder, checkers
+from evalspec.grading.judge import grade_run
+from evalspec.grading.judges import JudgeConfig
+from evalspec.grading.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
 from evalspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
@@ -35,12 +37,11 @@ from evalspec.sandbox.sandbox import (
     ensure_snapshot,
 )
 from evalspec.specs.discovery import EvalCase, resolve_environment_config
-from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 
 # The judge is a run-level concern, independent of the task arm's own harness/model
 # (which can be a provider-qualified name like `google/gemini-3.5-flash` for OpenCode).
 # The default judge is JudgeConfig() (harness=claude-code, model=sonnet); callers pass
-# a resolved JudgeConfig (see evalspec.judges.config.resolve_judge_config) to override.
+# a resolved JudgeConfig (see evalspec.grading.judges.config.resolve_judge_config) to override.
 
 
 @dataclass

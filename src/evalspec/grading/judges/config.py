@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from evalspec.agents.claude import _validate_harness_args as _validate_claude_code_harness_args
 from evalspec.agents.codex import _validate_harness_args as _validate_codex_harness_args
 from evalspec.agents.opencode import _validate_harness_args as _validate_opencode_harness_args
-from evalspec.judges.registry import known_judge_harnesses
+from evalspec.grading.judges.registry import known_judge_harnesses
 from evalspec.specs.schema import SchemaError
 
 DEFAULT_HARNESS = "claude-code"

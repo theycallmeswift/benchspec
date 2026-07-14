@@ -669,7 +669,7 @@ def test_route_in_sandbox_returns_lines_on_dispatch(monkeypatch: object, tmp_pat
         model="sonnet",
     )
 
-    from evalspec.trigger import detect_skill_fired
+    from evalspec.grading.trigger import detect_skill_fired
 
     assert detect_skill_fired(lines, "archive") is True
 

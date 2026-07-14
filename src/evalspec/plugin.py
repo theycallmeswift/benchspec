@@ -24,9 +24,9 @@ from evalspec import report, workspace
 from evalspec.agents import resolve_agent_name
 from evalspec.arms import Set as EvalSet
 from evalspec.arms import parse_sets, resolve_set
-from evalspec.binder import binder_identity
-from evalspec.judges import JudgeConfig, resolve_judge_config
-from evalspec.judges.registry import probe_judge_version
+from evalspec.grading.binder import binder_identity
+from evalspec.grading.judges import JudgeConfig, resolve_judge_config
+from evalspec.grading.judges.registry import probe_judge_version
 from evalspec.sandbox.provenance import RuntimeProvenance, aggregate_observed
 from evalspec.specs.discovery import (
     discover_eval_cases,

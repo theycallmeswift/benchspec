@@ -15,8 +15,8 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec import binder
-from evalspec.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
+from evalspec.grading import binder
+from evalspec.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
 
 
 def _reply(text: str) -> object:
@@ -160,7 +160,7 @@ def test_parses_fenced_json() -> None:
 def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
     """Verify returned spec is dispatchable."""
     # The bound spec must flow straight into the existing checker dispatch.
-    from evalspec.checkers import run_assertion
+    from evalspec.grading.checkers import run_assertion
 
     (tmp_path / "out.md").write_text("hi")
     spec = bind(
