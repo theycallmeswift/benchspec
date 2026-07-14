@@ -25,9 +25,9 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from evalspec.agents import CodingAgent
-from evalspec.discovery import EnvConfig
 from evalspec.provenance import ImageIdentity
-from evalspec.schema import SchemaError
+from evalspec.specs.discovery import EnvConfig
+from evalspec.specs.schema import SchemaError
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"

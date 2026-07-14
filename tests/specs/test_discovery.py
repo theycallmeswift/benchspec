@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import discovery, schema
-from evalspec.discovery import (
+from evalspec.specs import discovery, schema
+from evalspec.specs.discovery import (
     discover_eval_cases,
     resolve_environment_config,
     resolve_repo_root,
 )
-from evalspec.mdformat import MdFormatError
+from evalspec.specs.mdformat import MdFormatError
 
 
 class _FakeConfig:

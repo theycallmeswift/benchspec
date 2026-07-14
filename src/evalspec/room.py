@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 from evalspec.runner import substitute_prompt
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 
 def _sha256(path: Path) -> str:

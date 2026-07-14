@@ -13,7 +13,7 @@ from evalspec.arms import (
     parse_sets,
     resolve_set,
 )
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 
 def _sets_table(sets: object, default: object = "default", **extra: object) -> object:

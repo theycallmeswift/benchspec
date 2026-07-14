@@ -3,7 +3,7 @@
 import pytest
 
 from evalspec.judges.config import JudgeConfig, _validate_judge_table, resolve_judge_config
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 
 def test_judge_config_defaults() -> None:

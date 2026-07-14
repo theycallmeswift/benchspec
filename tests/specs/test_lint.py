@@ -6,7 +6,7 @@ fire.
 
 from __future__ import annotations
 
-from evalspec import lint
+from evalspec.specs import lint
 
 
 def _rules(text: object) -> object:

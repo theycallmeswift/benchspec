@@ -13,12 +13,13 @@ from textwrap import dedent
 
 import pytest
 
-from evalspec import analyze, discovery, workspace
+from evalspec import analyze, workspace
 from evalspec.arms import Arm
 from evalspec.binder import _bind_bare_exists
 from evalspec.execution import run_eval_arm
 from evalspec.runner import RunResult
-from evalspec.schema import SchemaError
+from evalspec.specs import discovery
+from evalspec.specs.schema import SchemaError
 
 _ACTIVATION_FIXTURE = Path(__file__).parent / "fixtures" / "activation"
 

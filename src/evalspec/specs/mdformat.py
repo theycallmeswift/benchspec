@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from evalspec import schema
+from evalspec.specs import schema
 
 _FENCE = re.compile(r"^(```|~~~)")
 _HEADER = re.compile(r"^(#{2,3}) +(.+?)\s*$")

@@ -14,7 +14,7 @@ from evalspec.judges.registry import (
     probe_judge_version,
     run_judge,
 )
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 
 def test_known_judge_harnesses() -> None:

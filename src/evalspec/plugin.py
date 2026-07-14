@@ -25,16 +25,16 @@ from evalspec.agents import resolve_agent_name
 from evalspec.arms import Set as EvalSet
 from evalspec.arms import parse_sets, resolve_set
 from evalspec.binder import binder_identity
-from evalspec.discovery import (
+from evalspec.judges import JudgeConfig, resolve_judge_config
+from evalspec.judges.registry import probe_judge_version
+from evalspec.provenance import RuntimeProvenance, aggregate_observed
+from evalspec.specs.discovery import (
     discover_eval_cases,
     pyproject_table,
     resolve_eval_paths,
     resolve_repo_root,
 )
-from evalspec.judges import JudgeConfig, resolve_judge_config
-from evalspec.judges.registry import probe_judge_version
-from evalspec.provenance import RuntimeProvenance, aggregate_observed
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 _CASES = Path(__file__).parent / "cases.py"
 

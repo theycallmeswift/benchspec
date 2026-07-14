@@ -6,9 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from evalspec import analyze, lint, run, sandbox
+from evalspec import analyze, run, sandbox
 from evalspec.exit_codes import ExitCode
-from evalspec.schema import SchemaError
+from evalspec.specs import lint
+from evalspec.specs.schema import SchemaError
 
 
 def _add_root_argument(command_parser: argparse.ArgumentParser) -> None:

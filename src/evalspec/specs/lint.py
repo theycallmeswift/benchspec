@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from evalspec import discovery
+from evalspec.specs import discovery
 
 _VAGUE = re.compile(
     r"\b(explicitly|appropriately|properly|gracefully|suitably|reasonably|adequately)\b",

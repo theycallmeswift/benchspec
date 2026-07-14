@@ -16,7 +16,7 @@ from evalspec.agents.claude import _validate_harness_args as _validate_claude_co
 from evalspec.agents.codex import _validate_harness_args as _validate_codex_harness_args
 from evalspec.agents.opencode import _validate_harness_args as _validate_opencode_harness_args
 from evalspec.judges.registry import known_judge_harnesses
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 DEFAULT_HARNESS = "claude-code"
 DEFAULT_MODEL = "sonnet"

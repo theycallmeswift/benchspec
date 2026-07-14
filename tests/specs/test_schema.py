@@ -1,4 +1,4 @@
-"""Schema tests for evalspec.schema — the self-contained `evals/<slug>/` shape."""
+"""Schema tests for evalspec.specs.schema — the self-contained `evals/<slug>/` shape."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from evalspec import schema as v
-from evalspec.schema import SchemaError, _validate, _validate_checker_obj
+from evalspec.specs import schema as v
+from evalspec.specs.schema import SchemaError, _validate, _validate_checker_obj
 
 
 def _doc(evals: list[dict]) -> dict:

@@ -1683,7 +1683,7 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
     import os
 
     from evalspec.judges.registry import run_judge
-    from evalspec.schema import SchemaError
+    from evalspec.specs.schema import SchemaError
 
     os.environ.pop("EVALSPEC_JUDGE_FIXTURE_UNSET_VAR", None)
     with pytest.raises(SchemaError, match="EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"):

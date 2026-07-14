@@ -8,8 +8,8 @@ import pytest
 
 from evalspec import backend
 from evalspec.agents.claude import ClaudeCodeAgent
-from evalspec.discovery import EnvConfig
-from evalspec.schema import SchemaError
+from evalspec.specs.discovery import EnvConfig
+from evalspec.specs.schema import SchemaError
 
 
 def _agent() -> object:

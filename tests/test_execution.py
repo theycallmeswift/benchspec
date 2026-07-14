@@ -10,12 +10,12 @@ import pytest
 from evalspec import workspace
 from evalspec.arms import Arm
 from evalspec.backend import FingerprintInputs
-from evalspec.discovery import EnvConfig, EvalCase
 from evalspec.execution import run_eval_arm
 from evalspec.provenance import ImageIdentity
 from evalspec.runner import RunResult
 from evalspec.sandbox import ensure_snapshot
-from evalspec.schema import SchemaError
+from evalspec.specs.discovery import EnvConfig, EvalCase
+from evalspec.specs.schema import SchemaError
 
 TRIAL = Arm("trial", "claude-code", "opus")
 BASELINE = Arm("baseline", "claude-code", "opus")

@@ -23,7 +23,6 @@ from evalspec.agents import make_agent
 from evalspec.agents.base import probe_guest_version
 from evalspec.arms import Arm, expand_env
 from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
-from evalspec.discovery import EvalCase, resolve_environment_config
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
 from evalspec.provenance import RuntimeProvenance, SandboxProvenance
@@ -35,6 +34,7 @@ from evalspec.sandbox import (
     arm_session,
     ensure_snapshot,
 )
+from evalspec.specs.discovery import EvalCase, resolve_environment_config
 from evalspec.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 
 # The judge is a run-level concern, independent of the task arm's own harness/model

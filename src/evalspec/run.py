@@ -14,8 +14,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 
-from evalspec import discovery
 from evalspec.exit_codes import ExitCode, exit_code_for_pytest_status
+from evalspec.specs import discovery
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
 # `option=value` token so a value that starts with `-` is never mistaken for a flag.

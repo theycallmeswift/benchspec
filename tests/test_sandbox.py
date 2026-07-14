@@ -13,8 +13,8 @@ from evalspec.agents.base import FIXED_SKILLS_HOME
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
 from evalspec.agents.opencode import OpenCodeAgent
-from evalspec.discovery import EnvConfig
 from evalspec.runner import RunResult
+from evalspec.specs.discovery import EnvConfig
 from evalspec.testing import FakeExecOutput, FakeSandbox
 
 
@@ -515,7 +515,7 @@ def test_cli_build_bare_path_requires_no_sets_table(
 
 def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:
     """A docker set fails fast at resolution, never reaching preflight or the build."""
-    from evalspec.schema import SchemaError
+    from evalspec.specs.schema import SchemaError
 
     (tmp_path / "pyproject.toml").write_text(
         "[tool.evalspec]\n"
@@ -540,7 +540,7 @@ def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path:
 
 def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:
     """A malformed scratch sets value raises a contextual schema error."""
-    from evalspec.schema import SchemaError
+    from evalspec.specs.schema import SchemaError
 
     config = tmp_path / "config.toml"
     config.write_text('[tool.evalspec]\nsets = ["oops"]\n', encoding="utf-8")

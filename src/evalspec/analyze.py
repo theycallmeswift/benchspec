@@ -13,7 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from evalspec import binder, discovery
+from evalspec import binder
+from evalspec.specs import discovery
 
 
 @dataclass(frozen=True)
