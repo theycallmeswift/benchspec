@@ -7,10 +7,10 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec import workspace
 from evalspec.config.arms import Arm
-from evalspec.execution import run_eval_arm
-from evalspec.runner import RunResult
+from evalspec.orchestration import workspace
+from evalspec.orchestration.execution import run_eval_arm
+from evalspec.orchestration.results import RunResult
 from evalspec.sandbox.backend import FingerprintInputs
 from evalspec.sandbox.provenance import ImageIdentity
 from evalspec.sandbox.sandbox import ensure_snapshot
@@ -26,8 +26,10 @@ def _no_real_vm(monkeypatch: object) -> None:
     """Build the no real vm test fixture."""
     # run_eval_arm resolves a real agent + snapshot (which would build a microVM). Stub both
     # so unit tests never touch microsandbox; session_factory is faked separately per test.
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: None)
-    monkeypatch.setattr("evalspec.execution.ensure_snapshot", lambda agent, **kwargs: "snap")
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: None)
+    monkeypatch.setattr(
+        "evalspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"
+    )
 
 
 def _grade_all_pass(
@@ -661,7 +663,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch
         captured["harness"] = harness
         return None
 
-    monkeypatch.setattr("evalspec.execution.make_agent", fake_make_agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", fake_make_agent)
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
@@ -818,7 +820,7 @@ def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
         captured["name"] = name
         return object()
 
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", fake_resolve)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", fake_resolve)
 
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -1221,13 +1223,13 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
         tmp_path, {"id": "lam", "prompt": "perform the task", "assertions": ["a1", "a2"]}
     )
     agent = ClaudeCodeAgent(auth_value="test-key", version="test-version")
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
 
     def boom(*args: object, **kwargs: object) -> NoReturn:
         """Boom."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
-    monkeypatch.setattr("evalspec.environments.subprocess.run", boom)
+    monkeypatch.setattr("evalspec.orchestration.environments.subprocess.run", boom)
 
     outcome = run_eval_arm(
         eval_case,
@@ -1927,8 +1929,8 @@ def test_provenance_json_written_with_arm_and_guest_version(
 
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
 
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
@@ -1967,8 +1969,8 @@ def test_guest_probe_uses_live_sandbox_seam_not_host(
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
     live_sandbox = object()
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
 
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
@@ -1998,8 +2000,8 @@ def test_image_identity_failure_is_unavailable_but_run_completes(
 
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.unavailable("manifest read failed"))
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
 
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
@@ -2034,14 +2036,16 @@ def test_capture_error_on_real_arm_raises_loudly(
 
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
 
     def _raise_config(repo_root: object) -> NoReturn:
         """Stand in for a real config defect surfaced at capture time."""
         raise SchemaError("[tool.evalspec] base_image must be a non-empty string")
 
-    monkeypatch.setattr("evalspec.execution.resolve_environment_config", _raise_config)
+    monkeypatch.setattr(
+        "evalspec.orchestration.execution.resolve_environment_config", _raise_config
+    )
 
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
@@ -2069,8 +2073,8 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
     workdir.mkdir()
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
 
@@ -2141,11 +2145,13 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
         """Return a changed config if production resolves the environment twice."""
         return next(environments)
 
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
-    monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
-    monkeypatch.setattr("evalspec.execution.ensure_snapshot", ensure_snapshot)
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: agent)
+    monkeypatch.setattr("evalspec.orchestration.execution.resolve_sandbox", lambda name: backend)
+    monkeypatch.setattr("evalspec.orchestration.execution.ensure_snapshot", ensure_snapshot)
     monkeypatch.setattr("evalspec.sandbox.sandbox.resolve_environment_config", resolve_environment)
-    monkeypatch.setattr("evalspec.execution.resolve_environment_config", resolve_environment)
+    monkeypatch.setattr(
+        "evalspec.orchestration.execution.resolve_environment_config", resolve_environment
+    )
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
 

@@ -1,6 +1,6 @@
 """Tests for workspace."""
 
-from evalspec import workspace
+from evalspec.orchestration import workspace
 
 
 def test_next_iteration_name_global_under_evals(tmp_path: object) -> None:

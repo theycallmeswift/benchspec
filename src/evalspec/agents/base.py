@@ -7,7 +7,7 @@ to parse its output. `sandbox.py` drives a live sandbox through this interface a
 names a concrete agent; adding a second agent is additive, not a refactor.
 
 One adapter per harness, transport-blind: the adapter builds commands and parses
-output, and an `evalspec.environments.ExecutionEnv` decides where the process runs —
+output, and an `evalspec.orchestration.environments.ExecutionEnv` decides where the process runs —
 `GuestSandbox` for task arms (`invoke`), `Host` for grading (`judge`). Sandbox-vs-host
 is a parameter of the call, not a code path baked into each harness.
 """
@@ -21,11 +21,11 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from evalspec.runner import RunResult
+from evalspec.orchestration.results import RunResult
 
 if TYPE_CHECKING:
-    from evalspec.environments import ExecutionEnv
     from evalspec.grading.judges.config import JudgeConfig
+    from evalspec.orchestration.environments import ExecutionEnv
     from evalspec.sandbox.backend import SandboxBackend
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent

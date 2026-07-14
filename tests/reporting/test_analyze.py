@@ -13,12 +13,12 @@ from textwrap import dedent
 
 import pytest
 
-from evalspec import workspace
 from evalspec.config.arms import Arm
-from evalspec.execution import run_eval_arm
 from evalspec.grading.binder import _bind_bare_exists
+from evalspec.orchestration import workspace
+from evalspec.orchestration.execution import run_eval_arm
+from evalspec.orchestration.results import RunResult
 from evalspec.reporting import analyze
-from evalspec.runner import RunResult
 from evalspec.specs import discovery
 from evalspec.specs.schema import SchemaError
 
@@ -213,8 +213,10 @@ def test_activation_fixture_grades_both_polarities_end_to_end(
     both grade True off the arm's dispatched-skill set.
     """
     workspace.set_current_iteration("iteration_01")
-    monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: None)
-    monkeypatch.setattr("evalspec.execution.ensure_snapshot", lambda agent, **kwargs: "snap")
+    monkeypatch.setattr("evalspec.orchestration.execution.make_agent", lambda harness=None: None)
+    monkeypatch.setattr(
+        "evalspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"
+    )
     eval_case = discovery.discover_eval_cases(_ACTIVATION_FIXTURE)[0]
     trajectory = [
         {"kind": "tool_call", "id": "1", "name": "Skill", "arguments": {"skill": "ingest"}}

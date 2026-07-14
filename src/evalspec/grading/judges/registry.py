@@ -2,7 +2,7 @@
 
 The same adapter that runs a harness inside the sandbox (`invoke`) also grades with
 it (`judge`) — one class per harness, with the execution environment
-(`evalspec.environments`) deciding where the process runs. `run_judge` is the sync
+(`evalspec.orchestration.environments`) deciding where the process runs. `run_judge` is the sync
 boundary the grading path calls: it expands config.env via evalspec.config.arms.expand_env
 (the same function arms use, so judge env expansion is provably identical) and runs
 the adapter's async `judge` to completion in a Host environment. JudgeConfig is

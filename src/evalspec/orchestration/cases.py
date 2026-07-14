@@ -19,13 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import runner
-from evalspec.execution import run_eval_arm
 from evalspec.grading import binder
 from evalspec.grading.judges import JudgeConfig
 from evalspec.grading.judges.registry import preflight_judge_binary
+from evalspec.orchestration import results
+from evalspec.orchestration.execution import run_eval_arm
+from evalspec.orchestration.room import seed_room
 from evalspec.plugin import resolved_judge_config, resolved_run_set, session_run_set
-from evalspec.room import seed_room
 from evalspec.sandbox import sandbox
 from evalspec.sandbox.backend import resolve_sandbox
 from evalspec.specs.discovery import resolve_repo_root
@@ -76,7 +76,7 @@ def project_marker(request: object) -> str:
 @pytest.fixture
 def today() -> str:
     """Return the date string used for placeholder substitution."""
-    return runner.utc_today()
+    return results.utc_today()
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 """Tests for room."""
 
-from evalspec.room import (
+from evalspec.orchestration.room import (
     changed_paths,
     gather_facts,
     merge_facts,

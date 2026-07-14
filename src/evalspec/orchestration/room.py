@@ -16,7 +16,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from evalspec.runner import substitute_prompt
+from evalspec.orchestration.results import substitute_prompt
 from evalspec.specs.schema import SchemaError
 
 

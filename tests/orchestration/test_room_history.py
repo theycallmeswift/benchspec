@@ -2,7 +2,7 @@
 
 import pytest
 
-from evalspec.room import render_history
+from evalspec.orchestration.room import render_history
 
 
 def test_render_history_none_is_empty() -> None:

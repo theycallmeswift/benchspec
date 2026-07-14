@@ -20,13 +20,13 @@ import pytest
 from dotenv import load_dotenv
 
 import evalspec
-from evalspec import workspace
 from evalspec.agents import resolve_agent_name
 from evalspec.config.arms import Set as EvalSet
 from evalspec.config.arms import parse_sets, resolve_set
 from evalspec.grading.binder import binder_identity
 from evalspec.grading.judges import JudgeConfig, resolve_judge_config
 from evalspec.grading.judges.registry import probe_judge_version
+from evalspec.orchestration import workspace
 from evalspec.reporting import report
 from evalspec.sandbox.provenance import RuntimeProvenance, aggregate_observed
 from evalspec.specs.discovery import (
@@ -37,7 +37,7 @@ from evalspec.specs.discovery import (
 )
 from evalspec.specs.schema import SchemaError
 
-_CASES = Path(__file__).parent / "cases.py"
+_CASES = Path(__file__).parent / "orchestration" / "cases.py"
 
 _STARTED_AT = pytest.StashKey[str]()
 _SUMMARY_LINES = pytest.StashKey[list]()

@@ -10,11 +10,11 @@ import shlex
 from dataclasses import replace
 from pathlib import Path
 
-from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
 from evalspec.config.arms import parse_sets, resolve_set
 from evalspec.grading.trigger import RoutingError
-from evalspec.room import (
+from evalspec.orchestration import workspace
+from evalspec.orchestration.room import (
     changed_paths,
     parse_artifact_stream,
     parse_sha_stream,

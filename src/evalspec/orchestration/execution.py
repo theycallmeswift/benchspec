@@ -18,7 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evalspec import workspace
 from evalspec.agents import make_agent
 from evalspec.agents.base import probe_guest_version
 from evalspec.config.arms import Arm, expand_env
@@ -26,8 +25,9 @@ from evalspec.grading import binder, checkers
 from evalspec.grading.judge import grade_run
 from evalspec.grading.judges import JudgeConfig
 from evalspec.grading.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
-from evalspec.room import gather_facts, merge_facts, render_history
-from evalspec.runner import substitute_assertions, substitute_prompt
+from evalspec.orchestration import workspace
+from evalspec.orchestration.results import substitute_assertions, substitute_prompt
+from evalspec.orchestration.room import gather_facts, merge_facts, render_history
 from evalspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
 from evalspec.sandbox.sandbox import (

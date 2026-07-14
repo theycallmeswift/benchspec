@@ -11,7 +11,7 @@ from evalspec.agents.base import FIXED_SKILLS_HOME
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
 from evalspec.agents.opencode import OpenCodeAgent
-from evalspec.runner import RunResult
+from evalspec.orchestration.results import RunResult
 from evalspec.sandbox import backend as backend_mod
 from evalspec.sandbox import sandbox
 from evalspec.specs.discovery import EnvConfig

@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import plugin, workspace
+from evalspec import plugin
 from evalspec.agents.base import AgentCapabilities
+from evalspec.orchestration import workspace
 from evalspec.reporting import report
 from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
@@ -420,8 +421,8 @@ def test_run_set_when_needed_degrades_without_resolving(tmp_path: object) -> Non
 
 def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object) -> None:
     """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
-    from evalspec import cases
     from evalspec.config.arms import Arm, Set
+    from evalspec.orchestration import cases
 
     fake_set = Set(
         "s", [Arm("a", "claude-code", "opus")], baseline=None, sandbox="custombackend"
@@ -440,7 +441,7 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object
 
 def test_preflight_session_sandbox_trigger_only_uses_default(monkeypatch: object) -> None:
     """Verify a trigger-only run passes None so preflight resolves the default backend."""
-    from evalspec import cases
+    from evalspec.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
     seen = {}
@@ -459,8 +460,8 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
     import types
 
-    from evalspec import cases
     from evalspec.grading import binder
+    from evalspec.orchestration import cases
     from evalspec.sandbox import sandbox
 
     _make_project(pytester)  # set with sandbox default = microsandbox

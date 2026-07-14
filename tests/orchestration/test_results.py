@@ -1,4 +1,4 @@
-"""Tests for runner."""
+"""Tests for results."""
 
 import datetime
 import json
@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from evalspec.runner import (
+from evalspec.orchestration.results import (
     parse_run_json,
     parse_stream_run,
     substitute_assertions,
