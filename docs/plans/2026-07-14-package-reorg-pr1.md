@@ -15,7 +15,7 @@
 - **`(case × arm)` pairing → `orchestration/cases.py`** as `eval_arm_params(config)`: the pairs parametrize the case bodies that live in the same file, and `cases.py` already imports discovery + set resolution. No new module needed.
 - **De-underscore only what crosses a module boundary:** `_has_configured_set` → `has_configured_set`, `_judge_meta` → `judge_meta`, `_write_manifest` → `write_manifest`, `_aggregate_observed_arms` → `aggregate_observed_arms` (each now called from `runners/pytest.py`). `_config_hash`, `_git_commit`, `_layer_config_sets`, `_read_scratch_evalspec_table`, `_parse_judge_cli_table`, `_parse_env_pairs`, `_help` stay private — their callers move with them. House style forbids suppressions, so cross-module private-name imports are not an option.
 - **`write_manifest` signature:** the `config: object` param (used only for `config.stash.get(_STARTED_AT, None)`) becomes `started_at: str | None` — the stash keys stay with the hooks, keeping pytest types out of `reporting/`. Everything else in the function is byte-identical.
-- **Moved test file keeps its module aliases** (`from evalspec.runners import pytest as plugin`) so hook call sites (`plugin.pytest_sessionfinish(...)`) don't churn; only the extracted symbols' prefixes change (`plugin.resolved_run_set` → `sets.resolved_run_set`), which is the import-path-only diff the spec demands.
+- **Moved test file keeps its module aliases** (`from evalspec.runners import pytest as plugin`) so hook call sites (`plugin.pytest_sessionfinish(...)`) don't churn; the extracted symbols' tests move to the mirrored files `tests/config/test_sets.py` and `tests/reporting/test_manifest.py` (Tasks 8–9) with prefix changes only (`plugin.resolved_run_set` → `sets.resolved_run_set`), which is the import-path-and-location-only diff the spec demands.
 
 ## Global Constraints
 
@@ -51,14 +51,14 @@ tests/
 ├── test_main.py  test_exit_codes.py  test_e2e_suite.py  test_readme_examples.py   # cross-cutting, stay top-level
 ├── agents/          # untouched
 ├── specs/           __init__.py  test_discovery.py  test_mdformat.py  test_schema.py  test_lint.py
-├── config/          __init__.py  test_arms.py
+├── config/          __init__.py  test_arms.py  test_sets.py   # test_sets.py extracted from test_plugin.py
 ├── runners/         __init__.py  test_pytest.py  test_run.py
 ├── orchestration/   __init__.py  test_execution.py  test_room.py  test_room_history.py
 │                    test_workspace.py  test_results.py
 ├── sandbox/         __init__.py  test_sandbox.py  test_backend.py  test_provenance.py
 ├── grading/         __init__.py  test_binder.py  test_checkers.py  test_judge.py
 │                    test_trajectory.py  test_trigger.py  judges/   # tests/judges moves whole
-└── reporting/       __init__.py  test_report.py  test_analyze.py
+└── reporting/       __init__.py  test_report.py  test_analyze.py  test_manifest.py   # test_manifest.py extracted from test_plugin.py
 ```
 
 Every new `__init__.py` (src and tests) is a module docstring plus `from __future__ import annotations`, nothing else. Src example: `"""Eval-spec parsing: discovery, Markdown format, schema validation, lint."""`.
@@ -157,6 +157,10 @@ Every new `__init__.py` (src and tests) is a module docstring plus `from __futur
   - `grading/trajectory.py:223` (lazy) stays `from evalspec.agents.opencode import _opencode_trajectory` — agents didn't move.
 - [ ] Update test importers (complete list): moved files' own imports (`tests/grading/test_binder.py:18,19,163`; `test_checkers.py:9,10`; `test_judge.py:9,10` plus the **9 monkeypatch strings** at lines 124,148,162,179,194,210,222,238,276: `"evalspec.judge.run_judge"` → `"evalspec.grading.judge.run_judge"`; `test_trajectory.py:5,194,209,217,247,294`; `test_trigger.py:5` plus its docstring's `evalspec.trigger` mention); `tests/grading/judges/*` (test_config.py:5, test_judge_registry.py:9,10, test_claude_code.py:10, test_codex.py:10, test_opencode.py:10 — all `evalspec.judges.*` → `evalspec.grading.judges.*`); `tests/test_execution.py:1079,1119,1360,1640,2065`; `tests/test_plugin.py:461` (`from evalspec import binder, cases` → `from evalspec import cases` + `from evalspec.grading import binder`), `:1675,1685`; `tests/test_e2e_suite.py:21` → `from evalspec.grading.judges.config import resolve_judge_config`; `tests/test_analyze.py:18` → `from evalspec.grading.binder import _bind_bare_exists`; `tests/sandbox/test_sandbox.py:672` → grading.trigger; `tests/agents/test_opencode.py:972,1001,1023` → grading.trajectory; `tests/test_judge.py` moved already (covered above).
 - [ ] Update `evals/` importers: `evals/binder/conftest.py:17` → `from evalspec.grading import binder`; `evals/binder/test_corpus.py:20` → `from evalspec.grading.binder import _bind_bare_exists, bind`; `evals/binder/test_corpus_integrity.py:15,16` → `from evalspec.grading import binder` / `from evalspec.grading.checkers import derive_text`.
+- [ ] Fix stale prose references to modules this task moves (comment/docstring accuracy only, no code change):
+  - `grading/judge.py:8` docstring: `evalspec.judges.run_judge's job` → `evalspec.grading.judges.run_judge's job`
+  - `src/evalspec/execution.py:43` comment: `see evalspec.judges.config.resolve_judge_config` → `see evalspec.grading.judges.config.resolve_judge_config`
+  - `tests/test_plugin.py:1668` comment: `until evalspec.judges.run_judge actually expands` → `until evalspec.grading.judges.run_judge actually expands`; `:1671` comment: `see tests/judges/test_judge_registry.py` → `see tests/grading/judges/test_judge_registry.py`
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/grading tests/agents tests/test_execution.py tests/test_plugin.py -p pytester -q` → all pass.
 - [ ] Verify: `make test` → green; `make lint` → clean; `make evals EVAL_ARGS="--collect-only -q"` → binder corpus still collects.
 - [ ] Commit: `refactor: move grading modules into grading/`
@@ -181,6 +185,9 @@ Every new `__init__.py` (src and tests) is a module docstring plus `from __futur
   - `sandbox/sandbox.py:15` → `from evalspec.config.arms import parse_sets, resolve_set`
 - [ ] Update test importers: `tests/config/test_arms.py:10` (`from evalspec.arms import (...)` → `from evalspec.config.arms import (...)`); `tests/test_analyze.py:17`; `tests/test_e2e_suite.py:19`; `tests/test_execution.py:11`; `tests/test_plugin.py:423` (`from evalspec.arms import Arm, Set` → `from evalspec.config.arms import Arm, Set`).
 - [ ] Also update the comment in `tests/fixtures/judge/unset-judge-env.toml:5` (`evalspec.arms.expand_env` → `evalspec.config.arms.expand_env`) — comment accuracy only.
+- [ ] Fix stale prose references to `arms`'s old home (comment/docstring accuracy only, no code change):
+  - `grading/judges/registry.py:6` docstring: `via evalspec.arms.expand_env` → `via evalspec.config.arms.expand_env`; `:54` docstring: `Uses evalspec.arms.expand_env` → `Uses evalspec.config.arms.expand_env`
+  - `tests/test_plugin.py:1672` comment: `tests/test_arms.py for expand_env's own unset-var coverage` → `tests/config/test_arms.py for expand_env's own unset-var coverage`
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/config tests/test_e2e_suite.py tests/test_plugin.py -p pytester -q` → all pass.
 - [ ] Verify: `make test` → green; `make lint` → clean.
 - [ ] Commit: `refactor: move arm configuration into config/`
@@ -236,6 +243,9 @@ Every new `__init__.py` (src and tests) is a module docstring plus `from __futur
   - `tests/sandbox/test_sandbox.py:17` → `from evalspec.orchestration.results import RunResult`
   - `tests/agents/test_claude.py:11` → `from evalspec.orchestration.results import parse_run_json`
 - [ ] Update `pyproject.toml:95` marker-comment text `evalspec.cases` → `evalspec.orchestration.cases` (comment accuracy only).
+- [ ] Fix stale prose references to `environments`'s old home (docstring accuracy only, no code change):
+  - `agents/base.py:10` docstring: `evalspec.environments.ExecutionEnv` → `evalspec.orchestration.environments.ExecutionEnv`
+  - `grading/judges/registry.py:5` docstring: `evalspec.environments` → `evalspec.orchestration.environments`
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/orchestration tests/agents tests/reporting tests/test_plugin.py -p pytester -q` → all pass.
 - [ ] Verify: `make test` → green; `make lint` → clean.
 - [ ] Commit: `refactor: move orchestration modules into orchestration/ (runner.py -> results.py)`
@@ -263,6 +273,9 @@ Every new `__init__.py` (src and tests) is a module docstring plus `from __futur
   - Replace all **10** literal `"evalspec.plugin"` strings (lines 106,118,153,173,480,514,1259,1289,1312,1652 — the `-p` launcher args in pytester runs) with `"evalspec.runners.pytest"`
   - `tests/runners/test_run.py:14,15`: `from evalspec import run` → `from evalspec.runners import run`; `from evalspec.run import translate_run_flags` → `from evalspec.runners.run import translate_run_flags`
 - [ ] `tests/fixtures/judge/unsupported-judge-harness.toml:3` comment: `pytest -p evalspec.plugin` → `pytest -p evalspec.runners.pytest`.
+- [ ] Fix stale prose references to the plugin's old path (comment/docstring accuracy only, no code change):
+  - `orchestration/cases.py:3` docstring: `-p evalspec.plugin` → `-p evalspec.runners.pytest`
+  - `runners/pytest.py` self-register comment in `pytest_configure` (plugin.py:415 pre-move): `pytest -p evalspec.plugin` → `pytest -p evalspec.runners.pytest`
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/runners -p pytester -q` → all pass (pytester runs exercise the new `-p evalspec.runners.pytest` launcher).
 - [ ] Verify: `make test` → green; `make lint` → clean; `ls src/evalspec/*.py` → only `__init__.py __main__.py exit_codes.py testing.py`.
 - [ ] Verify entrypoint: `make evals EVAL_ARGS="--collect-only -q"` → collects via the auto-loaded entrypoint (no PYTEST_DISABLE_PLUGIN_AUTOLOAD in that target), exit 0.
@@ -271,7 +284,7 @@ Every new `__init__.py` (src and tests) is a module docstring plus `from __futur
 ## Task 8: Extract set/judge-config resolution into `config/sets.py`
 
 **Files:**
-- Create: `src/evalspec/config/sets.py`
+- Create: `src/evalspec/config/sets.py`, `tests/config/test_sets.py`
 - Modify: `src/evalspec/runners/pytest.py`, `src/evalspec/orchestration/cases.py`, `tests/runners/test_pytest.py`
 
 **Interfaces:** `config/sets.py` exports (bodies and docstrings byte-identical to today's `plugin.py`, except `_has_configured_set` → `has_configured_set`):
@@ -315,7 +328,12 @@ The set-resolution seam (`has_configured_set` / `run_set_when_needed` / `session
   No aliasing needed: the imported `resolve_judge_config` and the defined `resolved_judge_config` are distinct names (verified against `plugin.py:34,361`), exactly as they coexist in `plugin.py` today — bodies stay byte-identical.
 - [ ] Thin `runners/pytest.py`: delete the moved functions; drop now-unused imports (`sys`, `parse_sets`, `resolve_set`, `SchemaError`, `resolve_judge_config`); **keep** `discover_eval_cases` and `resolve_eval_paths` — `pytest_generate_tests` still uses them until Task 10. Add `from evalspec.config.sets import has_configured_set, resolved_judge_config, run_set_when_needed`; update `pytest_sessionfinish`'s `_has_configured_set(config)` call to `has_configured_set(config)`. (`pytest_generate_tests` still calls `run_set_when_needed`/`resolved_judge_config` until Task 10.)
 - [ ] `orchestration/cases.py:28`: `from evalspec.runners.pytest import resolved_judge_config, resolved_run_set, session_run_set` → `from evalspec.config.sets import resolved_judge_config, resolved_run_set, session_run_set` — this breaks the `cases → plugin` import edge for good.
-- [ ] `tests/runners/test_pytest.py`: add `from evalspec.config import sets`; repoint the 12 extracted-symbol call sites (assertions untouched): `plugin.resolved_run_set` → `sets.resolved_run_set` (lines 288,309,323,331,342,352,362,374,386), `plugin.session_run_set` → `sets.session_run_set` (396,410), `plugin.run_set_when_needed` → `sets.run_set_when_needed` (417).
+- [ ] Create `tests/config/test_sets.py` (docstring `"""Tests for evalspec.config.sets — set and judge-config resolution by value."""`) and move the extracted symbols' 12 tests out of `tests/runners/test_pytest.py` (cut whole, assertions byte-identical):
+  - Tests (test_pytest.py:285–417): `test_resolved_run_set_reads_pyproject`, `test_resolved_run_set_preserves_harness_args`, `test_resolved_run_set_set_model_default_not_clobbered`, `test_resolved_run_set_models_sweep`, `test_resolved_run_set_unknown_set_raises_usageerror`, `test_resolved_run_set_legacy_config_raises_usageerror`, `test_resolved_run_set_missing_scratch_config_raises_usageerror`, `test_resolved_run_set_malformed_scratch_config_raises_usageerror`, `test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror`, `test_session_run_set_resolves_when_cases_exist`, `test_session_run_set_none_for_trigger_only`, `test_run_set_when_needed_degrades_without_resolving`. (`test_preflight_session_sandbox_uses_resolved_set_backend` stays — it tests the `cases.py` seam, not `sets`.)
+  - Helpers that move outright (every user moves with them): `_SetConfig` (test_pytest.py:232) and `_write_sets_pyproject` (:272).
+  - Helper duplicated byte-identical (its other 11 users stay with the hook tests): `_FakeConfig` (:529).
+  - In the moved tests: `plugin.` prefix → `sets.` on the 12 call sites (old lines 288,309,323,331,342,352,362,374,386 / 396,410 / 417), and the two monkeypatch targets `monkeypatch.setattr(plugin, "discover_eval_cases", ...)` (:395,407) → `monkeypatch.setattr(sets, "discover_eval_cases", ...)` — `session_run_set` now reads `sets.py`'s own import.
+  - New file's imports: `import pytest` and `from evalspec.config import sets`.
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/runners tests/config -p pytester -q` → all pass.
 - [ ] Verify: `make test` → green; `make lint` → clean.
 - [ ] Commit: `refactor: extract set and judge-config resolution into config/sets.py`
@@ -323,7 +341,7 @@ The set-resolution seam (`has_configured_set` / `run_set_when_needed` / `session
 ## Task 9: Extract run-manifest assembly into `reporting/manifest.py`
 
 **Files:**
-- Create: `src/evalspec/reporting/manifest.py`
+- Create: `src/evalspec/reporting/manifest.py`, `tests/reporting/test_manifest.py`
 - Modify: `src/evalspec/runners/pytest.py`, `tests/runners/test_pytest.py`
 
 **Interfaces:** `reporting/manifest.py` exports (bodies byte-identical except the two named signature/name changes):
@@ -380,7 +398,12 @@ def aggregate_observed_arms(skills_root: Path, run_set: EvalSet | None) -> dict:
   ```
 
   (`binder_identity` stays imported in `runners/pytest.py` too — `pytest_sessionfinish` still passes it to `report.write_benchmark`.)
-- [ ] `tests/runners/test_pytest.py`: add `manifest` to the reporting import (`from evalspec.reporting import manifest, report`); repoint the 8 extracted-symbol call sites: `plugin.build_manifest` → `manifest.build_manifest` (lines 703,742,750,777,781,811,819) and `plugin._aggregate_observed_arms` → `manifest.aggregate_observed_arms` (line 1118). Assertions untouched.
+- [ ] Create `tests/reporting/test_manifest.py` (docstring `"""Tests for evalspec.reporting.manifest — manifest assembly and observed-arm aggregation by value."""`) and move the extracted symbols' tests out of `tests/runners/test_pytest.py` (cut whole, assertions byte-identical):
+  - Tests: `test_build_manifest_assembles_shape_by_value`, `test_build_manifest_config_hash_excludes_observed_arms`, `test_build_manifest_config_hash_ignores_judge_actual_version`, `test_build_manifest_config_hash_is_order_independent` (test_pytest.py:681–829 pre-Task-8; Task 8's cuts shift line numbers, so locate by function name) and `test_aggregate_observed_arms_trigger_only_skips_roster` (:1109 pre-Task-8).
+  - Helper duplicated byte-identical (its other six users stay with the sessionfinish tests): `_seed_provenance` (:997).
+  - In the moved tests: `plugin.build_manifest` → `manifest.build_manifest` (pre-Task-8 lines 703,742,750,777,781,811,819) and `plugin._aggregate_observed_arms` → `manifest.aggregate_observed_arms` (:1118 pre-Task-8 — the Task 9 de-underscore).
+  - New file's imports: `import json`, `from evalspec.orchestration import workspace`, `from evalspec.reporting import manifest`, `from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance`, `from tests.support import seed_arm`.
+  - `tests/runners/test_pytest.py` needs no `manifest` import — its remaining tests drive the hooks (`plugin.pytest_sessionfinish`), never `manifest` directly.
 - [ ] Verify: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/runners tests/reporting -p pytester -q` → all pass.
 - [ ] Verify: `make test` → green; `make lint` → clean.
 - [ ] Commit: `refactor: extract run-manifest assembly into reporting/manifest.py`
@@ -455,6 +478,7 @@ It performs, verbatim from the current hook: `resolve_repo_root(config)`, `disco
 - [ ] `make evals EVAL_ARGS="--collect-only -q"` → binder corpus collects through the entrypoint-loaded plugin, exit 0.
 - [ ] Entrypoint check: `grep -A1 'entry-points.pytest11' pyproject.toml` → shows `evalspec = "evalspec.runners.pytest"` (name `evalspec` unchanged).
 - [ ] Structure check: `ls src/evalspec/*.py` → exactly `__init__.py __main__.py exit_codes.py testing.py`; `git grep -nE "from evalspec import (plugin|runner|arms|discovery|mdformat|schema|lint|execution|room|workspace|environments|sandbox|backend|provenance|binder|checkers|judge|trajectory|trigger|report|analyze)\b|from evalspec\.(plugin|runner|arms|discovery|mdformat|schema|lint|execution|room|environments|backend|provenance|binder|checkers|trajectory|trigger|report|analyze)\b" -- src tests evals` → no hits (no stale flat-path imports; `evalspec.sandbox`/`evalspec.judge*`/`evalspec.run`/`evalspec.workspace`/`evalspec.cases` need eyeball checks since package names overlap — `git grep -n "evalspec\.cases\|evalspec\.workspace\|evalspec\.judges\b"` → no hits).
+- [ ] Stale-prose scan (docstrings and comments included, not just import lines): `git grep -nE "evalspec\.(plugin|runner|arms|discovery|mdformat|schema|lint|execution|room|environments|backend|provenance|binder|checkers|judge|judges|trajectory|trigger|report|analyze)\b" -- src tests evals` → every remaining hit must be a `[tool.evalspec.*]` TOML key or `--evalspec-*` flag text (config vocabulary, not module paths — e.g. `[tool.evalspec.judge]` in help strings and fixture TOML); no old module path survives in prose. Also `git grep -n "tests/test_arms\.py\|tests/judges/" -- src tests` → no hits (stale test-file paths in comments).
 - [ ] Diff audit for the zero-behavior gate: `git diff dev...HEAD -- tests/` shows only import lines, monkeypatch target strings, moved paths, and the extracted-symbol prefix repointing — no assertion changes.
 - [ ] Note for the PR (not run per task): `make e2e` runs once later in the flow on real microVMs to confirm artifacts still match the frozen schemas (`meta.json` v2, `benchmark.json` v3, `index.jsonl`, `provenance.json`).
 
@@ -462,5 +486,5 @@ It performs, verbatim from the current hook: `resolve_repo_root(config)`, `disco
 
 ## Self-review checklist (plan-level)
 
-- Every spec requirement maps to a task: seven packages (Tasks 1–7), `plugin.py` decomposition (8–10), test mirror (each move task), frozen entrypoint name (7, 11), no shims (docstring-only `__init__.py`, Task 11 grep), collision-only renames (6, 7), README/`test_readme_examples` handled (Task 1 — import only; README itself has no evalspec imports), `evals/` and fixture-TOML references (3, 4, 7), pyproject comment (6), style rules on every new file, green tree at every commit.
-- Out of scope, deliberately: docs/*.md content (PR 2), splitting `tests/runners/test_pytest.py` into per-package test files (would move test logic between files; the extracted functions' tests stay with the plugin suite for a minimal, auditable diff).
+- Every spec requirement maps to a task: seven packages (Tasks 1–7), `plugin.py` decomposition (8–10), test mirror (each move task; extracted-logic tests mirrored into `tests/config/test_sets.py` and `tests/reporting/test_manifest.py` in Tasks 8–9), frozen entrypoint name (7, 11), no shims (docstring-only `__init__.py`, Task 11 grep), collision-only renames (6, 7), README/`test_readme_examples` handled (Task 1 — import only; README itself has no evalspec imports), `evals/` and fixture-TOML references (3, 4, 7), stale prose paths in comments/docstrings (3, 4, 6, 7; swept in 11), pyproject comment (6), style rules on every new file, green tree at every commit.
+- Out of scope, deliberately: docs/*.md content (PR 2).
