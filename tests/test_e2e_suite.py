@@ -214,8 +214,8 @@ def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
     assert (eval_dir / copied_source).resolve() == REPO_ROOT / "evals/e2e/hello/SKILL.md"
 
 
-def test_make_e2e_runs_artifact_contract_validation() -> None:
-    """Verify the E2E target validates the artifacts produced by the live run."""
+def test_make_e2e_runs_the_e2e_set() -> None:
+    """Verify the E2E target runs the repository's live eval set."""
     result = subprocess.run(
         ["make", "--no-print-directory", "-n", "e2e"],
         cwd=REPO_ROOT,
@@ -226,10 +226,8 @@ def test_make_e2e_runs_artifact_contract_validation() -> None:
 
     assert result.returncode == 0, result.stderr
     output = result.stdout
-    assert "find tmp/evals" in output
     assert "uv run evalspec run --set e2e" in output
-    assert "uv run python scripts/verify_e2e_artifacts.py tmp/evals" in output
-    assert "$existing_iterations" in output
+    assert "verify_e2e_artifacts" not in output
 
 
 def test_removed_binder_make_alias_has_no_active_references() -> None:

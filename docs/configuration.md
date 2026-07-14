@@ -243,7 +243,7 @@ In the host plugin's Makefile (external consumers replicate as needed):
 
 | Target | Effect |
 |---|---|
-| `make e2e` | Runs evalspec's own `e2e` set and validates its generated artifacts. |
+| `make e2e` | Runs evalspec's own `e2e` set. |
 | `make evals EVAL_ARGS="…"` | Runs the paid binder corpus; `EVAL_ARGS` passes pytest collection options. |
 
 Use [`evalspec run`](#running-a-benchmark--evalspec-run) for project skill evals and
