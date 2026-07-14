@@ -13,7 +13,6 @@ from pathlib import Path
 from evalspec import workspace
 from evalspec.agents import CodingAgent, credential_preflight_error, make_agent
 from evalspec.arms import parse_sets, resolve_set
-from evalspec.backend import BASE_IMAGE, DEFAULT_SANDBOX, SandboxBackend, resolve_sandbox
 from evalspec.room import (
     changed_paths,
     parse_artifact_stream,
@@ -22,6 +21,7 @@ from evalspec.room import (
     sha_snapshot_script,
     to_display_paths,
 )
+from evalspec.sandbox.backend import BASE_IMAGE, DEFAULT_SANDBOX, SandboxBackend, resolve_sandbox
 from evalspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from evalspec.specs.schema import SchemaError
 from evalspec.trigger import RoutingError

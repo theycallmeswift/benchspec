@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from evalspec.runner import RunResult
 
 if TYPE_CHECKING:
-    from evalspec.backend import SandboxBackend
     from evalspec.environments import ExecutionEnv
     from evalspec.judges.config import JudgeConfig
+    from evalspec.sandbox.backend import SandboxBackend
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical

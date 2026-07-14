@@ -7,13 +7,13 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec import backend as backend_mod
-from evalspec import sandbox
 from evalspec.agents.base import FIXED_SKILLS_HOME
 from evalspec.agents.claude import ClaudeCodeAgent
 from evalspec.agents.codex import CodexAgent
 from evalspec.agents.opencode import OpenCodeAgent
 from evalspec.runner import RunResult
+from evalspec.sandbox import backend as backend_mod
+from evalspec.sandbox import sandbox
 from evalspec.specs.discovery import EnvConfig
 from evalspec.testing import FakeExecOutput, FakeSandbox
 
@@ -451,7 +451,7 @@ def test_cli_build_reports_image_identity_available(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Every built/reused snapshot's image-identity status is reported (spec 160)."""
-    from evalspec.provenance import ImageIdentity
+    from evalspec.sandbox.provenance import ImageIdentity
 
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
@@ -471,7 +471,7 @@ def test_cli_build_reports_image_identity_unavailable(
     monkeypatch: object, tmp_path: object, capsys: object
 ) -> None:
     """An unavailable image-identity lookup surfaces its error, never a bare null."""
-    from evalspec.provenance import ImageIdentity
+    from evalspec.sandbox.provenance import ImageIdentity
 
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)

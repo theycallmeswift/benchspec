@@ -19,13 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from evalspec import binder, runner, sandbox
-from evalspec.backend import resolve_sandbox
+from evalspec import binder, runner
 from evalspec.execution import run_eval_arm
 from evalspec.judges import JudgeConfig
 from evalspec.judges.registry import preflight_judge_binary
 from evalspec.plugin import resolved_judge_config, resolved_run_set, session_run_set
 from evalspec.room import seed_room
+from evalspec.sandbox import sandbox
+from evalspec.sandbox.backend import resolve_sandbox
 from evalspec.specs.discovery import resolve_repo_root
 
 

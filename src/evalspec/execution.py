@@ -22,13 +22,13 @@ from evalspec import binder, checkers, workspace
 from evalspec.agents import make_agent
 from evalspec.agents.base import probe_guest_version
 from evalspec.arms import Arm, expand_env
-from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.judge import grade_run
 from evalspec.judges import JudgeConfig
-from evalspec.provenance import RuntimeProvenance, SandboxProvenance
 from evalspec.room import gather_facts, merge_facts, render_history
 from evalspec.runner import substitute_assertions, substitute_prompt
-from evalspec.sandbox import (
+from evalspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
+from evalspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
+from evalspec.sandbox.sandbox import (
     DEFAULT_PROJECT_MARKER,
     SandboxSession,
     arm_session,

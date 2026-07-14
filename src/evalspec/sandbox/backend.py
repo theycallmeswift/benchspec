@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from evalspec.agents import CodingAgent
-from evalspec.provenance import ImageIdentity
+from evalspec.sandbox.provenance import ImageIdentity
 from evalspec.specs.discovery import EnvConfig
 from evalspec.specs.schema import SchemaError
 

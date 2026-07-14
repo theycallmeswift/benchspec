@@ -9,11 +9,11 @@ import pytest
 
 from evalspec import workspace
 from evalspec.arms import Arm
-from evalspec.backend import FingerprintInputs
 from evalspec.execution import run_eval_arm
-from evalspec.provenance import ImageIdentity
 from evalspec.runner import RunResult
-from evalspec.sandbox import ensure_snapshot
+from evalspec.sandbox.backend import FingerprintInputs
+from evalspec.sandbox.provenance import ImageIdentity
+from evalspec.sandbox.sandbox import ensure_snapshot
 from evalspec.specs.discovery import EnvConfig, EvalCase
 from evalspec.specs.schema import SchemaError
 
@@ -2144,7 +2144,7 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
     monkeypatch.setattr("evalspec.execution.make_agent", lambda harness=None: agent)
     monkeypatch.setattr("evalspec.execution.resolve_sandbox", lambda name: backend)
     monkeypatch.setattr("evalspec.execution.ensure_snapshot", ensure_snapshot)
-    monkeypatch.setattr("evalspec.sandbox.resolve_environment_config", resolve_environment)
+    monkeypatch.setattr("evalspec.sandbox.sandbox.resolve_environment_config", resolve_environment)
     monkeypatch.setattr("evalspec.execution.resolve_environment_config", resolve_environment)
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)

@@ -6,8 +6,8 @@ import hashlib
 
 import pytest
 
-from evalspec import backend
 from evalspec.agents.claude import ClaudeCodeAgent
+from evalspec.sandbox import backend
 from evalspec.specs.discovery import EnvConfig
 from evalspec.specs.schema import SchemaError
 

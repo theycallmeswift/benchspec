@@ -6,8 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from evalspec import analyze, run, sandbox
+from evalspec import analyze, run
 from evalspec.exit_codes import ExitCode
+from evalspec.sandbox import sandbox
 from evalspec.specs import lint
 from evalspec.specs.schema import SchemaError
 

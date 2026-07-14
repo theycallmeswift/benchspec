@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from evalspec.agents import known_harnesses
-from evalspec.backend import DEFAULT_SANDBOX, resolve_sandbox
+from evalspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
 from evalspec.specs.schema import SchemaError
 
 

@@ -13,7 +13,7 @@ import pytest
 
 from evalspec import plugin, report, workspace
 from evalspec.agents.base import AgentCapabilities
-from evalspec.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
 ALPHA_MD = textwrap.dedent(
@@ -458,7 +458,8 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
     import types
 
-    from evalspec import binder, cases, sandbox
+    from evalspec import binder, cases
+    from evalspec.sandbox import sandbox
 
     _make_project(pytester)  # set with sandbox default = microsandbox
     captured: list = []
@@ -1238,7 +1239,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     """Verify judge preflight fixture raises when binary missing."""
     import shutil
 
-    from evalspec import sandbox
+    from evalspec.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.setattr(shutil, "which", lambda name: None)
@@ -1273,7 +1274,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     """Verify the judge_config fixture fails fast on a missing GEMINI_API_KEY."""
     import shutil
 
-    from evalspec import sandbox
+    from evalspec.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -1301,7 +1302,7 @@ def test_gemini_key_preflight_skipped_under_collect_only(
     pytester: object, monkeypatch: object
 ) -> None:
     """Verify --collect-only never triggers the GEMINI_API_KEY preflight."""
-    from evalspec import sandbox
+    from evalspec.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
