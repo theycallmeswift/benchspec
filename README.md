@@ -150,6 +150,21 @@ verbatim, so `evalspec run -- -k archive-source-from-inbox` (equivalently
 arms out across microVMs, and `--count 5` samples each cell five times for
 stability (the latter two via the pytest-xdist and pytest-repeat plugins).
 
+## Checking the binder itself
+
+The binder's own accuracy is a separate concern from `evalspec run`: `make evals`
+samples the real Gemini binder over a hand-labeled corpus and enforces the one hard
+gate — a punt-labeled assertion must never bind to a checker. It's a **paid, live
+Gemini run**, not part of `make test`. Each draw retries once on a transient Gemini
+failure; a draw that exhausts both attempts **fails its pytest item outright** — never
+a silent skip — and the run stops after three failed draws so an unhealthy Gemini
+endpoint can't burn through the rest of the corpus.
+
+```bash
+make evals                                  # zero punt-leaks; summary prints
+make evals EVAL_ARGS="--collect-only -q"    # dry-run collection, no API calls
+```
+
 ## Why evalspec
 
 Most eval frameworks grade a model's *output*. evalspec grades an agent's
