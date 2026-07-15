@@ -131,8 +131,7 @@ def test_skill_invoked_binds_present() -> None:
             f"gold={entry['gold']!r}; must be bind"
         )
         assert entry["expect_checker"] == "skill_invoked", (
-            f"skill_invoked entry {entry['text'][:50]}... targets "
-            f"{entry['expect_checker']!r}"
+            f"skill_invoked entry {entry['text'][:50]}... targets {entry['expect_checker']!r}"
         )
 
 
@@ -338,12 +337,27 @@ def test_semantic_compound_punts_with_decomposed_children(
 def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     """Verify regex-sourced rows are excluded from latency/token/cost aggregates."""
     rows = [
-        {"source": "regex", "attempts": 0, "latency_ms": None,
-         "prompt_tokens": None, "output_tokens": None},
-        {"source": "gemini", "attempts": 1, "latency_ms": 120.0,
-         "prompt_tokens": 500, "output_tokens": 20},
-        {"source": "gemini", "attempts": 1, "latency_ms": 140.0,
-         "prompt_tokens": 500, "output_tokens": 20},
+        {
+            "source": "regex",
+            "attempts": 0,
+            "latency_ms": None,
+            "prompt_tokens": None,
+            "output_tokens": None,
+        },
+        {
+            "source": "gemini",
+            "attempts": 1,
+            "latency_ms": 120.0,
+            "prompt_tokens": 500,
+            "output_tokens": 20,
+        },
+        {
+            "source": "gemini",
+            "attempts": 1,
+            "latency_ms": 140.0,
+            "prompt_tokens": 500,
+            "output_tokens": 20,
+        },
     ]
 
     summary = _latency_cost_summary(rows)
@@ -377,6 +391,27 @@ def test_recording_call_model_honors_evalspec_binder_model_env_override(
     call_model("prompt", timeout=60)
 
     assert captured["model"] == "gemini-3.1-flash"
+
+
+def test_recording_call_model_uses_corpus_timeout_not_callers_timeout(monkeypatch: object) -> None:
+    """The corpus's recording call_model overrides bind()'s 60s with the 15s corpus cap.
+
+    `bind()` always calls `call_model(prompt, timeout=60)` (`src/evalspec/grading/binder.py:370`);
+    production stays at 60s there. Only this corpus-side wrapper substitutes the
+    suite-constant 15s cap when it delegates to `_call_gemini`.
+    """
+    captured = {}
+
+    def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        captured["timeout"] = timeout
+        return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
+
+    call_model = _recording_call_model([])
+    call_model("prompt", timeout=60)  # bind() always passes 60 here
+
+    assert captured["timeout"] == 15
 
 
 def test_bind_resilient_exhausts_retries_and_reports_final_error(monkeypatch: object) -> None:

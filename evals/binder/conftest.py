@@ -80,6 +80,13 @@ def _rate(rows: object, hit: object) -> object:
     return sum(1 for row in rows if hit(row)) / len(rows) if rows else 0.0
 
 
+_CORPUS_TIMEOUT_SECONDS = 15  # Corpus-only cap. bind() always calls call_model(prompt, timeout=60)
+# (src/evalspec/grading/binder.py:370); this wrapper substitutes a suite constant instead. It's
+# urllib's per-blocking-socket-operation timeout, not a hard wall-clock cap, so an unhealthy draw
+# is typically — not guaranteed — bounded well under production's 60s. A suite constant, not a
+# public config surface: production bind()/_call_gemini keep their own 60s default untouched.
+
+
 def _recording_call_model(sink: list) -> object:
     """Build a call_model that delegates to _call_gemini and records every reply.
 
@@ -87,7 +94,9 @@ def _recording_call_model(sink: list) -> object:
     corpus-suite knob and the production transport takes no env input. Exceptions
     propagate unchanged and only successful replies land in `sink`, so per-draw
     `attempts` is tracked by _bind_resilient's retry loop instead: `len(sink)`
-    would undercount a retry that raised before producing a reply.
+    would undercount a retry that raised before producing a reply. Also substitutes
+    _CORPUS_TIMEOUT_SECONDS for whatever timeout the caller passes — bind() always
+    passes 60, but the corpus suite needs its own shorter cap.
 
     Args:
         sink: List to append each successful GeminiReply to.
@@ -98,8 +107,8 @@ def _recording_call_model(sink: list) -> object:
     model = os.environ.get("EVALSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
 
     def call(prompt: str, *, timeout: int = 60) -> object:
-        """Call the Gemini binder model and record the reply in sink."""
-        reply = binder._call_gemini(prompt, timeout=timeout, model=model)
+        """Call the Gemini binder model at the corpus's 15s timeout, recording the reply."""
+        reply = binder._call_gemini(prompt, timeout=_CORPUS_TIMEOUT_SECONDS, model=model)
         sink.append(reply)
         return reply
 
