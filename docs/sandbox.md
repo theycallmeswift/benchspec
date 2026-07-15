@@ -1,12 +1,12 @@
 # The sandbox
 
 Every eval cell runs inside a microVM — not a container, not a subprocess on your
-machine. This is what makes the numbers honest: the agent starts from a known
-image, sees exactly the files the eval seeded, and cannot reach your repo, your
-shell history, or the skill documentation it is being tested on. This document
-covers the lifecycle: what gets baked into a snapshot, when snapshots rebuild,
-what a running cell can see, and how credentials get in without ever being
-readable in the guest.
+machine. The agent starts from a known image and a clean workdir containing only
+the files the eval seeded. Your repo is also readable, but immutable, at
+`/project` so `setup.sh` can install the skill under test; the agent shares the
+guest and can read that mount too. This document covers the lifecycle: what gets
+baked into a snapshot, when snapshots rebuild, what a running cell can see, and
+how credentials get in without ever being readable in the guest.
 
 The implementation is [microsandbox](https://github.com/microsandbox/microsandbox),
 behind a `SandboxBackend` seam. A set selects its backend with the `sandbox` key;

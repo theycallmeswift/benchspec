@@ -129,11 +129,13 @@ fresh temporary directory — the **clean room** — that gets bind-mounted into
 microVM at `/workspace`, which is also the agent's working directory. No
 `workspace/` means the agent starts in an empty directory.
 
-The clean room lives outside your project on purpose. The agent cannot read your
-repo, the skill's documentation, or a peer eval's fixtures; it sees exactly what
-`workspace/` seeded plus whatever it writes itself. Before the agent runs,
-evalspec snapshots SHA-256s of the seeded files, so assertions like
-"byte-identical to its pre-run content" are decidable mechanically afterward.
+The clean room lives outside your project on purpose. It contains exactly what
+`workspace/` seeded plus whatever the agent writes. The repo is separately
+mounted read-only at `/project` for `setup.sh`, and the agent can read it, so do
+not point prompts or harness arguments there unless repo access is part of the
+experiment. Before the agent runs, evalspec snapshots SHA-256s of the seeded
+files, so assertions like "byte-identical to its pre-run content" are decidable
+mechanically afterward.
 
 Write every path in the eval `./`-relative — `./Inbox/clipping.md`, not an
 absolute path or a repo-relative one — because that is how the agent, the

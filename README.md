@@ -4,8 +4,8 @@ evalspec is a benchmark framework for coding agents. You write evals as Markdown
 a prompt plus a checklist of plain-prose assertions — and evalspec runs each one
 across the named **arms** of a benchmark (Claude Code vs. Codex, sonnet vs. opus,
 with the skill vs. without), each arm inside its own microVM. The results come back
-as a matrix: evals down the side, arms across the top, and the percentage-point
-delta against a baseline arm in every cell.
+as a matrix: evals down the side and arms across the top. When the set configures
+a baseline, each comparison cell includes its percentage-point delta.
 
 > evalspec is like a test runner for agent behavior: pytest underneath, but the
 > unit of measurement is what an agent *did* in an isolated workspace — the files
@@ -18,9 +18,9 @@ delta against a baseline arm in every cell.
 
 A single pass rate is just a number. Whether 60% is good depends entirely on what
 the same agent scores *without* your skill, or on a cheaper model, or under a
-different harness. So evalspec never runs an eval once: it runs the same eval
-across every arm of an **eval set**, then reports each arm's assertion pass rate
-and its delta (in percentage points) against the set's **baseline** arm.
+different harness. An **eval set** lets you run the same eval across several arms.
+When the set names a **baseline** arm, evalspec reports every other arm's delta
+against it in percentage points; without a baseline, it reports absolute rates.
 
 The primary output is a matrix, written as `benchmark.md` after every run:
 
@@ -31,9 +31,9 @@ The primary output is a matrix, written as `benchmark.md` after every run:
 | archive/choose-right-capability | 100% | 75% (-25pp) |
 | All evals | 72% | 86% (+14pp) |
 
-Rows are evals, columns are arms, the baseline column comes first, and every
-non-baseline cell carries both its absolute rate and its delta. An `All evals`
-footer rolls each arm up to its headline number.
+Rows are evals and columns are arms. When configured, the baseline column comes
+first and every non-baseline cell carries both its absolute rate and its delta.
+An `All evals` footer rolls each arm up to its headline number.
 
 ## An eval is one Markdown file
 
@@ -92,12 +92,12 @@ Each `(eval × arm)` pair becomes one parametrized pytest test. The arm boots a
 fresh microVM from a cached snapshot, seeds the eval's `workspace/` files into a
 clean room mounted at `/workspace`, runs the eval's own `setup.sh` (which branches
 on `$EVALSPEC_ARM` — the baseline arm installs nothing), and invokes the agent.
-That containment is the honesty contract: the agent's workdir starts with
-nothing but the eval's `workspace/` files — no docs, no peers, no project
-state — so the baseline arm measures what the agent already knows and the
-delta measures what your skill actually taught it. (The repo is also mounted
-read-only at `/project` so `setup.sh` can install the skill under test;
-nothing the agent does there can write back into your checkout.)
+The agent's workdir starts with nothing but the eval's `workspace/` files — no
+docs, peers, or project state are copied into it. The repo is also mounted
+read-only at `/project` so `setup.sh` can install the skill under test. The agent
+can read that mount, so prompts and harness arguments should not direct it there
+unless repo access is part of the experiment; neither the agent nor `setup.sh`
+can write back into your checkout.
 
 ## Vocabulary
 
@@ -155,8 +155,8 @@ stability (the latter two via the pytest-xdist and pytest-repeat plugins).
 Most eval frameworks grade a model's *output*. evalspec grades an agent's
 *behavior* — inside a sandbox, comparatively, and reproducibly:
 
-- **Comparative by construction.** The baseline arm runs every time, so the
-  headline is a delta, not an absolute score that flatters the model.
+- **Comparison is first-class.** Configure several arms and a baseline to make the
+  headline a delta; omit the baseline when absolute rates are what you need.
 - **Deterministic where possible, judged where necessary.** The binder is tuned so
   a false positive (a surface check passing on wrong output) is the one
   unacceptable error; anything doubtful goes to the judge, which sees evidence,
