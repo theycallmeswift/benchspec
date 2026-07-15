@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import conftest
 import pytest
 import yaml
 from conftest import _latency_cost_summary, _recording_call_model
@@ -376,3 +377,75 @@ def test_recording_call_model_honors_evalspec_binder_model_env_override(
     call_model("prompt", timeout=60)
 
     assert captured["model"] == "gemini-3.1-flash"
+
+
+def test_bind_resilient_exhausts_retries_and_reports_final_error(monkeypatch: object) -> None:
+    """Two transient RuntimeErrors exhaust the retry budget; the final error survives."""
+    attempt_count = {"calls": 0}
+
+    def failing_call_gemini(
+        prompt: object, *, timeout: object = 60, model: object = None
+    ) -> object:
+        attempt_count["calls"] += 1
+        raise RuntimeError(f"Gemini API transport failure: attempt {attempt_count['calls']}")
+
+    monkeypatch.setattr(binder, "_call_gemini", failing_call_gemini)
+
+    attempt = conftest._bind_resilient(
+        "the summary faithfully reflects the three key facts from the source", sink=[]
+    )
+
+    assert attempt.binding is None
+    assert attempt.attempts == 2
+    assert isinstance(attempt.error, RuntimeError)
+    assert "attempt 2" in str(attempt.error)
+    assert attempt.elapsed_ms >= 0
+
+
+def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) -> None:
+    """One transient RuntimeError followed by a valid reply succeeds; both attempts count."""
+    attempt_count = {"calls": 0}
+
+    def flaky_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        attempt_count["calls"] += 1
+        if attempt_count["calls"] == 1:
+            raise RuntimeError("Gemini API transport failure: cold start")
+        return binder.GeminiReply(
+            text='{"punt": true, "reason": "semantic"}',
+            prompt_tokens=10,
+            output_tokens=2,
+            latency_ms=5.0,
+        )
+
+    monkeypatch.setattr(binder, "_call_gemini", flaky_call_gemini)
+
+    sink: list = []
+    attempt = conftest._bind_resilient(
+        "the summary faithfully reflects the three key facts from the source", sink=sink
+    )
+
+    assert attempt.error is None
+    assert attempt.attempts == 2
+    assert attempt.binding is None  # the model punted
+    assert len(sink) == 1
+    assert attempt.elapsed_ms >= 0
+
+
+def test_bind_resilient_lets_binder_auth_error_propagate_uncaught(monkeypatch: object) -> None:
+    """BinderAuthError bypasses the retry loop entirely — a bad credential must fail loud.
+
+    Deliberately not a RuntimeError subclass (see BinderAuthError's own docstring in
+    binder.py), so `_bind_resilient`'s `except RuntimeError` must never catch it.
+    """
+
+    def rejecting_call_gemini(
+        prompt: object, *, timeout: object = 60, model: object = None
+    ) -> object:
+        raise binder.BinderAuthError("Gemini API rejected the credential (HTTP 401): bad key")
+
+    monkeypatch.setattr(binder, "_call_gemini", rejecting_call_gemini)
+
+    with pytest.raises(binder.BinderAuthError):
+        conftest._bind_resilient(
+            "the summary faithfully reflects the three key facts from the source", sink=[]
+        )

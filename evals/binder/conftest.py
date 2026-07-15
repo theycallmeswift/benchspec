@@ -1,15 +1,19 @@
-"""Controller-side aggregation for the parametrized binder corpus eval.
+"""Controller-side aggregation for the binder corpus eval, plus its shared resilient Gemini call.
 
 Each draw is its own pytest item in its own xdist worker, so there's no shared
 accumulator: every draw appends a JSON record to a per-worker file, and the controller
-reads them all at session end for the corpus-wide infra-error guard and the reporting
-rates. The per-draw false-positive gate asserts in the test itself.
+reads them all at session end for the corpus-wide infra-failure/latency diagnostics and
+the reporting rates. The per-draw false-positive gate and the fail-on-exhausted-retry
+behavior both live in the test itself; a draw that exhausts its retries fails its own
+pytest item, so `make evals`'s `--maxfail` is the only run-level stop condition.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -100,6 +104,57 @@ def _recording_call_model(sink: list) -> object:
         return reply
 
     return call
+
+
+@dataclass(frozen=True)
+class BindAttempt:
+    """Result of one resilient binder call, including retry diagnostics.
+
+    Attributes:
+        binding: Checker spec dict, or None (punt) on success. Always None when `error`
+            is set — callers must check `error` first.
+        attempts: Retry-loop iterations entered — 1 for a first-try success, 2 when a
+            transient RuntimeError triggered the one retry (win or lose).
+        elapsed_ms: Wall-clock time spent across every attempt, successful or not — the
+            only place a failed attempt's cost is measured, since a raised RuntimeError
+            never reaches `_recording_call_model`'s `sink.append`.
+        error: The final RuntimeError after both attempts failed, otherwise None.
+    """
+
+    binding: dict | None
+    attempts: int
+    elapsed_ms: float
+    error: RuntimeError | None
+
+
+def _bind_resilient(text: str, *, sink: list) -> BindAttempt:
+    """Bind one assertion with one retry for a transient Gemini infra failure.
+
+    Args:
+        text: The assertion text to bind.
+        sink: List that the recording call_model appends each successful GeminiReply to.
+
+    Returns:
+        A BindAttempt. When `error` is set, both attempts failed — the caller must record
+        the failure and fail the pytest item, never skip it. BinderAuthError is never
+        caught here (it isn't a RuntimeError subclass) and propagates uncaught.
+    """
+    call_model = _recording_call_model(sink)
+    attempts = 0
+    elapsed_ms = 0.0
+    error: RuntimeError | None = None
+    for _ in range(2):
+        attempts += 1
+        started = time.perf_counter()
+        try:
+            binding = binder.bind(text, call_model=call_model)
+        except RuntimeError as caught:
+            elapsed_ms += (time.perf_counter() - started) * 1000
+            error = caught
+            continue
+        elapsed_ms += (time.perf_counter() - started) * 1000
+        return BindAttempt(binding=binding, attempts=attempts, elapsed_ms=elapsed_ms, error=None)
+    return BindAttempt(binding=None, attempts=attempts, elapsed_ms=elapsed_ms, error=error)
 
 
 # Approximate — a corpus-suite pricing constant, not a billing source of truth.
