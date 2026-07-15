@@ -3,7 +3,7 @@
 Provisions OpenCode into a microVM via `npm i -g opencode-ai@<pinned>`, passes the
 provider credential as a host-substituted secret scoped to the provider host, builds
 the `opencode run --format json` command, and parses its JSONL output. Pinning,
-model surface, and effort taxonomy are documented in `agents.md`.
+model surface, and effort taxonomy are documented in `docs/harnesses.md`.
 
 Event shape: JSONL, one event per line, nested
 under `part`. Turn events are `step_start` / `text` / `tool_use` / `step_finish`;
