@@ -12,7 +12,7 @@
 
 - Exhausted Gemini retries in the live binder corpus FAIL the pytest item (final exception type/message), never skip; `BinderAuthError` continues to bypass the retry loop and fail immediately — it is deliberately not a `RuntimeError` subclass (`src/evalspec/grading/binder.py:178-186`).
 - Assertion-quality failures (the leak/field-preservation `assert`s) stay distinct from transport failures (`pytest.fail`) in pytest output and corpus records.
-- The 15-second timeout is corpus-only: `_recording_call_model` substitutes it when delegating to `binder._call_gemini`; production `bind()`/`_call_gemini` keep the 60-second default at `src/evalspec/grading/binder.py:370`. It is a suite constant, not a new public configuration surface.
+- The 15-second timeout is corpus-only: `_recording_call_model` substitutes it when delegating to `binder._call_gemini`; production `bind()`/`_call_gemini` keep the 60-second default at `src/evalspec/grading/binder.py:370`. It is a suite constant, not a new public configuration surface. It's `urllib`'s per-blocking-socket-operation timeout, not a hard wall-clock cap, so one retry typically — not guaranteed — bounds an unhealthy draw to ~30s plus overhead; it is not a cancellation guarantee against a pathologically slow/trickling response.
 - `make evals` adds `--maxfail=3` (via `BINDER_MAX_FAILURES ?= 3`) as the circuit breaker — it counts exhausted draws (failed pytest items), not individual attempts. `EVAL_ARGS` passthrough is unchanged.
 - Per-draw JSONL records include elapsed time for all attempts, plus the final exception type and message when a draw exhausts its retries.
 - The terminal summary reports infrastructure-failure count and elapsed time separately from the success-only latency/token aggregates.
@@ -286,9 +286,10 @@ Replace `_recording_call_model`'s definition (docstring and inner `call`) with:
 
 ```python
 _CORPUS_TIMEOUT_SECONDS = 15  # Corpus-only cap. bind() always calls call_model(prompt, timeout=60)
-# (src/evalspec/grading/binder.py:370); this wrapper substitutes a suite constant instead — an
-# unhealthy draw must be bounded well under production's 60s. A suite constant, not a public
-# config surface: production bind()/_call_gemini keep their own 60s default untouched.
+# (src/evalspec/grading/binder.py:370); this wrapper substitutes a suite constant instead. It's
+# urllib's per-blocking-socket-operation timeout, not a hard wall-clock cap, so an unhealthy draw
+# is typically — not guaranteed — bounded well under production's 60s. A suite constant, not a
+# public config surface: production bind()/_call_gemini keep their own 60s default untouched.
 
 
 def _recording_call_model(sink: list) -> object:
@@ -345,12 +346,138 @@ git commit -m "feat(evals): cap the binder corpus's Gemini calls at a 15s corpus
 
 **Files:**
 - Modify: `evals/binder/test_corpus.py` (entire file — module docstring, imports, `_ERROR`/`_bind_resilient` removed, both live test functions updated)
+- Modify: `evals/binder/test_corpus_integrity.py` (imports; two new pytester tests appended at the end of the file)
 
 **Interfaces:**
 - Consumes: `evals/binder/conftest.py`'s `_bind_resilient(text: str, *, sink: list) -> BindAttempt` (Task 1) and `_CORPUS_TIMEOUT_SECONDS` (Task 2, applied transparently inside `_bind_resilient`).
 - Produces: per-draw JSONL records (both `test: "leak"` and `test: "fields"` rows) now always carry `result` (`"error" | "punt" | "bound"`), `elapsed_ms` (float, all attempts), `error_type` (`str | None`), and `error_message` (`str | None`) — consumed by Task 4's `_error_summary`.
+- Produces: two offline `pytester`-based tests in `evals/binder/test_corpus_integrity.py` that run the real `test_corpus.py` items in-process (no live Gemini calls, no `make evals` cost) to lock in the fail-not-skip wiring and the `--maxfail=3` circuit breaker end-to-end.
 
-- [ ] **Step 1: Update the module docstring and imports**
+- [ ] **Step 1: Write the failing pytester tests**
+
+Add to `evals/binder/test_corpus_integrity.py`, at the end of the file. Written first, against
+the *current* `test_corpus.py` (still `pytest.skip`-on-exhaustion at this point in the task) —
+this is expected to fail red until Steps 3-5 below rewire the live tests:
+
+```python
+def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
+    pytester: object, monkeypatch: object
+) -> None:
+    """A draw that exhausts its Gemini retries must fail its pytest item, never skip it.
+
+    Runs the real evals/binder/test_corpus.py items in-process against the real
+    corpus.yaml — not a synthetic pytester project — with binder._call_gemini forced to
+    always raise. `binder` is a proper package module (evalspec.grading.binder), so this
+    monkeypatch carries through runpytest_inprocess via the shared sys.modules entry
+    (conftest.py itself does NOT carry through: pytest deletes and reimports any
+    unpackaged "conftest" module by name on every load, see _importconftest in
+    _pytest/config/__init__.py, so a patch on THIS module's `conftest` reference would be
+    invisible to the nested run — hence targeting `binder` here, not `conftest`).
+    `--rootdir` pins the nested run's rootpath to pytester.path, so its JSONL output
+    lands inside this test's own isolated temp dir rather than the real repo's
+    tmp/binder_results/ (which pytest_configure wipes at the start of every
+    binder_corpus-marked run — piggybacking on the real directory would risk deleting a
+    developer's own live `make evals` artifacts).
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # any non-empty value satisfies preflight
+
+    def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        raise RuntimeError("Gemini API transport failure: forced for this test")
+
+    monkeypatch.setattr(binder, "_call_gemini", always_fails)
+    test_corpus_path = Path(__file__).resolve().parent / "test_corpus.py"
+
+    result = pytester.runpytest_inprocess(
+        "--rootdir",
+        str(pytester.path),
+        "-m",
+        "binder_corpus",
+        "-k",
+        "persistence and test_binder_corpus_blocks_punt_leaks",
+        "--maxfail=1",
+        str(test_corpus_path),
+    )
+
+    result.assert_outcomes(failed=1, passed=0, skipped=0)
+
+    rows = [
+        json.loads(line)
+        for result_path in (pytester.path / "tmp" / "binder_results").glob("results-*.jsonl")
+        for line in result_path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["result"] == "error"
+    assert row["error_type"] == "RuntimeError"
+    assert "forced for this test" in row["error_message"]
+    assert row["elapsed_ms"] >= 0
+
+
+def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: object) -> None:
+    """`--maxfail=3` (the Makefile's circuit breaker) stops the run after 3 failed draws.
+
+    Same in-process real-corpus setup as
+    test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries, with --maxfail=3
+    instead of 1 so a fourth persistence draw never runs once three have failed.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        raise RuntimeError("Gemini API transport failure: forced for this test")
+
+    monkeypatch.setattr(binder, "_call_gemini", always_fails)
+    test_corpus_path = Path(__file__).resolve().parent / "test_corpus.py"
+
+    result = pytester.runpytest_inprocess(
+        "--rootdir",
+        str(pytester.path),
+        "-m",
+        "binder_corpus",
+        "-k",
+        "persistence and test_binder_corpus_blocks_punt_leaks",
+        "--maxfail=3",
+        str(test_corpus_path),
+    )
+
+    result.assert_outcomes(failed=3, passed=0, skipped=0)
+    result.stdout.fnmatch_lines(["*stopping after 3 failures*"])
+```
+
+Both tests select `-k persistence`: the `persistence` cohort is always a punt resolved via the
+Gemini path, never `_bind_bare_exists`'s regex fast path (`test_no_persistence_entry_is_bind`,
+`test_has_persistence_and_semantic_punts` already pin this), so every selected draw is guaranteed
+to call `_call_gemini` and hit the forced failure — no draw silently passes through the fast path
+and starves `--maxfail=3` of failures to count. Its 20-draw heavy floor (`_samples_for` in
+`test_corpus.py`) is comfortably above 3.
+
+Add `import json` to the import block (stdlib group, before `from pathlib import Path`; `import
+conftest` here is Task 1's addition, already in place by this point in the plan):
+
+```python
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import conftest
+import pytest
+import yaml
+from conftest import _latency_cost_summary, _recording_call_model
+
+from evalspec.grading import binder
+from evalspec.grading.checkers import derive_text
+```
+
+- [ ] **Step 2: Run the pytester tests to verify they fail**
+
+Run: `uv run pytest -p pytester evals/binder/test_corpus_integrity.py -k "fails_not_skips or stops_after_maxfail" -v`
+Expected: FAIL — `test_corpus.py` still calls `pytest.skip(...)` on exhaustion (Task 1/2 already
+moved `_bind_resilient` into `conftest.py`, but `test_corpus.py` itself isn't rewired until Steps
+3-5 below), so both `assert_outcomes(...)` calls see a nonzero `skipped` count and `failed=0`
+instead of the expected fail counts.
+
+- [ ] **Step 3: Update the module docstring and imports**
 
 Replace the module docstring (lines 1-10):
 
@@ -385,7 +512,7 @@ SAMPLES = int(os.environ.get("EVALSPEC_BINDER_SAMPLES", "5"))
 
 This drops the `_ERROR = object()` sentinel and its comment, and the local `_bind_resilient` function (previously lines 26-61) entirely — both now live in `conftest.py` (Task 1). `_samples_for`, `_draws`, and `_field_expectation_draws` are unchanged.
 
-- [ ] **Step 2: Update `test_binder_corpus_blocks_punt_leaks`**
+- [ ] **Step 4: Update `test_binder_corpus_blocks_punt_leaks`**
 
 ```python
 @pytest.mark.parametrize("entry", _draws())
@@ -434,7 +561,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
         )
 ```
 
-- [ ] **Step 3: Update `test_binder_corpus_preserves_expected_checker_fields`**
+- [ ] **Step 5: Update `test_binder_corpus_preserves_expected_checker_fields`**
 
 ```python
 @pytest.mark.parametrize("entry", _field_expectation_draws())
@@ -473,12 +600,17 @@ def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: 
 
 Note on distinctness (spec requirement: "assertion-quality failures remain distinct from transport failures"): the two `assert` statements above raise `AssertionError` with pytest's assertion-rewrite diff; `pytest.fail(...)` raises `Failed` with the plain `"infra failure after retry: <Type>: <message>"` string and no diff — the two failure modes read differently in `pytest`'s terminal output and in `-rf`/`-rF` summaries.
 
-This task has no new *offline* test to write: it wires two `binder_corpus`-marked tests that only run against the live Gemini API, and the repo's convention (see `docs/plans/2026-07-09-gemini-binder-execution.md`) is that live-run behavior is verified by collection (below), not by a paid run, per task. `make test` still statically re-collects this module every run (`testpaths = ["tests", "evals"]`, then the marker deselects the items) — an import error or `NameError` here fails `make test` outright.
+- [ ] **Step 6: Run the pytester tests to verify they pass**
 
-- [ ] **Step 4: Verify collection and the offline suite**
+Run: `uv run pytest -p pytester evals/binder/test_corpus_integrity.py -k "fails_not_skips or stops_after_maxfail" -v`
+Expected: 2 passed.
+
+The two `binder_corpus`-marked live tests themselves still only run against the live Gemini API and stay deselected under `make test` — consistent with the repo's convention (see `docs/plans/2026-07-09-gemini-binder-execution.md`) that live-run behavior is verified by collection, not a paid run, per task. But the pytester tests added in Steps 1-2 and 6 now exercise their fail-vs-skip wiring offline, in-process, with `binder._call_gemini` forced to raise — this task is no longer collection-only for that behavior. `make test` also still statically re-collects `test_corpus.py` every run (`testpaths = ["tests", "evals"]`, then the marker deselects the two live items) — an import error or `NameError` there fails `make test` outright.
+
+- [ ] **Step 7: Verify collection and the offline suite**
 
 Run: `make test`
-Expected: all pass — this confirms `evals/binder/test_corpus.py` still imports and collects cleanly (it's deselected by `-m 'not binder_corpus'`, not skipped from collection).
+Expected: all pass — this confirms `evals/binder/test_corpus.py` still imports and collects cleanly (it's deselected by `-m 'not binder_corpus'`, not skipped from collection), and includes the two new pytester tests from Step 1.
 
 Run: `GEMINI_API_KEY=test-key make evals EVAL_ARGS="--collect-only -q"`
 Expected: collection succeeds and lists both `test_binder_corpus_blocks_punt_leaks` and `test_binder_corpus_preserves_expected_checker_fields` items (a fake key satisfies `pytest_configure`'s preflight; `--collect-only` never makes a network call).
@@ -486,10 +618,10 @@ Expected: collection succeeds and lists both `test_binder_corpus_blocks_punt_lea
 Run: `make lint`
 Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add evals/binder/test_corpus.py
+git add evals/binder/test_corpus.py evals/binder/test_corpus_integrity.py
 git commit -m "fix(evals): fail (not skip) binder corpus draws that exhaust Gemini retries"
 ```
 
@@ -732,7 +864,8 @@ Replace lines 16-19:
 
 ```make
 # Keep modest: high fan-out trips the Gemini call's 15s corpus timeout (12-way -> throttling);
-# one retry bounds a single unhealthy draw to ~30s.
+# one retry typically bounds a single unhealthy draw to ~30s plus overhead — urllib's timeout is
+# per blocking socket op, not a hard wall-clock cap, so a trickling response can still run longer.
 BINDER_WORKERS ?= 6
 BINDER_MAX_FAILURES ?= 3
 evals:  ## Run the binder corpus (paid live Gemini; 15s corpus timeout, stops after 3 failed draws). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
