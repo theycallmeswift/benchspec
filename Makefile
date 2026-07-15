@@ -13,10 +13,13 @@ test:  ## Run the unit test suite
 e2e:  ## Run evalspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
 	uv run evalspec run --set e2e
 
-# Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
+# Keep modest: high fan-out trips the Gemini call's 15s corpus timeout (12-way -> throttling);
+# one retry typically bounds a single unhealthy draw to ~30s plus overhead — urllib's timeout is
+# per blocking socket op, not a hard wall-clock cap, so a trickling response can still run longer.
 BINDER_WORKERS ?= 6
-evals:  ## Run the binder corpus (binder quality, not framework function). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
-	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/binder $(EVAL_ARGS)
+BINDER_MAX_FAILURES ?= 3
+evals:  ## Run the binder corpus (paid live Gemini; 15s corpus timeout, stops after 3 failed draws). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
+	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) --maxfail=$(BINDER_MAX_FAILURES) evals/binder $(EVAL_ARGS)
 
 lint:  ## Lint with Ruff and houserules
 	$(MAKE) lint:ruff
