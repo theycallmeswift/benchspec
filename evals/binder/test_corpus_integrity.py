@@ -569,3 +569,80 @@ def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: 
 
     result.assert_outcomes(failed=3, passed=0, skipped=0)
     result.stdout.fnmatch_lines(["*stopping after 3 failures*"])
+
+
+def test_error_summary_counts_only_error_rows_across_both_tests() -> None:
+    """Verify infra-failure count and elapsed time are scoped to result == 'error' rows."""
+    rows = [
+        {"test": "leak", "result": "bound", "elapsed_ms": 40.0},
+        {"test": "leak", "result": "error", "elapsed_ms": 500.0},
+        {"test": "fields", "result": "error", "elapsed_ms": 300.0},
+        {"test": "fields", "result": "bound", "elapsed_ms": 20.0},
+    ]
+
+    summary = conftest._error_summary(rows)
+
+    assert summary["error_count"] == 2
+    assert summary["error_elapsed_ms_total"] == pytest.approx(800.0)
+
+
+class _FakeConfig:
+    """Minimal stand-in for pytest.Config, enough to call conftest hooks directly."""
+
+    def __init__(self, rootpath: Path) -> None:
+        self.rootpath = rootpath
+        self.stash: dict = {}
+
+
+class _FakeSession:
+    """Minimal stand-in for pytest.Session, enough to call pytest_sessionfinish directly."""
+
+    def __init__(self, config: _FakeConfig, exitstatus: int) -> None:
+        self.config = config
+        self.exitstatus = exitstatus
+
+
+def test_pytest_sessionfinish_does_not_flip_exitstatus_on_high_error_rate(
+    tmp_path: Path,
+) -> None:
+    """The removed 5% infra-error gate no longer turns a green run red.
+
+    Every exhausted draw now fails its own pytest item via `pytest.fail` in
+    `test_corpus.py`, so a broadly-broken run is already red long before
+    sessionfinish runs — a second gate flipping `session.exitstatus` here would
+    just be a second, redundant failure policy.
+    """
+    results_dir = tmp_path / "tmp" / "binder_results"
+    results_dir.mkdir(parents=True)
+    error_row = {
+        "test": "leak",
+        "gold": "punt",
+        "cohort": "semantic",
+        "expect_checker": None,
+        "expect": None,
+        "actual": None,
+        "result": "error",
+        "checker": None,
+        "source": "gemini",
+        "attempts": 2,
+        "elapsed_ms": 500.0,
+        "error_type": "RuntimeError",
+        "error_message": "Gemini API transport failure",
+        "latency_ms": None,
+        "prompt_tokens": None,
+        "output_tokens": None,
+    }
+    rows = [error_row] * 20  # 100% error rate — comfortably over the removed 5% threshold
+    (results_dir / "results-gw0.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n"
+    )
+    config = _FakeConfig(rootpath=tmp_path)
+    config.stash[conftest._RAN] = True
+    session = _FakeSession(config, exitstatus=0)
+
+    conftest.pytest_sessionfinish(session, exitstatus=0)
+
+    assert session.exitstatus == 0
+    summary = "\n".join(config.stash[conftest._SUMMARY])
+    assert "infra_failures: 20 draws exhausted retries and failed" in summary
+    assert "FAIL" not in summary

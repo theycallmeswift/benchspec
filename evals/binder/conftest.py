@@ -206,6 +206,27 @@ def _latency_cost_summary(rows: list) -> dict:
     }
 
 
+def _error_summary(rows: list) -> dict:
+    """Aggregate infrastructure-failure count and elapsed time across all draws.
+
+    Scoped to `result == "error"` rows from both live tests — kept separate from the
+    leak-only retention/over-punt/mismatch math in `pytest_sessionfinish` and from
+    `_latency_cost_summary`'s success-only latency/token aggregates, since an exhausted
+    draw never produces a GeminiReply to meter.
+
+    Args:
+        rows: Per-draw records from both live tests (leak and field-preservation).
+
+    Returns:
+        A dict with the count of exhausted draws and their total elapsed time in ms.
+    """
+    error_rows = [row for row in rows if row.get("result") == "error"]
+    return {
+        "error_count": len(error_rows),
+        "error_elapsed_ms_total": sum(row.get("elapsed_ms") or 0 for row in error_rows),
+    }
+
+
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     """Aggregate binder corpus records after the pytest session."""
     config = session.config
@@ -237,8 +258,19 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             f"over_punt_rate={over_punt:.3f}  bind_mismatch={mismatch:.3f}",
         ]
 
+    # Every exhausted draw from either live test now fails its own pytest item (never a
+    # skip), so this is a diagnostic total, not a pass/fail gate — --maxfail bounds the
+    # run instead. Kept separate from the success-only latency/cost aggregate below,
+    # since an exhausted draw never produces a GeminiReply to meter.
+    errors = _error_summary(rows)
+    if errors["error_count"]:
+        lines.append(
+            f"infra_failures: {errors['error_count']} draws exhausted retries and failed "
+            f"(elapsed={errors['error_elapsed_ms_total']:.0f}ms)"
+        )
+
     # Both live tests (leak + field-preservation) meter latency/cost; the leak-only
-    # gate above is unaffected — it only ever read leak_rows.
+    # diagnostics above are unaffected — they only ever read leak_rows.
     cost = _latency_cost_summary(rows)
     lines.append(
         f"latency_ms: mean={cost['latency_ms_mean']} p95={cost['latency_ms_p95']} "
@@ -247,15 +279,6 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         f"est_cost_usd~{cost['estimated_cost_usd']:.4f}"
     )
 
-    # 0 leaks is meaningless if most draws errored, so a broadly-broken infra run fails loud.
-    # Guarded on leak_rows: a `-k`-filtered run that selects only the field-preservation
-    # test has no leak rows to divide by, and must not crash sessionfinish over it.
-    if leak_rows and errored / len(leak_rows) >= 0.05:
-        lines.append(
-            f"FAIL: too many infra errors ({errored}/{len(leak_rows)}) — gate unmeasurable"
-        )
-        if session.exitstatus == 0:
-            session.exitstatus = 1
     config.stash[_SUMMARY] = lines
 
 
