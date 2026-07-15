@@ -35,4 +35,3 @@
 - [ ] **Step 6:** Run `make lint`; expect exit 0.
 - [ ] **Step 7:** Commit the documentation corrections.
 - [ ] **Step 8:** Push the commits to PR 44 and resolve both inline review threads.
-

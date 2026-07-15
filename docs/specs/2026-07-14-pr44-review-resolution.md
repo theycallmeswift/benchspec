@@ -18,4 +18,3 @@ Correct two user-facing contract errors without changing runtime behavior.
 - Run `make test`.
 - Run `make lint`.
 - Confirm the corrected claims agree with the sandbox mount and reporting implementations.
-
