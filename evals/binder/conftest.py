@@ -81,10 +81,10 @@ def _rate(rows: object, hit: object) -> object:
 
 
 _CORPUS_TIMEOUT_SECONDS = 15  # Corpus-only cap. bind() always calls call_model(prompt, timeout=60)
-# (src/evalspec/grading/binder.py:370); this wrapper substitutes a suite constant instead. It's
-# urllib's per-blocking-socket-operation timeout, not a hard wall-clock cap, so an unhealthy draw
-# is typically — not guaranteed — bounded well under production's 60s. A suite constant, not a
-# public config surface: production bind()/_call_gemini keep their own 60s default untouched.
+# but this wrapper substitutes a suite constant instead. It's urllib's per-blocking-socket-operation
+# timeout, not a hard wall-clock cap, so an unhealthy draw is typically — not guaranteed — bounded
+# well under production's 60s. A suite constant, not a public config surface: production bind()
+# and _call_gemini keep their own 60s default untouched.
 
 
 def _recording_call_model(sink: list) -> object:

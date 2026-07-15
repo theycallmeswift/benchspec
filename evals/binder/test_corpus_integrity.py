@@ -397,9 +397,9 @@ def test_recording_call_model_honors_evalspec_binder_model_env_override(
 def test_recording_call_model_uses_corpus_timeout_not_callers_timeout(monkeypatch: object) -> None:
     """The corpus's recording call_model overrides bind()'s 60s with the 15s corpus cap.
 
-    `bind()` always calls `call_model(prompt, timeout=60)` (`src/evalspec/grading/binder.py:370`);
-    production stays at 60s there. Only this corpus-side wrapper substitutes the
-    suite-constant 15s cap when it delegates to `_call_gemini`.
+    `bind()` always calls `call_model(prompt, timeout=60)`, and production stays at 60s there.
+    Only this corpus-side wrapper substitutes the suite-constant 15s cap when it delegates to
+    `_call_gemini`.
     """
     captured = {}
 
