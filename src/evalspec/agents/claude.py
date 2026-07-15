@@ -2,7 +2,7 @@
 
 Provisions the Claude Code CLI into a microVM (the cached snapshot step), injects the
 Anthropic credential as a host-substituted secret, builds the headless `claude -p`
-command, and parses its output through the shared helpers in `runner.py`.
+command, and parses its output through the shared helpers in `results.py`.
 """
 
 from __future__ import annotations
@@ -14,12 +14,12 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.environments import ExecutionEnv, GuestSandbox, Host
-from evalspec.runner import RunResult, parse_stream_run
-from evalspec.trigger import detect_skill_fired, dispatches_skill, streamed_activity
+from evalspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
+from evalspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
+from evalspec.orchestration.results import RunResult, parse_stream_run
 
 if TYPE_CHECKING:
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
 
 # Credentials Claude Code reads, in preference order. The runner injects whichever is set as
 # a microsandbox secret (substituted only for the Anthropic API host).

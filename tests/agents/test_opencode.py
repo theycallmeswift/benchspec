@@ -969,7 +969,7 @@ def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
     """Verify parse opencode jsonl trajectory feeds shared consumers."""
     # The normalized trajectory must work with the agent-agnostic helpers, so the
     # judge process-facts payoff covers OpenCode evals too.
-    from evalspec.trajectory import render_process_facts, skills_dispatched
+    from evalspec.grading.trajectory import render_process_facts, skills_dispatched
 
     stream = json.dumps(
         {
@@ -998,7 +998,7 @@ def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
 
 def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: object) -> None:
     """Verify opencode fired and skills dispatched agree on name."""
-    from evalspec.trajectory import skills_dispatched
+    from evalspec.grading.trajectory import skills_dispatched
 
     line = json.dumps(
         {
@@ -1020,7 +1020,7 @@ def test_opencode_non_completed_skill_neither_fires_nor_trajectories() -> None:
     # A skill dispatch seen only in a non-completed frame is dropped by the
     # trajectory's completed-frame gate; `fired` must honor the same gate so the two
     # stay consistent (no fired=True with an empty process-facts trajectory).
-    from evalspec.trajectory import skills_dispatched
+    from evalspec.grading.trajectory import skills_dispatched
 
     stream = "\n".join(
         [

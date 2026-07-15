@@ -13,7 +13,7 @@ from textwrap import dedent
 import pytest
 
 from evalspec import __main__
-from evalspec.schema import SchemaError
+from evalspec.specs.schema import SchemaError
 
 
 def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:

@@ -54,7 +54,7 @@ Issues = "https://github.com/theycallmeswift/evalspec/issues"
 evalspec = "evalspec.__main__:main"
 
 [project.entry-points.pytest11]
-evalspec = "evalspec.plugin"
+evalspec = "evalspec.runners.pytest"
 
 [tool.hatch.version]
 path = "src/evalspec/__init__.py"
@@ -92,7 +92,7 @@ convention = "google"
 testpaths = ["tests", "evals"]
 markers = [
     "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals`)",
-    "evalspec: skill-eval cases run via `evalspec run` or `make e2e` (declared here too so importing evalspec.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
+    "evalspec: skill-eval cases run via `evalspec run` or `make e2e` (declared here too so importing evalspec.orchestration.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
 ]
 addopts = "-m 'not binder_corpus'"
 

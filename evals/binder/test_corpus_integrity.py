@@ -12,8 +12,8 @@ import pytest
 import yaml
 from conftest import _latency_cost_summary, _recording_call_model
 
-from evalspec import binder
-from evalspec.checkers import derive_text
+from evalspec.grading import binder
+from evalspec.grading.checkers import derive_text
 
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
 
