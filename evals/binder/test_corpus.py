@@ -4,9 +4,11 @@ Samples the real Gemini binder over the gold-labeled corpus and enforces the one
 gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
 so the run shows live per-item progress and a leak names the exact draw; `make
 evals` shards the draws across xdist workers and the `binder_corpus` marker keeps
-it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). Corpus-wide stats
-(infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
-per-draw records.
+it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). A draw that
+exhausts its Gemini retries fails its own pytest item — never a skip — and `make
+evals`'s `--maxfail` stops the run after too many. Corpus-wide stats (infra-failure
+count/elapsed time, retention/over-punt/mismatch) are aggregated in conftest.py from
+the per-draw records.
 """
 
 from __future__ import annotations
@@ -14,18 +16,14 @@ from __future__ import annotations
 import os
 
 import pytest
-from conftest import _recording_call_model
+from conftest import _bind_resilient
 from test_corpus_integrity import CORPUS
 
-from evalspec.grading.binder import _bind_bare_exists, bind
+from evalspec.grading.binder import _bind_bare_exists
 
 pytestmark = pytest.mark.binder_corpus
 
 SAMPLES = int(os.environ.get("EVALSPEC_BINDER_SAMPLES", "5"))
-
-# A bind that failed on infra (timeout/HTTP failure) even after a retry — distinct from a punt
-# (None) and a bind (dict). Excluded from every rate; counted by the infra-error guard.
-_ERROR = object()
 
 
 def _samples_for(entry: object) -> object:
@@ -35,30 +33,6 @@ def _samples_for(entry: object) -> object:
     # needs enough draws on these that "0 observed" is meaningful.
     heavy = entry["cohort"] in ("persistence", "skill_invoked")
     return max(SAMPLES, 20) if heavy else SAMPLES
-
-
-def _bind_resilient(text: object, *, sink: list) -> tuple:
-    """Bind one assertion with one retry for a transient Gemini infra failure.
-
-    Args:
-        text: The assertion text to bind.
-        sink: List that the recording call_model appends each GeminiReply to.
-
-    Returns:
-        A (binding, attempts) tuple. `binding` is a checker spec dict, None (punt),
-        or `_ERROR` (infra failure after retry). `attempts` counts every retry-loop
-        iteration entered — `len(sink)` would undercount a retry that raised before
-        producing a reply — and is 1 for a regex fast-path bind (no API call).
-    """
-    call_model = _recording_call_model(sink)
-    attempts = 0
-    for _ in range(2):
-        attempts += 1
-        try:
-            return bind(text, call_model=call_model), attempts
-        except RuntimeError:
-            continue
-    return _ERROR, attempts
 
 
 def _draws() -> object:
@@ -84,12 +58,15 @@ def _field_expectation_draws() -> object:
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
     replies: list = []
-    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    attempt = _bind_resilient(entry["text"], sink=replies)
     # Derive source from the same predicate bind() itself uses to skip call_model,
     # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
     # never appends to `replies` either, and mislabeling it "regex" would inflate
     # regex_fast_path_count and deflate gemini_count.
     source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+    result = (
+        "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"
+    )
 
     record(
         {
@@ -98,25 +75,30 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
             "cohort": entry["cohort"],
             "expect_checker": entry.get("expect_checker"),
             "expect": entry.get("expect"),
-            "actual": {key: binding.get(key) for key in entry.get("expect", {})}
-            if isinstance(binding, dict)
+            "actual": {key: attempt.binding.get(key) for key in entry.get("expect", {})}
+            if isinstance(attempt.binding, dict)
             else None,
-            "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
-            "checker": binding.get("checker") if isinstance(binding, dict) else None,
+            "result": result,
+            "checker": attempt.binding.get("checker")
+            if isinstance(attempt.binding, dict)
+            else None,
             "source": source,
-            "attempts": attempts,
+            "attempts": attempt.attempts,
+            "elapsed_ms": attempt.elapsed_ms,
+            "error_type": type(attempt.error).__name__ if attempt.error is not None else None,
+            "error_message": str(attempt.error) if attempt.error is not None else None,
             "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
             "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
             "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
         }
     )
 
-    if binding is _ERROR:
-        pytest.skip("infra failure after retry")
+    if attempt.error is not None:
+        pytest.fail(f"infra failure after retry: {type(attempt.error).__name__}: {attempt.error}")
 
     if entry["gold"] == "punt":
-        assert not isinstance(binding, dict), (
-            f"false-positive leak: {entry['text']!r} bound to {binding.get('checker')!r}"
+        assert not isinstance(attempt.binding, dict), (
+            f"false-positive leak: {entry['text']!r} bound to {attempt.binding.get('checker')!r}"
         )
 
 
@@ -124,24 +106,32 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
 def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: object) -> None:
     """Ensure bound checker specs preserve expected fields from the corpus."""
     replies: list = []
-    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    attempt = _bind_resilient(entry["text"], sink=replies)
     source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+    result = (
+        "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"
+    )
 
     record(
         {
             "test": "fields",
+            "result": result,
             "source": source,
-            "attempts": attempts,
+            "attempts": attempt.attempts,
+            "elapsed_ms": attempt.elapsed_ms,
+            "error_type": type(attempt.error).__name__ if attempt.error is not None else None,
+            "error_message": str(attempt.error) if attempt.error is not None else None,
             "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
             "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
             "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
         }
     )
 
-    if binding is _ERROR:
-        pytest.skip("infra failure after retry")
+    if attempt.error is not None:
+        pytest.fail(f"infra failure after retry: {type(attempt.error).__name__}: {attempt.error}")
 
-    assert isinstance(binding, dict), f"expected bind for {entry['text']!r}, got punt"
-    assert all(binding.get(key) == value for key, value in entry["expect"].items()), (
-        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, got {binding!r}"
+    assert isinstance(attempt.binding, dict), f"expected bind for {entry['text']!r}, got punt"
+    assert all(attempt.binding.get(key) == value for key, value in entry["expect"].items()), (
+        f"field mismatch for {entry['text']!r}: expected {entry['expect']!r}, "
+        f"got {attempt.binding!r}"
     )

@@ -6,6 +6,7 @@ enforces the invariants required by the false-positive gate.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import conftest
@@ -484,3 +485,87 @@ def test_bind_resilient_lets_binder_auth_error_propagate_uncaught(monkeypatch: o
         conftest._bind_resilient(
             "the summary faithfully reflects the three key facts from the source", sink=[]
         )
+
+
+def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
+    pytester: object, monkeypatch: object
+) -> None:
+    """A draw that exhausts its Gemini retries must fail its pytest item, never skip it.
+
+    Runs the real evals/binder/test_corpus.py items in-process against the real
+    corpus.yaml — not a synthetic pytester project — with binder._call_gemini forced to
+    always raise. `binder` is a proper package module (evalspec.grading.binder), so this
+    monkeypatch carries through runpytest_inprocess via the shared sys.modules entry
+    (conftest.py itself does NOT carry through: pytest deletes and reimports any
+    unpackaged "conftest" module by name on every load, see _importconftest in
+    _pytest/config/__init__.py, so a patch on THIS module's `conftest` reference would be
+    invisible to the nested run — hence targeting `binder` here, not `conftest`).
+    `--rootdir` pins the nested run's rootpath to pytester.path, so its JSONL output
+    lands inside this test's own isolated temp dir rather than the real repo's
+    tmp/binder_results/ (which pytest_configure wipes at the start of every
+    binder_corpus-marked run — piggybacking on the real directory would risk deleting a
+    developer's own live `make evals` artifacts).
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # any non-empty value satisfies preflight
+
+    def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        raise RuntimeError("Gemini API transport failure: forced for this test")
+
+    monkeypatch.setattr(binder, "_call_gemini", always_fails)
+    test_corpus_path = Path(__file__).resolve().parent / "test_corpus.py"
+
+    result = pytester.runpytest_inprocess(
+        "--rootdir",
+        str(pytester.path),
+        "-m",
+        "binder_corpus",
+        "-k",
+        "persistence and test_binder_corpus_blocks_punt_leaks",
+        "--maxfail=1",
+        str(test_corpus_path),
+    )
+
+    result.assert_outcomes(failed=1, passed=0, skipped=0)
+
+    rows = [
+        json.loads(line)
+        for result_path in (pytester.path / "tmp" / "binder_results").glob("results-*.jsonl")
+        for line in result_path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["result"] == "error"
+    assert row["error_type"] == "RuntimeError"
+    assert "forced for this test" in row["error_message"]
+    assert row["elapsed_ms"] >= 0
+
+
+def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: object) -> None:
+    """`--maxfail=3` (the Makefile's circuit breaker) stops the run after 3 failed draws.
+
+    Same in-process real-corpus setup as
+    test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries, with --maxfail=3
+    instead of 1 so a fourth persistence draw never runs once three have failed.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        raise RuntimeError("Gemini API transport failure: forced for this test")
+
+    monkeypatch.setattr(binder, "_call_gemini", always_fails)
+    test_corpus_path = Path(__file__).resolve().parent / "test_corpus.py"
+
+    result = pytester.runpytest_inprocess(
+        "--rootdir",
+        str(pytester.path),
+        "-m",
+        "binder_corpus",
+        "-k",
+        "persistence and test_binder_corpus_blocks_punt_leaks",
+        "--maxfail=3",
+        str(test_corpus_path),
+    )
+
+    result.assert_outcomes(failed=3, passed=0, skipped=0)
+    result.stdout.fnmatch_lines(["*stopping after 3 failures*"])
