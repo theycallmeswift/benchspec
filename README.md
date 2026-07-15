@@ -162,7 +162,7 @@ endpoint can't burn through the rest of the corpus.
 
 ```bash
 make evals                                  # zero punt-leaks; summary prints
-make evals EVAL_ARGS="--collect-only -q"    # dry-run collection, no API calls
+GEMINI_API_KEY=test-key make evals EVAL_ARGS="--collect-only -q"    # dry-run collection, no API calls (any non-empty key satisfies the preflight)
 ```
 
 ## Why evalspec
