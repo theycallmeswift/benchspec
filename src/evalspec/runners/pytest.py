@@ -257,6 +257,9 @@ def pytest_collection_modifyitems(config: object, items: list) -> None:
         if callspec is None or "eval_arm" not in callspec.params:
             continue
         eval_case, _arm = callspec.params["eval_arm"]
+        # `_node_location_to_relpath` and `_nodeid` are pytest-internal (underscore-prefixed,
+        # verified against pytest 9.1.x) — re-verify this rewrite against pytest's own
+        # nodeid-path computation on any pytest upgrade.
         relpath = item.session._node_location_to_relpath(eval_case.eval_file)
         # `nodeid` is a read-only property; assign the backing `_nodeid`. Keep everything
         # after the first `::` (the parametrized test-function domain) untouched.
