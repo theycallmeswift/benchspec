@@ -2,11 +2,11 @@
 
 Samples the real Gemini binder over the gold-labeled corpus and enforces the one hard
 gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
-so the run shows live per-item progress and a leak names the exact draw; `make
-evals` shards the draws across xdist workers and the `binder_corpus` marker keeps
-it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). A draw that
-exhausts its Gemini retries fails its own pytest item — never a skip — and `make
-evals`'s `--maxfail` stops the run after too many. Corpus-wide stats (infra-failure
+so the run shows live per-item progress and a leak names the exact draw; the corpus run
+shards the draws across xdist workers, and the `binder_corpus` marker keeps them out of
+the offline suite (each draw costs money and needs a `GEMINI_API_KEY`). A draw that
+exhausts its Gemini retries fails its own pytest item — never a skip — and the run's
+`--maxfail` threshold stops scheduling after too many. Corpus-wide stats (infra-failure
 count/elapsed time, retention/over-punt/mismatch) are aggregated in conftest.py from
 the per-draw records.
 """
@@ -59,6 +59,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
     replies: list = []
     attempt = _bind_resilient(entry["text"], sink=replies)
+
     # Derive source from the same predicate bind() itself uses to skip call_model,
     # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
     # never appends to `replies` either, and mislabeling it "regex" would inflate
@@ -107,6 +108,7 @@ def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: 
     """Ensure bound checker specs preserve expected fields from the corpus."""
     replies: list = []
     attempt = _bind_resilient(entry["text"], sink=replies)
+
     source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
     result = (
         "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"

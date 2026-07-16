@@ -5,7 +5,7 @@ accumulator: every draw appends a JSON record to a per-worker file, and the cont
 reads them all at session end for the corpus-wide infra-failure/latency diagnostics and
 the reporting rates. The per-draw false-positive gate and the fail-on-exhausted-retry
 behavior both live in the test itself; a draw that exhausts its retries fails its own
-pytest item, so `make evals`'s `--maxfail` is the only run-level stop condition.
+pytest item, so the run's `--maxfail` threshold is the only run-level stop condition.
 """
 
 from __future__ import annotations
@@ -80,11 +80,9 @@ def _rate(rows: object, hit: object) -> object:
     return sum(1 for row in rows if hit(row)) / len(rows) if rows else 0.0
 
 
-_CORPUS_TIMEOUT_SECONDS = 15  # Corpus-only cap. bind() always calls call_model(prompt, timeout=60)
-# but this wrapper substitutes a suite constant instead. It's urllib's per-blocking-socket-operation
-# timeout, not a hard wall-clock cap, so an unhealthy draw is typically — not guaranteed — bounded
-# well under production's 60s. A suite constant, not a public config surface: production bind()
-# and _call_gemini keep their own 60s default untouched.
+# urllib's per-blocking-socket-operation timeout, not a hard wall-clock cap — bounds an
+# unhealthy draw typically, not guaranteed. Corpus-only: production keeps its 60s default.
+_CORPUS_TIMEOUT_SECONDS = 15
 
 
 def _recording_call_model(sink: list) -> object:
@@ -152,17 +150,21 @@ def _bind_resilient(text: str, *, sink: list) -> BindAttempt:
     attempts = 0
     elapsed_ms = 0.0
     error: RuntimeError | None = None
+
     for _ in range(2):
         attempts += 1
         started = time.perf_counter()
+
         try:
             binding = binder.bind(text, call_model=call_model)
         except RuntimeError as caught:
             elapsed_ms += (time.perf_counter() - started) * 1000
             error = caught
             continue
+
         elapsed_ms += (time.perf_counter() - started) * 1000
         return BindAttempt(binding=binding, attempts=attempts, elapsed_ms=elapsed_ms, error=None)
+
     return BindAttempt(binding=None, attempts=attempts, elapsed_ms=elapsed_ms, error=error)
 
 
@@ -258,10 +260,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             f"over_punt_rate={over_punt:.3f}  bind_mismatch={mismatch:.3f}",
         ]
 
-    # Every exhausted draw from either live test now fails its own pytest item (never a
-    # skip), so this is a diagnostic total, not a pass/fail gate — --maxfail bounds the
-    # run instead. Kept separate from the success-only latency/cost aggregate below,
-    # since an exhausted draw never produces a GeminiReply to meter.
+    # Diagnostic total, not a gate — every exhausted draw already failed its own item.
     errors = _error_summary(rows)
     if errors["error_count"]:
         lines.append(
@@ -269,8 +268,6 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             f"(elapsed={errors['error_elapsed_ms_total']:.0f}ms)"
         )
 
-    # Both live tests (leak + field-preservation) meter latency/cost; the leak-only
-    # diagnostics above are unaffected — they only ever read leak_rows.
     cost = _latency_cost_summary(rows)
     lines.append(
         f"latency_ms: mean={cost['latency_ms_mean']} p95={cost['latency_ms_p95']} "

@@ -7,6 +7,7 @@ enforces the invariants required by the false-positive gate.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import conftest
@@ -410,7 +411,7 @@ def test_recording_call_model_uses_corpus_timeout_not_callers_timeout(monkeypatc
     monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
 
     call_model = _recording_call_model([])
-    call_model("prompt", timeout=60)  # bind() always passes 60 here
+    call_model("prompt", timeout=60)
 
     assert captured["timeout"] == 15
 
@@ -462,7 +463,7 @@ def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) 
 
     assert attempt.error is None
     assert attempt.attempts == 2
-    assert attempt.binding is None  # the model punted
+    assert attempt.binding is None
     assert len(sink) == 1
     assert attempt.elapsed_ms >= 0
 
@@ -470,8 +471,8 @@ def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) 
 def test_bind_resilient_lets_binder_auth_error_propagate_uncaught(monkeypatch: object) -> None:
     """BinderAuthError bypasses the retry loop entirely — a bad credential must fail loud.
 
-    Deliberately not a RuntimeError subclass (see BinderAuthError's own docstring in
-    binder.py), so `_bind_resilient`'s `except RuntimeError` must never catch it.
+    It is deliberately not a RuntimeError subclass, so `_bind_resilient`'s
+    `except RuntimeError` must never catch it.
     """
 
     def rejecting_call_gemini(
@@ -492,19 +493,12 @@ def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
 ) -> None:
     """A draw that exhausts its Gemini retries must fail its pytest item, never skip it.
 
-    Runs the real evals/binder/test_corpus.py items in-process against the real
-    corpus.yaml — not a synthetic pytester project — with binder._call_gemini forced to
-    always raise. `binder` is a proper package module (evalspec.grading.binder), so this
-    monkeypatch carries through runpytest_inprocess via the shared sys.modules entry
-    (conftest.py itself does NOT carry through: pytest deletes and reimports any
-    unpackaged "conftest" module by name on every load, see _importconftest in
-    _pytest/config/__init__.py, so a patch on THIS module's `conftest` reference would be
-    invisible to the nested run — hence targeting `binder` here, not `conftest`).
-    `--rootdir` pins the nested run's rootpath to pytester.path, so its JSONL output
-    lands inside this test's own isolated temp dir rather than the real repo's
-    tmp/binder_results/ (which pytest_configure wipes at the start of every
-    binder_corpus-marked run — piggybacking on the real directory would risk deleting a
-    developer's own live `make evals` artifacts).
+    Runs the real test_corpus.py items in-process against the real corpus with
+    binder._call_gemini forced to always raise. The patch targets `binder` — a package
+    module shared through sys.modules — because pytest reimports unpackaged conftest
+    modules per run, so patching this module's `conftest` reference would be invisible
+    to the nested run. `--rootdir` pins the nested run's records under pytester.path so
+    its wipe-and-write cycle can't touch the repo's own tmp/binder_results/.
     """
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # any non-empty value satisfies preflight
 
@@ -542,11 +536,14 @@ def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
 
 
 def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: object) -> None:
-    """`--maxfail=3` (the Makefile's circuit breaker) stops the run after 3 failed draws.
+    """`--maxfail=3` stops a serial corpus run after three failed draws.
 
     Same in-process real-corpus setup as
     test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries, with --maxfail=3
     instead of 1 so a fourth persistence draw never runs once three have failed.
+    Serial-only coverage: the distributed run adds xdist scheduling, where workers
+    may finish draws already in flight after the threshold trips — this in-process
+    run cannot exercise that.
     """
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
@@ -569,6 +566,27 @@ def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: 
 
     result.assert_outcomes(failed=3, passed=0, skipped=0)
     result.stdout.fnmatch_lines(["*stopping after 3 failures*"])
+
+
+def test_evals_target_constructs_the_circuit_breaker_command() -> None:
+    """The evals make target wires marker, fan-out, and failure threshold into pytest.
+
+    A dry run prints the recipe with defaults expanded without executing anything,
+    pinning the constructed command that the serial pytester tests above cannot see.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+
+    printed = subprocess.run(
+        ["make", "--dry-run", "evals"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    assert "-m binder_corpus" in printed
+    assert "-n 6" in printed
+    assert "--maxfail=3" in printed
 
 
 def test_error_summary_counts_only_error_rows_across_both_tests() -> None:
@@ -607,10 +625,9 @@ def test_pytest_sessionfinish_does_not_flip_exitstatus_on_high_error_rate(
 ) -> None:
     """The removed 5% infra-error gate no longer turns a green run red.
 
-    Every exhausted draw now fails its own pytest item via `pytest.fail` in
-    `test_corpus.py`, so a broadly-broken run is already red long before
-    sessionfinish runs — a second gate flipping `session.exitstatus` here would
-    just be a second, redundant failure policy.
+    Every exhausted draw now fails its own pytest item, so a broadly-broken run is
+    already red long before sessionfinish runs — a second gate flipping
+    `session.exitstatus` here would just be a second, redundant failure policy.
     """
     results_dir = tmp_path / "tmp" / "binder_results"
     results_dir.mkdir(parents=True)
