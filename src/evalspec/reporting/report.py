@@ -379,6 +379,76 @@ def _matrix_table(benchmark: dict) -> list[str]:
     return lines
 
 
+def terminal_matrix(benchmark: dict, benchmark_md: Path) -> list[str]:
+    """Render the run-level matrix as width-aligned plain text for the terminal.
+
+    A plain-text sibling of `_matrix_table`: same baseline-first column order, same
+    roster rows (all-errored evals included as `—` cells), same `_rate_cell` cell
+    semantics, same pooled `All evals` footer. The label column is left-justified; every
+    arm column is right-justified and sized to the wider of its header and its widest
+    cell, joined by a two-space gutter. The final line points at the persisted report.
+
+    Args:
+        benchmark: The benchmark dict from `build_benchmark`/`write_benchmark`.
+        benchmark_md: Path to the run's `benchmark.md`, printed as the trailing pointer.
+
+    Returns:
+        One string per line (header, one per roster eval, the `All evals` footer, and a
+        `Report: <path>` pointer), or `[]` when the benchmark has no arm columns.
+    """
+    arms = benchmark["arms"]
+    baseline = benchmark.get("baseline")
+    # Baseline column first, then the rest in declared order — matching `_matrix_table`.
+    names = ([baseline] if baseline in arms else []) + [
+        arm_name for arm_name in arms if arm_name != baseline
+    ]
+    if not names:
+        return []
+
+    # Build (label, cells) rows from the roster then the pooled footer, reusing the exact
+    # per-eval lookup and cell formatting the Markdown matrix uses.
+    rows: list[tuple[str, list[str]]] = []
+    for entry in benchmark["roster"]:
+        group = entry["group"]
+        eval_id = entry["eval_id"]
+        ref_rate = _per_eval_rate(arms[baseline], group, eval_id) if baseline in arms else None
+        cells = []
+        for arm_name in names:
+            rate = _per_eval_rate(arms[arm_name], group, eval_id)
+            measured = arm_name != baseline and ref_rate is not None and rate is not None
+            delta_pp = (rate - ref_rate) * 100 if measured else None
+            cells.append(_rate_cell(rate, delta_pp))
+        rows.append((f"{group}/{eval_id}", cells))
+    footer_cells = []
+    for arm_name in names:
+        delta_pp = None if arm_name == baseline else arms[arm_name].get("delta_pp")
+        footer_cells.append(_rate_cell(arms[arm_name]["pass_rate"], delta_pp))
+    rows.append(("All evals", footer_cells))
+
+    # Column widths: label column fits its header and every row label; each arm column
+    # fits its header and every cell in that column.
+    label_width = max(len("Eval"), *(len(label) for label, _ in rows))
+    arm_widths = [
+        max(len(names[index]), *(len(cells[index]) for _, cells in rows))
+        for index in range(len(names))
+    ]
+
+    def _data(label: str, cells: list[str]) -> str:
+        """Left-justify the label, right-justify each cell, join on the two-space gutter."""
+        parts = [label.ljust(label_width)]
+        parts += [cells[index].rjust(arm_widths[index]) for index in range(len(names))]
+        return "  ".join(parts).rstrip()
+
+    # Header names read as left-justified labels; rstrip drops the trailing pad off the
+    # last one so the line has no dangling whitespace.
+    header_parts = ["Eval".ljust(label_width)]
+    header_parts += [names[index].ljust(arm_widths[index]) for index in range(len(names))]
+    lines = ["  ".join(header_parts).rstrip()]
+    lines += [_data(label, cells) for label, cells in rows]
+    lines.append(f"Report: {benchmark_md}")
+    return lines
+
+
 def _provenance_lines(benchmark: dict) -> list[str]:
     """Render a compact Provenance section below the matrix.
 

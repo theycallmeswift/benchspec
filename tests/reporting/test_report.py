@@ -1,6 +1,7 @@
 """Tests for report."""
 
 import pytest
+from pathlib import Path
 
 from evalspec.reporting import report
 from tests.support import seed_arm
@@ -845,3 +846,51 @@ def test_index_rows_omit_axes_for_unknown_arm(tmp_path: object) -> None:
     assert "harness" not in row
     assert "model" not in row
     assert "effort" not in row
+
+
+def test_terminal_matrix_layout_golden(tmp_path: object) -> None:
+    """Verify the aligned plain-text matrix, header, footer, and Report pointer."""
+    seed_arm(tmp_path / "hello", "greets-by-name", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "hello", "greets-by-name", "trial", passes=2, total=2)  # 100% → +50pp
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        "iteration_02",
+        baseline="baseline",
+        arm_meta={"baseline": {"harness": "claude-code"}, "trial": {"harness": "claude-code"}},
+    )
+
+    lines = report.terminal_matrix(bench, Path("tmp/evals/iteration_02/benchmark.md"))
+
+    # Label column left-justified to width 20; baseline column right-justified to width 8
+    # (header "baseline"); trial column right-justified to width 12 ("100% (+50pp)").
+    assert lines == [
+        "Eval" + " " * 16 + "  " + "baseline" + "  " + "trial",
+        "hello/greets-by-name" + "  " + " " * 5 + "50%" + "  " + "100% (+50pp)",
+        "All evals" + " " * 11 + "  " + " " * 5 + "50%" + "  " + "100% (+50pp)",
+        "Report: tmp/evals/iteration_02/benchmark.md",
+    ]
+
+
+def test_terminal_matrix_renders_dash_for_all_errored_eval(tmp_path: object) -> None:
+    """Verify an all-errored eval keeps a roster row rendered as a — cell."""
+    seed_arm(tmp_path / "hello", "ok", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "hello", "ghost", "trial", passes=0, total=2, errored=True)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "iteration_01", baseline=None
+    )
+
+    lines = report.terminal_matrix(bench, Path("tmp/evals/iteration_01/benchmark.md"))
+
+    # Roster sorts by (group, eval_id): ghost before ok. The all-errored eval has no
+    # per-eval row in any arm, so its only cell is —.
+    ghost = next(line for line in lines if line.startswith("hello/ghost"))
+    assert ghost.split() == ["hello/ghost", "—"]
+
+
+def test_terminal_matrix_empty_without_arms() -> None:
+    """Verify a benchmark with no arm columns yields no lines."""
+    bench = {"arms": {}, "baseline": None, "roster": []}
+
+    assert report.terminal_matrix(bench, Path("x/benchmark.md")) == []
