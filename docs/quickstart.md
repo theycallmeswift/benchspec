@@ -127,9 +127,15 @@ discovery without running anything, forward `--collect-only` to pytest:
 .venv/bin/evalspec run -- --collect-only -q
 ```
 
-You should see two collected items — `test_eval[hello-greets-by-name-baseline]`
-and `test_eval[hello-greets-by-name-trial]` — one per arm. A malformed eval fails
-here, loudly, with the offending path quoted.
+You should see two collected items, one per arm — each id-ed as the eval file's
+repo-relative path plus its arm-qualified test name:
+
+```
+skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-baseline]
+skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-trial]
+```
+
+A malformed eval fails here, loudly, with the offending path quoted.
 
 ## Step 5 — Run
 
