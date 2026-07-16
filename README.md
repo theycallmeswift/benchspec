@@ -157,12 +157,13 @@ samples the real Gemini binder over a hand-labeled corpus and enforces the one h
 gate — a punt-labeled assertion must never bind to a checker. It's a **paid, live
 Gemini run**, not part of `make test`. Each draw retries once on a transient Gemini
 failure; a draw that exhausts both attempts **fails its pytest item outright** — never
-a silent skip — and the run stops after three failed draws so an unhealthy Gemini
-endpoint can't burn through the rest of the corpus.
+a silent skip. After three observed failures the run stops scheduling new draws
+(workers may still finish draws already in flight), so an unhealthy Gemini endpoint
+can't burn through the rest of the corpus.
 
 ```bash
 make evals                                  # zero punt-leaks; summary prints
-GEMINI_API_KEY=test-key make evals EVAL_ARGS="--collect-only -q"    # dry-run collection, no API calls (any non-empty key satisfies the preflight)
+GEMINI_API_KEY=test-key make evals EVAL_ARGS="--collect-only -q"    # dry-run collection, no API calls
 ```
 
 ## Why evalspec

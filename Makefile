@@ -18,7 +18,7 @@ e2e:  ## Run evalspec's own end-to-end suite (real microVMs; needs claude+codex 
 # per blocking socket op, not a hard wall-clock cap, so a trickling response can still run longer.
 BINDER_WORKERS ?= 6
 BINDER_MAX_FAILURES ?= 3
-evals:  ## Run the binder corpus (paid live Gemini; 15s corpus timeout, stops after 3 failed draws). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
+evals:  ## Run the binder corpus (paid live Gemini; 15s corpus timeout, stops scheduling after 3 failed draws). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
 	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) --maxfail=$(BINDER_MAX_FAILURES) evals/binder $(EVAL_ARGS)
 
 lint:  ## Lint with Ruff and houserules
