@@ -66,6 +66,28 @@ the snapshot it ran from, and the pulled image digest. An arm that never produce
 a runtime record is labeled `not observed` — never shown with fabricated
 identity.
 
+## The terminal summary
+
+`evalspec run` ends the pytest session with the same matrix rendered as aligned
+plain text under an `evalspec benchmark` banner — the run-time view of what
+`benchmark.md` persists. Columns are the arms baseline-first; rows are
+`group/eval_id` (an all-errored eval still appears, as a row of `—`); the
+`All evals` footer is each arm's pooled rate; every non-baseline cell carries its
+`(+Npp)` delta. The last line, `Report: <path>`, points at the written
+`benchmark.md`:
+
+```text
+============================== evalspec benchmark ==============================
+Eval                             baseline  trial
+hello/greets-by-name                  67%  100% (+33pp)
+hello-file/writes-greeting-file       50%   83% (+33pp)
+All evals                             58%   92% (+34pp)
+Report: tmp/evals/iteration_02/benchmark.md
+```
+
+The matrix is display only: `FAIL fail-under: …` and `WARN binder: …` lines, when
+present, print below it and are what actually control exit status.
+
 <a id="noise"></a>
 ## Noise, samples, and flakiness
 

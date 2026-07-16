@@ -140,10 +140,14 @@ here, loudly, with the offending path quoted.
 The first run builds the sandbox snapshot — a few minutes to download the base
 image and install the agent CLI — and every later run reuses it. (To pay that
 cost up front instead, run `evalspec sandbox:build` once.) Both cells then run,
-grade, and the session ends with a benchmark line:
+grade, and the session ends with the benchmark matrix:
 
 ```
-iteration_01: baseline 0% -> trial 100%  (delta +100pp)  -> tmp/evals/iteration_01/benchmark.md
+============================== evalspec benchmark ==============================
+Eval                  baseline  trial
+hello/greets-by-name        0%  100% (+100pp)
+All evals                   0%  100% (+100pp)
+Report: tmp/evals/iteration_01/benchmark.md
 ```
 
 Your numbers will differ — the baseline arm may guess the right shape, the trial
