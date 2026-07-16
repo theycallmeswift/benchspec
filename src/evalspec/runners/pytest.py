@@ -236,6 +236,34 @@ def pytest_configure_node(node: object) -> None:
     node.workerinput["evalspec_iteration"] = workspace.current_iteration()
 
 
+def pytest_collection_modifyitems(config: object, items: list) -> None:
+    """Attribute each eval item's displayed path to its authored `.eval.md` file.
+
+    Rewrites only the PATH portion of the nodeid (everything before the first `::`) to the
+    eval's authored Markdown file, repo-relative, preserving the
+    `test_eval[group-evalid-arm]` domain verbatim. pytest derives its non-verbose progress
+    lines, `--collect-only` ids, and FAILED headers from `nodeid.split("::")[0]`, so the
+    nodeid path — not `item.location` — is the field that regroups them; `item.location`
+    is set to the same path so `-vv` and reportinfo stay coherent. The domain carries the
+    per-cell `(eval × arm)` uniqueness downstream tooling and tests match on. Nothing in
+    evalspec keys off pytest nodeids (aggregation uses arm names and on-disk `eval-*`
+    dirs), so persisted artifacts are unaffected. Non-eval items (no `eval_arm` callspec
+    param) are left alone.
+    """
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if callspec is None or "eval_arm" not in callspec.params:
+            continue
+        eval_case, _arm = callspec.params["eval_arm"]
+        relpath = item.session._node_location_to_relpath(eval_case.eval_file)
+        # `nodeid` is a read-only property; assign the backing `_nodeid`. Keep everything
+        # after the first `::` (the parametrized test-function domain) untouched.
+        domain = item.nodeid.split("::", 1)[1]
+        item._nodeid = f"{relpath}::{domain}"
+        _, lineno, testname = item.location
+        item.location = (relpath, lineno, testname)
+
+
 def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     """Aggregate binder corpus records after the pytest session."""
     # Controller-only, and only when a run actually produced artifacts (a

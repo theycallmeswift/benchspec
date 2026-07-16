@@ -197,6 +197,38 @@ def test_models_flag_sweeps_arms(pytester: object) -> None:
     assert "test_eval[myskill-alpha-opus]" in out
 
 
+def test_progress_and_nodeid_use_authored_eval_files(pytester: object) -> None:
+    """Verify progress + collection ids use authored .eval.md paths, domain preserved."""
+    _make_project(pytester)
+
+    # Non-verbose progress groups by the nodeid path portion — now the authored eval file.
+    run = pytester.runpytest(
+        "-p",
+        "evalspec.runners.pytest",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+    )
+
+    run.assert_outcomes(passed=4)  # 2 evals × 2 arms; dummy bodies just pass
+    progress = run.stdout.str()
+    assert "skills/myskill/evals/myskill/alpha.eval.md" in progress
+    assert "skills/myskill/evals/myskill/beta.eval.md" in progress
+
+    # --collect-only -q prints the full rewritten nodeid: authored path + preserved domain.
+    collected = _collect(pytester).stdout.str()
+    assert (
+        "skills/myskill/evals/myskill/alpha.eval.md::test_eval[myskill-alpha-baseline]"
+        in collected
+    )
+    assert (
+        "skills/myskill/evals/myskill/beta.eval.md::test_eval[myskill-beta-trial]"
+        in collected
+    )
+    # Per-cell uniqueness survives — the domain is untouched, so the four cells remain.
+    assert collected.count("test_eval[") == 4
+
+
 def test_malformed_schema_fails_collection(pytester: object) -> None:
     """Verify malformed schema fails collection."""
     (pytester.path / "pyproject.toml").write_text(ARMS_TOML)
