@@ -248,7 +248,9 @@ def pytest_collection_modifyitems(config: object, items: list) -> None:
     per-cell `(eval × arm)` uniqueness downstream tooling and tests match on. Nothing in
     evalspec keys off pytest nodeids (aggregation uses arm names and on-disk `eval-*`
     dirs), so persisted artifacts are unaffected. Non-eval items (no `eval_arm` callspec
-    param) are left alone.
+    param) are left alone. Because the rewritten path comes from the eval file rather than
+    the test module, explicitly passing multiple modules that each request `eval_arm` can
+    alias their rewritten nodeids together.
     """
     for item in items:
         callspec = getattr(item, "callspec", None)
