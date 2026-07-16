@@ -706,36 +706,3 @@ def write_benchmark(
     (out_dir / "benchmark.md").write_text(_format_markdown(benchmark))
     return benchmark
 
-
-def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
-    """Return one terminal-summary line for a benchmark."""
-    arms = benchmark["arms"]
-    baseline = benchmark.get("baseline")
-    parts = []
-    if baseline is None:
-        scored = [f"{name} {_pct(stats.get('pass_rate'))}" for name, stats in arms.items()]
-        if scored:
-            parts.append(" · ".join(scored))
-    else:
-        ref_rate = arms.get(baseline, {}).get("pass_rate")
-        for name, stats in arms.items():
-            if name == baseline:
-                continue
-            rate = stats.get("pass_rate")
-            if rate is None and ref_rate is None:
-                continue
-            seg = f"baseline {_pct(ref_rate)} -> {name} {_pct(rate)}"
-            if rate is not None and ref_rate is not None:
-                delta_pp = (rate - ref_rate) * 100
-                seg += f"  (delta {delta_pp:+.0f}pp"
-                band = stats.get("delta_noise_pp")
-                if band is not None and abs(delta_pp) <= band:
-                    seg += f", within noise ±{band:.0f}pp"
-                seg += ")"
-            parts.append(seg)
-
-        # Baseline-only sweep: show the baseline's own rate so the terminal line still
-        # carries a score, not just a bare path.
-        if not parts and baseline in arms:
-            parts.append(f"{baseline} {_pct(ref_rate)}")
-    return f"{skill}: " + "  |  ".join(parts) + f"  -> {benchmark_md}"

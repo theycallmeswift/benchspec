@@ -1,7 +1,8 @@
 """Tests for report."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from evalspec.reporting import report
 from tests.support import seed_arm
@@ -356,18 +357,6 @@ def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> No
     assert "50%" in headline
 
 
-def test_delta_line_reference_only_shows_its_rate(tmp_path: object) -> None:
-    """Verify delta line reference only shows its rate."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {"baseline": {"pass_rate": 0.5}},
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "baseline 50%" in line
-
-
 def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
     """Verify errored samples surface instead of vanishing."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=0)
@@ -381,57 +370,6 @@ def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
     assert bench["arms"]["trial"]["pass_rate"] == 1.0  # still excluded from rates
     md = (tmp_path / "benchmark.md").read_text()
     assert "1 sample(s) excluded" in md
-
-
-def test_delta_line_shows_delta(tmp_path: object) -> None:
-    """Verify delta line shows delta."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {
-            "trial": {"pass_rate": 0.9},
-            "baseline": {"pass_rate": 0.4},
-        },
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "archive" in line
-    assert "90%" in line
-    assert "40%" in line
-    assert "+50pp" in line
-
-
-def test_delta_line_handles_missing_arm(tmp_path: object) -> None:
-    """Verify delta line handles missing arm."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {
-            "trial": {"pass_rate": 0.8},
-            "baseline": {"pass_rate": None},
-        },
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "n/a" in line
-    assert "pp" not in line  # no delta when the reference arm is missing
-
-
-def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:
-    """Verify delta line absolute when no reference."""
-    bench = {
-        "baseline": None,
-        "arms": {
-            "trial-opus": {"pass_rate": 0.8},
-            "trial-sonnet": {"pass_rate": 0.6},
-        },
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "80%" in line
-    assert "60%" in line
-    assert "pp" not in line  # no delta without a reference
 
 
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
@@ -631,8 +569,8 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
     assert report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"]) is None
 
 
-def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None:
-    """Verify within noise label in markdown and delta line."""
+def test_within_noise_label_in_markdown(tmp_path: object) -> None:
+    """Verify within noise label in markdown."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
     archive = tmp_path / "archive"
     for sample_index, passes in enumerate((2, 0, 1)):
@@ -640,13 +578,12 @@ def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None
     for sample_index, passes in enumerate((0, 1, 1)):
         seed_arm(archive, "alpha", "baseline", passes=passes, total=2, sample=sample_index)
 
-    bench = report.write_benchmark(
+    report.write_benchmark(
         tmp_path, report.discover_eval_dirs(tmp_path), label="alpha", baseline="baseline"
     )
     md = (tmp_path / "benchmark.md").read_text()
 
     assert "within noise" in md
-    assert "within noise" in report.delta_line("demo", bench, tmp_path / "benchmark.md")
 
 
 def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: object) -> None:

@@ -326,7 +326,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
-        lines.append(report.delta_line(iteration, benchmark, skills_root.parent / "benchmark.md"))
+        lines += report.terminal_matrix(benchmark, skills_root.parent / "benchmark.md")
 
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         skill = skill_dir.name

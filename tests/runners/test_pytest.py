@@ -459,14 +459,18 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
 
     assert ("separator", "evalspec benchmark") in terminal_reporter.events
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert any("iteration_01" in message and "+100pp" in message for message in lines)
+    # The matrix header names the arms; a data row carries the +100pp delta cell; the
+    # final line points at the persisted report under this iteration.
+    assert lines[0].split() == ["Eval", "baseline", "trial"]
+    assert any("+100pp" in message for message in lines)
+    assert any(message.startswith("Report: ") and "iteration_01" in message for message in lines)
     assert (skill_results_dir.parent.parent / "benchmark.md").is_file()
 
 
 def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
-    """Verify terminal summary multi skill single header."""
-    # Two skills with eval-* children pool into ONE run-level table and one run-level
-    # delta line, under a single header (rows sorted: archive before ingest).
+    """Verify terminal summary multi skill single table."""
+    # Two skills with eval-* children pool into ONE run-level matrix under a single
+    # header (rows sorted: archive before ingest).
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -485,7 +489,13 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     assert terminal_reporter.events.count(("separator", "evalspec benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert len(lines) == 1
+    # One pooled table: header, a row per eval (archive before ingest), the pooled
+    # footer, then the report pointer — no per-skill repetition.
+    assert lines[0].split() == ["Eval", "baseline", "trial"]
+    assert any(line.startswith("archive/alpha") for line in lines)
+    assert any(line.startswith("ingest/beta") for line in lines)
+    assert any(line.startswith("All evals") for line in lines)
+    assert lines[-1].startswith("Report: ")
 
     iteration_root = skills.parent
     benchmark = json.loads((iteration_root / "benchmark.json").read_text())
