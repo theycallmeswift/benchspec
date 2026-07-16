@@ -4,7 +4,7 @@
 
 **Goal:** Make `evalspec run` (and `make e2e`) attribute pytest progress to authored `.eval.md` files and finish with an aligned per-eval benchmark matrix in the terminal, replacing the wrapper-module path and the single prose delta line.
 
-**Architecture:** Two independent presentation fixes on top of unchanged collection/execution/scoring. (1) A new `pytest_collection_modifyitems` hook rewrites each parametrized item's `item.location` — the path pytest groups progress under — from the shared `cases.py` wrapper to the eval's authored Markdown file, without touching `item.nodeid`. (2) A new `report.terminal_matrix()` renders the benchmark's existing roster/arms/baseline as width-aligned plain text; `pytest_sessionfinish` emits it in place of `report.delta_line()`, which is then deleted as dead code. Persisted `benchmark.json`/`benchmark.md` artifacts are untouched.
+**Architecture:** Two independent presentation fixes on top of unchanged collection/execution/scoring. (1) A new `pytest_collection_modifyitems` hook rewrites only the PATH portion of each eval item's nodeid (`item._nodeid`) — from the shared `cases.py`/`test_cases.py` wrapper to the eval's authored Markdown file, repo-relative — while preserving the `test_eval[group-evalid-arm]` domain verbatim. pytest 9.1.1 derives non-verbose progress paths, `--collect-only` ids, and FAILED headers from `nodeid.split("::")[0]` (not from `item.location`), so the nodeid path is the load-bearing field; `item.location` is set to the same path for `-vv`/reportinfo coherence. (2) A new `report.terminal_matrix()` renders the benchmark's existing roster/arms/baseline as width-aligned plain text; `pytest_sessionfinish` emits it in place of `report.delta_line()`, which is then deleted as dead code. Persisted `benchmark.json`/`benchmark.md` artifacts are untouched — nothing in `src/evalspec` keys off pytest nodeids (aggregation uses arm names and on-disk `eval-*` dirs).
 
 **Tech Stack:** Python 3.11+, pytest (plugin hooks + pytester), `uv` for running, Ruff + houserules for lint. No new dependencies.
 
@@ -12,7 +12,7 @@
 
 - **Byte-identical artifacts.** Do NOT change the output of `build_benchmark`, `_format_markdown`, `_matrix_table`, or `write_benchmark`. `benchmark.json`, `benchmark.md`, `meta.json`, and `index.jsonl` schemas and bytes stay exactly as they are today.
 - **No new dependency.** No Rich, tabulate, or any terminal-rendering library. Plain `str.ljust`/`str.rjust`.
-- **No `item.nodeid` changes.** Collection identity is preserved: `--collect-only`/`-v` must still show unique `test_eval[<group>-<eval_id>-<arm>]` node ids. Only `item.location` changes.
+- **Nodeid: rewrite the PATH portion only.** For `eval_arm`-parametrized items, rewrite only the path portion of `item._nodeid` (everything before the first `::`) to the repo-relative authored `.eval.md`; preserve the `test_eval[<group>-<eval_id>-<arm>]` domain (everything after the first `::`) VERBATIM, so per-cell uniqueness — and every existing `test_eval[...]` node-id substring assertion — survives. (pytest 9.1.1: `nodeid` is a read-only property backed by the writable `item._nodeid` attribute; assignment is verified to work.) Also set `item.location` to the same path for `-vv`/reportinfo coherence. Nothing in `src/evalspec` keys off pytest nodeids (aggregation uses arm names + on-disk `eval-*` dirs), so persisted artifacts stay byte-identical.
 - **Exit semantics unchanged.** `FAIL fail-under: …` and `WARN binder: …` lines still print (now below the matrix) and still control `session.exitstatus` exactly as today.
 - **Style guide** ([`docs/style/development.md`](../style/development.md)): Google-style docstrings on ALL functions incl. private/nested helpers; comments explain why-not-what and carry NO issue references; `from __future__ import annotations` (already present in every file touched); fail fast; four-phase DAMP tests. Reuse `_rate_cell`/`_per_eval_rate` rather than duplicating cell-format semantics.
 - **Verification commands** (run per the final task; `make e2e` is human-gated — costs real money/microVMs, run once):
@@ -352,28 +352,28 @@ git commit -m "feat(runner): print benchmark matrix in terminal summary; drop de
 
 ---
 
-### Task 3: Collection hook — attribute item locations to authored eval files
+### Task 3: Collection hook — attribute item nodeid paths to authored eval files
 
-Add `pytest_collection_modifyitems` to the plugin so pytest progress groups each cell under its authored `.eval.md` path instead of the shared `cases.py` wrapper. Rewrite `item.location` only; leave `item.nodeid` alone.
+Add `pytest_collection_modifyitems` to the plugin so pytest groups each cell's progress, collection id, and failure header under its authored `.eval.md` path instead of the shared wrapper module. Rewrite the PATH portion of `item._nodeid` (verified in pytest 9.1.1: non-verbose progress derives from `nodeid.split("::")[0]`, not `item.location`); preserve the `test_eval[group-evalid-arm]` domain verbatim; set `item.location` to the same path for coherence.
 
 **Files:**
 - Modify: `src/evalspec/runners/pytest.py` — add `pytest_collection_modifyitems` after `pytest_configure_node` (ends line 237, before `pytest_sessionfinish` at 239).
-- Test: `tests/runners/test_pytest.py` (add one test near the collection tests, after `test_models_flag_sweeps_arms` at line 198).
+- Test: `tests/runners/test_pytest.py` (add one test near the collection tests, after `test_models_flag_sweeps_arms` at line 198). No existing test needs changing — every current assertion checks the `test_eval[...]` domain substring or passes `test_cases.py::test_eval` as a positional (selection happens at collection, before this hook), both untouched by a path-only rewrite. Step 5 re-runs them to prove it.
 
 **Interfaces:**
-- Consumes: pytest `Session._node_location_to_relpath(node_path: Path) -> str` (verified present in this env); each parametrized item's `item.callspec.params["eval_arm"]` is the `(EvalCase, Arm)` tuple set by `pytest_generate_tests`; `EvalCase.eval_file: Path` is the absolute authored `.eval.md`.
-- Produces: `pytest_collection_modifyitems(config: object, items: list) -> None` — a pytest hook (no return value; mutates `item.location` in place).
+- Consumes: pytest `Session._node_location_to_relpath(node_path: Path) -> str` (verified present, returns a posix repo-relative string); pytest `Node.nodeid` read-only property backed by writable `item._nodeid` (verified in pytest 9.1.1); each parametrized item's `item.callspec.params["eval_arm"]` is the `(EvalCase, Arm)` tuple set by `pytest_generate_tests`; `EvalCase.eval_file: Path` is the absolute authored `.eval.md`.
+- Produces: `pytest_collection_modifyitems(config: object, items: list) -> None` — a pytest hook (no return value; mutates `item._nodeid` and `item.location` in place).
 
 - [ ] **Step 1: Write the failing test**
 
-The dummy `def test_eval(eval_arm): pass` in `test_cases.py` requests only the parametrized `eval_arm` value (no sandbox/judge fixtures — those live in `cases.py`, which is not the collection target here), so the four cells run and pass with no `claude -p`. In default (non-verbose) mode pytest groups its progress line by `report.location[0]`, which is copied from `item.location` — the value this hook rewrites. Add to `tests/runners/test_pytest.py` after `test_models_flag_sweeps_arms` (line 198):
+The dummy `def test_eval(eval_arm): pass` in `test_cases.py` requests only the parametrized `eval_arm` value (no sandbox/judge fixtures — those live in `cases.py`, which is not the collection target here), so the four cells run and pass with no `claude -p`. In default (non-verbose) mode pytest groups its progress line by `nodeid.split("::")[0]` — the value this hook rewrites. Add to `tests/runners/test_pytest.py` after `test_models_flag_sweeps_arms` (line 198):
 
 ```python
-def test_progress_groups_under_authored_eval_files(pytester: object) -> None:
-    """Verify pytest attributes progress to authored .eval.md paths, node ids intact."""
+def test_progress_and_nodeid_use_authored_eval_files(pytester: object) -> None:
+    """Verify progress + collection ids use authored .eval.md paths, domain preserved."""
     _make_project(pytester)
 
-    # Non-verbose progress groups by item.location — the rewritten authored eval file.
+    # Non-verbose progress groups by the nodeid path portion — now the authored eval file.
     run = pytester.runpytest(
         "-p",
         "evalspec.runners.pytest",
@@ -387,21 +387,24 @@ def test_progress_groups_under_authored_eval_files(pytester: object) -> None:
     assert "skills/myskill/evals/myskill/alpha.eval.md" in progress
     assert "skills/myskill/evals/myskill/beta.eval.md" in progress
 
-    # Collection identity is unchanged: --collect-only still lists unique (eval × arm) ids.
+    # --collect-only -q prints the full rewritten nodeid: authored path + preserved domain.
     collected = _collect(pytester).stdout.str()
-    for node_id in (
-        "test_eval[myskill-alpha-baseline]",
-        "test_eval[myskill-alpha-trial]",
-        "test_eval[myskill-beta-baseline]",
-        "test_eval[myskill-beta-trial]",
-    ):
-        assert node_id in collected
+    assert (
+        "skills/myskill/evals/myskill/alpha.eval.md::test_eval[myskill-alpha-baseline]"
+        in collected
+    )
+    assert (
+        "skills/myskill/evals/myskill/beta.eval.md::test_eval[myskill-beta-trial]"
+        in collected
+    )
+    # Per-cell uniqueness survives — the domain is untouched, so the four cells remain.
+    assert collected.count("test_eval[") == 4
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_progress_groups_under_authored_eval_files" -v`
-Expected: FAIL — with no hook yet, `item.location[0]` is still the `test_cases.py` wrapper, so the authored `.eval.md` paths never appear in the progress output and the two `in progress` assertions fail.
+Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_progress_and_nodeid_use_authored_eval_files" -v`
+Expected: FAIL — with no hook yet, the nodeid path is still `test_cases.py`, so the authored `.eval.md` paths never appear in progress and the collect-only nodeid assertions read `test_cases.py::test_eval[...]`, not the `.eval.md` paths.
 
 - [ ] **Step 3: Write the hook**
 
@@ -409,14 +412,18 @@ In `src/evalspec/runners/pytest.py`, insert after `pytest_configure_node` (after
 
 ```python
 def pytest_collection_modifyitems(config: object, items: list) -> None:
-    """Attribute each eval item's displayed location to its authored `.eval.md` file.
+    """Attribute each eval item's displayed path to its authored `.eval.md` file.
 
-    Collection identity (`item.nodeid`) is untouched, so `--collect-only`/`-v` keep the
-    unique `(eval × arm)` descriptions; only `item.location` — the path pytest groups
-    progress and reports under — is rewritten from the shared `cases.py` wrapper to the
-    eval's authored Markdown file, repo-relative. Reading `item.location` first computes
-    and caches the tuple; the assignment then overrides that cache. Non-eval items (no
-    `eval_arm` callspec param) are left alone.
+    Rewrites only the PATH portion of the nodeid (everything before the first `::`) to the
+    eval's authored Markdown file, repo-relative, preserving the
+    `test_eval[group-evalid-arm]` domain verbatim. pytest derives its non-verbose progress
+    lines, `--collect-only` ids, and FAILED headers from `nodeid.split("::")[0]`, so the
+    nodeid path — not `item.location` — is the field that regroups them; `item.location`
+    is set to the same path so `-vv` and reportinfo stay coherent. The domain carries the
+    per-cell `(eval × arm)` uniqueness downstream tooling and tests match on. Nothing in
+    evalspec keys off pytest nodeids (aggregation uses arm names and on-disk `eval-*`
+    dirs), so persisted artifacts are unaffected. Non-eval items (no `eval_arm` callspec
+    param) are left alone.
     """
     for item in items:
         callspec = getattr(item, "callspec", None)
@@ -424,19 +431,25 @@ def pytest_collection_modifyitems(config: object, items: list) -> None:
             continue
         eval_case, _arm = callspec.params["eval_arm"]
         relpath = item.session._node_location_to_relpath(eval_case.eval_file)
-        _, lineno, domain = item.location
-        item.location = (relpath, lineno, domain)
+        # `nodeid` is a read-only property; assign the backing `_nodeid`. Keep everything
+        # after the first `::` (the parametrized test-function domain) untouched.
+        domain = item.nodeid.split("::", 1)[1]
+        item._nodeid = f"{relpath}::{domain}"
+        _, lineno, testname = item.location
+        item.location = (relpath, lineno, testname)
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_progress_groups_under_authored_eval_files" -v`
+Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_progress_and_nodeid_use_authored_eval_files" -v`
 Expected: 1 passed.
 
-- [ ] **Step 5: Confirm node ids (collection identity) are untouched**
+- [ ] **Step 5: Confirm existing node-id assertions still hold**
 
-Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_cross_product_of_evals_and_arms" "tests/runners/test_pytest.py::test_models_flag_sweeps_arms" -v`
-Expected: both pass — the pre-existing node-id assertions still hold, proving `item.nodeid` is unchanged.
+The rewrite changes only the path portion, so every existing `test_eval[...]` substring assertion and every `test_cases.py::test_eval` positional selection must still work. Run the tests that assert node ids or select by positional/keyword:
+
+Run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester "tests/runners/test_pytest.py::test_cross_product_of_evals_and_arms" "tests/runners/test_pytest.py::test_plugin_self_registers_cases_without_positional" "tests/runners/test_pytest.py::test_explicit_positional_is_respected" "tests/runners/test_pytest.py::test_models_flag_sweeps_arms" "tests/runners/test_pytest.py::test_count_two_parametrizes_sample_index" -v`
+Expected: all pass — domain-preserving path rewrite leaves `test_eval[...]` substrings, `count("test_eval[") == 4`, positional selection, and `--count` outcomes intact.
 
 - [ ] **Step 6: Commit**
 
@@ -543,7 +556,7 @@ Expected: all pass — collection presentation and terminal-table behavior.
 - [ ] **Step 2: Collect-only on the real e2e set (no paid tasks)**
 
 Run: `uv run evalspec run --set e2e -- --collect-only -q`
-Expected: six cells (two authored eval files × three arms) collect and name the two `.eval.md` files; exit 0. No tasks run.
+Expected: six cells (two authored eval files × three arms) collect, printed as `<repo-relative eval.md>::test_eval[<group>-<eval_id>-<arm>]` node ids naming the two authored `.eval.md` files; exit 0. No tasks run.
 
 - [ ] **Step 3: Full unit + integration suite**
 
