@@ -105,7 +105,7 @@ def _recording_call_model(sink: list) -> object:
     model = os.environ.get("EVALSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
 
     def call(prompt: str, *, timeout: int = 60) -> object:
-        """Call the Gemini binder model at the corpus's 15s timeout, recording the reply."""
+        """Call the Gemini binder model at the corpus timeout, recording the reply."""
         reply = binder._call_gemini(prompt, timeout=_CORPUS_TIMEOUT_SECONDS, model=model)
         sink.append(reply)
         return reply
@@ -134,6 +134,10 @@ class BindAttempt:
     error: RuntimeError | None
 
 
+# Two attempts per draw: the original call plus one retry for a transient failure.
+_BIND_ATTEMPTS = 2
+
+
 def _bind_resilient(text: str, *, sink: list) -> BindAttempt:
     """Bind one assertion with one retry for a transient Gemini infra failure.
 
@@ -143,15 +147,18 @@ def _bind_resilient(text: str, *, sink: list) -> BindAttempt:
 
     Returns:
         A BindAttempt. When `error` is set, both attempts failed — the caller must record
-        the failure and fail the pytest item, never skip it. BinderAuthError is never
-        caught here (it isn't a RuntimeError subclass) and propagates uncaught.
+        the failure and fail the pytest item, never skip it.
+
+    Raises:
+        BinderAuthError: Propagated uncaught — deliberately not a RuntimeError subclass,
+            so the retry loop never catches it and a bad credential fails immediately.
     """
     call_model = _recording_call_model(sink)
     attempts = 0
     elapsed_ms = 0.0
     error: RuntimeError | None = None
 
-    for _ in range(2):
+    for _ in range(_BIND_ATTEMPTS):
         attempts += 1
         started = time.perf_counter()
 

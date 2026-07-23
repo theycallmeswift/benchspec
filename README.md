@@ -153,12 +153,14 @@ stability (the latter two via the pytest-xdist and pytest-repeat plugins).
 ## Checking the binder itself
 
 The binder's own accuracy is a separate concern from `evalspec run`: `make evals`
-samples the real Gemini binder over a hand-labeled corpus and enforces the one hard
-gate — a punt-labeled assertion must never bind to a checker. It's a **paid, live
-Gemini run**, not part of `make test`. Each draw retries once on a transient Gemini
-failure; a draw that exhausts both attempts **fails its pytest item outright** — never
-a silent skip. After three observed failures the run stops scheduling new draws
-(workers may still finish draws already in flight), so an unhealthy Gemini endpoint
+samples the real Gemini binder over a hand-labeled corpus and enforces its hard
+gates — above all, a punt-labeled assertion must never bind to a checker, and a
+bound spec must preserve its expected fields. It's a **paid, live Gemini run**, not
+part of `make test`. Each draw retries once on a transient Gemini failure; a draw
+that exhausts both attempts **fails its pytest item outright** — never a silent
+skip. After three failed draws of any kind — infra exhaustion or a genuine gate
+failure — the run stops scheduling new draws (workers may still finish draws
+already in flight), so an unhealthy Gemini endpoint or a badly leaking binder
 can't burn through the rest of the corpus.
 
 ```bash

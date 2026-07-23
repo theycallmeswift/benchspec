@@ -1,7 +1,8 @@
 """Live labeled-corpus eval for the Gemini binder: the false-positive gate.
 
-Samples the real Gemini binder over the gold-labeled corpus and enforces the one hard
-gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
+Samples the real Gemini binder over the gold-labeled corpus and enforces its hard
+gates: a punt-labeled assertion must never bind to a checker (the false-positive
+gate), and a bound spec must preserve its expected fields. One pytest item per draw,
 so the run shows live per-item progress and a leak names the exact draw; the corpus run
 shards the draws across xdist workers, and the `binder_corpus` marker keeps them out of
 the offline suite (each draw costs money and needs a `GEMINI_API_KEY`). A draw that
@@ -54,20 +55,40 @@ def _field_expectation_draws() -> object:
     ]
 
 
+def _draw_record(entry: object, attempt: object, replies: list) -> dict:
+    """Build the diagnostic record fields shared by both live tests for one draw.
+
+    Derives source from the same predicate bind() itself uses to skip call_model,
+    not from whether `replies` is non-empty — an all-retries-errored Gemini draw
+    never appends to `replies` either, and mislabeling it "regex" would inflate
+    regex_fast_path_count and deflate gemini_count.
+    """
+    return {
+        "result": (
+            "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"
+        ),
+        "source": "regex" if _bind_bare_exists(entry["text"]) else "gemini",
+        "attempts": attempt.attempts,
+        "elapsed_ms": attempt.elapsed_ms,
+        "error_type": type(attempt.error).__name__ if attempt.error is not None else None,
+        "error_message": str(attempt.error) if attempt.error is not None else None,
+        "latency_ms": sum(reply.latency_ms for reply in replies) if replies else None,
+        "prompt_tokens": sum(reply.prompt_tokens for reply in replies) if replies else None,
+        "output_tokens": sum(reply.output_tokens for reply in replies) if replies else None,
+    }
+
+
+def _fail_on_exhausted_retries(attempt: object) -> None:
+    """Fail the pytest item outright — never skip — when a draw exhausted its retries."""
+    if attempt.error is not None:
+        pytest.fail(f"infra failure after retry: {type(attempt.error).__name__}: {attempt.error}")
+
+
 @pytest.mark.parametrize("entry", _draws())
 def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
     replies: list = []
     attempt = _bind_resilient(entry["text"], sink=replies)
-
-    # Derive source from the same predicate bind() itself uses to skip call_model,
-    # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
-    # never appends to `replies` either, and mislabeling it "regex" would inflate
-    # regex_fast_path_count and deflate gemini_count.
-    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
-    result = (
-        "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"
-    )
 
     record(
         {
@@ -79,23 +100,14 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
             "actual": {key: attempt.binding.get(key) for key in entry.get("expect", {})}
             if isinstance(attempt.binding, dict)
             else None,
-            "result": result,
             "checker": attempt.binding.get("checker")
             if isinstance(attempt.binding, dict)
             else None,
-            "source": source,
-            "attempts": attempt.attempts,
-            "elapsed_ms": attempt.elapsed_ms,
-            "error_type": type(attempt.error).__name__ if attempt.error is not None else None,
-            "error_message": str(attempt.error) if attempt.error is not None else None,
-            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
-            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
-            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
+            **_draw_record(entry, attempt, replies),
         }
     )
 
-    if attempt.error is not None:
-        pytest.fail(f"infra failure after retry: {type(attempt.error).__name__}: {attempt.error}")
+    _fail_on_exhausted_retries(attempt)
 
     if entry["gold"] == "punt":
         assert not isinstance(attempt.binding, dict), (
@@ -109,28 +121,9 @@ def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: 
     replies: list = []
     attempt = _bind_resilient(entry["text"], sink=replies)
 
-    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
-    result = (
-        "error" if attempt.error is not None else "punt" if attempt.binding is None else "bound"
-    )
+    record({"test": "fields", **_draw_record(entry, attempt, replies)})
 
-    record(
-        {
-            "test": "fields",
-            "result": result,
-            "source": source,
-            "attempts": attempt.attempts,
-            "elapsed_ms": attempt.elapsed_ms,
-            "error_type": type(attempt.error).__name__ if attempt.error is not None else None,
-            "error_message": str(attempt.error) if attempt.error is not None else None,
-            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
-            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
-            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
-        }
-    )
-
-    if attempt.error is not None:
-        pytest.fail(f"infra failure after retry: {type(attempt.error).__name__}: {attempt.error}")
+    _fail_on_exhausted_retries(attempt)
 
     assert isinstance(attempt.binding, dict), f"expected bind for {entry['text']!r}, got punt"
     assert all(attempt.binding.get(key) == value for key, value in entry["expect"].items()), (

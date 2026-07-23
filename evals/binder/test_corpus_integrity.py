@@ -6,9 +6,12 @@ enforces the invariants required by the false-positive gate.
 
 from __future__ import annotations
 
+import itertools
 import json
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import conftest
 import pytest
@@ -383,6 +386,7 @@ def test_recording_call_model_honors_evalspec_binder_model_env_override(
     captured = {}
 
     def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Capture the model the wrapper passes and return a canned reply."""
         captured["model"] = model
         return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
 
@@ -405,6 +409,7 @@ def test_recording_call_model_uses_corpus_timeout_not_callers_timeout(monkeypatc
     captured = {}
 
     def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Capture the timeout the wrapper passes and return a canned reply."""
         captured["timeout"] = timeout
         return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
 
@@ -416,17 +421,39 @@ def test_recording_call_model_uses_corpus_timeout_not_callers_timeout(monkeypatc
     assert captured["timeout"] == 15
 
 
+def _install_stepping_clock(monkeypatch: object) -> None:
+    """Swap conftest's time module for one whose perf_counter advances 1s per call.
+
+    Each timed attempt in _bind_resilient reads the clock twice (start and end), so
+    every attempt spans exactly one second and tests can pin elapsed_ms accumulation
+    to an exact total instead of the vacuous `>= 0`.
+    """
+    ticks = itertools.count()
+
+    def stepping_perf_counter() -> float:
+        """Return 0.0, 1.0, 2.0, ... — one second per call."""
+        return float(next(ticks))
+
+    monkeypatch.setattr(conftest, "time", SimpleNamespace(perf_counter=stepping_perf_counter))
+
+
 def test_bind_resilient_exhausts_retries_and_reports_final_error(monkeypatch: object) -> None:
-    """Two transient RuntimeErrors exhaust the retry budget; the final error survives."""
+    """Two transient RuntimeErrors exhaust the retry budget; the final error survives.
+
+    With the stepping clock, each of the two failed attempts spans exactly 1000ms, so
+    elapsed_ms == 2000 pins that failed attempts accumulate into the total.
+    """
     attempt_count = {"calls": 0}
 
     def failing_call_gemini(
         prompt: object, *, timeout: object = 60, model: object = None
     ) -> object:
+        """Raise a transient transport failure on every call, numbering each attempt."""
         attempt_count["calls"] += 1
         raise RuntimeError(f"Gemini API transport failure: attempt {attempt_count['calls']}")
 
     monkeypatch.setattr(binder, "_call_gemini", failing_call_gemini)
+    _install_stepping_clock(monkeypatch)
 
     attempt = conftest._bind_resilient(
         "the summary faithfully reflects the three key facts from the source", sink=[]
@@ -436,14 +463,19 @@ def test_bind_resilient_exhausts_retries_and_reports_final_error(monkeypatch: ob
     assert attempt.attempts == 2
     assert isinstance(attempt.error, RuntimeError)
     assert "attempt 2" in str(attempt.error)
-    assert attempt.elapsed_ms >= 0
+    assert attempt.elapsed_ms == pytest.approx(2000.0)
 
 
 def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) -> None:
-    """One transient RuntimeError followed by a valid reply succeeds; both attempts count."""
+    """One transient RuntimeError followed by a valid reply succeeds; both attempts count.
+
+    With the stepping clock, the failed and the successful attempt each span exactly
+    1000ms, so elapsed_ms == 2000 pins that the failed attempt's cost is kept.
+    """
     attempt_count = {"calls": 0}
 
     def flaky_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Fail the first call with a transient error, then return a punt reply."""
         attempt_count["calls"] += 1
         if attempt_count["calls"] == 1:
             raise RuntimeError("Gemini API transport failure: cold start")
@@ -455,6 +487,7 @@ def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) 
         )
 
     monkeypatch.setattr(binder, "_call_gemini", flaky_call_gemini)
+    _install_stepping_clock(monkeypatch)
 
     sink: list = []
     attempt = conftest._bind_resilient(
@@ -465,7 +498,7 @@ def test_bind_resilient_succeeds_after_one_transient_error(monkeypatch: object) 
     assert attempt.attempts == 2
     assert attempt.binding is None
     assert len(sink) == 1
-    assert attempt.elapsed_ms >= 0
+    assert attempt.elapsed_ms == pytest.approx(2000.0)
 
 
 def test_bind_resilient_lets_binder_auth_error_propagate_uncaught(monkeypatch: object) -> None:
@@ -478,6 +511,7 @@ def test_bind_resilient_lets_binder_auth_error_propagate_uncaught(monkeypatch: o
     def rejecting_call_gemini(
         prompt: object, *, timeout: object = 60, model: object = None
     ) -> object:
+        """Raise the auth rejection a bad credential produces."""
         raise binder.BinderAuthError("Gemini API rejected the credential (HTTP 401): bad key")
 
     monkeypatch.setattr(binder, "_call_gemini", rejecting_call_gemini)
@@ -503,6 +537,7 @@ def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # any non-empty value satisfies preflight
 
     def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Raise a transient transport failure on every call."""
         raise RuntimeError("Gemini API transport failure: forced for this test")
 
     monkeypatch.setattr(binder, "_call_gemini", always_fails)
@@ -532,7 +567,57 @@ def test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries(
     assert row["result"] == "error"
     assert row["error_type"] == "RuntimeError"
     assert "forced for this test" in row["error_message"]
-    assert row["elapsed_ms"] >= 0
+    assert row["elapsed_ms"] > 0
+
+
+def test_binder_corpus_fields_draw_fails_not_skips_when_gemini_exhausts_retries(
+    pytester: object, monkeypatch: object
+) -> None:
+    """A field-preservation draw that exhausts its retries must also fail, never skip.
+
+    Same in-process real-corpus setup as
+    test_binder_corpus_fails_not_skips_when_gemini_exhausts_retries, selecting the
+    fields test instead so its fail path and record row get their own offline
+    coverage. Scoped to the frontmatter_has cohort because those draws never take the
+    bare-file-exists regex fast path, so the first draw always reaches the forced
+    Gemini failure.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Raise a transient transport failure on every call."""
+        raise RuntimeError("Gemini API transport failure: forced for this test")
+
+    monkeypatch.setattr(binder, "_call_gemini", always_fails)
+    test_corpus_path = Path(__file__).resolve().parent / "test_corpus.py"
+
+    result = pytester.runpytest_inprocess(
+        "--rootdir",
+        str(pytester.path),
+        "-m",
+        "binder_corpus",
+        "-k",
+        "frontmatter_has and test_binder_corpus_preserves_expected_checker_fields",
+        "--maxfail=1",
+        str(test_corpus_path),
+    )
+
+    result.assert_outcomes(failed=1, passed=0, skipped=0)
+
+    rows = [
+        json.loads(line)
+        for result_path in (pytester.path / "tmp" / "binder_results").glob("results-*.jsonl")
+        for line in result_path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["test"] == "fields"
+    assert row["result"] == "error"
+    assert row["error_type"] == "RuntimeError"
+    assert "forced for this test" in row["error_message"]
+    assert row["attempts"] == 2
+    assert row["elapsed_ms"] > 0
 
 
 def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: object) -> None:
@@ -548,6 +633,7 @@ def test_binder_corpus_stops_after_maxfail_three(pytester: object, monkeypatch: 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     def always_fails(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+        """Raise a transient transport failure on every call."""
         raise RuntimeError("Gemini API transport failure: forced for this test")
 
     monkeypatch.setattr(binder, "_call_gemini", always_fails)
@@ -573,8 +659,15 @@ def test_evals_target_constructs_the_circuit_breaker_command() -> None:
 
     A dry run prints the recipe with defaults expanded without executing anything,
     pinning the constructed command that the serial pytester tests above cannot see.
+    The Makefile's `?=` defaults yield to the environment, so the knobs are scrubbed
+    from the subprocess env — a developer's exported overrides must not fail this test.
     """
     repo_root = Path(__file__).resolve().parents[2]
+    scrubbed_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("BINDER_WORKERS", "BINDER_MAX_FAILURES", "EVAL_ARGS")
+    }
 
     printed = subprocess.run(
         ["make", "--dry-run", "evals"],
@@ -582,6 +675,7 @@ def test_evals_target_constructs_the_circuit_breaker_command() -> None:
         capture_output=True,
         text=True,
         check=True,
+        env=scrubbed_env,
     ).stdout
 
     assert "-m binder_corpus" in printed
@@ -608,6 +702,7 @@ class _FakeConfig:
     """Minimal stand-in for pytest.Config, enough to call conftest hooks directly."""
 
     def __init__(self, rootpath: Path) -> None:
+        """Store the rootpath and an empty stash."""
         self.rootpath = rootpath
         self.stash: dict = {}
 
@@ -616,6 +711,7 @@ class _FakeSession:
     """Minimal stand-in for pytest.Session, enough to call pytest_sessionfinish directly."""
 
     def __init__(self, config: _FakeConfig, exitstatus: int) -> None:
+        """Store the config and the exit status under test."""
         self.config = config
         self.exitstatus = exitstatus
 
@@ -623,10 +719,10 @@ class _FakeSession:
 def test_pytest_sessionfinish_does_not_flip_exitstatus_on_high_error_rate(
     tmp_path: Path,
 ) -> None:
-    """The removed 5% infra-error gate no longer turns a green run red.
+    """Never mutate exitstatus in sessionfinish — per-item failures are the only gate.
 
-    Every exhausted draw now fails its own pytest item, so a broadly-broken run is
-    already red long before sessionfinish runs — a second gate flipping
+    Every exhausted draw fails its own pytest item, so a broadly-broken run is
+    already red long before sessionfinish runs — a gate flipping
     `session.exitstatus` here would just be a second, redundant failure policy.
     """
     results_dir = tmp_path / "tmp" / "binder_results"
@@ -649,7 +745,7 @@ def test_pytest_sessionfinish_does_not_flip_exitstatus_on_high_error_rate(
         "prompt_tokens": None,
         "output_tokens": None,
     }
-    rows = [error_row] * 20  # 100% error rate — comfortably over the removed 5% threshold
+    rows = [error_row] * 20  # every row errored — sessionfinish must still leave exitstatus alone
     (results_dir / "results-gw0.jsonl").write_text(
         "\n".join(json.dumps(row) for row in rows) + "\n"
     )
@@ -662,4 +758,5 @@ def test_pytest_sessionfinish_does_not_flip_exitstatus_on_high_error_rate(
     assert session.exitstatus == 0
     summary = "\n".join(config.stash[conftest._SUMMARY])
     assert "infra_failures: 20 draws exhausted retries and failed" in summary
+    assert "(elapsed=10000ms)" in summary
     assert "FAIL" not in summary
