@@ -236,7 +236,7 @@ def pytest_configure_node(node: object) -> None:
     node.workerinput["evalspec_iteration"] = workspace.current_iteration()
 
 
-def pytest_collection_modifyitems(config: object, items: list) -> None:
+def pytest_collection_modifyitems(config: object, items: list[object]) -> None:
     """Attribute each eval item's displayed path to its authored `.eval.md` file.
 
     Rewrites only the PATH portion of the nodeid (everything before the first `::`) to the
@@ -359,7 +359,15 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
-        lines += report.terminal_matrix(benchmark, skills_root.parent / "benchmark.md")
+        # Report the path relative to the invocation cwd (the docs' `tmp/evals/...` form)
+        # so it's copy-pasteable into a follow-up command; a run rooted outside cwd keeps
+        # the absolute path rather than fabricating a `..`-relative one.
+        benchmark_md = skills_root.parent / "benchmark.md"
+        try:
+            benchmark_md = benchmark_md.relative_to(Path.cwd())
+        except ValueError:
+            pass
+        lines += report.terminal_matrix(benchmark, benchmark_md)
 
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         skill = skill_dir.name

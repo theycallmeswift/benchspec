@@ -197,11 +197,11 @@ def test_models_flag_sweeps_arms(pytester: object) -> None:
     assert "test_eval[myskill-alpha-opus]" in out
 
 
-def test_progress_and_nodeid_use_authored_eval_files(pytester: object) -> None:
-    """Verify progress + collection ids use authored .eval.md paths, domain preserved."""
+def test_progress_groups_under_authored_eval_files(pytester: object) -> None:
+    """Verify non-verbose progress output groups under the authored .eval.md paths."""
+    # Non-verbose progress groups by the nodeid path portion — now the authored eval file.
     _make_project(pytester)
 
-    # Non-verbose progress groups by the nodeid path portion — now the authored eval file.
     run = pytester.runpytest(
         "-p",
         "evalspec.runners.pytest",
@@ -215,8 +215,14 @@ def test_progress_and_nodeid_use_authored_eval_files(pytester: object) -> None:
     assert "skills/myskill/evals/myskill/alpha.eval.md" in progress
     assert "skills/myskill/evals/myskill/beta.eval.md" in progress
 
-    # --collect-only -q prints the full rewritten nodeid: authored path + preserved domain.
+
+def test_collect_only_ids_use_authored_eval_files(pytester: object) -> None:
+    """Verify --collect-only -q prints rewritten nodeids with the domain preserved."""
+    _make_project(pytester)
+
     collected = _collect(pytester).stdout.str()
+
+    # The full rewritten nodeid: authored path + preserved parametrized domain.
     assert (
         "skills/myskill/evals/myskill/alpha.eval.md::test_eval[myskill-alpha-baseline]"
         in collected
@@ -227,6 +233,53 @@ def test_progress_and_nodeid_use_authored_eval_files(pytester: object) -> None:
     )
     # Per-cell uniqueness survives — the domain is untouched, so the four cells remain.
     assert collected.count("test_eval[") == 4
+
+
+def test_non_eval_items_keep_their_original_nodeid(pytester: object) -> None:
+    """Verify a plain test collected alongside eval items keeps its module nodeid."""
+    _make_project(pytester)
+    pytester.makepyfile(test_plain="def test_plain():\n    pass\n")
+
+    result = pytester.runpytest(
+        "-p",
+        "evalspec.runners.pytest",
+        "--collect-only",
+        "-q",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+        "test_plain.py",
+    )
+
+    out = result.stdout.str()
+    # The plain item carries no eval_arm callspec, so the rewrite hook leaves it alone
+    # while the eval items collected beside it still get authored paths.
+    assert "test_plain.py::test_plain" in out
+    assert "skills/myskill/evals/myskill/alpha.eval.md::test_eval[myskill-alpha-baseline]" in out
+
+
+def test_hook_rewrites_item_location_to_authored_eval_file(pytester: object) -> None:
+    """Verify item.location is rewritten so -vv lines derive from the eval file."""
+    # At -vv, pytest appends ` <- <location path>` to a test line whenever the nodeid
+    # path disagrees with item.location — so a nodeid-only rewrite would print
+    # `alpha.eval.md::test_eval[...] <- test_cases.py`. A clean line proves the hook
+    # rewrote location too.
+    _make_project(pytester)
+
+    run = pytester.runpytest(
+        "-p",
+        "evalspec.runners.pytest",
+        "-vv",
+        "--evalspec-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+    )
+
+    run.assert_outcomes(passed=4)
+    eval_lines = [line for line in run.stdout.lines if "test_eval[" in line]
+    assert eval_lines
+    assert all(line.startswith("skills/myskill/evals/myskill/") for line in eval_lines)
+    assert not any(" <- " in line for line in eval_lines)
 
 
 def test_malformed_schema_fails_collection(pytester: object) -> None:
@@ -478,9 +531,10 @@ def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> objec
     return session, terminal_reporter
 
 
-def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) -> None:
-    """Verify terminal summary prints delta."""
+def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -> None:
+    """Verify the terminal summary prints the run-level matrix and its Report pointer."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    monkeypatch.chdir(tmp_path)
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
@@ -495,7 +549,11 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
     # final line points at the persisted report under this iteration.
     assert lines[0].split() == ["Eval", "baseline", "trial"]
     assert any("+100pp" in message for message in lines)
-    assert any(message.startswith("Report: ") and "iteration_01" in message for message in lines)
+    report_line = next(message for message in lines if message.startswith("Report: "))
+    assert "iteration_01" in report_line
+    # Relativized against the invocation cwd — the docs' copy-pasteable `tmp/evals/...`
+    # form, never an absolute path.
+    assert not report_line.removeprefix("Report: ").startswith("/")
     assert (skill_results_dir.parent.parent / "benchmark.md").is_file()
 
 
@@ -1176,6 +1234,34 @@ def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> N
     assert any("fail-under" in line for line in terminal_reporter.lines)
 
 
+def test_fail_under_line_prints_below_matrix(tmp_path: object, monkeypatch: object) -> None:
+    """Verify the FAIL fail-under line prints after the matrix and its Report pointer."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=0, total=2)  # 0%
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)  # 100% → delta -100pp
+    config = _FakeConfig(tmp_path, fail_under=0.0)
+    session = _FakeSession(config)
+
+    plugin.pytest_sessionfinish(session, 0)
+
+    terminal_reporter = _FakeTR()
+    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
+    lines = terminal_reporter.lines
+    header_index = next(
+        index for index, line in enumerate(lines) if line.split() == ["Eval", "baseline", "trial"]
+    )
+    report_line_index = next(
+        index for index, line in enumerate(lines) if line.startswith("Report: ")
+    )
+    fail_line_index = next(
+        index for index, line in enumerate(lines) if line.startswith("FAIL fail-under:")
+    )
+    assert header_index < report_line_index < fail_line_index
+
+
 def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> None:
     """Verify fail under quiet when met."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
@@ -1330,8 +1416,8 @@ def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) 
     terminal_reporter = _FakeTR()
     plugin.pytest_terminal_summary(terminal_reporter, 0, config)
     # A bare "binder" substring check would self-collide: pytest's tmp_path embeds this
-    # test's own name (which contains "binder") into the benchmark.md path the delta
-    # line reports. Match the WARN line's actual shape instead.
+    # test's own name (which contains "binder") into the benchmark.md path the matrix's
+    # Report pointer prints. Match the WARN line's actual shape instead.
     assert not any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
 
 

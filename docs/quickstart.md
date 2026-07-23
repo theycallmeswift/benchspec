@@ -135,6 +135,9 @@ skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-
 skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-trial]
 ```
 
+These ids are display attribution, not pasteable positional selectors — use `-k`
+to select individual cells.
+
 A malformed eval fails here, loudly, with the offending path quoted.
 
 ## Step 5 — Run

@@ -72,9 +72,11 @@ identity.
 plain text under an `evalspec benchmark` banner — the run-time view of what
 `benchmark.md` persists. Columns are the arms baseline-first; rows are
 `group/eval_id` (an all-errored eval still appears, as a row of `—`); the
-`All evals` footer is each arm's pooled rate; every non-baseline cell carries its
-`(+Npp)` delta. The last line, `Report: <path>`, points at the written
-`benchmark.md`:
+`All evals` footer is each arm's pooled rate. A non-baseline cell carries its
+`(+Npp)` delta only when both it and the baseline measured that eval — a cell
+with no rate of its own renders `—`, and one whose baseline rate is missing
+shows a bare `%`. The matrix block's last line, `Report: <path>`, points at the
+written `benchmark.md`:
 
 ```text
 ============================== evalspec benchmark ==============================
@@ -87,6 +89,12 @@ Report: tmp/evals/iteration_02/benchmark.md
 
 The matrix is display only: `FAIL fail-under: …` and `WARN binder: …` lines, when
 present, print below it and are what actually control exit status.
+
+Likewise, the `.eval.md::test_eval[…]` ids in progress output are display
+attribution, not positional selectors — pasting one back into a run collects
+nothing. Re-run individual cells with `-k`, or failures with `--lf`. `--sw`
+(stepwise) resume doesn't survive the rewrite either — its cache compares
+pre-rewrite ids — so reach for `--lf` instead.
 
 <a id="noise"></a>
 ## Noise, samples, and flakiness

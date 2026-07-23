@@ -826,6 +826,40 @@ def test_terminal_matrix_renders_dash_for_all_errored_eval(tmp_path: object) -> 
     assert ghost.split() == ["hello/ghost", "—"]
 
 
+def test_terminal_matrix_baseline_only_shows_rate_without_delta(tmp_path: object) -> None:
+    """Verify a baseline-only sweep renders bare rate cells with no delta anywhere."""
+    seed_arm(tmp_path / "hello", "greets-by-name", "baseline", passes=1, total=2)  # 50%
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, Path("tmp/evals/iteration_01/benchmark.md"))
+
+    # The baseline is the sole arm, so there is no contrast arm to take a Δ against.
+    assert any("50%" in line for line in lines)
+    assert not any("pp)" in line for line in lines)
+
+
+def test_terminal_matrix_missing_baseline_rate_renders_bare_cell(tmp_path: object) -> None:
+    """Verify a baseline with no per-eval rate yields — and a delta-less trial cell."""
+    # `ghost` has no baseline measurement (its only baseline sample errored) but a real
+    # trial rate; `ok` keeps the baseline arm alive so build_benchmark doesn't coerce
+    # the baseline to None outright.
+    seed_arm(tmp_path / "hello", "ok", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "hello", "ghost", "baseline", passes=0, total=2, errored=True)
+    seed_arm(tmp_path / "hello", "ghost", "trial", passes=2, total=2)  # 100%
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, Path("tmp/evals/iteration_01/benchmark.md"))
+
+    # No baseline rate to measure against → the trial cell is a bare %, never a delta
+    # against nothing.
+    ghost = next(line for line in lines if line.startswith("hello/ghost"))
+    assert ghost.split() == ["hello/ghost", "—", "100%"]
+
+
 def test_terminal_matrix_empty_without_arms() -> None:
     """Verify a benchmark with no arm columns yields no lines."""
     bench = {"arms": {}, "baseline": None, "roster": []}

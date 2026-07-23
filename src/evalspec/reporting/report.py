@@ -405,8 +405,8 @@ def terminal_matrix(benchmark: dict, benchmark_md: Path) -> list[str]:
     if not names:
         return []
 
-    # Build (label, cells) rows from the roster then the pooled footer, reusing the exact
-    # per-eval lookup and cell formatting the Markdown matrix uses.
+    # Reuses the exact per-eval lookup and cell formatting `_matrix_table` uses — keep the
+    # two in sync so the terminal and Markdown matrices can never disagree.
     rows: list[tuple[str, list[str]]] = []
     for entry in benchmark["roster"]:
         group = entry["group"]
@@ -425,15 +425,13 @@ def terminal_matrix(benchmark: dict, benchmark_md: Path) -> list[str]:
         footer_cells.append(_rate_cell(arms[arm_name]["pass_rate"], delta_pp))
     rows.append(("All evals", footer_cells))
 
-    # Column widths: label column fits its header and every row label; each arm column
-    # fits its header and every cell in that column.
     label_width = max(len("Eval"), *(len(label) for label, _ in rows))
     arm_widths = [
         max(len(names[index]), *(len(cells[index]) for _, cells in rows))
         for index in range(len(names))
     ]
 
-    def _data(label: str, cells: list[str]) -> str:
+    def _format_row(label: str, cells: list[str]) -> str:
         """Left-justify the label, right-justify each cell, join on the two-space gutter."""
         parts = [label.ljust(label_width)]
         parts += [cells[index].rjust(arm_widths[index]) for index in range(len(names))]
@@ -444,7 +442,7 @@ def terminal_matrix(benchmark: dict, benchmark_md: Path) -> list[str]:
     header_parts = ["Eval".ljust(label_width)]
     header_parts += [names[index].ljust(arm_widths[index]) for index in range(len(names))]
     lines = ["  ".join(header_parts).rstrip()]
-    lines += [_data(label, cells) for label, cells in rows]
+    lines += [_format_row(label, cells) for label, cells in rows]
     lines.append(f"Report: {benchmark_md}")
     return lines
 
