@@ -86,6 +86,19 @@ def test_eval(eval_arm):
     pass
 """
 
+# Asserts, from a conftest's own `pytest_configure`, that `.env` is already loaded — the
+# hook ordering `test_dotenv_loads_before_conftests_run` exercises.
+DOTENV_PROBE_CONFTEST = """
+import os
+
+import pytest
+
+
+def pytest_configure(config):
+    if not os.environ.get("EVALSPEC_DOTENV_PROBE"):
+        raise pytest.UsageError("EVALSPEC_DOTENV_PROBE missing at configure time")
+"""
+
 
 def _make_project(
     pytester: object, skill: object = "myskill", arms_toml: object = ARMS_TOML
@@ -882,12 +895,9 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
 
     _make_project(pytester)
     monkeypatch.setattr(shutil, "which", lambda name: None)
-    # judge_config preflights the Gemini key before the binary; set it so that check
-    # can't fail first and mask the judge-binary assertion below. (It used to pass only
-    # because a dev-machine repo-root .env leaked in — never true in CI.)
+    # Neither the Gemini key preflight (which judge_config runs first) nor the sandbox
+    # preflight may fail for unrelated reasons and mask the judge-binary assertion below.
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    # No-op the sandbox preflight so it cannot fail first for unrelated reasons (no
-    # microVM/credentials) and mask the judge-binary assertion below.
     monkeypatch.setattr(sandbox, "preflight", lambda: None)
     # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
     # test_eval"): `pytest_configure` only self-registers the real `evalspec/cases.py`
@@ -1279,24 +1289,9 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
 
 def test_dotenv_loads_before_conftests_run(pytester: object, monkeypatch: object) -> None:
     """Verify `.env` is loaded before any conftest's `pytest_configure` runs."""
-    # Regression: load_dotenv() lived in the plugin's pytest_configure, which pluggy
-    # calls *after* every conftest's (conftests register later; hooks run LIFO). The
-    # binder corpus conftest preflights GEMINI_API_KEY there, so `make evals` aborted
-    # with "GEMINI_API_KEY is required" even with the key sitting in `.env`.
     monkeypatch.delenv("EVALSPEC_DOTENV_PROBE", raising=False)
     (pytester.path / ".env").write_text("EVALSPEC_DOTENV_PROBE=from-dotenv\n")
-    pytester.makeconftest(
-        """
-        import os
-
-        import pytest
-
-
-        def pytest_configure(config):
-            if not os.environ.get("EVALSPEC_DOTENV_PROBE"):
-                raise pytest.UsageError("EVALSPEC_DOTENV_PROBE missing at configure time")
-        """
-    )
+    pytester.makeconftest(DOTENV_PROBE_CONFTEST)
     pytester.makepyfile(test_probe="def test_probe():\n    pass\n")
 
     result = pytester.runpytest_subprocess("-p", "evalspec.plugin", "test_probe.py")
