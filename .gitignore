@@ -13,3 +13,4 @@ build/
 .superpowers/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+.claude/settings.local.json
