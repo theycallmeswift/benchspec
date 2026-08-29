@@ -604,7 +604,7 @@ def cli_clean(repo_root: Path) -> None:
 
     Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
-    Tolerates 'none found'. Snapshots are regenerable via `make evals:build`.
+    Tolerates 'none found'. Snapshots are regenerable via `harnessbench sandbox:build`.
     """
     import subprocess
 

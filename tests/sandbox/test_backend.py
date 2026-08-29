@@ -175,6 +175,36 @@ def test_image_identity_unavailable_when_microsandbox_not_installed() -> None:
     assert identity.image_digest_error
 
 
+def test_msb_binary_honors_msb_path_override(monkeypatch: object, tmp_path: object) -> None:
+    """`MSB_PATH` wins over the wheel-bundled runtime, matching the SDK's resolver."""
+    override = tmp_path / "custom-msb"
+    monkeypatch.setenv("MSB_PATH", str(override))
+
+    assert backend.msb_binary() == override
+
+
+def test_installed_false_when_msb_path_override_missing(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """An `MSB_PATH` pointing at nothing means the runtime is not installed."""
+    monkeypatch.setenv("MSB_PATH", str(tmp_path / "missing-msb"))
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    assert microsandbox_backend.installed() is False
+
+
+def test_installed_true_when_msb_path_override_exists(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """An `MSB_PATH` pointing at a real file means the runtime is installed."""
+    binary = tmp_path / "msb"
+    binary.write_bytes(b"")
+    monkeypatch.setenv("MSB_PATH", str(binary))
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+
+    assert microsandbox_backend.installed() is True
+
+
 def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None:
     """The backend preflight returns the platform + install errors as a list."""
     microsandbox_backend = backend.resolve_sandbox("microsandbox")
