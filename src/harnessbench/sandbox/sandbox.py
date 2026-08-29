@@ -27,6 +27,7 @@ from harnessbench.sandbox.backend import (
     DEFAULT_SANDBOX,
     SandboxBackend,
     host_mount_path,
+    msb_binary,
     resolve_sandbox,
 )
 from harnessbench.sandbox.project import discard_stage, stage_project
@@ -608,12 +609,16 @@ def cli_clean(repo_root: Path) -> None:
     """
     import subprocess
 
+    binary = msb_binary()
+
     def _msb(*args: object) -> None:
-        """Provide the msb helper."""
+        """Run the SDK-resolved msb binary; a missing runtime means nothing to prune."""
+        if binary is None:
+            return
         try:
-            subprocess.run(["msb", *args], check=False)
+            subprocess.run([str(binary), *args], check=False)
         except FileNotFoundError:
-            pass  # msb CLI not installed — nothing to prune via it
+            pass
 
     home = Path.home() / ".microsandbox"
     for sub, prefixes in (
