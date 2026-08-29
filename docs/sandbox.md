@@ -2,11 +2,11 @@
 
 Every eval cell runs inside a microVM — not a container, not a subprocess on your
 machine. The agent starts from a known image and a clean workdir containing only
-the files the eval seeded. Your repo is also readable, but immutable, at
-`/project` so `setup.sh` can install the skill under test; the agent shares the
-guest and can read that mount too. This document covers the lifecycle: what gets
-baked into a snapshot, when snapshots rebuild, what a running cell can see, and
-how credentials get in without ever being readable in the guest.
+the files the eval seeded. A staged copy of your repo is also readable, but
+immutable, at `/project` so `setup.sh` can install the skill under test; the agent
+shares the guest and can read that mount too. This document covers the lifecycle:
+what gets baked into a snapshot, when snapshots rebuild, what a running cell can
+see, and how credentials get in without ever being readable in the guest.
 
 The implementation is [microsandbox](https://github.com/microsandbox/microsandbox),
 behind a `SandboxBackend` seam. A set selects its backend with the `sandbox` key;
@@ -80,13 +80,29 @@ of memory — and tears it down after the turn. The guest sees:
 | Path | Mount | Contents |
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory. The host grades this directory afterward. |
-| `/project` | read-only | Your repo root. Exists so the eval's own `setup.sh` can copy the skill under test into the guest — read-only, so nothing an agent or script does can write back into your checkout. |
+| `/project` | read-only | A staged copy of your repo (see below). Exists so the eval's own `setup.sh` can copy the skill under test into the guest — read-only, so nothing an agent or script does can write back into your checkout. |
 | `/home/harnessbench/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
-The order of events in a cell: boot from snapshot → run `setup.sh` (if present,
-with the `HARNESSBENCH_*` cell variables and the arm's `env`) → invoke the agent with
-its working directory at `/workspace` → gather facts (file tree, contents,
-SHA-256s, the final message, the tool-call stream) → tear down.
+The order of events in a cell: stage the project → boot from snapshot → run
+`setup.sh` (if present, with the `HARNESSBENCH_*` cell variables and the arm's
+`env`) → invoke the agent with its working directory at `/workspace` → gather
+facts (file tree, contents, SHA-256s, the final message, the tool-call stream) →
+tear down, removing the stage.
+
+### What `/project` contains
+
+`/project` is never a bind mount of your checkout. Each cell stages a fresh copy
+of what a `git clone` would contain — tracked files plus untracked files that
+`.gitignore` does not ignore — and mounts that. Three things are always left out,
+tracked or not: any dotenv file (`.env`, `.env.local`, `.env.example`, …), `.git`,
+and harnessbench's own `tmp/` artifact root (earlier runs' transcripts and grades,
+which an agent must not be able to crib from). The relative layout is preserved,
+so `setup.sh` paths, a project-local `.claude/skills/`, and
+`harness_args = ["--plugin-dir", "/project"]` all resolve as they would against
+the checkout. Outside a git checkout (or without `git` on `PATH`) the stage falls
+back to a plain walk that skips `.venv`, `node_modules`, `__pycache__`, and
+`.worktrees` by name — `.gitignore` is not honored on that path. If a dotenv file
+would still land in the stage, the cell refuses to boot rather than mount it.
 
 ## Credentials
 

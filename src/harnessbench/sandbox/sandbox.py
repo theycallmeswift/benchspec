@@ -28,6 +28,7 @@ from harnessbench.sandbox.backend import (
     SandboxBackend,
     resolve_sandbox,
 )
+from harnessbench.sandbox.project import discard_stage, stage_project
 from harnessbench.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from harnessbench.specs.schema import SchemaError
 
@@ -246,14 +247,23 @@ class SandboxSession:
 
     async def __aenter__(self: object) -> object:
         """Enter the arm session and capture baseline artifact state."""
-        self._sandbox = await self._backend.create_sandbox(
-            agent=self._agent,
-            snapshot=self._snapshot,
-            name=_sandbox_run_name(self._eval_id, self._config),
-            host_workdir=self._host_workdir,
-            host_repo_root=self._host_repo_root,
-            extra_volumes=_agent_extra_volumes,
+        # The guest gets a staged copy of the project, never the checkout: the copy has
+        # the same layout minus `.env`, `.git`, and prior-run artifacts.
+        self._staged_project = (
+            stage_project(self._host_repo_root) if self._host_repo_root is not None else None
         )
+        try:
+            self._sandbox = await self._backend.create_sandbox(
+                agent=self._agent,
+                snapshot=self._snapshot,
+                name=_sandbox_run_name(self._eval_id, self._config),
+                host_workdir=self._host_workdir,
+                host_repo_root=self._staged_project,
+                extra_volumes=_agent_extra_volumes,
+            )
+        except BaseException:
+            discard_stage(self._staged_project)
+            raise
         # Install before the artifact baseline so only later agent-authored files surface.
         if self._setup_reldir is not None:
             try:
@@ -268,6 +278,7 @@ class SandboxSession:
                 )
             except BaseException:
                 await self._backend.stop_quietly(self._sandbox)
+                discard_stage(self._staged_project)
                 raise
         self._artifact_base = await _snapshot_artifact_shas(
             self._sandbox, self._agent, self._backend
@@ -302,7 +313,10 @@ class SandboxSession:
 
     async def __aexit__(self: object, *exc: object) -> object:
         """Close the arm session and release sandbox resources."""
-        await self._sandbox.stop()
+        try:
+            await self._sandbox.stop()
+        finally:
+            discard_stage(self._staged_project)
 
 
 def arm_session(
@@ -379,13 +393,18 @@ async def _route_in_sandbox_async(
 ) -> object:
     """Route in sandbox async."""
     # Snapshot resolution happens before this coroutine because snapshot builds run loops.
-    sandbox = await backend.create_trigger_sandbox(
-        agent=agent,
-        snapshot=snapshot,
-        name=f"trigger-{_worker_tag()}",
-        host_repo_root=repo_root,
-        extra_volumes=_agent_extra_volumes,
-    )
+    staged_project = stage_project(repo_root)
+    try:
+        sandbox = await backend.create_trigger_sandbox(
+            agent=agent,
+            snapshot=snapshot,
+            name=f"trigger-{_worker_tag()}",
+            host_repo_root=staged_project,
+            extra_volumes=_agent_extra_volumes,
+        )
+    except BaseException:
+        discard_stage(staged_project)
+        raise
     lines: list[str] = []
     dispatched = False
     exit_code: int | None = None
@@ -432,6 +451,7 @@ async def _route_in_sandbox_async(
             await backend.kill_quietly(handle)
     finally:
         await backend.stop_quietly(sandbox)
+        discard_stage(staged_project)
 
     if dispatched:
         return lines

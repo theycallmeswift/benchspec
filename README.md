@@ -93,11 +93,13 @@ fresh microVM from a cached snapshot, seeds the eval's `workspace/` files into a
 clean room mounted at `/workspace`, runs the eval's own `setup.sh` (which branches
 on `$HARNESSBENCH_ARM` — the baseline arm installs nothing), and invokes the agent.
 The agent's workdir starts with nothing but the eval's `workspace/` files — no
-docs, peers, or project state are copied into it. The repo is also mounted
-read-only at `/project` so `setup.sh` can install the skill under test. The agent
-can read that mount, so prompts and harness arguments should not direct it there
-unless repo access is part of the experiment; neither the agent nor `setup.sh`
-can write back into your checkout.
+docs, peers, or project state are copied into it. A staged copy of the repo — what
+a `git clone` would contain, minus any `.env` file, `.git`, and prior-run artifacts —
+is also mounted read-only at `/project` so `setup.sh` can install the skill under
+test. The agent can read that mount, so prompts and harness arguments should not
+direct it there unless repo access is part of the experiment; neither the agent
+nor `setup.sh` can write back into your checkout, and your credentials are never
+inside the guest.
 
 ## Vocabulary
 
