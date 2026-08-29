@@ -1,11 +1,11 @@
-"""Harnessbench — a pytest-native runner for coding-agent skill evals.
+"""harnessbench — a benchmark framework for coding agents.
 
-Discovers self-contained output evals by walking configured search paths (`eval_paths`,
-default `skills`, `tests`, `evals`, `benchmarks`) for `eval.md` / `<stem>.eval.md`
-files, runs each eval's `(eval × arm)` units as parametrized tests against a coding
-agent CLI (`claude-code` or `opencode`) inside a microsandbox microVM, grades with an
-LLM judge (or host-side deterministic checkers), and reports each arm's delta against
-the reference arm when a `reference` arm ran.
+An eval is one Markdown file: a prompt plus a checklist of prose assertions. Each eval
+runs across the named arms of an eval set — harness × model × effort × environment —
+as parametrized pytest tests, each cell inside its own microVM. Assertions the binder
+can map to a deterministic checker are graded on the host; the rest go to an LLM judge
+that sees only collected evidence. The report is a matrix of pass rates with every
+arm's delta against the set's baseline.
 """
 
 from __future__ import annotations

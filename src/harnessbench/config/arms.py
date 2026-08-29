@@ -95,9 +95,8 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         raise SchemaError(
             "[tool.harnessbench] needs at least one eval set "
             "([tool.harnessbench.sets.<name>] with `arms`, optional set-level "
-            "harness/model/effort/env defaults, and a `baseline`). The flat "
-            "[[tool.harnessbench.arms]] + `reference` shape is no longer supported — "
-            "wrap your arms in a named set and add `default-set`."
+            "harness/model/effort/env defaults, and a `baseline`), plus `default-set` "
+            "naming the set a plain run resolves."
         )
     known = known_harnesses()
     rawsets: dict[str, RawSet] = {}

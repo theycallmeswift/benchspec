@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "harnessbench"
 dynamic = ["version"]
-description = "A pytest-native runner for coding-agent skill evals, sandboxed under microsandbox."
+description = "Benchmark coding agents: Markdown evals run across harness and model arms in isolated microVMs, graded into a comparison matrix."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
