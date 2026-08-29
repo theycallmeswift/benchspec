@@ -164,6 +164,25 @@ def eval_sandbox(request: object) -> str:
     return resolved_run_set(request.config).sandbox
 
 
+def _errored_message(arm_name: str, outcome: object) -> str:
+    """Build an assertion message that names the infra failure instead of just pointing away.
+
+    The failure lives in the arm's `grading.json` (the judge/agent evidence), not the
+    transcript. Surface the first infra-error evidence inline so the reason is visible in
+    the pytest summary, and still name the file for the full record.
+    """
+    evidence = next(
+        (
+            assertion.get("evidence", "")
+            for assertion in outcome.grading.get("assertions", [])
+            if not assertion.get("passed") and "INFRA ERROR" in assertion.get("evidence", "")
+        ),
+        "",
+    )
+    detail = f": {evidence}" if evidence else ""
+    return f"{arm_name} run errored (see the arm's grading.json){detail}"
+
+
 @pytest.mark.harnessbench
 def test_eval(
     eval_arm: object,
@@ -203,4 +222,4 @@ def test_eval(
     # baseline that legitimately doesn't fire the skill) is the recorded measurement, not a
     # gate — the report computes Δ from the persisted grading.json. The only test-body
     # failure is an infra error (excluded from the benchmark).
-    assert not outcome.errored, f"{arm.name} run errored — see transcript.json"
+    assert not outcome.errored, _errored_message(arm.name, outcome)
