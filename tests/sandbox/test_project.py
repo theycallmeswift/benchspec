@@ -70,6 +70,7 @@ def test_stage_project_copies_a_clone_and_drops_secrets_git_and_artifacts(
 
     staged = project.stage_project(repo_root, staging_parent=tmp_path)
 
+    assert staged == staged.resolve()
     assert _relative_files(staged) == {
         ".gitignore",
         "pyproject.toml",

@@ -108,7 +108,9 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
         RuntimeError: if a dotenv file would still be visible in the stage.
     """
     repo_root = Path(repo_root)
-    staged = Path(tempfile.mkdtemp(prefix="harnessbench-project-", dir=staging_parent))
+    # Resolved, because the VM runtime binds the literal path: on macOS the temp root
+    # sits behind the `/var` → `/private/var` symlink, and a mount through it fails.
+    staged = Path(tempfile.mkdtemp(prefix="harnessbench-project-", dir=staging_parent)).resolve()
 
     listed = _git_listed_files(repo_root)
     files = listed if listed is not None else _walked_files(repo_root)
