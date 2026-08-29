@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -247,3 +248,16 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
         if pattern.search(path.read_text(encoding="utf-8")):
             offenders.append(str(path))
     assert offenders == [], f"microsandbox imported outside the allowlist: {offenders}"
+
+
+def test_host_mount_path_resolves_symlinked_roots(tmp_path: Path) -> None:
+    """Verify a bind-mount path is handed to the runtime with symlinked ancestors resolved."""
+    real_root = tmp_path / "real"
+    (real_root / "room").mkdir(parents=True)
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(real_root)
+
+    mount_path = backend.host_mount_path(linked_root / "room")
+
+    assert mount_path == str((real_root / "room").resolve())
+    assert "linked" not in mount_path

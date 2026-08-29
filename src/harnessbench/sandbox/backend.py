@@ -31,6 +31,17 @@ from harnessbench.specs.schema import SchemaError
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
+
+
+def host_mount_path(path: object) -> str:
+    """Return the host path to hand the VM runtime for a bind mount.
+
+    The runtime binds the literal path it is given. On macOS the temp root — where the
+    clean room and the staged project live — sits behind the `/var` → `/private/var`
+    symlink, and a mount through that link fails with "Not a directory". Resolving
+    first makes every bind site immune to that.
+    """
+    return str(Path(path).resolve())
 BASE_IMAGE = "ubuntu:latest"
 # The only implemented backend today; the single source other modules default to.
 DEFAULT_SANDBOX = "microsandbox"
@@ -283,11 +294,11 @@ class MicrosandboxBackend:
         """Create a microsandbox instance from a snapshot for an arm session."""
         from microsandbox import Sandbox, Volume
 
-        volumes = {GUEST_WORKDIR: Volume.bind(str(host_workdir), readonly=False)}
+        volumes = {GUEST_WORKDIR: Volume.bind(host_mount_path(host_workdir), readonly=False)}
         if host_repo_root is not None:
             # The project mounts read-only so a per-eval setup.sh can install the
             # suite-specific skill without risking a write back into the host checkout.
-            volumes[PROJECT_MOUNT] = Volume.bind(str(host_repo_root), readonly=True)
+            volumes[PROJECT_MOUNT] = Volume.bind(host_mount_path(host_repo_root), readonly=True)
         volumes.update(extra_volumes(agent, Volume))
         return await Sandbox.create(
             name,
@@ -311,7 +322,7 @@ class MicrosandboxBackend:
         """Create the sandbox used for trigger-routing probes."""
         from microsandbox import Sandbox, Volume
 
-        volumes = {PROJECT_MOUNT: Volume.bind(str(host_repo_root), readonly=True)}
+        volumes = {PROJECT_MOUNT: Volume.bind(host_mount_path(host_repo_root), readonly=True)}
         volumes.update(extra_volumes(agent, Volume))
         sandbox = await Sandbox.create(
             name,
