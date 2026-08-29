@@ -11,4 +11,5 @@ dist/
 build/
 *.egg-info/
 .superpowers/
-.claude/
+.claude/scheduled_tasks.lock
+.claude/worktrees/
