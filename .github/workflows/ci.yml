@@ -3,22 +3,27 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    # `dev` is the working branch until the history cleanup makes `main` the default;
+    # drop it from this list then.
+    branches: [main, dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - name: Check out the repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -38,7 +43,7 @@ jobs:
         run: make test
 
   lint:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -52,6 +57,9 @@ jobs:
           enable-cache: true
           python-version: "3.13"
 
+      - name: Check the lockfile is current
+        run: uv lock --check
+
       - name: Sync dependencies
         run: uv sync --frozen
 
@@ -59,9 +67,49 @@ jobs:
         run: make lint:ruff
 
       # Model-backed houserules needs the Gemini secret, which GitHub withholds
-      # from fork PRs. Ruff above still runs for forks; only gate this step.
+      # from fork PRs, and diffs against the PR base. Ruff above still runs for
+      # forks and pushes; only gate this step.
       - name: Run houserules
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: make lint:houserules LINT_BASE=origin/${{ github.base_ref }}
+
+  build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Build the wheel and sdist
+        run: uv build
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Verify the sdist holds only the intended files
+        run: |
+          tar tzf dist/*.tar.gz \
+            | sed 's#^[^/]*/##' \
+            | grep -v '^$' \
+            | grep -v -E '^(src/|tests/|evals/|docs/[a-z-]+\.md$|docs/style/|Makefile$|README\.md$|LICENSE$|pyproject\.toml$|PKG-INFO$|\.gitignore$)' \
+            > unexpected.txt || true
+          if [ -s unexpected.txt ]; then
+            echo "::error::unexpected files in the sdist:"
+            cat unexpected.txt
+            exit 1
+          fi
+
+      - name: Install the wheel into a clean environment and smoke it
+        run: |
+          uv venv --python 3.13 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/harnessbench --help
+          /tmp/smoke/bin/harnessbench lint .
