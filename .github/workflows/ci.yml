@@ -4,8 +4,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    # `dev` is the working branch until the history cleanup makes `main` the default;
-    # drop it from this list then.
     branches: [main, dev]
   workflow_dispatch:
 

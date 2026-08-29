@@ -6,10 +6,6 @@ name: Evals
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - src/harnessbench/grading/binder.py
-      - evals/binder/**
-      - .github/workflows/evals.yml
   workflow_dispatch:
 
 permissions:
@@ -20,13 +16,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # One flag per suite, read by that suite's job. A manual run skips the filter and
+    # every suite runs.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    outputs:
+      binder: ${{ steps.filter.outputs.binder }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Detect which suites this change touches
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            binder:
+              - src/harnessbench/grading/binder.py
+              - evals/binder/**
+              - .github/workflows/evals.yml
+
   binder:
     # The corpus is the binder's false-positive gate. It needs the Gemini secret,
     # which GitHub withholds from fork PRs.
+    needs: changes
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (!github.event.pull_request.draft &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        (needs.changes.outputs.binder == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository)
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
