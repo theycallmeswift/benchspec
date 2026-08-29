@@ -3,7 +3,7 @@
 Provisions OpenCode into a microVM via `npm i -g opencode-ai@<pinned>`, passes the
 provider credential as a host-substituted secret scoped to the provider host, builds
 the `opencode run --format json` command, and parses its JSONL output. Pinning,
-model surface, and effort taxonomy are documented in `agents.md`.
+model surface, and effort taxonomy are documented in `docs/harnesses.md`.
 
 Event shape: JSONL, one event per line, nested
 under `part`. Turn events are `step_start` / `text` / `tool_use` / `step_finish`;
@@ -15,22 +15,21 @@ are `step_finish.part.tokens.total`.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess
-import sys
+import tomllib
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.environments import ExecutionEnv, GuestSandbox, Host
-from evalspec.runner import RunResult
-from evalspec.trajectory import iter_events
+from evalspec.grading.trajectory import iter_events
+from evalspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
+from evalspec.orchestration.results import RunResult
 
 if TYPE_CHECKING:
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
 
 # Credentials OpenCode reads (host-side env var names), in preference order. The
 # runner injects whichever is set as a microsandbox secret, substituted only for
@@ -281,10 +280,6 @@ class OpenCodeAgent(BaseAgent):
         `Path.cwd()` so direct `cli_build` invocations from the repo root still find the
         pin. Returns None if the file is missing or the value isn't a string.
         """
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            import tomli as tomllib
         candidates = []
         env_root = os.environ.get("PROJECT_ROOT")
         if env_root:
@@ -428,7 +423,7 @@ class OpenCodeAgent(BaseAgent):
                 # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError) as error:
+        except (TimeoutError, MicrosandboxError, OSError) as error:
             return RunResult(
                 eval_id,
                 config,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
 import os
@@ -10,12 +9,12 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from evalspec.agents.base import AgentCapabilities, BaseAgent
-from evalspec.environments import ExecutionEnv, GuestSandbox, Host
-from evalspec.runner import RunResult
-from evalspec.trajectory import iter_events
+from evalspec.grading.trajectory import iter_events
+from evalspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
+from evalspec.orchestration.results import RunResult
 
 if TYPE_CHECKING:
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
 
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
@@ -347,7 +346,7 @@ class CodexAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as error:
+        except (TimeoutError, MicrosandboxError, OSError, RuntimeError) as error:
             return RunResult(
                 eval_id,
                 config,

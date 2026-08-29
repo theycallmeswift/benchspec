@@ -7,28 +7,93 @@ to parse its output. `sandbox.py` drives a live sandbox through this interface a
 names a concrete agent; adding a second agent is additive, not a refactor.
 
 One adapter per harness, transport-blind: the adapter builds commands and parses
-output, and an `evalspec.environments.ExecutionEnv` decides where the process runs —
+output, and an `evalspec.orchestration.environments.ExecutionEnv` decides where the process runs —
 `GuestSandbox` for task arms (`invoke`), `Host` for grading (`judge`). Sandbox-vs-host
 is a parameter of the call, not a code path baked into each harness.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from evalspec.runner import RunResult
+from evalspec.orchestration.results import RunResult
 
 if TYPE_CHECKING:
-    from evalspec.environments import ExecutionEnv
-    from evalspec.judges.config import JudgeConfig
+    from evalspec.grading.judges.config import JudgeConfig
+    from evalspec.orchestration.environments import ExecutionEnv
+    from evalspec.sandbox.backend import SandboxBackend
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical
 # across agents and the per-agent load dir is the only agent-specific fact.
 FIXED_SKILLS_HOME = "/home/evalspec/skills"
+
+# Matches the first dotted-numeric token in `--version` output, e.g. the "1.2.3" in
+# both "claude-code 1.2.3" and "codex-cli 0.144.1". Shared by every guest-version parse
+# so adapters never hand-roll their own extraction.
+_VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
+
+# The guest `--version` probe runs before the task on every sample. A wedged guest
+# command must not block the run forever, so the await is bounded and a timeout becomes
+# an explained-unavailable result like any other probe failure.
+GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
+
+
+def _parse_version_token(output: str) -> str | None:
+    """Extract a dotted version token (e.g. "1.2.3") from raw `--version` output."""
+    match = _VERSION_TOKEN_RE.search(output)
+    return match.group(0) if match else None
+
+
+async def probe_guest_version(
+    backend: SandboxBackend, sandbox: object, agent: object
+) -> tuple[str | None, str | None]:
+    """Measure the task-harness binary's version inside the live guest sandbox.
+
+    Runs `<agent.agent_bin> --version` through the backend's guest command seam
+    (`backend.guest_shell`) against the already-booted `sandbox` instance. This is the
+    guest task-harness probe: it reads the binary actually installed in the selected
+    snapshot, never the host binding (`for_host()`) or the pinned install selector
+    (`agent.version()`, e.g. `"latest"`).
+
+    Never raises: any failure to reach the guest, or to parse a version out of what it
+    returns, is reported as an explained `(None, error)` pair rather than an
+    unexplained null (ground rule: explained unavailable).
+
+    Args:
+        backend: The resolved `SandboxBackend` driving this arm's sandbox.
+        sandbox: The live sandbox instance for the running arm session.
+        agent: The `CodingAgent` whose `agent_bin` is probed.
+
+    Returns:
+        `(version, None)` on success, or `(None, error)` describing why the probe
+        could not produce a version.
+    """
+    script = f"{agent.agent_bin} --version"
+    try:
+        # Bounded so a wedged guest command surfaces as unavailable instead of hanging
+        # every sample before its task runs.
+        output = await asyncio.wait_for(
+            backend.guest_shell(sandbox, agent, script),
+            timeout=GUEST_VERSION_PROBE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return None, f"guest version probe timed out after {GUEST_VERSION_PROBE_TIMEOUT_SECONDS}s"
+    except Exception as error:
+        # Broad on purpose: this probe's contract is "never raise" (see docstring), and
+        # guest_shell's own concrete failure modes vary by backend.
+        return None, f"guest_shell raised {type(error).__name__}: {error}"
+    if output is None:
+        return None, f"guest_shell returned no output for `{script}`"
+    version = _parse_version_token(output)
+    if version is None:
+        return None, f"could not parse a version from guest output: {output.strip()!r}"
+    return version, None
 
 
 class BaseAgent:
