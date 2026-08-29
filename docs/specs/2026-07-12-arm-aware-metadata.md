@@ -81,7 +81,7 @@ no second sandbox backend.
   },
   "binder": {
     "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
+    "model": "gemini-3.1-flash-lite",
     "api_path": "generativelanguage.googleapis.com/v1beta"
   }
 }

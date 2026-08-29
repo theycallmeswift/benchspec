@@ -251,7 +251,7 @@ from pathlib import Path
 
 import lib.style_lint as style_lint
 
-DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_PATHS = (Path("src"), Path("tests"), Path("evals"), Path("bin"), Path("lib"))
 RULES = [...]
 POLICY_INSTRUCTIONS = "..."
@@ -389,6 +389,6 @@ Skip this commit if there are no verification fixes.
 
 ## Self-Review
 
-- Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.5 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification gate/model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
+- Spec coverage: Ruff config, inline comments, Google docstrings, scoped baseline ignores to avoid a repo-wide rewrite, custom rule IDs, Gemini 3.1 Flash Lite default, stdlib Gemini REST transport, `GEMINI_API_KEY` skip behavior, optional verification gate/model, advisory exit semantics, default paths, and Makefile speed boundary are covered.
 - Placeholder scan: no `TBD`, `TODO`, vague "add tests", or undefined task dependencies remain.
 - Type consistency: `Rule`, `SourceChunk`, `Finding`, `collect_python_files`, `chunk_source_files`, `build_detector_prompt`, `parse_findings`, `verify_findings`, `format_findings`, `run`, and `main` names are consistent across tasks.

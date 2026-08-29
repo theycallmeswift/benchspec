@@ -102,8 +102,7 @@ def _recording_call_model(sink: list) -> object:
     return call
 
 
-# Gemini 3.5 Flash-Lite paid-tier list price ($0.30 / $2.50 per 1M tokens) — a
-# corpus-suite pricing constant, not a billing source of truth.
+# Approximate — a corpus-suite pricing constant, not a billing source of truth.
 _GEMINI_FLASH_LITE_USD_PER_1K_PROMPT_TOKENS = 0.0003
 _GEMINI_FLASH_LITE_USD_PER_1K_OUTPUT_TOKENS = 0.0025
 

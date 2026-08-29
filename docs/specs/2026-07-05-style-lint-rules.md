@@ -1,4 +1,4 @@
-**TL;DR** — Add commented Ruff configuration plus verified full-codebase advisory Gemini 3.5 Flash Lite style checks under `make lint`.
+**TL;DR** — Add commented Ruff configuration plus verified full-codebase advisory Gemini 3.1 Flash Lite style checks under `make lint`.
 
 ## Problem
 
@@ -7,7 +7,7 @@
 - **Scope:** Add executable lint coverage for Python style preferences where automation is practical, while keeping Ruff as the first deterministic gate.
 - **Constraint:** Ruff rule codes must have inline comments because terse rule families are not self-descriptive.
 - **Constraint:** Local lint scripts live under `bin/linters/`.
-- **Constraint:** Custom style checks use Gemini 3.5 Flash Lite as the default detector model.
+- **Constraint:** Custom style checks use Gemini 3.1 Flash Lite as the default detector model.
 
 ## Solution
 
@@ -61,7 +61,7 @@ docs/style/development.md
   - Do not rely on Ruff `DOC` preview rules in the first rollout; docstring existence and Google-style shape are enough for the initial deterministic pass.
 
 - **`bin/linters/style_lint.py` owns advisory model-backed rules Ruff cannot express cleanly.**
-  - Use `gemini-3.5-flash-lite` as the default detector model.
+  - Use `gemini-3.1-flash-lite` as the default detector model.
   - Require `GEMINI_API_KEY`; if it is missing, print a clear skip message and exit zero.
   - Keep reusable framework code under `lib/style_lint/`, not inside `src/evalspec/`, so it can later be extracted.
   - Keep framework implementation in focused submodules; use `lib/style_lint/__init__.py` only for export control.
@@ -110,7 +110,7 @@ docs/style/development.md
   - `make lint` runs verification with the default detector model after Ruff passes, so full-codebase advisory output is confirmed without a separate manual verifier command.
   - Keep `--verify-findings` available for direct scoped runs and PR-review workflows that want confirmation. `--verify-model` only selects
     the verification model; when omitted, verification uses the detector model.
-  - Verification, when enabled, receives the original input plus Gemini 3.5 Flash Lite findings and may drop or amend findings before output.
+  - Verification, when enabled, receives the original input plus Gemini 3.1 Flash Lite findings and may drop or amend findings before output.
   - Verification remains advisory and exits zero with findings, but it is part of the local `make lint` output after Ruff succeeds.
 
 - **Readable custom rule IDs replace `SL00X` codes.**
@@ -169,7 +169,7 @@ docs/style/development.md
 - **The canonical lint path runs Ruff first** — `make lint` does not run
   verified style lint unless Ruff passes.
 - **The slower custom style path is included in `make lint`** — verified
-  advisory Gemini 3.5 Flash Lite custom rules run after Ruff and remain
+  advisory Gemini 3.1 Flash Lite custom rules run after Ruff and remain
   non-failing on findings.
 - **Future required CI matches local lint** — any required CI workflow uses `make lint`, not a bespoke lint command.
 
@@ -209,5 +209,5 @@ docs/style/development.md
 
 - `python3 scripts/validate_spec.py docs/specs/2026-07-05-style-lint-rules.md` — validates spec structure if the validator is added to this repo.
 - `make lint` — proves Ruff runs first and verified full-codebase style lint runs afterward.
-- `make lint:custom` — proves the Gemini 3.5 Flash Lite custom checker remains directly runnable.
+- `make lint:custom` — proves the Gemini 3.1 Flash Lite custom checker remains directly runnable.
 - `make test` — proves checker behavior and the existing suite pass together.
