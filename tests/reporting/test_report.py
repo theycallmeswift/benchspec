@@ -319,7 +319,7 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
 
     md = (tmp_path / "benchmark.md").read_text()
     assert md.splitlines()[0] == "# Benchmark — iteration_01"
-    # Headline lists each non-reference arm's `baseline <ref%> → <arm> <pct%> (Δpp)`.
+    # Headline lists each non-baseline arm's `baseline <ref%> → <arm> <pct%> (Δpp)`.
     assert "baseline 0%" in md
     assert "trial 100%" in md
     assert "+100pp" in md
@@ -413,7 +413,7 @@ def test_delta_line_handles_missing_arm(tmp_path: object) -> None:
     line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
 
     assert "n/a" in line
-    assert "pp" not in line  # no delta when the reference arm is missing
+    assert "pp" not in line  # no delta when the baseline arm is missing
 
 
 def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:

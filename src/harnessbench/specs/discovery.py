@@ -22,7 +22,7 @@ from harnessbench.specs import mdformat, schema
 class EvalCase:
     """One discovered Markdown output eval, keyed on (group, eval_id)."""
 
-    group: str  # the evals/<group>/ folder name — the artifact-path slot Phase 3 keeps
+    group: str  # the evals/<group>/ folder name; also the artifact-path slot
     eval_dir: Path  # evals/<group>/ — holds the eval file(s), workspace/, setup.sh
     eval_file: Path  # eval.md or <stem>.eval.md
     eval: dict  # {id, prompt, assertions, history?} from parse_eval_md

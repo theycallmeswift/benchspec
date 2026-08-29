@@ -321,7 +321,7 @@ def _agent_for_harness(harness: object = None) -> object:
 def test_cli_build_with_set_builds_once_per_distinct_harness(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Two DISTINCT-harness arms build two snapshots, one per harness (spec 205)."""
+    """Two DISTINCT-harness arms build two snapshots, one per harness."""
     (tmp_path / "pyproject.toml").write_text(
         "[tool.harnessbench]\n"
         'default-set = "mixed"\n'
@@ -365,7 +365,7 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
 def test_cli_build_with_set_dedupes_shared_harness(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Two arms sharing one harness build exactly once (spec 205)."""
+    """Two arms sharing one harness build exactly once."""
     (tmp_path / "pyproject.toml").write_text(
         "[tool.harnessbench]\n"
         'default-set = "shared"\n'
@@ -450,7 +450,7 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
 def test_cli_build_reports_image_identity_available(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Every built/reused snapshot's image-identity status is reported (spec 160)."""
+    """Every built/reused snapshot's image-identity status is reported."""
     from harnessbench.sandbox.provenance import ImageIdentity
 
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)

@@ -8,7 +8,7 @@ shares the guest and can read that mount too. This document covers the lifecycle
 what gets baked into a snapshot, when snapshots rebuild, what a running cell can
 see, and how credentials get in without ever being readable in the guest.
 
-The implementation is [microsandbox](https://github.com/microsandbox/microsandbox),
+The implementation is [microsandbox](https://github.com/superradcompany/microsandbox),
 behind a `SandboxBackend` seam. A set selects its backend with the `sandbox` key;
 `microsandbox` is the only implementation today (`docker` is recognized but fails
 fast as not implemented, so a typo can't silently fall back).

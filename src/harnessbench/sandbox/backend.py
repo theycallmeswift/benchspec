@@ -11,7 +11,7 @@ defaulting. Adding a real second backend is additive: implement the protocol, re
 
 IMPORTANT: importing this module must NOT import the `microsandbox` package. Every
 `import microsandbox` stays inside a method body so `lint`/`analyze` keep working on a
-host where the package is absent (the Phase 5 lazy-import invariant).
+host where the package is absent.
 """
 
 from __future__ import annotations
