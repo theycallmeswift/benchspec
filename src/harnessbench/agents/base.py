@@ -170,9 +170,10 @@ class AgentCapabilities:
 
     Typed, not a dict: every field here has a consumer in the harness, and an
     unknown field is a type error rather than silently ignored documentation.
+    Effort is deliberately not a capability: every driver forwards it verbatim and
+    the agent's CLI is the validator, the same way model names are handled.
     """
 
-    efforts: tuple[str, ...]  # values the agent's CLI accepts for the effort flag
     multi_turn: bool  # honors resume_session_id (session chaining across turns)
     token_split: bool  # reports input/output token split (enables cost estimates)
 

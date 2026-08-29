@@ -422,11 +422,7 @@ class _StubAgent:
     """Store stub agent data."""
 
     id = "claude-code"
-    capabilities = AgentCapabilities(
-        efforts=("low", "medium", "high"),
-        multi_turn=True,
-        token_split=True,
-    )
+    capabilities = AgentCapabilities(multi_turn=True, token_split=True)
 
     def version(self: object) -> str:
         """Version."""

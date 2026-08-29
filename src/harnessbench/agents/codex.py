@@ -103,7 +103,7 @@ class CodexAgent(BaseAgent):
     AUTH_JSON_GUEST_SOURCE = "/harnessbench-codex-auth/auth.json"
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
-    capabilities = AgentCapabilities(efforts=(), multi_turn=False, token_split=True)
+    capabilities = AgentCapabilities(multi_turn=False, token_split=True)
     def provision_script(self: object) -> str:
         """Install the instance's pinned Codex CLI version (baked in so the cache key tracks it)."""
         return dedent(f"""\
@@ -209,8 +209,8 @@ class CodexAgent(BaseAgent):
         workdir: str | None = None,
     ) -> list[str]:
         """Build the guest command used to invoke the agent."""
-        # plugin_dir/resume_session_id/effort/detect_skill are accepted for protocol
-        # parity. Codex exec has no stable harnessbench-owned equivalents for them yet.
+        # plugin_dir/resume_session_id/detect_skill are accepted for protocol parity.
+        # Codex exec has no stable harnessbench-owned equivalents for them yet.
         cd = workdir or self.guest_home
         return [
             self.agent_bin,
@@ -218,6 +218,8 @@ class CodexAgent(BaseAgent):
             "--json",
             "-m",
             model,
+            "-c",
+            f"model_reasoning_effort={effort}",
             "-C",
             cd,
             "--dangerously-bypass-approvals-and-sandbox",
