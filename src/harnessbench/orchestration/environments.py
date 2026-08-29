@@ -32,10 +32,16 @@ class ProcResult:
         assertion failures.
         """
         if self.exit_code != 0:
-            body = (self.stderr or self.stdout or "").strip()
-            raise RuntimeError(
-                f"`{self.command[0]}` exited {self.exit_code}: {body[-1000:] or '(no output)'}"
-            )
+            # Show both streams: a CLI like `codex exec` writes its progress noise to
+            # stderr but the actual failure to stdout, so a stderr-only tail hides the
+            # real cause. Label each so the reader knows which is which.
+            parts = [
+                f"{label}: {stream.strip()[-1000:]}"
+                for label, stream in (("stderr", self.stderr), ("stdout", self.stdout))
+                if stream.strip()
+            ]
+            detail = "  ".join(parts) or "(no output)"
+            raise RuntimeError(f"`{self.command[0]}` exited {self.exit_code}: {detail}")
         return self
 
 
@@ -74,10 +80,14 @@ class Host:
         propagates unchanged (grade_run records a hung judge as a graded error).
         """
         run_env = {**os.environ, **env}
+        # Never inherit the harness's stdin: a judge CLI like `codex exec` reads it as
+        # "additional input", and concurrent judges (xdist) racing for the same terminal
+        # fd make some exit nonzero. An explicit empty stdin isolates each process.
+        proc_stdin = subprocess.DEVNULL if stdin is None else stdin
         try:
             proc = await asyncio.to_thread(
                 subprocess.run, command, capture_output=True, text=True,
-                timeout=timeout, env=run_env, cwd=cwd, stdin=stdin,
+                timeout=timeout, env=run_env, cwd=cwd, stdin=proc_stdin,
             )
         except FileNotFoundError as error:
             raise RuntimeError(f"host {command[0]} CLI not found on PATH") from error
