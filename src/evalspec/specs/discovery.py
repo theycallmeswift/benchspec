@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,10 +85,6 @@ def pyproject_table(repo_root: Path) -> dict:
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.is_file():
         return {}
-    if sys.version_info >= (3, 11):
-        import tomllib
-    else:
-        import tomli as tomllib
     with pyproject.open("rb") as pyproject_file:
         data = tomllib.load(pyproject_file)
     return data.get("tool", {}).get("evalspec", {})

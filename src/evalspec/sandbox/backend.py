@@ -204,7 +204,7 @@ class MicrosandboxBackend:
 
         try:
             result = await sandbox.shell(script, env=agent.guest_env())
-        except (MicrosandboxError, asyncio.TimeoutError, OSError):
+        except (TimeoutError, MicrosandboxError, OSError):
             return None
         return result.stdout_text if result.exit_code == 0 else None
 
@@ -240,7 +240,7 @@ class MicrosandboxBackend:
             await self._bridge_skills_home(sandbox, agent)
             await self._run_environment_script(sandbox, agent, env)
             await sandbox.stop()  # snapshots require a stopped sandbox
-            await Snapshot.create(build_name, name=name, record_integrity=True)
+            await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
         finally:
             from microsandbox.errors import MicrosandboxError
 
@@ -291,7 +291,7 @@ class MicrosandboxBackend:
         volumes.update(extra_volumes(agent, Volume))
         return await Sandbox.create(
             name,
-            snapshot=snapshot,
+            from_snapshot=snapshot,
             volumes=volumes,
             secrets=agent.secrets(),
             cpus=VM_CPUS,
@@ -315,7 +315,7 @@ class MicrosandboxBackend:
         volumes.update(extra_volumes(agent, Volume))
         sandbox = await Sandbox.create(
             name,
-            snapshot=snapshot,
+            from_snapshot=snapshot,
             volumes=volumes,
             secrets=agent.secrets(),
             cpus=VM_CPUS,

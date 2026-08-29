@@ -223,7 +223,7 @@ def pytest_configure(config: object) -> None:
     else:
         # Controller / serial run: choose once.
         workspace.set_current_iteration(workspace.next_iteration_name(repo_root))
-        config.stash[_STARTED_AT] = datetime.datetime.now(datetime.timezone.utc).isoformat(
+        config.stash[_STARTED_AT] = datetime.datetime.now(datetime.UTC).isoformat(
             timespec="seconds"
         )
 

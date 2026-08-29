@@ -27,7 +27,7 @@ def test_utc_today_uses_utc_calendar_date_not_local() -> None:
 def test_utc_today_passthrough_utc_instant() -> None:
     """Verify utc today passthrough utc instant."""
     assert (
-        utc_today(datetime.datetime(2026, 5, 29, 0, 1, tzinfo=datetime.timezone.utc))
+        utc_today(datetime.datetime(2026, 5, 29, 0, 1, tzinfo=datetime.UTC))
         == "2026-05-29"
     )
 

@@ -7,7 +7,6 @@ command, and parses its output through the shared helpers in `results.py`.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from dataclasses import replace
@@ -325,7 +324,7 @@ class ClaudeCodeAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError) as error:
+        except (TimeoutError, MicrosandboxError, OSError) as error:
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.

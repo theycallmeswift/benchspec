@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from evalspec.config.arms import (
     Arm,
