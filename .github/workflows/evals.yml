@@ -21,6 +21,9 @@ jobs:
     # every suite runs.
     if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       binder: ${{ steps.filter.outputs.binder }}
     steps:
