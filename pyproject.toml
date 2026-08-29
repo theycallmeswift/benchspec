@@ -62,6 +62,22 @@ path = "src/harnessbench/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/harnessbench"]
 
+[tool.hatch.build.targets.sdist]
+# Ship what a downstream builder needs: the package, its tests and the fixtures they
+# read, and the user docs. Planning records, agent config, the lockfile, and CI stay
+# in the repository.
+include = [
+    "src/harnessbench",
+    "tests",
+    "evals",
+    "docs/*.md",
+    "docs/style",
+    "Makefile",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
 [tool.uv]
 package = true
 
