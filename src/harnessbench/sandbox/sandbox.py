@@ -26,6 +26,7 @@ from harnessbench.sandbox.backend import (
     BASE_IMAGE,
     DEFAULT_SANDBOX,
     SandboxBackend,
+    host_mount_path,
     resolve_sandbox,
 )
 from harnessbench.sandbox.project import discard_stage, stage_project
@@ -163,7 +164,9 @@ def _agent_extra_volumes(agent: object, volume_cls: object) -> dict:
     if not path:
         return {}
     return {
-        "/harnessbench-codex-auth/auth.json": volume_cls.bind(str(path), readonly=True),
+        "/harnessbench-codex-auth/auth.json": volume_cls.bind(
+            host_mount_path(path), readonly=True
+        ),
     }
 
 
