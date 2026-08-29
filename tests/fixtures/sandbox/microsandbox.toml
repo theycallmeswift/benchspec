@@ -3,13 +3,13 @@
 # Tested today: `parse_sets` + `resolve_set` on this file yield
 #   Set(sandbox="microsandbox", runner="pytest", ...)
 # with no error. Nothing on the `run` path resolves a backend from `Set.sandbox` in
-# Phase 7 (that's Phase 8). `evalspec sandbox:build --config tests/fixtures/sandbox/
+# Phase 7 (that's Phase 8). `harnessbench sandbox:build --config tests/fixtures/sandbox/
 # microsandbox.toml` (and `--set micro`) now resolves this set and drives the build
 # from its microsandbox backend (Task 7).
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "micro"
 
-[tool.evalspec.sets.micro]
+[tool.harnessbench.sets.micro]
 model = "sonnet"
 sandbox = "microsandbox"
 baseline = "baseline"

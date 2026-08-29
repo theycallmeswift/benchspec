@@ -1,13 +1,13 @@
-# evalspec
+# harnessbench
 
-evalspec is a benchmark framework for coding agents. You write evals as Markdown —
-a prompt plus a checklist of plain-prose assertions — and evalspec runs each one
+harnessbench is a benchmark framework for coding agents. You write evals as Markdown —
+a prompt plus a checklist of plain-prose assertions — and harnessbench runs each one
 across the named **arms** of a benchmark (Claude Code vs. Codex, sonnet vs. opus,
 with the skill vs. without), each arm inside its own microVM. The results come back
 as a matrix: evals down the side and arms across the top. When the set configures
 a baseline, each comparison cell includes its percentage-point delta.
 
-> evalspec is like a test runner for agent behavior: pytest underneath, but the
+> harnessbench is like a test runner for agent behavior: pytest underneath, but the
 > unit of measurement is what an agent *did* in an isolated workspace — the files
 > it wrote, the skills it invoked, the claims its output satisfies.
 
@@ -19,7 +19,7 @@ a baseline, each comparison cell includes its percentage-point delta.
 A single pass rate is just a number. Whether 60% is good depends entirely on what
 the same agent scores *without* your skill, or on a cheaper model, or under a
 different harness. An **eval set** lets you run the same eval across several arms.
-When the set names a **baseline** arm, evalspec reports every other arm's delta
+When the set names a **baseline** arm, harnessbench reports every other arm's delta
 against it in percentage points; without a baseline, it reports absolute rates.
 
 The primary output is a matrix, written as `benchmark.md` after every run:
@@ -91,7 +91,7 @@ flowchart LR
 Each `(eval × arm)` pair becomes one parametrized pytest test. The arm boots a
 fresh microVM from a cached snapshot, seeds the eval's `workspace/` files into a
 clean room mounted at `/workspace`, runs the eval's own `setup.sh` (which branches
-on `$EVALSPEC_ARM` — the baseline arm installs nothing), and invokes the agent.
+on `$HARNESSBENCH_ARM` — the baseline arm installs nothing), and invokes the agent.
 The agent's workdir starts with nothing but the eval's `workspace/` files — no
 docs, peers, or project state are copied into it. The repo is also mounted
 read-only at `/project` so `setup.sh` can install the skill under test. The agent
@@ -115,18 +115,18 @@ can write back into your checkout.
 ## Getting started
 
 ```bash
-pip install "evalspec[microsandbox]"
+pip install "harnessbench[microsandbox]"
 ```
 
-evalspec needs Python 3.11+, an Apple Silicon Mac or Linux with `/dev/kvm`, an
+harnessbench needs Python 3.11+, an Apple Silicon Mac or Linux with `/dev/kvm`, an
 agent CLI on `$PATH` with a credential, and `GEMINI_API_KEY` for the binder (a
 repo-root `.env` is loaded automatically). Declare a set in `pyproject.toml`:
 
 ```toml
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness = "claude-code"
 model = "sonnet"
 baseline = "baseline"
@@ -139,20 +139,20 @@ arms = [
 Then lint, preview, and run:
 
 ```bash
-evalspec lint      # static checks: catches unjudgeable assertions before you spend
-evalspec analyze   # how will each assertion grade — deterministic or judge-backed?
-evalspec run       # the benchmark: every (eval × arm), sandboxed, graded, reported
+harnessbench lint      # static checks: catches unjudgeable assertions before you spend
+harnessbench analyze   # how will each assertion grade — deterministic or judge-backed?
+harnessbench run       # the benchmark: every (eval × arm), sandboxed, graded, reported
 ```
 
-`evalspec run` is pytest underneath — everything after `--` passes through
-verbatim, so `evalspec run -- -k archive-source-from-inbox` (equivalently
+`harnessbench run` is pytest underneath — everything after `--` passes through
+verbatim, so `harnessbench run -- -k archive-source-from-inbox` (equivalently
 `pytest -k archive-source-from-inbox`) scopes the run to one eval, `-n 8` fans
 arms out across microVMs, and `--count 5` samples each cell five times for
 stability (the latter two via the pytest-xdist and pytest-repeat plugins).
 
-## Why evalspec
+## Why harnessbench
 
-Most eval frameworks grade a model's *output*. evalspec grades an agent's
+Most eval frameworks grade a model's *output*. harnessbench grades an agent's
 *behavior* — inside a sandbox, comparatively, and reproducibly:
 
 - **Comparison is first-class.** Configure several arms and a baseline to make the

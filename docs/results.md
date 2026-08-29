@@ -70,7 +70,7 @@ identity.
 ## Noise, samples, and flakiness
 
 A delta smaller than its sampling noise is a coin flip, not a lift. With at least
-two samples per arm (`--count N`), evalspec computes a noise band for each
+two samples per arm (`--count N`), harnessbench computes a noise band for each
 arm-vs-baseline delta — the standard error of the difference of the two arms'
 per-sample rates — and labels the headline **within noise** when `|Δ|` falls
 inside it. Treat the band as a guardrail against over-reading small numbers, not
@@ -103,7 +103,7 @@ versus observed**:
 | Field | Contents |
 |---|---|
 | `run_id` / `commit` / `config_hash` | Identity for cross-run joins. `config_hash` covers only planned selectors — never what happened to run or which binary versions were probed — so two runs of identical config hash identically. |
-| `iteration` / `started_at` / `evalspec_version` | Run bookkeeping. |
+| `iteration` / `started_at` / `harnessbench_version` | Run bookkeeping. |
 | `set` / `runner` | The resolved set name and runner. |
 | `arms` | The **planned** roster: every configured arm (name, harness, model, effort, redacted env, harness_args, `requested_version` — the install selector, e.g. `latest` — and `capabilities`), whether or not it ran. |
 | `observed_arms` | The **observed** side, keyed by arm name: only arms with a persisted runtime record appear. Each carries the guest-probed `actual_version` and the sandbox identity (backend, snapshot, fingerprint and its inputs, pulled `image_digest`). Probes that fail record an explicit `*_status: "unavailable"` plus an error — never a silent null. |
@@ -143,10 +143,10 @@ configuration.
 - `session.jsonl` — the lossless raw stream, each turn behind a `{"turn": N}`
   marker line. Everything else is derivable from it; it is the artifact to reach
   for when a grade looks wrong. To get the structured tool-call trajectory, feed
-  its text to `evalspec.grading.trajectory.trajectory_from_session` — events
+  its text to `harnessbench.grading.trajectory.trajectory_from_session` — events
   follow the OpenTelemetry GenAI naming (`gen_ai.tool.name`,
   `gen_ai.tool.call.id`, …).
 
-The authoritative shapes live in `evalspec.reporting.manifest`,
-`evalspec.reporting.report`, and `evalspec.sandbox.provenance`. When this
+The authoritative shapes live in `harnessbench.reporting.manifest`,
+`harnessbench.reporting.report`, and `harnessbench.sandbox.provenance`. When this
 document drifts, the code wins.

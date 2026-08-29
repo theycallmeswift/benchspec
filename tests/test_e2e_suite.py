@@ -1,6 +1,6 @@
-"""Config-resolution and discovery/parse tests for evalspec's own end-to-end suite.
+"""Config-resolution and discovery/parse tests for harnessbench's own end-to-end suite.
 
-Exercises the real `[tool.evalspec]` config in this repo's `pyproject.toml` (the `e2e`
+Exercises the real `[tool.harnessbench]` config in this repo's `pyproject.toml` (the `e2e`
 set and its Codex judge) and the real `evals/e2e/hello/` suite against the live parsers
 — the same "authored example must parse for real" pattern as
 `tests/test_readme_examples.py`, extended to config resolution and eval discovery.
@@ -16,9 +16,9 @@ from textwrap import dedent
 
 import pytest
 
-from evalspec.config.arms import parse_sets, resolve_set
-from evalspec.grading.judges.config import resolve_judge_config
-from evalspec.specs.discovery import discover_eval_cases, pyproject_table
+from harnessbench.config.arms import parse_sets, resolve_set
+from harnessbench.grading.judges.config import resolve_judge_config
+from harnessbench.specs.discovery import discover_eval_cases, pyproject_table
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,9 +28,9 @@ def _write_command_recorder(command_dir: Path, command: str) -> None:
     recorder = command_dir / command
     recorder.write_text(dedent("""\
         #!/bin/sh
-        printf "%s" "${0##*/}" >> "$EVALSPEC_COMMAND_LOG"
-        printf " %s" "$@" >> "$EVALSPEC_COMMAND_LOG"
-        printf "\\n" >> "$EVALSPEC_COMMAND_LOG"
+        printf "%s" "${0##*/}" >> "$HARNESSBENCH_COMMAND_LOG"
+        printf " %s" "$@" >> "$HARNESSBENCH_COMMAND_LOG"
+        printf "\\n" >> "$HARNESSBENCH_COMMAND_LOG"
     """))
     recorder.chmod(0o755)
 
@@ -163,8 +163,8 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: s
         cwd=eval_dir,
         env={
             **os.environ,
-            "EVALSPEC_ARM": "baseline",
-            "EVALSPEC_COMMAND_LOG": str(command_log),
+            "HARNESSBENCH_ARM": "baseline",
+            "HARNESSBENCH_COMMAND_LOG": str(command_log),
             "PATH": str(command_dir),
         },
         capture_output=True,
@@ -195,8 +195,8 @@ def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
         cwd=eval_dir,
         env={
             **os.environ,
-            "EVALSPEC_ARM": "trial",
-            "EVALSPEC_COMMAND_LOG": str(command_log),
+            "HARNESSBENCH_ARM": "trial",
+            "HARNESSBENCH_COMMAND_LOG": str(command_log),
             "PATH": str(command_dir),
         },
         capture_output=True,
@@ -209,8 +209,8 @@ def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
 
     assert result.returncode == 0, result.stderr
     assert commands == [
-        "mkdir -p /home/evalspec/skills/hello",
-        "cp ../../SKILL.md /home/evalspec/skills/hello/SKILL.md",
+        "mkdir -p /home/harnessbench/skills/hello",
+        "cp ../../SKILL.md /home/harnessbench/skills/hello/SKILL.md",
     ]
     assert (eval_dir / copied_source).resolve() == REPO_ROOT / "evals/e2e/hello/SKILL.md"
 
@@ -227,7 +227,7 @@ def test_make_e2e_runs_the_e2e_set() -> None:
 
     assert result.returncode == 0, result.stderr
     output = result.stdout
-    assert "uv run evalspec run --set e2e" in output
+    assert "uv run harnessbench run --set e2e" in output
     assert "verify_e2e_artifacts" not in output
 
 

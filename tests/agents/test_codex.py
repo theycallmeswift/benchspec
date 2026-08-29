@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from evalspec.agents.codex import CodexAgent, parse_codex_jsonl
+from harnessbench.agents.codex import CodexAgent, parse_codex_jsonl
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -167,7 +167,7 @@ def test_guest_env_carries_home_codex_home_tz_and_pinned_version() -> None:
         "HOME": "/root",
         "CODEX_HOME": "/root/.codex",
         "TZ": "UTC",
-        "EVALSPEC_CODEX_VERSION": "0.142.3",
+        "HARNESSBENCH_CODEX_VERSION": "0.142.3",
     }
 
 
@@ -185,7 +185,7 @@ def test_from_env_prefers_api_key(monkeypatch: object) -> None:
     captured = _capture_secret(monkeypatch)
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
-    monkeypatch.setenv("EVALSPEC_CODEX_VERSION", "0.142.3")
+    monkeypatch.setenv("HARNESSBENCH_CODEX_VERSION", "0.142.3")
 
     agent = CodexAgent.from_env()
 
@@ -314,22 +314,22 @@ def test_codex_bridge_script_symlinks_fixed_home() -> None:
     """Verify codex bridge script symlinks fixed home."""
     script = _agent().bridge_skills_home_script()
 
-    assert "/home/evalspec/skills" in script
+    assert "/home/harnessbench/skills" in script
     assert "/root/.codex/skills" in script
 
 
-def test_codex_cell_env_carries_evalspec_vars() -> None:
-    """Verify codex cell env carries evalspec vars."""
+def test_codex_cell_env_carries_harnessbench_vars() -> None:
+    """Verify codex cell env carries harnessbench vars."""
     env = CodexAgent(version="0.142.3").cell_env(
         arm="trial",
         model="gpt-5.4",
         eval_set="codex-smoke",
     )
 
-    assert env["EVALSPEC_ARM"] == "trial"
-    assert env["EVALSPEC_MODEL"] == "gpt-5.4"
-    assert env["EVALSPEC_HARNESS"] == "codex"
-    assert env["EVALSPEC_SET"] == "codex-smoke"
+    assert env["HARNESSBENCH_ARM"] == "trial"
+    assert env["HARNESSBENCH_MODEL"] == "gpt-5.4"
+    assert env["HARNESSBENCH_HARNESS"] == "codex"
+    assert env["HARNESSBENCH_SET"] == "codex-smoke"
 
 
 def test_detect_dispatch_matches_skill_invocation_item() -> None:

@@ -2,7 +2,7 @@
 
 A dummy `test_eval(eval_arm)` is collected with `--collect-only`, so the body never
 runs; we assert on the parametrized node ids the plugin generates. Each project writes a
-`[tool.evalspec]` eval set so `resolved_run_set` has a real set to resolve.
+`[tool.harnessbench]` eval set so `resolved_run_set` has a real set to resolve.
 """
 
 import json
@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from evalspec.agents.base import AgentCapabilities
-from evalspec.orchestration import workspace
-from evalspec.reporting import report
-from evalspec.runners import pytest as plugin
-from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from harnessbench.agents.base import AgentCapabilities
+from harnessbench.orchestration import workspace
+from harnessbench.reporting import report
+from harnessbench.runners import pytest as plugin
+from harnessbench.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
 ALPHA_MD = textwrap.dedent(
@@ -55,10 +55,10 @@ t1
 # inherits a concrete harness, and the dummy collect never needs a real CLI.
 ARMS_TOML = textwrap.dedent(
     """\
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness = "claude-code"
 model = "sonnet"
 baseline = "baseline"
@@ -66,20 +66,20 @@ arms = [{name="baseline"}, {name="trial", model="opus"}]
 """
 )
 
-# Same as ARMS_TOML plus a [tool.evalspec.judge] env entry whose key is secret-shaped
+# Same as ARMS_TOML plus a [tool.harnessbench.judge] env entry whose key is secret-shaped
 # (matches report._SECRET_KEY) — proves the judge env path is actually redacted, not
 # just presence-checked against an always-empty {} like every other judge test here.
 JUDGE_ENV_TOML = """\
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness = "claude-code"
 model = "sonnet"
 baseline = "baseline"
 arms = [{name="baseline"}, {name="trial", model="opus"}]
 
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 env = { OPENAI_API_KEY = "sk-live-supersecret123" }
 """
 
@@ -97,8 +97,8 @@ import pytest
 
 
 def pytest_configure(config):
-    if not os.environ.get("EVALSPEC_DOTENV_PROBE"):
-        raise pytest.UsageError("EVALSPEC_DOTENV_PROBE missing at configure time")
+    if not os.environ.get("HARNESSBENCH_DOTENV_PROBE"):
+        raise pytest.UsageError("HARNESSBENCH_DOTENV_PROBE missing at configure time")
 """
 
 
@@ -118,10 +118,10 @@ def _collect(pytester: object, *extra: object) -> object:
     """Build the collect test fixture."""
     return pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "--collect-only",
         "-q",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "test_cases.py::test_eval",
         *extra,
@@ -130,7 +130,7 @@ def _collect(pytester: object, *extra: object) -> object:
 
 def test_help_describes_eval_search_paths(pytester: object) -> None:
     """Verify the eval-paths option help names the default search paths."""
-    result = pytester.runpytest("-p", "evalspec.runners.pytest", "--help")
+    result = pytester.runpytest("-p", "harnessbench.runners.pytest", "--help")
 
     output = " ".join(result.stdout.str().split())
     assert result.ret == 0
@@ -165,10 +165,10 @@ def test_plugin_self_registers_cases_without_positional(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "--collect-only",
         "-q",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
         # deliberately no positional target
     )
@@ -185,10 +185,10 @@ def test_explicit_positional_is_respected(pytester: object, monkeypatch: object)
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "--collect-only",
         "-q",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "test_cases.py::test_eval",
     )
@@ -199,11 +199,11 @@ def test_explicit_positional_is_respected(pytester: object, monkeypatch: object)
 
 def test_models_flag_sweeps_arms(pytester: object) -> None:
     """Verify models flag sweeps arms."""
-    # --evalspec-models is a SWEEP, not a filter: it replaces the set's arms with one
+    # --harnessbench-models is a SWEEP, not a filter: it replaces the set's arms with one
     # arm per value (named by it), inheriting the set-level harness.
     _make_project(pytester)
 
-    out = _collect(pytester, "--evalspec-models", "sonnet,opus").stdout.str()
+    out = _collect(pytester, "--harnessbench-models", "sonnet,opus").stdout.str()
 
     assert out.count("test_eval[") == 4  # 2 evals × 2 swept arms
     assert "test_eval[myskill-alpha-sonnet]" in out
@@ -231,8 +231,8 @@ def test_bad_set_fails_collection(pytester: object) -> None:
     # A set arm with an unknown harness must fail collection with a UsageError
     # (wrapped SchemaError), not a silent empty roster.
     bad_set = (
-        '[tool.evalspec]\ndefault-set = "default"\n'
-        '[tool.evalspec.sets.default]\nmodel = "sonnet"\n'
+        '[tool.harnessbench]\ndefault-set = "default"\n'
+        '[tool.harnessbench.sets.default]\nmodel = "sonnet"\n'
         'arms = [{name="x", harness="nope"}]\n'
     )
     _make_project(pytester, arms_toml=bad_set)
@@ -246,8 +246,8 @@ def test_bad_set_fails_collection(pytester: object) -> None:
 
 def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object) -> None:
     """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
-    from evalspec.config.arms import Arm, Set
-    from evalspec.orchestration import cases
+    from harnessbench.config.arms import Arm, Set
+    from harnessbench.orchestration import cases
 
     fake_set = Set(
         "s", [Arm("a", "claude-code", "opus")], baseline=None, sandbox="custombackend"
@@ -266,7 +266,7 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object
 
 def test_preflight_session_sandbox_trigger_only_uses_default(monkeypatch: object) -> None:
     """Verify a trigger-only run passes None so preflight resolves the default backend."""
-    from evalspec.orchestration import cases
+    from harnessbench.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
     seen = {}
@@ -285,9 +285,9 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
     import types
 
-    from evalspec.grading import binder
-    from evalspec.orchestration import cases
-    from evalspec.sandbox import sandbox
+    from harnessbench.grading import binder
+    from harnessbench.orchestration import cases
+    from harnessbench.sandbox import sandbox
 
     _make_project(pytester)  # set with sandbox default = microsandbox
     captured: list = []
@@ -306,8 +306,8 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
-        "--evalspec-repo-root",
+        "harnessbench.runners.pytest",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "-k",
         "test_eval",
@@ -340,10 +340,10 @@ def test_eval(eval_arm, sample_index):
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "-p",
         "pytest_repeat",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "--count",
         "2",
@@ -371,23 +371,23 @@ class _FakeConfig:
 
     def getoption(self: object, name: object) -> object:
         """Getoption."""
-        if name == "evalspec_repo_root":
+        if name == "harnessbench_repo_root":
             return self._repo_root
         return {
-            "evalspec_model": None,
-            "evalspec_set": None,
-            "evalspec_config": None,
-            "evalspec_harness": None,
-            "evalspec_effort": None,
-            "evalspec_env": [],
-            "evalspec_models": None,
-            "evalspec_judge_harness": None,
-            "evalspec_judge_model": None,
-            "evalspec_judge_effort": None,
-            "evalspec_judge_timeout": None,
-            "evalspec_judge_harness_arg": [],
-            "evalspec_judge_env": [],
-            "evalspec_fail_under": self._fail_under,
+            "harnessbench_model": None,
+            "harnessbench_set": None,
+            "harnessbench_config": None,
+            "harnessbench_harness": None,
+            "harnessbench_effort": None,
+            "harnessbench_env": [],
+            "harnessbench_models": None,
+            "harnessbench_judge_harness": None,
+            "harnessbench_judge_model": None,
+            "harnessbench_judge_effort": None,
+            "harnessbench_judge_timeout": None,
+            "harnessbench_judge_harness_arg": [],
+            "harnessbench_judge_env": [],
+            "harnessbench_fail_under": self._fail_under,
         }.get(name)
 
 
@@ -442,7 +442,7 @@ def _stub_judge_probe(monkeypatch: object) -> None:
     judge `actual_version` is predictable and the dedicated test can assert it flows through.
     """
     monkeypatch.setattr(
-        "evalspec.reporting.manifest.probe_judge_version", lambda harness: "judge-1.0.0"
+        "harnessbench.reporting.manifest.probe_judge_version", lambda harness: "judge-1.0.0"
     )
 
 
@@ -470,7 +470,7 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
 
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert ("separator", "evalspec benchmark") in terminal_reporter.events
+    assert ("separator", "harnessbench benchmark") in terminal_reporter.events
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
     assert any("iteration_01" in message and "+100pp" in message for message in lines)
     assert (skill_results_dir.parent.parent / "benchmark.md").is_file()
@@ -495,7 +495,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
 
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
-    assert terminal_reporter.events.count(("separator", "evalspec benchmark")) == 1
+    assert terminal_reporter.events.count(("separator", "harnessbench benchmark")) == 1
 
     lines = [message for kind, message in terminal_reporter.events if kind == "line"]
     assert len(lines) == 1
@@ -515,10 +515,10 @@ def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent(
             """\
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness = "claude-code"
 model = "sonnet"
 baseline = "baseline"
@@ -572,7 +572,7 @@ arms = [
     }
     assert "commit" in meta
     assert "started_at" in meta
-    assert "evalspec_version" in meta
+    assert "harnessbench_version" in meta
 
     benchmark = json.loads((skill_results_dir.parent.parent / "benchmark.json").read_text())
     assert benchmark["arms"]["baseline"]["harness_args"] == ["--set-flag"]
@@ -658,7 +658,7 @@ def test_manifest_writes_without_agent_credential(tmp_path: object, monkeypatch:
     selector — here the real claude-code default of `latest`. Uses the real `make_agent`
     (no stub) precisely to prove the selector resolves without credentials.
     """
-    for env_var in ("EVALSPEC_CLAUDE_VERSION", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
+    for env_var in ("HARNESSBENCH_CLAUDE_VERSION", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
         monkeypatch.delenv(env_var, raising=False)
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -818,20 +818,20 @@ def test_unknown_agent_flag_fails_at_startup(pytester: object) -> None:
     """Verify unknown agent flag fails at startup."""
     _make_project(pytester)
 
-    result = _collect(pytester, "--evalspec-agent", "not-a-harness")
+    result = _collect(pytester, "--harnessbench-agent", "not-a-harness")
 
     assert result.ret != 0
     out = result.stderr.str() + result.stdout.str()
-    assert "--evalspec-agent" in out
+    assert "--harnessbench-agent" in out
     assert "not-a-harness" in out
 
 
 def test_agent_flag_beats_env(pytester: object, monkeypatch: object) -> None:
     """Verify agent flag beats env."""
-    monkeypatch.setenv("EVALSPEC_AGENT", "opencode")
+    monkeypatch.setenv("HARNESSBENCH_AGENT", "opencode")
     _make_project(pytester)
 
-    result = _collect(pytester, "--evalspec-agent", "claude-code")
+    result = _collect(pytester, "--harnessbench-agent", "claude-code")
 
     assert result.ret == 0
 
@@ -840,7 +840,7 @@ def test_judge_model_flag_is_accepted(pytester: object) -> None:
     """Verify judge model flag is accepted."""
     _make_project(pytester)
 
-    result = _collect(pytester, "--evalspec-judge-model", "haiku")
+    result = _collect(pytester, "--harnessbench-judge-model", "haiku")
 
     assert result.ret == 0
 
@@ -849,7 +849,7 @@ def test_judge_harness_flag_is_accepted(pytester: object) -> None:
     """Verify judge harness flag is accepted."""
     _make_project(pytester)
     result = _collect(
-        pytester, "--evalspec-judge-harness", "codex", "--evalspec-judge-model", "gpt-5.5"
+        pytester, "--harnessbench-judge-harness", "codex", "--harnessbench-judge-model", "gpt-5.5"
     )
 
     assert result.ret == 0
@@ -859,7 +859,7 @@ def test_judge_effort_and_timeout_flags_are_accepted(pytester: object) -> None:
     """Verify judge effort and timeout flags are accepted."""
     _make_project(pytester)
     result = _collect(
-        pytester, "--evalspec-judge-effort", "high", "--evalspec-judge-timeout", "120"
+        pytester, "--harnessbench-judge-effort", "high", "--harnessbench-judge-timeout", "120"
     )
 
     assert result.ret == 0
@@ -873,8 +873,8 @@ def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
     _make_project(pytester)
     result = _collect(
         pytester,
-        "--evalspec-judge-harness-arg=--plugin-dir",
-        "--evalspec-judge-harness-arg=/project",
+        "--harnessbench-judge-harness-arg=--plugin-dir",
+        "--harnessbench-judge-harness-arg=/project",
     )
 
     assert result.ret == 0
@@ -883,7 +883,9 @@ def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
 def test_judge_env_flag_is_repeatable(pytester: object) -> None:
     """Verify judge env flag is repeatable."""
     _make_project(pytester)
-    result = _collect(pytester, "--evalspec-judge-env", "A=1", "--evalspec-judge-env", "B=2")
+    result = _collect(
+        pytester, "--harnessbench-judge-env", "A=1", "--harnessbench-judge-env", "B=2"
+    )
 
     assert result.ret == 0
 
@@ -905,7 +907,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     """Verify judge preflight fixture raises when binary missing."""
     import shutil
 
-    from evalspec.sandbox import sandbox
+    from harnessbench.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.setattr(shutil, "which", lambda name: None)
@@ -914,7 +916,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
-    # test_eval"): `pytest_configure` only self-registers the real `evalspec/cases.py`
+    # test_eval"): `pytest_configure` only self-registers the real `harnessbench/cases.py`
     # (whose `judge_config` fixture runs the binary preflight under test) when
     # `config.args_source` isn't `ARGS` — i.e. when no explicit positional is given.
     # Passing "test_cases.py::test_eval" would instead collect _make_project's dummy
@@ -924,8 +926,8 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     # `-k test_eval` keeps this to the real (parametrized) test_eval items.
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
-        "--evalspec-repo-root",
+        "harnessbench.runners.pytest",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "-k",
         "test_eval",
@@ -941,7 +943,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     """Verify the judge_config fixture fails fast on a missing GEMINI_API_KEY."""
     import shutil
 
-    from evalspec.sandbox import sandbox
+    from harnessbench.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -954,8 +956,8 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
-        "--evalspec-repo-root",
+        "harnessbench.runners.pytest",
+        "--harnessbench-repo-root",
         str(pytester.path),
         "-k",
         "test_eval",
@@ -969,7 +971,7 @@ def test_gemini_key_preflight_skipped_under_collect_only(
     pytester: object, monkeypatch: object
 ) -> None:
     """Verify --collect-only never triggers the GEMINI_API_KEY preflight."""
-    from evalspec.sandbox import sandbox
+    from harnessbench.sandbox import sandbox
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -977,9 +979,9 @@ def test_gemini_key_preflight_skipped_under_collect_only(
 
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "--collect-only",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
     )
     assert result.ret == 0
@@ -987,18 +989,18 @@ def test_gemini_key_preflight_skipped_under_collect_only(
 
 def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(pytester: object) -> None:
     """Verify judge model flag no longer shadows pyproject default when unset."""
-    # Regression guard for the precedence bug: --evalspec-judge-model must default to
-    # None so an unset flag never overrides [tool.evalspec.judge] model.
+    # Regression guard for the precedence bug: --harnessbench-judge-model must default to
+    # None so an unset flag never overrides [tool.harnessbench.judge] model.
     project_toml = (
         ARMS_TOML
         + """
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 harness = "codex"
 model = "gpt-5.5"
 """
     )
     _make_project(pytester, arms_toml=project_toml)
-    result = _collect(pytester)  # no --evalspec-judge-model passed
+    result = _collect(pytester)  # no --harnessbench-judge-model passed
     assert result.ret == 0
 
 
@@ -1007,7 +1009,7 @@ def test_unsupported_judge_harness_fails_at_collection(pytester: object) -> None
     project_toml = (
         ARMS_TOML
         + """
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 harness = "cursor"
 """
     )
@@ -1020,10 +1022,10 @@ harness = "cursor"
 
 def test_non_dict_pyproject_judge_table_fails_loudly(pytester: object) -> None:
     """Verify non dict pyproject judge table fails loudly."""
-    # Regression guard: a present-but-non-dict [tool.evalspec.judge] (e.g. `judge =
+    # Regression guard: a present-but-non-dict [tool.harnessbench.judge] (e.g. `judge =
     # "codex"` from a fat-fingered TOML edit) must raise, not silently coerce to
     # None and fall through to defaults. `judge` is inserted into the *existing*
-    # [tool.evalspec] table (not a re-opened header) — TOML forbids declaring the
+    # [tool.harnessbench] table (not a re-opened header) — TOML forbids declaring the
     # same table twice.
     project_toml = ARMS_TOML.replace(
         'default-set = "default"',
@@ -1033,24 +1035,24 @@ def test_non_dict_pyproject_judge_table_fails_loudly(pytester: object) -> None:
     result = _collect(pytester)
     assert result.ret != 0
     out = result.stderr.str() + result.stdout.str()
-    assert "[tool.evalspec.judge] must be a table" in out
+    assert "[tool.harnessbench.judge] must be a table" in out
 
 
 def test_non_dict_scratch_judge_table_fails_loudly(pytester: object) -> None:
     """Verify non dict scratch judge table fails loudly."""
-    # Same regression guard, but for a scratch --evalspec-config file's
-    # [tool.evalspec.judge] — a distinct code path (`_read_scratch_evalspec_table` +
+    # Same regression guard, but for a scratch --harnessbench-config file's
+    # [tool.harnessbench.judge] — a distinct code path (`_read_scratch_harnessbench_table` +
     # the scratch branch in `resolved_judge_config`) with its own error message.
     _make_project(pytester)
     scratch = pytester.path / "scratch.toml"
-    scratch.write_text('[tool.evalspec]\njudge = "codex"\n')
+    scratch.write_text('[tool.harnessbench]\njudge = "codex"\n')
 
-    result = _collect(pytester, "--evalspec-config", str(scratch))
+    result = _collect(pytester, "--harnessbench-config", str(scratch))
 
     assert result.ret != 0
     out = result.stderr.str() + result.stdout.str()
-    assert "[tool.evalspec.judge] must be a table" in out
-    assert "--evalspec-config" in out
+    assert "[tool.harnessbench.judge] must be a table" in out
+    assert "--harnessbench-config" in out
 
 
 def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object) -> None:
@@ -1170,8 +1172,8 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
     # threshold is a no-op rather than failing the run.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\ndefault-set = "default"\n'
-        '[tool.evalspec.sets.default]\nharness = "claude-code"\nmodel = "sonnet"\n'
+        '[tool.harnessbench]\ndefault-set = "default"\n'
+        '[tool.harnessbench.sets.default]\nharness = "claude-code"\nmodel = "sonnet"\n'
         'arms = [{name="trial-opus"}, {name="trial-sonnet"}]\n'
     )
     workspace.set_current_iteration("iteration_01")
@@ -1307,7 +1309,7 @@ def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) 
     assert not any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
 
 
-# On-disk --evalspec-config judge fixtures; each is driven end-to-end through the
+# On-disk --harnessbench-config judge fixtures; each is driven end-to-end through the
 # real plugin hooks at collection time by the tests below.
 _FIXTURES = Path(__file__).parent.parent / "fixtures" / "judge"
 
@@ -1317,12 +1319,12 @@ def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> No
     _make_project(pytester)
     result = pytester.runpytest(
         "-p",
-        "evalspec.runners.pytest",
+        "harnessbench.runners.pytest",
         "--collect-only",
         "-q",
-        "--evalspec-repo-root",
+        "--harnessbench-repo-root",
         str(pytester.path),
-        "--evalspec-config",
+        "--harnessbench-config",
         str(_FIXTURES / "unsupported-judge-harness.toml"),
         "test_cases.py::test_eval",
     )
@@ -1333,41 +1335,41 @@ def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> No
 def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time() -> None:
     """Verify unset judge env fixture passes collection but fails at judge exec time."""
     # Collection-time only: proves the fixture's env value is structurally valid
-    # (a string) and does NOT raise until evalspec.grading.judges.run_judge actually expands
+    # (a string) and does NOT raise until harnessbench.grading.judges.run_judge actually expands
     # it. Full end-to-end (a real arm run reaching the judge) needs live credentials
     # and a microVM — out of scope for `make test`; see tests/grading/judges/test_judge_registry.py
     # ::test_run_judge_env_unset_var_raises_schemaerror for the unit-level proof, and
     # tests/config/test_arms.py for expand_env's own unset-var coverage (the same function).
     import tomllib
 
-    from evalspec.grading.judges import resolve_judge_config
+    from harnessbench.grading.judges import resolve_judge_config
 
     with (_FIXTURES / "unset-judge-env.toml").open("rb") as fixture_file:
         raw = tomllib.load(fixture_file)
-    judge_table = raw["tool"]["evalspec"]["judge"]
+    judge_table = raw["tool"]["harnessbench"]["judge"]
     config = resolve_judge_config(pyproject_table=judge_table)  # no raise — structural only
-    assert config.env == {"SOME_JUDGE_KEY": "$EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"}
+    assert config.env == {"SOME_JUDGE_KEY": "$HARNESSBENCH_JUDGE_FIXTURE_UNSET_VAR"}
 
     import os
 
-    from evalspec.grading.judges.registry import run_judge
-    from evalspec.specs.schema import SchemaError
+    from harnessbench.grading.judges.registry import run_judge
+    from harnessbench.specs.schema import SchemaError
 
-    os.environ.pop("EVALSPEC_JUDGE_FIXTURE_UNSET_VAR", None)
-    with pytest.raises(SchemaError, match="EVALSPEC_JUDGE_FIXTURE_UNSET_VAR"):
+    os.environ.pop("HARNESSBENCH_JUDGE_FIXTURE_UNSET_VAR", None)
+    with pytest.raises(SchemaError, match="HARNESSBENCH_JUDGE_FIXTURE_UNSET_VAR"):
         run_judge("prompt", config=config)
 
 
 def test_dotenv_loads_before_conftests_run(pytester: object, monkeypatch: object) -> None:
     """Verify `.env` is loaded before any conftest's `pytest_configure` runs."""
-    monkeypatch.delenv("EVALSPEC_DOTENV_PROBE", raising=False)
-    (pytester.path / ".env").write_text("EVALSPEC_DOTENV_PROBE=from-dotenv\n")
+    monkeypatch.delenv("HARNESSBENCH_DOTENV_PROBE", raising=False)
+    (pytester.path / ".env").write_text("HARNESSBENCH_DOTENV_PROBE=from-dotenv\n")
     pytester.makeconftest(DOTENV_PROBE_CONFTEST)
     pytester.makepyfile(test_probe="def test_probe():\n    pass\n")
 
     result = pytester.runpytest_subprocess(
-        "-p", "evalspec.runners.pytest", "test_probe.py"
+        "-p", "harnessbench.runners.pytest", "test_probe.py"
     )
 
-    assert "EVALSPEC_DOTENV_PROBE missing" not in (result.stdout.str() + result.stderr.str())
+    assert "HARNESSBENCH_DOTENV_PROBE missing" not in (result.stdout.str() + result.stderr.str())
     result.assert_outcomes(passed=1)

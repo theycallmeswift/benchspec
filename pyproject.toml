@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "evalspec"
+name = "harnessbench"
 dynamic = ["version"]
 description = "A pytest-native runner for coding-agent skill evals, sandboxed under microsandbox."
 readme = "README.md"
@@ -46,21 +46,21 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/theycallmeswift/evalspec"
-Documentation = "https://github.com/theycallmeswift/evalspec/tree/dev/docs"
-Issues = "https://github.com/theycallmeswift/evalspec/issues"
+Homepage = "https://github.com/theycallmeswift/harnessbench"
+Documentation = "https://github.com/theycallmeswift/harnessbench/tree/dev/docs"
+Issues = "https://github.com/theycallmeswift/harnessbench/issues"
 
 [project.scripts]
-evalspec = "evalspec.__main__:main"
+harnessbench = "harnessbench.__main__:main"
 
 [project.entry-points.pytest11]
-evalspec = "evalspec.runners.pytest"
+harnessbench = "harnessbench.runners.pytest"
 
 [tool.hatch.version]
-path = "src/evalspec/__init__.py"
+path = "src/harnessbench/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/evalspec"]
+packages = ["src/harnessbench"]
 
 [tool.uv]
 package = true
@@ -92,15 +92,15 @@ convention = "google"
 testpaths = ["tests", "evals"]
 markers = [
     "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals`)",
-    "evalspec: skill-eval cases run via `evalspec run` or `make e2e` (declared here too so importing evalspec.orchestration.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
+    "harnessbench: skill-eval cases run via `harnessbench run` or `make e2e` (declared here too so importing harnessbench.orchestration.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
 ]
 addopts = "-m 'not binder_corpus'"
 
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "e2e"
 eval_paths = ["evals"]
 
-[tool.evalspec.sets.e2e]
+[tool.harnessbench.sets.e2e]
 harness  = "claude-code"
 model    = "sonnet"
 effort   = "medium"
@@ -112,6 +112,6 @@ arms = [
   { name = "trial-overrides", model = "opus", effort = "high", env = { GREETING_LOCALE = "en-GB" } },
 ]
 
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 harness = "codex"
 model   = "gpt-5.5"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from evalspec.sandbox.provenance import (
+from harnessbench.sandbox.provenance import (
     ImageIdentity,
     RuntimeProvenance,
     SandboxProvenance,
@@ -14,7 +14,7 @@ from evalspec.sandbox.provenance import (
 
 def _sandbox(
     *,
-    snapshot: str = "evalspec-microsandbox-claude-code-latest-ab12cd34",
+    snapshot: str = "harnessbench-microsandbox-claude-code-latest-ab12cd34",
     image_digest: str | None = "sha256:aaaa",
     image_digest_status: str = "available",
     image_digest_error: str | None = None,
@@ -188,7 +188,7 @@ class TestToObservedDict:
             "actual_version_status": "available",
             "sandbox": {
                 "backend": "microsandbox",
-                "snapshot": "evalspec-microsandbox-claude-code-latest-ab12cd34",
+                "snapshot": "harnessbench-microsandbox-claude-code-latest-ab12cd34",
                 "fingerprint": "ab12cd34",
                 "base_image_ref": "ubuntu:latest",
                 "install_fingerprint": "install-abc",
@@ -221,7 +221,7 @@ class TestToObservedDict:
             "actual_version_error": "guest probe failed: no such binary",
             "sandbox": {
                 "backend": "microsandbox",
-                "snapshot": "evalspec-microsandbox-claude-code-latest-ab12cd34",
+                "snapshot": "harnessbench-microsandbox-claude-code-latest-ab12cd34",
                 "fingerprint": "ab12cd34",
                 "base_image_ref": "ubuntu:latest",
                 "install_fingerprint": "install-abc",

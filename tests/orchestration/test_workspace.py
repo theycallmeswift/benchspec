@@ -1,6 +1,6 @@
 """Tests for workspace."""
 
-from evalspec.orchestration import workspace
+from harnessbench.orchestration import workspace
 
 
 def test_next_iteration_name_global_under_evals(tmp_path: object) -> None:
@@ -86,11 +86,11 @@ def test_arm_dir_shards_per_sample(tmp_path: object) -> None:
 
 def test_current_iteration_or_none_unset(monkeypatch: object) -> None:
     """Verify current iteration or none unset."""
-    monkeypatch.delenv("EVALSPEC_ITERATION", raising=False)
+    monkeypatch.delenv("HARNESSBENCH_ITERATION", raising=False)
     assert workspace.current_iteration_or_none() is None
 
 
 def test_current_iteration_or_none_set(monkeypatch: object) -> None:
     """Verify current iteration or none set."""
-    monkeypatch.setenv("EVALSPEC_ITERATION", "iteration_07")
+    monkeypatch.setenv("HARNESSBENCH_ITERATION", "iteration_07")
     assert workspace.current_iteration_or_none() == "iteration_07"

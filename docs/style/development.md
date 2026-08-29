@@ -85,7 +85,7 @@ for _ in range(retry_budget): ...            # unused -> _
   size caps.
 - **Package by feature** (`sandbox/`, `binder/`, `runner/`), not by layer
   (`models/`, `utils/`).
-- **Imports at the top of the file.** Absolute (`from evalspec.sandbox import
+- **Imports at the top of the file.** Absolute (`from harnessbench.sandbox import
   provision`), never relative. Grouped and ordered stdlib → third-party →
   local, linter-enforced.
 - **Paradigm-agnostic.** Functions, classes, or procedural code per the shape
@@ -109,7 +109,7 @@ for _ in range(retry_budget): ...            # unused -> _
       raise ValueError("SANDBOX_TOKEN is required")
 
   # cli top level
-  except EvalspecError as error:
+  except HarnessbenchError as error:
       print(f"error: {error}")
       sys.exit(1)
   ```

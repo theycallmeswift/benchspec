@@ -14,10 +14,10 @@ are pytest and microsandbox, and the interesting choices are the arms. A minimal
 two-arm set:
 
 ```toml
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness  = "claude-code"
 model    = "sonnet"
 baseline = "baseline"
@@ -28,16 +28,16 @@ arms = [
 ```
 
 Set-level keys are defaults every arm inherits; an arm overrides only what
-differs. The full key set for `[tool.evalspec.sets.<name>]`:
+differs. The full key set for `[tool.harnessbench.sets.<name>]`:
 
 | Key | Type | Notes |
 |---|---|---|
 | `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `model` / `effort` / `env` / `harness_args`. |
 | `harness` | string | Default harness — `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
-| `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by evalspec — a bad value fails loudly from the agent CLI. |
+| `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by harnessbench — a bad value fails loudly from the agent CLI. |
 | `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for each CLI's accepted values. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
-| `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags evalspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
+| `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags harnessbench owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional — without it, arms report absolute rates and no delta. Must name a declared arm. |
 | `runner` | string | The test harness driving the set. `pytest` is the only supported value (and the default); anything else fails fast with exit `2`. |
 | `sandbox` | string | The sandbox backend. `microsandbox` is the only implementation (and the default); `docker` is recognized but fails fast as not implemented. |
@@ -49,7 +49,7 @@ differs. The full key set for `[tool.evalspec.sets.<name>]`:
 Validation is structural and fail-fast: unknown harnesses, duplicate arm names, a
 `baseline` or `default-set` naming an undeclared thing, a non-table `env` — each
 raises at config-read time (a pytest `UsageError` at collection, exit `2` from
-the CLI), never a silent no-op mid-run. What evalspec deliberately does *not*
+the CLI), never a silent no-op mid-run. What harnessbench deliberately does *not*
 validate is harness × model semantics; models change too fast for an allow-list,
 so a wrong model surfaces as a loud error from the agent CLI.
 
@@ -87,7 +87,7 @@ every punted assertion, deliberately independent of the task arms so the grader
 is constant across the matrix. Declare it top-level, never per set:
 
 ```toml
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 harness = "codex"
 model   = "gpt-5.5"
 ```
@@ -98,7 +98,7 @@ model   = "gpt-5.5"
 | `model` | string | `sonnet` | Harness-specific, like an arm's model. One structural check: an `opencode` judge needs a provider-qualified model (`anthropic/...`), enforced at collection. |
 | `effort` | string | `medium` | Passed to the judge harness where an effort flag exists (Codex has none — accepted, unused). |
 | `timeout` | integer | `300` | Judge subprocess timeout, seconds. |
-| `harness_args` | array of strings | `[]` | Pass-through CLI tokens; evalspec-owned flags are rejected per harness. |
+| `harness_args` | array of strings | `[]` | Pass-through CLI tokens; harnessbench-owned flags are rejected per harness. |
 | `env` | table | `{}` | Judge-only env, `$VAR`-expanded at judge execution time by the same rule as arm env. |
 
 > **Best practice:** judge cross-family. An Anthropic judge grading Anthropic
@@ -110,7 +110,7 @@ model   = "gpt-5.5"
 The judge harness's CLI must be installed on the host with valid credentials; the
 binary is preflighted when tests actually execute, not at collection.
 
-## Top-level `[tool.evalspec]` keys
+## Top-level `[tool.harnessbench]` keys
 
 | Key | Type | Notes |
 |---|---|---|
@@ -118,57 +118,57 @@ binary is preflighted when tests actually execute, not at collection.
 | `sets.<name>` | table | One eval set — see above. |
 | `judge` | table | The run's judge — see above. |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
-| `agent` | string | Run-level default agent for paths outside the arm system (below `EVALSPEC_AGENT` and `--evalspec-agent` in precedence). Task arms ignore it — they name their own `harness`. |
+| `agent` | string | Run-level default agent for paths outside the arm system (below `HARNESSBENCH_AGENT` and `--harnessbench-agent` in precedence). Task arms ignore it — they name their own `harness`. |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs — the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
-| `opencode_version` | string | Default OpenCode version pin when `EVALSPEC_OPENCODE_VERSION` is unset. |
+| `opencode_version` | string | Default OpenCode version pin when `HARNESSBENCH_OPENCODE_VERSION` is unset. |
 
 ## The command line
 
-`evalspec` has four subcommands. `run` and `sandbox:build` follow the full
+`harnessbench` has four subcommands. `run` and `sandbox:build` follow the full
 exit-code contract below; `lint` and `analyze` never exit `5` — an empty root
 just reports zero findings/classifications and exits `0`.
 
 ```bash
-evalspec lint [root]            # static assertion checks — no credentials, no sandbox
-evalspec analyze [root]         # classify assertions deterministic / judge-backed
-evalspec run [root] [flags] [-- pytest-args]
-evalspec sandbox:build [--set S] [--config F] [root]
+harnessbench lint [root]            # static assertion checks — no credentials, no sandbox
+harnessbench analyze [root]         # classify assertions deterministic / judge-backed
+harnessbench run [root] [flags] [-- pytest-args]
+harnessbench sandbox:build [--set S] [--config F] [root]
 ```
 
-### `evalspec run`
+### `harnessbench run`
 
 `run` resolves one set, runs its `(eval × arm)` cells as parametrized pytest
-tests, grades, and reports. Each flag forwards to a `--evalspec-*` pytest plugin
+tests, grades, and reports. Each flag forwards to a `--harnessbench-*` pytest plugin
 option, so the same knobs work when driving pytest directly:
 
 | Flag | Forwards to | Effect |
 |---|---|---|
-| `--set NAME` | `--evalspec-set` | Run this set instead of `default-set`. Unknown names fail fast. |
-| `--config FILE` | `--evalspec-config` | Layer an untracked TOML's `[tool.evalspec.sets.*]` (and `judge`) over pyproject — a scratch set for a one-off comparison. Same table shape as pyproject. |
-| `--model M` | `--evalspec-model` | Override the set's `model` default. Arms that declared their own model keep it. |
-| `--models M1,M2` | `--evalspec-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
-| `--harness H` | `--evalspec-harness` | Override the set's `harness` default. |
-| `--effort E` | `--evalspec-effort` | Override the set's `effort` default. |
-| `--env K=V` | `--evalspec-env` | Add/override a set-default env entry (repeatable; `$VAR` expands at execution). |
-| `--eval-paths P1,P2` | `--evalspec-eval-paths` | Override discovery search paths. |
-| `--fail-under PP` | `--evalspec-fail-under` | CI gate — see below. |
-| `--judge-harness` / `--judge-model` / `--judge-effort` | `--evalspec-judge-*` | Per-run judge overrides. |
+| `--set NAME` | `--harnessbench-set` | Run this set instead of `default-set`. Unknown names fail fast. |
+| `--config FILE` | `--harnessbench-config` | Layer an untracked TOML's `[tool.harnessbench.sets.*]` (and `judge`) over pyproject — a scratch set for a one-off comparison. Same table shape as pyproject. |
+| `--model M` | `--harnessbench-model` | Override the set's `model` default. Arms that declared their own model keep it. |
+| `--models M1,M2` | `--harnessbench-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
+| `--harness H` | `--harnessbench-harness` | Override the set's `harness` default. |
+| `--effort E` | `--harnessbench-effort` | Override the set's `effort` default. |
+| `--env K=V` | `--harnessbench-env` | Add/override a set-default env entry (repeatable; `$VAR` expands at execution). |
+| `--eval-paths P1,P2` | `--harnessbench-eval-paths` | Override discovery search paths. |
+| `--fail-under PP` | `--harnessbench-fail-under` | CI gate — see below. |
+| `--judge-harness` / `--judge-model` / `--judge-effort` | `--harnessbench-judge-*` | Per-run judge overrides. |
 
 Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
-evalspec run -- -k archive-source-from-inbox   # one eval (substring match on the test id)
-evalspec run -- -n 8                           # fan cells across 8 microVMs (pytest-xdist)
-evalspec run -- --count 5                      # 5 samples per cell (pytest-repeat)
-evalspec run -- --collect-only -q              # list the cells without running
+harnessbench run -- -k archive-source-from-inbox   # one eval (substring match on the test id)
+harnessbench run -- -n 8                           # fan cells across 8 microVMs (pytest-xdist)
+harnessbench run -- --count 5                      # 5 samples per cell (pytest-repeat)
+harnessbench run -- --collect-only -q              # list the cells without running
 ```
 
 A few plugin options have no curated `run` flag and are reached the same way —
-notably `--evalspec-judge-timeout`, `--evalspec-judge-env K=V`,
-`--evalspec-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
-*replaces* the configured judge `harness_args` when given), `--evalspec-repo-root`,
-`--evalspec-agent`, and `--evalspec-project-marker`.
+notably `--harnessbench-judge-timeout`, `--harnessbench-judge-env K=V`,
+`--harnessbench-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
+*replaces* the configured judge `harness_args` when given), `--harnessbench-repo-root`,
+`--harnessbench-agent`, and `--harnessbench-project-marker`.
 
 ### The `--fail-under` gate
 
@@ -203,7 +203,7 @@ CLI flag  >  environment variable  >  pyproject.toml  >  built-in default
 ```
 
 Judge knobs insert the scratch file into that chain: CLI flag > `--config` file's
-`[tool.evalspec.judge]` > pyproject's > built-in default. Not every knob has
+`[tool.harnessbench.judge]` > pyproject's > built-in default. Not every knob has
 every channel — `eval_paths` has no env var, and `--fail-under` is flag-only by
 design (it's a CI decision, made where CI is configured).
 
@@ -217,10 +217,10 @@ Host-side configuration (all loadable from a repo-root `.env`):
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude Code credential (OAuth token preferred; from `claude setup-token`). |
 | `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order — see [`harnesses.md`](harnesses.md). |
 | `OPENROUTER_API_KEY` | OpenCode's preferred provider credential (falls back to `ANTHROPIC_API_KEY`, then Gemini keys). |
-| `EVALSPEC_CLAUDE_VERSION` / `EVALSPEC_CODEX_VERSION` / `EVALSPEC_OPENCODE_VERSION` | Pin a harness CLI version instead of `latest`; each pin keys its own sandbox snapshot. |
-| `EVALSPEC_AGENT` | Run-level default agent (below the `--evalspec-agent` flag, above `[tool.evalspec] agent`). |
-| `PROJECT_ROOT` | Repo-root override (below `--evalspec-repo-root`, above the pytest rootdir). |
+| `HARNESSBENCH_CLAUDE_VERSION` / `HARNESSBENCH_CODEX_VERSION` / `HARNESSBENCH_OPENCODE_VERSION` | Pin a harness CLI version instead of `latest`; each pin keys its own sandbox snapshot. |
+| `HARNESSBENCH_AGENT` | Run-level default agent (below the `--harnessbench-agent` flag, above `[tool.harnessbench] agent`). |
+| `PROJECT_ROOT` | Repo-root override (below `--harnessbench-repo-root`, above the pytest rootdir). |
 
-Inside the sandbox, each cell's `setup.sh` additionally sees `EVALSPEC_ARM`,
-`EVALSPEC_MODEL`, `EVALSPEC_HARNESS`, and `EVALSPEC_SET` — described in
+Inside the sandbox, each cell's `setup.sh` additionally sees `HARNESSBENCH_ARM`,
+`HARNESSBENCH_MODEL`, `HARNESSBENCH_HARNESS`, and `HARNESSBENCH_SET` — described in
 [`writing-evals.md`](writing-evals.md#setupsh-what-differs-per-arm).

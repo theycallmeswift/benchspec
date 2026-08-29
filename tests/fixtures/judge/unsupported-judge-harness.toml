@@ -1,10 +1,10 @@
 # tests/fixtures/judge/unsupported-judge-harness.toml
-# `evalspec run --evalspec-config tests/fixtures/judge/unsupported-judge-harness.toml`
-# (== `pytest -p evalspec.runners.pytest --evalspec-config <this file>`) must exit nonzero:
+# `harnessbench run --harnessbench-config tests/fixtures/judge/unsupported-judge-harness.toml`
+# (== `pytest -p harnessbench.runners.pytest --harnessbench-config <this file>`) must exit nonzero:
 # `cursor` is not a registered judge harness — fails at collection, before any paid
 # task arm executes.
-[tool.evalspec]
+[tool.harnessbench]
 
-[tool.evalspec.judge]
+[tool.harnessbench.judge]
 harness = "cursor"
 model = "gpt-5.5"

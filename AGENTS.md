@@ -1,4 +1,4 @@
-# evalspec
+# harnessbench
 
 A benchmark framework for agents: Markdown-authored evals run across named arms (harness × model), sandboxed under microsandbox and graded into matrix reports with machine-readable artifacts. The codebase is actively converging on that vision — internals are in motion, so don't over-index on how things fit together today.
 

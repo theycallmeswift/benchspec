@@ -1,7 +1,7 @@
 # Harnesses
 
 A **harness** is the coding-agent CLI an arm drives: the thing under test.
-evalspec keeps everything harness-specific — how to install the CLI into a
+harnessbench keeps everything harness-specific — how to install the CLI into a
 microVM, which credentials it needs, how to build its headless command, how to
 parse its stream — behind one interface, the `CodingAgent` protocol, so the
 sandbox lifecycle, grading, and reporting never name a concrete agent. Three
@@ -11,7 +11,7 @@ Arms pick their harness individually, so one set can put harnesses side by side
 in the same matrix:
 
 ```toml
-[tool.evalspec.sets.popular-harnesses]
+[tool.harnessbench.sets.popular-harnesses]
 effort   = "medium"
 baseline = "claude-code"
 arms = [
@@ -36,13 +36,13 @@ arms = [
 | Multi-turn (`history` via session resume) | yes | no | no |
 | Token split (input/output) | yes | yes | no — totals only |
 | Credentials | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest) | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or a Gemini key, in that order |
-| Version pin | `EVALSPEC_CLAUDE_VERSION` | `EVALSPEC_CODEX_VERSION` | `EVALSPEC_OPENCODE_VERSION`, then `[tool.evalspec] opencode_version` |
+| Version pin | `HARNESSBENCH_CLAUDE_VERSION` | `HARNESSBENCH_CODEX_VERSION` | `HARNESSBENCH_OPENCODE_VERSION`, then `[tool.harnessbench] opencode_version` |
 | Guest install | `curl -fsSL https://claude.ai/install.sh \| bash` | `npm i -g @openai/codex@<version>` | `npm i -g opencode-ai@<version>` |
-| Skill directory (bridged to `/home/evalspec/skills`) | `/root/.claude/skills` | `/root/.codex/skills` | `/root/.config/opencode/skills` |
+| Skill directory (bridged to `/home/harnessbench/skills`) | `/root/.claude/skills` | `/root/.codex/skills` | `/root/.config/opencode/skills` |
 
 Notes that matter in practice:
 
-- **Effort is trust-and-record.** evalspec passes the arm's `effort` to the
+- **Effort is trust-and-record.** harnessbench passes the arm's `effort` to the
   harness where an effort flag exists and does not pre-validate the value — an
   unsupported one surfaces as a loud error from the CLI, not a silent downgrade.
 - **`history:` needs multi-turn only conceptually.** History renders into the
@@ -55,7 +55,7 @@ Notes that matter in practice:
   `GEMINI_API_KEY` is injected under the SDK's expected
   `GOOGLE_GENERATIVE_AI_API_KEY` name.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
-  your tokens to its invocation but rejects flags evalspec owns — model, effort,
+  your tokens to its invocation but rejects flags harnessbench owns — model, effort,
   prompt delivery, output format, session, and permission controls — including
   their aliases and `--flag=value` forms. The canonical use is opting a Claude
   Code arm into the repo's plugin surface: `harness_args = ["--plugin-dir", "/project"]`.
@@ -65,7 +65,7 @@ Notes that matter in practice:
 Grading reuses the harness adapters in a different execution environment: a task
 arm runs its harness *inside* the sandbox, while the judge runs its harness as a
 fresh process *on the host*, with the host's own credentials. That is why any of
-the three harnesses can judge (configure `[tool.evalspec.judge]` — see
+the three harnesses can judge (configure `[tool.harnessbench.judge]` — see
 [`configuration.md`](configuration.md#the-judge)), why the judge CLI must be
 installed on the host, and why an `opencode` judge needs a provider-qualified
 model. The binder is not a harness call at all — it is a direct Gemini API call,
@@ -73,7 +73,7 @@ unaffected by either the task or judge harness.
 
 ## Adding a harness
 
-The `CodingAgent` protocol (`src/evalspec/agents/base.py`) is the whole
+The `CodingAgent` protocol (`src/harnessbench/agents/base.py`) is the whole
 integration surface. An adapter declares:
 
 - **Identity and layout**: `id` (the registry name, snapshot-cache key, and
@@ -93,11 +93,11 @@ integration surface. An adapter declares:
 
 The steps:
 
-1. Write `src/evalspec/agents/<name>.py` implementing the protocol. Reuse the
+1. Write `src/harnessbench/agents/<name>.py` implementing the protocol. Reuse the
    existing parsers where the CLI's output resembles one already supported.
-2. Register the class in `_REGISTRY` in `src/evalspec/agents/__init__.py` — the
+2. Register the class in `_REGISTRY` in `src/harnessbench/agents/__init__.py` — the
    name becomes a legal `harness` value everywhere at once.
-3. Test against `evalspec.testing.FakeSandbox`, a recording sandbox double, so
+3. Test against `harnessbench.testing.FakeSandbox`, a recording sandbox double, so
    command construction, secret injection, and stream parsing are unit-tested
    without booting a VM. Mirror an existing suite under `tests/agents/`.
 4. Verify with `make test` and `make lint`, then prove an end-to-end boot by

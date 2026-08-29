@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from evalspec.agents.opencode import OpenCodeAgent
-from evalspec.grading.judges.config import JudgeConfig
+from harnessbench.agents.opencode import OpenCodeAgent
+from harnessbench.grading.judges.config import JudgeConfig
 
 
 def _fake_proc(
