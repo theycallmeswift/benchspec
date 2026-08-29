@@ -346,7 +346,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
-        lines.append(report.delta_line(iteration, benchmark, skills_root.parent / "benchmark.md"))
+        lines += report.terminal_matrix(
+            benchmark, _display_path(skills_root.parent / "benchmark.md")
+        )
 
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
         skill = skill_dir.name
@@ -405,6 +407,43 @@ def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config
     terminalreporter.write_sep("=", "harnessbench benchmark")
     for line in lines:
         terminalreporter.line(line)
+
+
+def _display_path(path: Path) -> Path:
+    """Show a path relative to the invocation directory when it sits underneath it."""
+    invocation_dir = Path.cwd()
+    return path.relative_to(invocation_dir) if path.is_relative_to(invocation_dir) else path
+
+
+def _authored_reportinfo(eval_file: Path, item_name: str) -> object:
+    """Build a `reportinfo()` that places an item at its authored eval file."""
+
+    def reportinfo() -> tuple[Path, None, str]:
+        """Return `(path, lineno, domain)` pointing at the eval file, not the wrapper."""
+        return eval_file, None, item_name
+
+    return reportinfo
+
+
+def pytest_itemcollected(item: object) -> None:
+    """Attribute each eval cell to its authored `.eval.md` instead of the wrapper module.
+
+    Every cell is the one parametrized `cases.test_eval`, so pytest would otherwise file
+    all progress, nodeids, and report locations under `cases.py`. The nodeid keeps its
+    `test_eval[<group>-<eval_id>-<arm>]` tail, so `-k`, `--collect-only`, and verbose
+    lines still identify each eval × arm cell; only the path part moves.
+    """
+    callspec = getattr(item, "callspec", None)
+    if callspec is None or "eval_arm" not in callspec.params:
+        return
+    eval_case, _arm = callspec.params["eval_arm"]
+    eval_file = eval_case.eval_file
+    # WARNING: must run before anything reads item.location — it is cached on first
+    # access. pytest derives the progress path from the nodeid (not reportinfo), and
+    # nodeid has no public setter; _nodeid is the same slot Node.__init__ fills.
+    relative = os.path.relpath(eval_file, item.config.rootpath).replace(os.sep, "/")
+    item._nodeid = f"{relative}::{item.name}"
+    item.reportinfo = _authored_reportinfo(eval_file, item.name)
 
 
 def pytest_generate_tests(metafunc: object) -> None:

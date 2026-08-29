@@ -355,6 +355,54 @@ def test_eval(eval_arm, sample_index):
     assert sorted(observed) == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
+def test_progress_attributes_cells_to_authored_eval_files(pytester: object) -> None:
+    """Verify default progress groups cells under their `.eval.md`, not the wrapper module."""
+    _make_project(pytester)
+
+    result = pytester.runpytest(
+        "-p",
+        "harnessbench.runners.pytest",
+        "--harnessbench-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+    )
+
+    result.assert_outcomes(passed=4)
+    result.stdout.re_match_lines(
+        [
+            r"skills/myskill/evals/myskill/alpha\.eval\.md \.\.",
+            r"skills/myskill/evals/myskill/beta\.eval\.md \.\.",
+        ]
+    )
+    assert "test_cases.py .." not in result.stdout.str()
+
+
+def test_verbose_progress_keeps_eval_arm_ids(pytester: object) -> None:
+    """Verify verbose lines still carry the unique eval × arm id per cell."""
+    _make_project(pytester)
+
+    result = pytester.runpytest(
+        "-v",
+        "-p",
+        "harnessbench.runners.pytest",
+        "--harnessbench-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+    )
+
+    result.assert_outcomes(passed=4)
+    alpha = "skills/myskill/evals/myskill/alpha.eval.md"
+    beta = "skills/myskill/evals/myskill/beta.eval.md"
+    result.stdout.fnmatch_lines(
+        [
+            f"{alpha}::test_eval[[]myskill-alpha-baseline[]] PASSED*",
+            f"{alpha}::test_eval[[]myskill-alpha-trial[]] PASSED*",
+            f"{beta}::test_eval[[]myskill-beta-baseline[]] PASSED*",
+            f"{beta}::test_eval[[]myskill-beta-trial[]] PASSED*",
+        ]
+    )
+
+
 class _FakeConfig:
     """Fake config for the pytest_sessionfinish / pytest_terminal_summary tests.
 
@@ -455,8 +503,8 @@ def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> objec
     return session, terminal_reporter
 
 
-def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) -> None:
-    """Verify terminal summary prints delta."""
+def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -> None:
+    """Verify the summary is a per-eval matrix ending in a pointer at benchmark.md."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -467,15 +515,19 @@ def test_terminal_summary_prints_delta(tmp_path: object, monkeypatch: object) ->
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
     assert ("separator", "harnessbench benchmark") in terminal_reporter.events
-    lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert any("iteration_01" in message and "+100pp" in message for message in lines)
-    assert (skill_results_dir.parent.parent / "benchmark.md").is_file()
+    header, eval_row, footer, pointer = terminal_reporter.lines
+    assert header.split() == ["Eval", "baseline", "trial"]
+    assert eval_row.split() == ["archive/alpha", "0%", "100%", "(+100pp)"]
+    assert footer.split() == ["All", "evals", "0%", "100%", "(+100pp)"]
+    benchmark_md = skill_results_dir.parent.parent / "benchmark.md"
+    assert pointer == f"Report: {benchmark_md}"
+    assert benchmark_md.is_file()
 
 
 def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
     """Verify terminal summary multi skill single header."""
-    # Two skills with eval-* children pool into ONE run-level table and one run-level
-    # delta line, under a single header (rows sorted: archive before ingest).
+    # Two skills with eval-* children pool into ONE run-level table, under a single
+    # header (rows sorted: archive before ingest).
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
     workspace.set_current_iteration("iteration_01")
@@ -493,8 +545,14 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
 
     assert terminal_reporter.events.count(("separator", "harnessbench benchmark")) == 1
 
-    lines = [message for kind, message in terminal_reporter.events if kind == "line"]
-    assert len(lines) == 1
+    *table, pointer = terminal_reporter.lines
+    assert [line.split("  ")[0] for line in table] == [
+        "Eval",
+        "archive/alpha",
+        "ingest/beta",
+        "All evals",
+    ]
+    assert pointer.startswith("Report: ")
 
     iteration_root = skills.parent
     benchmark = json.loads((iteration_root / "benchmark.json").read_text())
@@ -1300,8 +1358,8 @@ def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) 
     terminal_reporter = _FakeTR()
     plugin.pytest_terminal_summary(terminal_reporter, 0, config)
     # A bare "binder" substring check would self-collide: pytest's tmp_path embeds this
-    # test's own name (which contains "binder") into the benchmark.md path the delta
-    # line reports. Match the WARN line's actual shape instead.
+    # test's own name (which contains "binder") into the benchmark.md path the Report
+    # line names. Match the WARN line's actual shape instead.
     assert not any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
 
 

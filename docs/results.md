@@ -88,7 +88,32 @@ so a human doesn't ship a noisy win.
 > but counted and surfaced in the report and in `grading.json`'s `errored` flag,
 > so a half-crashed run can't read like a clean one.
 
-Two other visibility lines can follow the summary: `FAIL fail-under: …` when the
+## The terminal summary
+
+While cells run, pytest's progress line names the authored eval file each cell
+came from — `evals/e2e/hello/evals/hello/greets-by-name.eval.md ...` — rather
+than the internal test module, and each cell's id keeps its
+`test_eval[<group>-<eval_id>-<arm>]` tail for `-k` and `-v`. When the session
+ends, the run prints the same matrix `benchmark.md` holds, as a width-aligned
+plain-text table under a `harnessbench benchmark` banner:
+
+```
+============================ harnessbench benchmark ============================
+Eval                             baseline        trial  trial-overrides
+hello/greets-by-name                  17%  67% (+50pp)      83% (+66pp)
+hello-file/writes-greeting-file       17%  83% (+66pp)     100% (+83pp)
+All evals                             17%  75% (+58pp)     100% (+83pp)
+Report: tmp/evals/iteration_02/benchmark.md
+```
+
+Rows, columns, and cells follow the Markdown matrix exactly — roster rows
+(including all-errored evals as `—`), baseline column first, `rate (+Npp)` for
+every other arm, and the pooled `All evals` footer. The terminal table carries no
+harness labels or noise bands; `Report:` points at the `benchmark.md` that does.
+The table is presentation only: `benchmark.json` and `benchmark.md` are the
+artifacts, and the terminal never changes their contents.
+
+Two other visibility lines can follow the table: `FAIL fail-under: …` when the
 gate trips, and `WARN binder: N assertion(s) degraded to judge grading` when a
 transient binder infrastructure failure rerouted assertions to the judge (never
 silent, never an error — but a rejected `GEMINI_API_KEY` fails the run outright).
