@@ -130,12 +130,13 @@ microVM at `/workspace`, which is also the agent's working directory. No
 `workspace/` means the agent starts in an empty directory.
 
 The clean room lives outside your project on purpose. It contains exactly what
-`workspace/` seeded plus whatever the agent writes. The repo is separately
-mounted read-only at `/project` for `setup.sh`, and the agent can read it, so do
-not point prompts or harness arguments there unless repo access is part of the
-experiment. Before the agent runs, harnessbench snapshots SHA-256s of the seeded
-files, so assertions like "byte-identical to its pre-run content" are decidable
-mechanically afterward.
+`workspace/` seeded plus whatever the agent writes. A staged copy of the repo
+(what a clone would contain — never `.env`, `.git`, or earlier runs' artifacts) is
+separately mounted read-only at `/project` for `setup.sh`, and the agent can read
+it, so do not point prompts or harness arguments there unless repo access is part
+of the experiment. Before the agent runs, harnessbench snapshots SHA-256s of the
+seeded files, so assertions like "byte-identical to its pre-run content" are
+decidable mechanically afterward.
 
 Write every path in the eval `./`-relative — `./Inbox/clipping.md`, not an
 absolute path or a repo-relative one — because that is how the agent, the
