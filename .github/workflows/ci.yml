@@ -65,10 +65,13 @@ jobs:
         run: make lint:ruff
 
       # Model-backed houserules needs the Gemini secret, which GitHub withholds
-      # from fork PRs, and diffs against the PR base. Ruff above still runs for
-      # forks and pushes; only gate this step.
+      # from fork PRs and from Dependabot runs, and diffs against the PR base. Ruff
+      # above still runs everywhere; only gate this step.
       - name: Run houserules
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: make lint:houserules LINT_BASE=origin/${{ github.base_ref }}

@@ -42,13 +42,15 @@ jobs:
 
   binder:
     # The corpus is the binder's false-positive gate. It needs the Gemini secret,
-    # which GitHub withholds from fork PRs.
+    # which GitHub withholds from fork PRs and from Dependabot runs (a Dependabot
+    # touch to this file only moves action pins).
     needs: changes
     if: >-
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         (needs.changes.outputs.binder == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository)
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         github.actor != 'dependabot[bot]')
       )
     runs-on: ubuntu-latest
     steps:
