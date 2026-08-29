@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from harnessbench.grading.judge import _balanced_objects
 from harnessbench.specs.schema import SchemaError, _validate_checker_obj
 
-GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
+GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"
 
 GEMINI_API_PATH = "generativelanguage.googleapis.com/v1beta"
 _GEMINI_URL = f"https://{GEMINI_API_PATH}/models/{{model}}:generateContent"
@@ -61,64 +61,30 @@ _BINDING_PROMPT = textwrap.dedent(
       (or "sha256":"<64 hex>")
     - skill_invoked {{"checker":"skill_invoked","skill":"<skill-name>"}}
     - not_skill_invoked {{"checker":"not_skill_invoked","skill":"<skill-name>"}}
-    not_file_exists binds ONLY a bare claim that the path ITSELF is gone ("X no longer exists",
-    "X was removed"). "No <thing> was written / created / added to <path>" is a persistence
-    claim — the path may well exist and the check would false-positive — so it PUNTS under A9,
-    never not_file_exists. Canonical skill-activation lines:
-    `- Skill \\`X\\` invoked` → {{"checker":"skill_invoked","skill":"X"}};
-    `- Skill \\`X\\` not invoked` → {{"checker":"not_skill_invoked","skill":"X"}}.
-    Bind (not_)skill_invoked ONLY for such a bare one-skill line. A longer sentence that ALSO
-    claims a file was/wasn't written, describes intent ("announces readiness"), or bundles
-    other facts is compound — punt; the checker sees only the single activation fact.
     </primitives>
 
     <rules>
-    Output ONLY a single JSON object and nothing else — either ONE checker object from
-    <primitives>, OR a punt: {{"punt": true, "reason": "<why>"}}.
+    Reply with one JSON object and nothing else: a checker from <primitives>, or
+    {{"punt": true, "reason": "<why>"}}.
 
-    A9 HARD RULE — presence / persistence / negation assertions ALWAYS punt. If the assertion
-    asserts that something is "still present", "still contains", "not replaced", "not
-    duplicated", "in place, not duplicated", "preserved", "did not discard", "left intact",
-    "remains", "unchanged", or any other claim that something WAS NOT altered/removed/added,
-    you MUST punt. A surface check sees the present substring but is blind to the invisible
-    "…and was not replaced/duplicated" clause, so binding it would be a false-positive. The ONLY
-    carve-out is a BYTE-IDENTITY claim against pre-run content: "byte-identical to the pre-run X"
-    (a named distinct file) OR "byte-identical to its pre-run content" (the SAME file, unchanged)
-    binds to sha256_match — the one allowed persistence check, because the hash fully captures
-    "not altered" with no blind clause. A trailing explanatory gloss on such a claim ("— did not
-    overwrite it", "— left it untouched", "— did not re-stamp or reformat it") does NOT turn it
-    into a punt; the byte-identity IS the check. This carve-out requires the words "byte-identical"
-    (or "byte-for-byte" / an explicit sha256): a persistence claim WITHOUT a byte-identity phrase
-    ("still present", "not duplicated", "left intact") still punts under the rule above.
+    Bind only when the assertion is a single plain, mechanical fact: a path (file or
+    directory) exists or is gone, N files match a glob, a file has a frontmatter key, a
+    file has a line matching a regex, a file is byte-identical to a named pre-run file, or
+    a bare "- Skill `X` invoked" / "not invoked" line.
 
-    PATHS — when you bind any path-bearing checker, copy `path`, `glob`, `original`, and target
-    filenames inside regex assertions as the FULL workdir-relative path EXACTLY as written in the
-    assertion. Never shorten to a basename, substitute a descriptive label, drop directory
-    components, or drop meaningful `.` path components such as the dot in `./.meta/...`. A leading
-    `./` may remain; the checker resolver treats it only as a workdir anchor. For sha256_match,
-    the pre-run SHA map is keyed by the full path, so a basename or label will not resolve. For a
-    SELF-COMPARISON ("byte-identical to its pre-run content" — no separate file named), set
-    `original` to the SAME full path as `path`.
+    Punt everything else. In particular:
+    - Anything that needs the content read for meaning — "reflects the facts", "is
+      accurate", "the summary states X", "contains the right files".
+    - Anything that bundles two facts — "exists and contains all six templates", a skill
+      line that also says what was or wasn't written.
+    - Any claim that something was NOT changed, removed, duplicated, or added — "still
+      present", "left intact", "not duplicated", "no new entry was written to X". A surface
+      check can't see the "…and nothing else happened" half. The one exception is an
+      explicit "byte-identical" / sha256 claim, which binds to sha256_match.
 
-    Punt on any assertion whose truth needs reading content for meaning, correctness, or
-    faithfulness — e.g. "reflects the facts", "names the three primitives", "the summary
-    states X", "surfaces the contradiction", "reads well", "is accurate". No primitive can
-    verify meaning.
-
-    Punt when an assertion bundles two facts with "and" (e.g. "the file exists and is
-    accurate") — one object checks one fact.
-
-    DIRECTORIES — file_exists / not_file_exists test whether a path EXISTS as a file or a directory,
-    so a BARE existence claim about a folder ("the directory X was created") binds to file_exists,
-    and a BARE absence claim ("X no longer exists", "the directory X was removed") binds to
-    not_file_exists, with that path. A claim that ALSO says what the directory contains — "exists
-    and contains all six templates", "holds the seven PARA folders" — is compound: punt. A bare
-    file count with an explicit glob ("exactly 3 files match notes/*.md") still binds glob_count,
-    but "contains all the right files" is NOT a count — glob_count can't tell the right files
-    from the wrong ones, so binding it would be a false-positive.
-
-    Prefer punting. A false negative costs nothing (the judge grades it). A false positive — a
-    deterministic check passing on wrong output — is the exact failure this prompt prevents.
+    Copy paths exactly as written — full workdir-relative, `./` and `{{TODAY}}` included,
+    never a basename or label. When a file is byte-identical to its own pre-run content,
+    `original` is the same path as `path`.
     </rules>
 
     <examples>
@@ -130,6 +96,9 @@ _BINDING_PROMPT = textwrap.dedent(
 
     Assertion: exactly 3 files match notes/*.md
     {{"checker":"glob_count","glob":"notes/*.md","count":3}}
+
+    Assertion: At least one file matches ./out/{{TODAY}}/*.json
+    {{"checker":"glob_count","glob":"./out/{{TODAY}}/*.json","min":1}}
 
     Assertion: - Skill `my-skill` invoked
     {{"checker":"skill_invoked","skill":"my-skill"}}
@@ -146,7 +115,7 @@ _BINDING_PROMPT = textwrap.dedent(
     {{"checker":"not_file_exists","path":"tmp/scratch.md"}}
 
     Assertion: No new 'archive' entry was written to ./.meta/logs/{{TODAY}}.md
-    {{"punt": true, "reason": "A9 persistence-negation — the log path exists; 'no new entry
+    {{"punt": true, "reason": "persistence-negation — the log path exists; 'no new entry
       was written' is a contents/absence-of-action claim, not a path-absence not_file_exists sees"}}
 
     Assertion: out/session.jsonl is byte-identical to .store/projects/proj/sess-0001.jsonl
@@ -164,7 +133,7 @@ _BINDING_PROMPT = textwrap.dedent(
       is a separate, unverifiable contents claim"}}
 
     Assertion: the original note item.md is still present and was not duplicated
-    {{"punt": true, "reason": "A9 persistence/negation — blind to the not-duplicated clause"}}
+    {{"punt": true, "reason": "persistence/negation — blind to the not-duplicated clause"}}
 
     Assertion: the summary faithfully reflects the three key facts from the source
     {{"punt": true, "reason": "semantic — needs reading content for meaning"}}

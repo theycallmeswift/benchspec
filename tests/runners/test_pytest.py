@@ -567,7 +567,7 @@ arms = [
     assert meta["judge"]["actual_version"] == "judge-1.0.0"  # host probe path
     assert meta["binder"] == {
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": "gemini-3.5-flash-lite",
         "api_path": "generativelanguage.googleapis.com/v1beta",
     }
     assert "commit" in meta

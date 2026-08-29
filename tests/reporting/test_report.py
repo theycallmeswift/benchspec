@@ -781,7 +781,7 @@ def test_benchmark_v3_carries_planned_observed_runner_binder(tmp_path: object) -
         ],
         observed_arms={"trial": {"actual_version": "1.2.3", "sandbox": {"snapshot": "snap-x"}}},
         runner="pytest",
-        binder={"provider": "gemini", "model": "gemini-3.1-flash-lite"},
+        binder={"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     )
 
     assert bench["format_version"] == 3

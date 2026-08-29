@@ -180,7 +180,7 @@ serves every harness in a mixed set.
 This is the part worth internalizing, because it shapes how you word assertions.
 Every assertion takes one of two paths, and the split is decided per line, at
 grade time, by the **binder** — a conservative classifier (a fixed
-`gemini-3.1-flash-lite` call, which is why `GEMINI_API_KEY` is always required):
+`gemini-3.5-flash-lite` call, which is why `GEMINI_API_KEY` is always required):
 
 - **Bind**: the binder maps the prose to one deterministic **checker**, run on
   the host against the final workspace (or the run's process facts). Zero
