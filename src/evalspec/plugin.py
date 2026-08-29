@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 import evalspec
 from evalspec import report, workspace
@@ -42,6 +42,27 @@ _SUMMARY_LINES = pytest.StashKey[list]()
 def _help(*parts: str) -> str:
     """Join help text fragments into one argparse string."""
     return " ".join(parts)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_load_initial_conftests(
+    early_config: object, parser: object, args: object
+) -> None:
+    """Load the repo-root `.env` before any conftest is imported or configured.
+
+    Not `pytest_configure`: conftest plugins register after entry-point plugins, and
+    pluggy calls hooks LIFO, so every conftest's `pytest_configure` runs first — the
+    binder corpus conftest's `preflight_gemini_key()` was aborting the run before this
+    plugin ever loaded `.env`. This hook fires before initial conftest collection, so
+    credentials are in `os.environ` for anything a conftest does.
+
+    `usecwd=True` so the search walks up from where pytest was invoked. Bare
+    `find_dotenv()` walks up from this file instead, which only finds the repo `.env`
+    while evalspec is installed editable — from site-packages it finds nothing.
+    """
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        load_dotenv(dotenv_path)
 
 
 def pytest_addoption(parser: object) -> None:
@@ -352,7 +373,6 @@ def resolved_judge_config(config: object) -> JudgeConfig:
 
 def pytest_configure(config: object) -> None:
     """Configure pytest state for evalspec collection."""
-    load_dotenv()
     config.addinivalue_line(
         "markers", "evalspec: skill-eval cases run via `make evals` (not `make test`)"
     )
