@@ -42,6 +42,8 @@ def host_mount_path(path: object) -> str:
     first makes every bind site immune to that.
     """
     return str(Path(path).resolve())
+
+
 BASE_IMAGE = "ubuntu:latest"
 # The only implemented backend today; the single source other modules default to.
 DEFAULT_SANDBOX = "microsandbox"
