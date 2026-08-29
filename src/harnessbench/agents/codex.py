@@ -389,7 +389,9 @@ class CodexAgent(BaseAgent):
         result = parse_codex_jsonl(proc.stdout, "judge", "judge", None)
         if result.is_error:
             raise RuntimeError(f"codex judge reported an error: {result.result_text[:1000]}")
+
         proc.require_success()
+
         return json.dumps({"result": result.result_text})
 
 
