@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,23 @@ DEFAULT_SANDBOX = "microsandbox"
 # Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
 VM_MEMORY_MIB = 2048
+
+
+def msb_binary() -> Path | None:
+    """Return the `msb` runtime binary the SDK will drive, or None when unavailable.
+
+    Mirrors the SDK's own resolution: an `MSB_PATH` override wins, else the binary
+    bundled inside the `microsandbox` wheel. Nothing on `$PATH` is consulted — a
+    standalone `msb` install is neither required nor used.
+    """
+    override = os.environ.get("MSB_PATH")
+    if override:
+        return Path(override)
+    try:
+        from microsandbox._runtime import msb_path
+    except ImportError:
+        return None
+    return msb_path()
 
 
 @dataclass(frozen=True)
@@ -125,18 +143,15 @@ class MicrosandboxBackend:
     id = DEFAULT_SANDBOX
 
     def installed(self: object) -> bool:
-        """Return whether the microsandbox package can be imported and is installed."""
-        try:
-            import microsandbox
-        except ImportError:
-            return False
-        return bool(microsandbox.is_installed())
+        """Return whether the `msb` runtime the SDK resolves is present on disk."""
+        binary = msb_binary()
+        return binary is not None and binary.is_file()
 
     def preflight(self: object) -> list[str]:
         """Return host-readiness errors: Apple Silicon / KVM / installed runtime.
 
-        The microsandbox-specific remedy (`make evals:build`) lives here, not in the
-        shared preflight, so a future backend supplies its own host checks and remedy.
+        The microsandbox-specific remedy lives here, not in the shared preflight, so a
+        future backend supplies its own host checks and remedy.
         """
         errors: list[str] = []
         system = platform.system()
@@ -149,7 +164,10 @@ class MicrosandboxBackend:
         else:
             errors.append(f"unsupported platform: {system} (need Apple Silicon or Linux+KVM)")
         if not self.installed():
-            errors.append("microsandbox runtime not installed — run `make evals:build`")
+            errors.append(
+                "microsandbox runtime not installed — run `uv sync` "
+                "(or `pip install 'harnessbench[microsandbox]'`)"
+            )
         return errors
 
     def snapshot_exists(self: object, name: str) -> bool:

@@ -70,12 +70,28 @@ def test_build_command_shape_for_exec_json() -> None:
         "--json",
         "-m",
         "gpt-5.4",
+        "-c",
+        "model_reasoning_effort=medium",
         "-C",
         "/root",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
         "do the thing",
     ]
+
+
+def test_build_command_forwards_effort_verbatim() -> None:
+    """Effort reaches codex as a config override; the CLI, not harnessbench, validates it."""
+    cmd = _agent().build_command(
+        "prompt",
+        plugin_dir=None,
+        model="gpt-5.4",
+        effort="xhigh",
+        resume_session_id=None,
+        detect_skill=None,
+    )
+
+    assert cmd[cmd.index("-c") + 1] == "model_reasoning_effort=xhigh"
 
 
 def test_build_command_places_harness_args_before_prompt() -> None:

@@ -55,6 +55,43 @@ def test_judge_wraps_final_agent_message_in_result_envelope(monkeypatch: object)
     assert captured["command"][-1] == "grade this"  # trailing positional prompt
 
 
+def test_judge_pins_reasoning_effort_from_config(monkeypatch: object) -> None:
+    """The configured effort reaches codex as an explicit override, not host config."""
+    stdout = _stream(
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "{}"}},
+    )
+    captured = {}
+
+    def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
+        """Capture the command and return a successful process."""
+        captured["command"] = command
+        return _fake_proc(stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _judge("p", JudgeConfig(harness="codex", model="gpt-5.5", effort="high"))
+
+    command = captured["command"]
+    assert command[command.index("-c") + 1] == "model_reasoning_effort=high"
+
+
+def test_judge_surfaces_turn_failed_message_over_stderr_chatter(monkeypatch: object) -> None:
+    """A rejected request is reported from the stdout `turn.failed` event, not stderr."""
+    stdout = _stream({
+        "type": "turn.failed",
+        "error": {"message": "Unsupported value: 'max' is not supported with this model"},
+    })
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *args, **kwargs: _fake_proc(
+            stdout=stdout, stderr="Reading additional input from stdin...", returncode=1,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Unsupported value: 'max'"):
+        _judge("p", JudgeConfig(harness="codex", model="gpt-5.5"))
+
+
 def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
     """Verify judge raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(

@@ -732,6 +732,48 @@ def test_cli_clean_tolerates_missing_msb(monkeypatch: object, tmp_path: object) 
     sandbox.cli_clean(tmp_path)  # must not raise
 
 
+def test_cli_clean_runs_the_sdk_resolved_msb_binary(monkeypatch: object, tmp_path: object) -> None:
+    """Pruning drives the runtime the SDK resolves, never a bare `msb` from $PATH."""
+    import subprocess
+
+    home = tmp_path / "home"
+    (home / ".microsandbox" / "sandboxes" / "eval-x").mkdir(parents=True)
+    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
+    binary = tmp_path / "bundled" / "msb"
+    monkeypatch.setattr(sandbox, "msb_binary", lambda: binary)
+    commands = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda command, **kwargs: commands.append(command)
+    )
+
+    sandbox.cli_clean(tmp_path)
+
+    assert commands == [
+        [str(binary), "stop", "eval-x"],
+        [str(binary), "rm", "-f", "eval-x"],
+    ]
+
+
+def test_cli_clean_skips_msb_when_runtime_unavailable(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Without a resolvable runtime there is nothing to prune through msb."""
+    import subprocess
+
+    home = tmp_path / "home"
+    (home / ".microsandbox" / "sandboxes" / "eval-x").mkdir(parents=True)
+    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
+    monkeypatch.setattr(sandbox, "msb_binary", lambda: None)
+
+    def boom(*args: object, **kwargs: object) -> NoReturn:
+        """Fail loudly if msb is invoked at all."""
+        raise AssertionError("subprocess.run should not be called")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+
+    sandbox.cli_clean(tmp_path)  # must not raise
+
+
 def _opencode_agent() -> object:
     """Build the opencode agent test fixture."""
     return OpenCodeAgent(auth_value="test-token", auth_env="GEMINI_API_KEY", version="v")

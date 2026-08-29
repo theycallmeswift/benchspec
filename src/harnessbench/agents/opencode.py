@@ -205,11 +205,7 @@ class OpenCodeAgent(BaseAgent):
     # multi_turn: invoke() accepts resume_session_id but does not
     # honor it — each call is a fresh session. token_split: OpenCode usage events
     # carry no cache split, so cost would be a guess.
-    capabilities = AgentCapabilities(
-        efforts=("low", "medium", "high"),
-        multi_turn=False,
-        token_split=False,
-    )
+    capabilities = AgentCapabilities(multi_turn=False, token_split=False)
     def provision_script(self: object) -> str:
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
         return (

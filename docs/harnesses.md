@@ -78,7 +78,9 @@ integration surface. An adapter declares:
 
 - **Identity and layout**: `id` (the registry name, snapshot-cache key, and
   report label), `guest_home`, `skill_load_dir`, `agent_bin`, and a typed
-  `AgentCapabilities` (`efforts`, `multi_turn`, `token_split`).
+  `AgentCapabilities` (`multi_turn`, `token_split`). Effort is not a capability:
+  every adapter forwards the configured value verbatim and lets the CLI reject
+  what it does not accept, the same way model names are handled.
 - **Provisioning**: `provision_script()` — the commands that install the CLI in
   the guest. It is hashed into the snapshot fingerprint, so any installer change
   rebuilds the image automatically.

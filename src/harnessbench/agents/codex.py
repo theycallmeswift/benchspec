@@ -103,7 +103,7 @@ class CodexAgent(BaseAgent):
     AUTH_JSON_GUEST_SOURCE = "/harnessbench-codex-auth/auth.json"
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
-    capabilities = AgentCapabilities(efforts=(), multi_turn=False, token_split=True)
+    capabilities = AgentCapabilities(multi_turn=False, token_split=True)
     def provision_script(self: object) -> str:
         """Install the instance's pinned Codex CLI version (baked in so the cache key tracks it)."""
         return dedent(f"""\
@@ -209,8 +209,8 @@ class CodexAgent(BaseAgent):
         workdir: str | None = None,
     ) -> list[str]:
         """Build the guest command used to invoke the agent."""
-        # plugin_dir/resume_session_id/effort/detect_skill are accepted for protocol
-        # parity. Codex exec has no stable harnessbench-owned equivalents for them yet.
+        # plugin_dir/resume_session_id/detect_skill are accepted for protocol parity.
+        # Codex exec has no stable harnessbench-owned equivalents for them yet.
         cd = workdir or self.guest_home
         return [
             self.agent_bin,
@@ -218,6 +218,8 @@ class CodexAgent(BaseAgent):
             "--json",
             "-m",
             model,
+            "-c",
+            f"model_reasoning_effort={effort}",
             "-C",
             cd,
             "--dangerously-bypass-approvals-and-sandbox",
@@ -372,17 +374,39 @@ class CodexAgent(BaseAgent):
         wraps the final agent text in the {"result": ...} envelope judge.py parses,
         and raises RuntimeError on infra failure — a missing binary, a nonzero exit,
         or a harness error event surfaced by the parser as `is_error`. `config.effort`
-        is deliberately unused: codex exec has no stable effort flag.
+        is pinned via `-c model_reasoning_effort=...` so the verdict never depends on
+        whatever `~/.codex/config.toml` the host happens to carry.
         """
-        command = [self.agent_bin, "exec", "--json", "-m", config.model,
-                   *config.harness_args, prompt]
+        command = [
+            self.agent_bin, "exec", "--json", "-m", config.model,
+            "-c", f"model_reasoning_effort={config.effort}",
+            *config.harness_args, prompt,
+        ]
         proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
 
-        proc.require_success()
+        # Parse before the exit check: codex reports a rejected request as a `turn.failed`
+        # event on stdout and exits 1 with only progress chatter on stderr.
         result = parse_codex_jsonl(proc.stdout, "judge", "judge", None)
         if result.is_error:
             raise RuntimeError(f"codex judge reported an error: {result.result_text[:1000]}")
+
+        proc.require_success()
+
         return json.dumps({"result": result.result_text})
+
+
+def _error_message(event: dict) -> str:
+    """Return the human-readable message from a codex error event, or "" when absent.
+
+    `error` events carry `message` at the top level; `turn.failed` nests it as
+    `error.message`.
+    """
+    for candidate in (event.get("message"), event.get("error")):
+        if isinstance(candidate, str):
+            return candidate
+        if isinstance(candidate, dict) and isinstance(candidate.get("message"), str):
+            return candidate["message"]
+    return ""
 
 
 def _event_item(event: dict) -> dict:
@@ -561,9 +585,7 @@ def parse_codex_jsonl(
             reasoning_tokens += _usage_int(usage, "reasoning_tokens", "reasoning_output_tokens")
         elif etype in {"turn.failed", "error"}:
             is_error = True
-            msg = event.get("message") or event.get("error")
-            if isinstance(msg, str):
-                error_text = msg
+            error_text = _error_message(event) or error_text
 
     total_tokens = input_tokens + cache_read_tokens + output_tokens + reasoning_tokens
     duration_ms = (last_ts - first_ts) if first_ts is not None and last_ts is not None else 0
