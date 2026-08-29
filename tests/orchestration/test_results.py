@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from evalspec.orchestration.results import (
+from harnessbench.orchestration.results import (
     parse_run_json,
     parse_stream_run,
     substitute_assertions,

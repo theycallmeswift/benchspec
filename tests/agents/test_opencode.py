@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from evalspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
+from harnessbench.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -575,12 +575,12 @@ def test_guest_env_carries_home_tz_and_pinned_version() -> None:
     assert env["TZ"] == "UTC"
     # exporting the pinned version lets the provision script's npm install pick it
     # up from the same env when the snapshot is built.
-    assert env["EVALSPEC_OPENCODE_VERSION"] == "0.4.2"
+    assert env["HARNESSBENCH_OPENCODE_VERSION"] == "0.4.2"
 
 
 def test_from_env_env_var_beats_pyproject(monkeypatch: object) -> None:
     """Verify from env env var beats pyproject."""
-    monkeypatch.setenv("EVALSPEC_OPENCODE_VERSION", "1.2.3")
+    monkeypatch.setenv("HARNESSBENCH_OPENCODE_VERSION", "1.2.3")
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
 
     agent = OpenCodeAgent.from_env()
@@ -969,7 +969,7 @@ def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
     """Verify parse opencode jsonl trajectory feeds shared consumers."""
     # The normalized trajectory must work with the agent-agnostic helpers, so the
     # judge process-facts payoff covers OpenCode evals too.
-    from evalspec.grading.trajectory import render_process_facts, skills_dispatched
+    from harnessbench.grading.trajectory import render_process_facts, skills_dispatched
 
     stream = json.dumps(
         {
@@ -998,7 +998,7 @@ def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
 
 def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: object) -> None:
     """Verify opencode fired and skills dispatched agree on name."""
-    from evalspec.grading.trajectory import skills_dispatched
+    from harnessbench.grading.trajectory import skills_dispatched
 
     line = json.dumps(
         {
@@ -1020,7 +1020,7 @@ def test_opencode_non_completed_skill_neither_fires_nor_trajectories() -> None:
     # A skill dispatch seen only in a non-completed frame is dropped by the
     # trajectory's completed-frame gate; `fired` must honor the same gate so the two
     # stay consistent (no fired=True with an empty process-facts trajectory).
-    from evalspec.grading.trajectory import skills_dispatched
+    from harnessbench.grading.trajectory import skills_dispatched
 
     stream = "\n".join(
         [
@@ -1091,7 +1091,7 @@ def test_opencode_skill_load_dir_is_config_path() -> None:
 
 def test_opencode_bridge_script_symlinks_fixed_home() -> None:
     """Verify opencode bridge script symlinks fixed home."""
-    from evalspec.agents.base import FIXED_SKILLS_HOME
+    from harnessbench.agents.base import FIXED_SKILLS_HOME
 
     script = OpenCodeAgent().bridge_skills_home_script()
 
@@ -1100,16 +1100,16 @@ def test_opencode_bridge_script_symlinks_fixed_home() -> None:
     assert "ln -s" in script
 
 
-def test_opencode_cell_env_carries_evalspec_vars() -> None:
-    """Verify opencode cell env carries evalspec vars."""
+def test_opencode_cell_env_carries_harnessbench_vars() -> None:
+    """Verify opencode cell env carries harnessbench vars."""
     env = OpenCodeAgent(version="1.2.3").cell_env(
         arm="trial", model="google/gemini-3.5-flash", eval_set="default"
     )
 
-    assert env["EVALSPEC_ARM"] == "trial"
-    assert env["EVALSPEC_MODEL"] == "google/gemini-3.5-flash"
-    assert env["EVALSPEC_HARNESS"] == "opencode"
-    assert env["EVALSPEC_SET"] == "default"
+    assert env["HARNESSBENCH_ARM"] == "trial"
+    assert env["HARNESSBENCH_MODEL"] == "google/gemini-3.5-flash"
+    assert env["HARNESSBENCH_HARNESS"] == "opencode"
+    assert env["HARNESSBENCH_SET"] == "default"
     assert env["HOME"] == "/root"  # guest_env merged in
 
 

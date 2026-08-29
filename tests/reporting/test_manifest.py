@@ -1,12 +1,15 @@
-"""Tests for evalspec.reporting.manifest — manifest assembly, observed-arm aggregation by value."""
+"""Tests for harnessbench.reporting.manifest.
+
+Manifest assembly and observed-arm aggregation by value.
+"""
 
 from __future__ import annotations
 
 import json
 
-from evalspec.orchestration import workspace
-from evalspec.reporting import manifest
-from evalspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from harnessbench.orchestration import workspace
+from harnessbench.reporting import manifest
+from harnessbench.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
 

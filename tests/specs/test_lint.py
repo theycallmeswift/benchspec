@@ -6,7 +6,7 @@ fire.
 
 from __future__ import annotations
 
-from evalspec.specs import lint
+from harnessbench.specs import lint
 
 
 def _rules(text: object) -> object:

@@ -1,11 +1,11 @@
-"""The pytest-status -> evalspec exit-code mapping.
+"""The pytest-status -> harnessbench exit-code mapping.
 
 Each test pins one raw pytest status to the `ExitCode` the contract promises for it.
 """
 
 from __future__ import annotations
 
-from evalspec.exit_codes import ExitCode, exit_code_for_pytest_status
+from harnessbench.exit_codes import ExitCode, exit_code_for_pytest_status
 
 
 def test_pytest_success_maps_to_success() -> None:

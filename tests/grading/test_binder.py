@@ -15,8 +15,8 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec.grading import binder
-from evalspec.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
+from harnessbench.grading import binder
+from harnessbench.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
 
 
 def _reply(text: str) -> object:
@@ -160,7 +160,7 @@ def test_parses_fenced_json() -> None:
 def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
     """Verify returned spec is dispatchable."""
     # The bound spec must flow straight into the existing checker dispatch.
-    from evalspec.grading.checkers import run_assertion
+    from harnessbench.grading.checkers import run_assertion
 
     (tmp_path / "out.md").write_text("hi")
     spec = bind(
@@ -284,7 +284,7 @@ def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
 def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: object) -> None:
     """Verify _call_gemini's `model` keyword controls the request URL — no env var involved.
 
-    EVALSPEC_BINDER_MODEL is a corpus-suite knob, read only by the corpus's recording
+    HARNESSBENCH_BINDER_MODEL is a corpus-suite knob, read only by the corpus's recording
     wrapper; the production transport must stay env-independent.
     """
     captured = {}
@@ -294,7 +294,7 @@ def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: objec
         respond = _http_response({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})
         return respond(request, timeout)
 
-    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
+    monkeypatch.delenv("HARNESSBENCH_BINDER_MODEL", raising=False)
     monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
 
     binder._call_gemini("prompt", model="gemini-3.1-flash")
@@ -305,7 +305,7 @@ def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: objec
 
 def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
     """Verify the `model` keyword's default is the fixed production constant, not an env read."""
-    monkeypatch.delenv("EVALSPEC_BINDER_MODEL", raising=False)
+    monkeypatch.delenv("HARNESSBENCH_BINDER_MODEL", raising=False)
     assert (
         inspect.signature(binder._call_gemini).parameters["model"].default
         == binder.GEMINI_BINDER_MODEL

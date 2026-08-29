@@ -1,10 +1,10 @@
-"""Tests for evalspec.config.sets — set and judge-config resolution by value."""
+"""Tests for harnessbench.config.sets — set and judge-config resolution by value."""
 
 from __future__ import annotations
 
 import pytest
 
-from evalspec.config import sets
+from harnessbench.config import sets
 
 
 class _SetConfig:
@@ -31,14 +31,14 @@ class _SetConfig:
         self._root, self._opts = (
             repo_root,
             {
-                "evalspec_repo_root": str(repo_root),
-                "evalspec_set": set_name,
-                "evalspec_config": config,
-                "evalspec_model": model,
-                "evalspec_harness": harness,
-                "evalspec_effort": effort_level,
-                "evalspec_env": env or [],
-                "evalspec_models": models,
+                "harnessbench_repo_root": str(repo_root),
+                "harnessbench_set": set_name,
+                "harnessbench_config": config,
+                "harnessbench_model": model,
+                "harnessbench_harness": harness,
+                "harnessbench_effort": effort_level,
+                "harnessbench_env": env or [],
+                "harnessbench_models": models,
             },
         )
 
@@ -50,9 +50,9 @@ class _SetConfig:
 def _write_sets_pyproject(tmp_path: object) -> None:
     """Write sets pyproject."""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "default"\n'
-        "[tool.evalspec.sets.default]\n"
+        "[tool.harnessbench.sets.default]\n"
         'harness = "claude-code"\n'  # set-level default → sweep arms inherit a concrete harness
         'model = "sonnet"\n'
         'baseline = "baseline"\n'
@@ -71,9 +71,9 @@ def test_resolved_run_set_reads_pyproject(tmp_path: object) -> None:
 def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
     """Verify resolved run set preserves harness args."""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "default"\n'
-        "[tool.evalspec.sets.default]\n"
+        "[tool.harnessbench.sets.default]\n"
         'harness = "claude-code"\n'
         'model = "sonnet"\n'
         'harness_args = ["--set-flag"]\n'
@@ -92,13 +92,13 @@ def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
 
 def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> None:
     """Verify resolved run set set model default not clobbered."""
-    # A non-sonnet set default must survive a plain run (no --evalspec-model passed).
+    # A non-sonnet set default must survive a plain run (no --harnessbench-model passed).
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\ndefault-set = "default"\n'
-        '[tool.evalspec.sets.default]\nharness = "claude-code"\n'
+        '[tool.harnessbench]\ndefault-set = "default"\n'
+        '[tool.harnessbench.sets.default]\nharness = "claude-code"\n'
         'model = "opus"\nbaseline = "b"\narms = [{name="b"}]\n'
     )
-    run_set = sets.resolved_run_set(_SetConfig(tmp_path))  # evalspec_model defaults to None
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path))  # harnessbench_model defaults to None
     assert run_set.arms[0].model == "opus"
 
 
@@ -123,8 +123,8 @@ def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path: object) -> Non
 def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path: object) -> None:
     """Verify resolved run set legacy config raises for usageerror."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\nreference = "x"\n'
-        '[[tool.evalspec.arms]]\nname="x"\nharness="claude-code"\nmodel="opus"\n'
+        '[tool.harnessbench]\nreference = "x"\n'
+        '[[tool.harnessbench.arms]]\nname="x"\nharness="claude-code"\nmodel="opus"\n'
     )
     with pytest.raises(pytest.UsageError, match="eval set"):
         sets.resolved_run_set(_SetConfig(tmp_path))
@@ -136,7 +136,7 @@ def test_resolved_run_set_missing_scratch_config_raises_usageerror(
     """Verify resolved run set missing scratch config raises for usageerror."""
     _write_sets_pyproject(tmp_path)
 
-    with pytest.raises(pytest.UsageError, match="--evalspec-config"):
+    with pytest.raises(pytest.UsageError, match="--harnessbench-config"):
         sets.resolved_run_set(_SetConfig(tmp_path, config=str(tmp_path / "missing.toml")))
 
 
@@ -146,9 +146,9 @@ def test_resolved_run_set_malformed_scratch_config_raises_usageerror(
     """Verify resolved run set malformed scratch config raises for usageerror."""
     _write_sets_pyproject(tmp_path)
     scratch = tmp_path / "scratch.toml"
-    scratch.write_text("[tool.evalspec\n")
+    scratch.write_text("[tool.harnessbench\n")
 
-    with pytest.raises(pytest.UsageError, match="--evalspec-config"):
+    with pytest.raises(pytest.UsageError, match="--harnessbench-config"):
         sets.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
@@ -160,7 +160,7 @@ def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
     scratch = tmp_path / "scratch.toml"
     scratch.write_bytes(b"\xff")
 
-    with pytest.raises(pytest.UsageError, match="--evalspec-config"):
+    with pytest.raises(pytest.UsageError, match="--harnessbench-config"):
         sets.resolved_run_set(_SetConfig(tmp_path, config=str(scratch)))
 
 
@@ -211,21 +211,21 @@ class _FakeConfig:
 
     def getoption(self: object, name: object) -> object:
         """Getoption."""
-        if name == "evalspec_repo_root":
+        if name == "harnessbench_repo_root":
             return self._repo_root
         return {
-            "evalspec_model": None,
-            "evalspec_set": None,
-            "evalspec_config": None,
-            "evalspec_harness": None,
-            "evalspec_effort": None,
-            "evalspec_env": [],
-            "evalspec_models": None,
-            "evalspec_judge_harness": None,
-            "evalspec_judge_model": None,
-            "evalspec_judge_effort": None,
-            "evalspec_judge_timeout": None,
-            "evalspec_judge_harness_arg": [],
-            "evalspec_judge_env": [],
-            "evalspec_fail_under": self._fail_under,
+            "harnessbench_model": None,
+            "harnessbench_set": None,
+            "harnessbench_config": None,
+            "harnessbench_harness": None,
+            "harnessbench_effort": None,
+            "harnessbench_env": [],
+            "harnessbench_models": None,
+            "harnessbench_judge_harness": None,
+            "harnessbench_judge_model": None,
+            "harnessbench_judge_effort": None,
+            "harnessbench_judge_timeout": None,
+            "harnessbench_judge_harness_arg": [],
+            "harnessbench_judge_env": [],
+            "harnessbench_fail_under": self._fail_under,
         }.get(name)

@@ -16,7 +16,7 @@ fast as not implemented, so a typo can't silently fall back).
 ## Host requirements and preflight
 
 microsandbox runs hardware-virtualized guests, so the host must be an **Apple
-Silicon Mac** or **Linux with `/dev/kvm`**. Before any cell runs, evalspec
+Silicon Mac** or **Linux with `/dev/kvm`**. Before any cell runs, harnessbench
 preflights the host — platform, the microsandbox runtime, and a usable agent
 credential — and fails with every problem listed, as exit `2`, before a single VM
 boots or a paid call is made.
@@ -24,17 +24,17 @@ boots or a paid call is made.
 ## Snapshots: build once, boot many
 
 Booting a bare Ubuntu image and installing an agent CLI takes minutes; an eval
-run boots dozens of VMs. So evalspec builds one **snapshot** per configuration
+run boots dozens of VMs. So harnessbench builds one **snapshot** per configuration
 and boots every cell from it. A snapshot is sealed in five steps:
 
-1. **Base image** — `ubuntu:latest` by default, or `[tool.evalspec] base_image`.
+1. **Base image** — `ubuntu:latest` by default, or `[tool.harnessbench] base_image`.
 2. **Agent provision** — the harness adapter installs its CLI (for Claude Code,
    `curl -fsSL https://claude.ai/install.sh | bash`; for Codex and OpenCode, an
    npm install of the pinned version).
 3. **Skills-home bridge** — the agent's native skill directory is symlinked to
-   the fixed, harness-neutral `/home/evalspec/skills`, so a per-eval `setup.sh`
+   the fixed, harness-neutral `/home/harnessbench/skills`, so a per-eval `setup.sh`
    installs to one path regardless of harness.
-4. **Environment script** — `[tool.evalspec] environment_script`, if declared,
+4. **Environment script** — `[tool.harnessbench] environment_script`, if declared,
    runs under `set -e`: the escape hatch for extra system tools an eval suite
    needs. A failing command aborts the build loudly.
 5. **Seal** — the VM stops and the snapshot is recorded.
@@ -42,12 +42,12 @@ and boots every cell from it. A snapshot is sealed in five steps:
 Snapshots are cached under `~/.microsandbox/snapshots/` and named
 
 ```
-evalspec-<backend>-<agent>-<agent-version>-<fingerprint>
+harnessbench-<backend>-<agent>-<agent-version>-<fingerprint>
 ```
 
 where the 8-character fingerprint hashes the backend id, the declared base-image
 reference, the agent's install script, and the environment script's *bytes*.
-Change any ingredient — bump `EVALSPEC_CLAUDE_VERSION`, edit the environment
+Change any ingredient — bump `HARNESSBENCH_CLAUDE_VERSION`, edit the environment
 script in place, swap `base_image` — and the name changes, forcing a rebuild;
 old snapshots coexist, so a multi-harness set reuses each harness's cache.
 
@@ -59,14 +59,14 @@ old snapshots coexist, so a multi-harness set reuses each harness's cache.
 > `observed_arms[arm].sandbox.image_digest` — an audit trail, not a cache key.
 
 Builds are lazy and concurrent-safe: the first run that needs a snapshot builds
-it under a file lock (at `tmp/.evalspec-snapshot-<name>.lock` in your repo), so
+it under a file lock (at `tmp/.harnessbench-snapshot-<name>.lock` in your repo), so
 parallel `pytest -n` workers wait for one build instead of racing. To pay the
 cost up front — CI warmup, before a demo, offline prep — build explicitly:
 
 ```bash
-evalspec sandbox:build                 # default backend + repo env
-evalspec sandbox:build --set e2e       # that set's sandbox backend + env
-evalspec sandbox:build --config x.toml # with a scratch config layered over pyproject
+harnessbench sandbox:build                 # default backend + repo env
+harnessbench sandbox:build --set e2e       # that set's sandbox backend + env
+harnessbench sandbox:build --config x.toml # with a scratch config layered over pyproject
 ```
 
 `sandbox:build` exits `0` on a built or already-present snapshot, `2` on a
@@ -81,10 +81,10 @@ of memory — and tears it down after the turn. The guest sees:
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory. The host grades this directory afterward. |
 | `/project` | read-only | Your repo root. Exists so the eval's own `setup.sh` can copy the skill under test into the guest — read-only, so nothing an agent or script does can write back into your checkout. |
-| `/home/evalspec/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
+| `/home/harnessbench/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
 The order of events in a cell: boot from snapshot → run `setup.sh` (if present,
-with the `EVALSPEC_*` cell variables and the arm's `env`) → invoke the agent with
+with the `HARNESSBENCH_*` cell variables and the arm's `env`) → invoke the agent with
 its working directory at `/workspace` → gather facts (file tree, contents,
 SHA-256s, the final message, the tool-call stream) → tear down.
 
@@ -101,11 +101,11 @@ to `/root/.codex/auth.json` inside the guest. Details per harness in
 
 ## Customizing the image
 
-Two knobs, both top-level `[tool.evalspec]` keys, both folded into the cache
+Two knobs, both top-level `[tool.harnessbench]` keys, both folded into the cache
 identity so a change auto-rebuilds:
 
 ```toml
-[tool.evalspec]
+[tool.harnessbench]
 base_image = "python:3.12-slim"        # must be apt-family with glibc
 environment_script = "evals/setup.sh"  # runs after the agent installs, before seal
 ```
@@ -114,4 +114,4 @@ environment_script = "evals/setup.sh"  # runs after the agent installs, before s
 provision step uses `apt-get` and installs glibc-linked CLIs.
 `environment_script` is for suite-wide system dependencies (compilers, language
 runtimes) — per-eval and per-arm setup belongs in the eval's own `setup.sh`
-instead, which runs per cell and can branch on `EVALSPEC_ARM` and `EVALSPEC_SET`.
+instead, which runs per cell and can branch on `HARNESSBENCH_ARM` and `HARNESSBENCH_SET`.

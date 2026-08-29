@@ -14,7 +14,7 @@ skill, and a `benchmark.md` showing the delta between them.
 - **`GEMINI_API_KEY`** — the binder's classifier credential, required for every
   graded run and unrelated to the agent credential above.
 
-Credentials can live in a repo-root `.env`; evalspec loads it automatically. If
+Credentials can live in a repo-root `.env`; harnessbench loads it automatically. If
 anything is missing, preflight fails with a remediation message before any VM
 boots or any paid call is made.
 
@@ -23,7 +23,7 @@ boots or any paid call is made.
 ```bash
 mkdir hello-evals && cd hello-evals
 python3 -m venv .venv
-.venv/bin/pip install "evalspec[microsandbox]"
+.venv/bin/pip install "harnessbench[microsandbox]"
 ```
 
 ## Step 2 — Write a skill and a benchmark
@@ -48,10 +48,10 @@ columns) and a `baseline` (the delta reference); set-level defaults keep each ar
 to just a `name`:
 
 ```toml
-[tool.evalspec]
+[tool.harnessbench]
 default-set = "default"
 
-[tool.evalspec.sets.default]
+[tool.harnessbench.sets.default]
 harness = "claude-code"
 model = "sonnet"
 baseline = "baseline"
@@ -93,20 +93,20 @@ on paths so they read as workspace facts (the linter warns otherwise).
 > `./`-relative paths.
 
 The skill reaches the trial arm through the eval's own setup script, which runs
-inside the VM before the prompt with `$EVALSPEC_ARM` set to the arm's name.
+inside the VM before the prompt with `$HARNESSBENCH_ARM` set to the arm's name.
 Create `skills/hello/evals/hello/setup.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -e
-if [ "$EVALSPEC_ARM" = "baseline" ]; then
+if [ "$HARNESSBENCH_ARM" = "baseline" ]; then
   exit 0   # baseline installs nothing — measures what the agent already knows
 fi
-mkdir -p /home/evalspec/skills/hello
-cp ../../SKILL.md /home/evalspec/skills/hello/SKILL.md
+mkdir -p /home/harnessbench/skills/hello
+cp ../../SKILL.md /home/harnessbench/skills/hello/SKILL.md
 ```
 
-`/home/evalspec/skills` is the fixed skills home every harness's skill directory
+`/home/harnessbench/skills` is the fixed skills home every harness's skill directory
 is symlinked to, so the same `setup.sh` works whether the arm runs Claude Code,
 Codex, or OpenCode. The script's working directory is the eval folder itself
 (mounted read-only at `/project/...`), which is why `../../SKILL.md` resolves.
@@ -116,15 +116,15 @@ Codex, or OpenCode. The script's working directory is the eval folder itself
 Two commands catch problems before you spend sandbox or model time:
 
 ```bash
-.venv/bin/evalspec lint      # static: flags assertions the judge can't fairly grade
-.venv/bin/evalspec analyze   # binds each assertion: deterministic or judge-backed?
+.venv/bin/harnessbench lint      # static: flags assertions the judge can't fairly grade
+.venv/bin/harnessbench analyze   # binds each assertion: deterministic or judge-backed?
 ```
 
 `analyze` uses the real binder, so it needs `GEMINI_API_KEY`. To confirm
 discovery without running anything, forward `--collect-only` to pytest:
 
 ```bash
-.venv/bin/evalspec run -- --collect-only -q
+.venv/bin/harnessbench run -- --collect-only -q
 ```
 
 You should see two collected items — `test_eval[hello-greets-by-name-baseline]`
@@ -134,12 +134,12 @@ here, loudly, with the offending path quoted.
 ## Step 5 — Run
 
 ```bash
-.venv/bin/evalspec run
+.venv/bin/harnessbench run
 ```
 
 The first run builds the sandbox snapshot — a few minutes to download the base
 image and install the agent CLI — and every later run reuses it. (To pay that
-cost up front instead, run `evalspec sandbox:build` once.) Both cells then run,
+cost up front instead, run `harnessbench sandbox:build` once.) Both cells then run,
 grade, and the session ends with a benchmark line:
 
 ```
@@ -174,7 +174,7 @@ exactly which agent version and sandbox snapshot each arm ran on. Alongside it:
 - **Preflight: x86_64 macOS is unsupported.** microsandbox needs Apple Silicon or
   Linux with KVM.
 - **Preflight: microsandbox runtime not installed.** Install the sandbox extra —
-  `pip install "evalspec[microsandbox]"` — into the environment you run from.
+  `pip install "harnessbench[microsandbox]"` — into the environment you run from.
 - **Preflight: no Claude credential.** Run `claude setup-token` or export
   `ANTHROPIC_API_KEY`; a repo-root `.env` works too.
 - **`GEMINI_API_KEY is required`.** The binder classifies every assertion via the

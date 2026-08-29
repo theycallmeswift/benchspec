@@ -31,15 +31,15 @@ Artifacts land under `<group>/eval-<eval_id>/` in the run tree.
 
 ### Discovery
 
-evalspec finds evals by walking a configured list of **search paths** under the
+harnessbench finds evals by walking a configured list of **search paths** under the
 repo root — `skills`, `tests`, `evals`, and `benchmarks` by default. Any
 `eval.md` or `*.eval.md` file anywhere beneath a search path is an eval; the
 filename is the marker, so no particular ancestor directory is required. Override
-the list with `eval_paths` in `[tool.evalspec]` or the `--eval-paths` flag —
+the list with `eval_paths` in `[tool.harnessbench]` or the `--eval-paths` flag —
 that's the sole discovery knob:
 
 ```toml
-[tool.evalspec]
+[tool.harnessbench]
 eval_paths = ["evals"]   # only walk evals/; e.g. add ".claude/skills" as needed
 ```
 
@@ -133,7 +133,7 @@ The clean room lives outside your project on purpose. It contains exactly what
 `workspace/` seeded plus whatever the agent writes. The repo is separately
 mounted read-only at `/project` for `setup.sh`, and the agent can read it, so do
 not point prompts or harness arguments there unless repo access is part of the
-experiment. Before the agent runs, evalspec snapshots SHA-256s of the seeded
+experiment. Before the agent runs, harnessbench snapshots SHA-256s of the seeded
 files, so assertions like "byte-identical to its pre-run content" are decidable
 mechanically afterward.
 
@@ -150,10 +150,10 @@ set:
 
 | Variable | Meaning |
 |---|---|
-| `EVALSPEC_ARM` | The arm's name — the usual branching key. |
-| `EVALSPEC_MODEL` | The arm's task model. Informational; it does not route the model. |
-| `EVALSPEC_HARNESS` | The harness running this cell (`claude-code`, `codex`, `opencode`). |
-| `EVALSPEC_SET` | The explicitly-selected set name; empty when the run used `default-set`. |
+| `HARNESSBENCH_ARM` | The arm's name — the usual branching key. |
+| `HARNESSBENCH_MODEL` | The arm's task model. Informational; it does not route the model. |
+| `HARNESSBENCH_HARNESS` | The harness running this cell (`claude-code`, `codex`, `opencode`). |
+| `HARNESSBENCH_SET` | The explicitly-selected set name; empty when the run used `default-set`. |
 
 The arm's own `env` table is layered on top, so a set that declares
 `env = { CONTEXT_PROFILE = "full" }` can be read here too. A non-zero exit aborts
@@ -164,14 +164,14 @@ The canonical use is the install split:
 ```bash
 #!/usr/bin/env bash
 set -e
-if [ "$EVALSPEC_ARM" = "baseline" ]; then
+if [ "$HARNESSBENCH_ARM" = "baseline" ]; then
   exit 0
 fi
-mkdir -p /home/evalspec/skills/my-skill
-cp ../../SKILL.md /home/evalspec/skills/my-skill/SKILL.md
+mkdir -p /home/harnessbench/skills/my-skill
+cp ../../SKILL.md /home/harnessbench/skills/my-skill/SKILL.md
 ```
 
-`/home/evalspec/skills` is the harness-neutral skills home; every agent's native
+`/home/harnessbench/skills` is the harness-neutral skills home; every agent's native
 skill directory is symlinked to it when the snapshot is built, so one script
 serves every harness in a mixed set.
 
@@ -232,7 +232,7 @@ finding: the skill was there and the agent didn't use it.
 
 Two commands close the loop before a paid run.
 
-`evalspec lint` is static and free. It scans every discovered assertion for
+`harnessbench lint` is static and free. It scans every discovered assertion for
 wording the judge cannot fairly grade, and exits `1` on any finding:
 
 | Rule | Fires on |
@@ -241,7 +241,7 @@ wording the judge cannot fairly grade, and exits `1` on any finding:
 | `unseen-file` | a path-like string with no `./` anchor — the judge only sees workspace facts. |
 | `relative-claim` | `better`, `cleaner`, `improved`, … with no "than" comparand. |
 
-`evalspec analyze` asks the binder itself. It binds every assertion exactly as a
+`harnessbench analyze` asks the binder itself. It binds every assertion exactly as a
 live run would and prints one label per line — `deterministic` or `judge-backed`
 — so you can see where each assertion lands and tighten wording until the facts
 you care most about grade deterministically. It needs `GEMINI_API_KEY` (bare
@@ -257,6 +257,6 @@ call) and always exits `0` on a classified suite: it's a report, not a gate.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md` — anything else errors.
 
-The authoritative validators are `evalspec.specs.mdformat` (Markdown structure)
-and `evalspec.specs.schema` (the parsed shape). When this document drifts, the
+The authoritative validators are `harnessbench.specs.mdformat` (Markdown structure)
+and `harnessbench.specs.schema` (the parsed shape). When this document drifts, the
 code wins.

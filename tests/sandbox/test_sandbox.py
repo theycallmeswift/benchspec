@@ -7,15 +7,15 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec.agents.base import FIXED_SKILLS_HOME
-from evalspec.agents.claude import ClaudeCodeAgent
-from evalspec.agents.codex import CodexAgent
-from evalspec.agents.opencode import OpenCodeAgent
-from evalspec.orchestration.results import RunResult
-from evalspec.sandbox import backend as backend_mod
-from evalspec.sandbox import sandbox
-from evalspec.specs.discovery import EnvConfig
-from evalspec.testing import FakeExecOutput, FakeSandbox
+from harnessbench.agents.base import FIXED_SKILLS_HOME
+from harnessbench.agents.claude import ClaudeCodeAgent
+from harnessbench.agents.codex import CodexAgent
+from harnessbench.agents.opencode import OpenCodeAgent
+from harnessbench.orchestration.results import RunResult
+from harnessbench.sandbox import backend as backend_mod
+from harnessbench.sandbox import sandbox
+from harnessbench.specs.discovery import EnvConfig
+from harnessbench.testing import FakeExecOutput, FakeSandbox
 
 
 def _claude_agent(harness: object = None) -> object:
@@ -121,7 +121,7 @@ def test_snapshot_name_carries_backend_id() -> None:
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
     microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     name = sandbox.snapshot_name(agent, EnvConfig(), backend=microsandbox_backend)
-    assert name.startswith("evalspec-microsandbox-claude-code-1.2.3-")
+    assert name.startswith("harnessbench-microsandbox-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_base_image_changes() -> None:
@@ -135,7 +135,7 @@ def test_snapshot_name_changes_when_base_image_changes() -> None:
         agent, EnvConfig(base_image="ubuntu:22.04"), backend=microsandbox_backend
     )
     assert base != changed
-    assert base.startswith("evalspec-microsandbox-claude-code-1.2.3-")
+    assert base.startswith("harnessbench-microsandbox-claude-code-1.2.3-")
 
 
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
@@ -213,7 +213,7 @@ def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path:
     monkeypatch.setattr(microsandbox_backend, "build_snapshot", lambda *a, **k: built.append(a))
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
     name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=microsandbox_backend)
-    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
+    assert name.startswith("harnessbench-microsandbox-claude-code-v1-")
     assert built == []
 
 
@@ -229,13 +229,13 @@ def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: obje
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
     name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=microsandbox_backend)
     assert built == [name]
-    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
+    assert name.startswith("harnessbench-microsandbox-claude-code-v1-")
 
 
 def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path: object) -> None:
     """The env config from repo_root reaches both the snapshot name and the build."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.evalspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
+        '[tool.harnessbench]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
     microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: False)
@@ -250,7 +250,7 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
         repo_root=tmp_path,
         backend=microsandbox_backend,
     )
-    assert name.startswith("evalspec-microsandbox-claude-code-v1-")
+    assert name.startswith("harnessbench-microsandbox-claude-code-v1-")
     assert captured["name"] == name
     assert captured["image"] == "python:3.12-slim"
 
@@ -284,9 +284,9 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
 ) -> None:
     """A microsandbox set drives the real cli_build path to a backend build call."""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "micro"\n'
-        "[tool.evalspec.sets.micro]\n"
+        "[tool.harnessbench.sets.micro]\n"
         'model = "sonnet"\n'
         'sandbox = "microsandbox"\n'
         'baseline = "baseline"\n'
@@ -308,7 +308,7 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
     sandbox.cli_build(repo_root=tmp_path, set_name="micro")
 
     assert len(built) == 1
-    assert built[0].startswith("evalspec-microsandbox-")
+    assert built[0].startswith("harnessbench-microsandbox-")
 
 
 def _agent_for_harness(harness: object = None) -> object:
@@ -323,9 +323,9 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
 ) -> None:
     """Two DISTINCT-harness arms build two snapshots, one per harness (spec 205)."""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "mixed"\n'
-        "[tool.evalspec.sets.mixed]\n"
+        "[tool.harnessbench.sets.mixed]\n"
         'model = "sonnet"\n'
         'sandbox = "microsandbox"\n'
         'baseline = "baseline"\n'
@@ -359,7 +359,7 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
     assert make_agent_calls == ["claude-code", "codex"]
     assert len(built) == 2
     assert built[0] != built[1]
-    assert all(name.startswith("evalspec-microsandbox-") for name in built)
+    assert all(name.startswith("harnessbench-microsandbox-") for name in built)
 
 
 def test_cli_build_with_set_dedupes_shared_harness(
@@ -367,9 +367,9 @@ def test_cli_build_with_set_dedupes_shared_harness(
 ) -> None:
     """Two arms sharing one harness build exactly once (spec 205)."""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "shared"\n'
-        "[tool.evalspec.sets.shared]\n"
+        "[tool.harnessbench.sets.shared]\n"
         'model = "sonnet"\n'
         'sandbox = "microsandbox"\n'
         'baseline = "baseline"\n'
@@ -414,9 +414,9 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
     swallow or transform it, and must not retry or skip the first harness's built snapshot.
     """
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "mixed"\n'
-        "[tool.evalspec.sets.mixed]\n"
+        "[tool.harnessbench.sets.mixed]\n"
         'model = "sonnet"\n'
         'sandbox = "microsandbox"\n'
         'baseline = "baseline"\n'
@@ -451,7 +451,7 @@ def test_cli_build_reports_image_identity_available(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Every built/reused snapshot's image-identity status is reported (spec 160)."""
-    from evalspec.sandbox.provenance import ImageIdentity
+    from harnessbench.sandbox.provenance import ImageIdentity
 
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
@@ -471,7 +471,7 @@ def test_cli_build_reports_image_identity_unavailable(
     monkeypatch: object, tmp_path: object, capsys: object
 ) -> None:
     """An unavailable image-identity lookup surfaces its error, never a bare null."""
-    from evalspec.sandbox.provenance import ImageIdentity
+    from harnessbench.sandbox.provenance import ImageIdentity
 
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
@@ -494,7 +494,7 @@ def test_cli_build_reports_image_identity_unavailable(
 def test_cli_build_bare_path_requires_no_sets_table(
     monkeypatch: object, tmp_path: object
 ) -> None:
-    """Bare `sandbox:build` builds only the default agent with no `[tool.evalspec.sets]`."""
+    """Bare `sandbox:build` builds only the default agent with no `[tool.harnessbench.sets]`."""
     make_agent_calls: list = []
 
     def fake_make_agent(harness: object = None) -> object:
@@ -515,12 +515,12 @@ def test_cli_build_bare_path_requires_no_sets_table(
 
 def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:
     """A docker set fails fast at resolution, never reaching preflight or the build."""
-    from evalspec.specs.schema import SchemaError
+    from harnessbench.specs.schema import SchemaError
 
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.evalspec]\n"
+        "[tool.harnessbench]\n"
         'default-set = "dock"\n'
-        "[tool.evalspec.sets.dock]\n"
+        "[tool.harnessbench.sets.dock]\n"
         'model = "sonnet"\n'
         'sandbox = "docker"\n'
         'baseline = "baseline"\n'
@@ -540,10 +540,10 @@ def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path:
 
 def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:
     """A malformed scratch sets value raises a contextual schema error."""
-    from evalspec.specs.schema import SchemaError
+    from harnessbench.specs.schema import SchemaError
 
     config = tmp_path / "config.toml"
-    config.write_text('[tool.evalspec]\nsets = ["oops"]\n', encoding="utf-8")
+    config.write_text('[tool.harnessbench]\nsets = ["oops"]\n', encoding="utf-8")
 
     with pytest.raises(SchemaError, match=r"--config.*sets.*table"):
         sandbox._layer_build_config({}, str(config))
@@ -575,7 +575,7 @@ def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: object) -> None:
     volumes = sandbox._agent_extra_volumes(agent, FakeVolume)
 
     assert volumes == {
-        "/evalspec-codex-auth/auth.json": {
+        "/harnessbench-codex-auth/auth.json": {
             "path": str(auth),
             "readonly": True,
         },
@@ -669,7 +669,7 @@ def test_route_in_sandbox_returns_lines_on_dispatch(monkeypatch: object, tmp_pat
         model="sonnet",
     )
 
-    from evalspec.grading.trigger import detect_skill_fired
+    from harnessbench.grading.trigger import detect_skill_fired
 
     assert detect_skill_fired(lines, "archive") is True
 
@@ -971,7 +971,7 @@ class _SetupShellSandbox:
 class _SetupAgent:
     """Minimal agent stub: cell_env mirrors the real claude/opencode contract.
 
-    (guest_env + EVALSPEC_*, harness derived as self.id).
+    (guest_env + HARNESSBENCH_*, harness derived as self.id).
     """
 
     id = "claude-code"
@@ -980,10 +980,10 @@ class _SetupAgent:
         """Cell env."""
         return {
             "HOME": "/root",
-            "EVALSPEC_ARM": arm,
-            "EVALSPEC_MODEL": model,
-            "EVALSPEC_HARNESS": self.id,
-            "EVALSPEC_SET": eval_set,
+            "HARNESSBENCH_ARM": arm,
+            "HARNESSBENCH_MODEL": model,
+            "HARNESSBENCH_HARNESS": self.id,
+            "HARNESSBENCH_SET": eval_set,
         }
 
 
@@ -1005,8 +1005,8 @@ def test_run_setup_sh_runs_reldir_script_and_env() -> None:
     assert call["cwd"] == sandbox.PROJECT_MOUNT
     assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/single-article/setup.sh" in call["script"]
     assert "bash ./setup.sh" in call["script"]
-    assert call["env"]["EVALSPEC_ARM"] == "trial"
-    assert call["env"]["EVALSPEC_MODEL"] == "opus"
+    assert call["env"]["HARNESSBENCH_ARM"] == "trial"
+    assert call["env"]["HARNESSBENCH_MODEL"] == "opus"
 
 
 def test_run_setup_sh_passes_set_and_arm_env() -> None:
@@ -1026,7 +1026,7 @@ def test_run_setup_sh_passes_set_and_arm_env() -> None:
     )
 
     env = fake_sandbox.calls[-1]["env"]
-    assert env["EVALSPEC_SET"] == "popular-harnesses"
+    assert env["HARNESSBENCH_SET"] == "popular-harnesses"
     assert env["ANTHROPIC_BASE_URL"] == "https://o"
 
 
@@ -1144,8 +1144,8 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
     assert "setup.sh" in setup_call[1]
     assert setup_call[2]["cwd"] == sandbox.PROJECT_MOUNT
     assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/x/setup.sh" in setup_call[1]
-    assert setup_call[2]["env"]["EVALSPEC_ARM"] == "trial"
-    assert setup_call[2]["env"]["EVALSPEC_MODEL"] == "opus"
+    assert setup_call[2]["env"]["HARNESSBENCH_ARM"] == "trial"
+    assert setup_call[2]["env"]["HARNESSBENCH_MODEL"] == "opus"
 
 
 def test_arm_session_does_not_implicitly_pass_plugin_dir(
@@ -1444,9 +1444,9 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
 
 
 def test_build_uses_the_declared_image_the_fingerprint_hashed(monkeypatch: object) -> None:
-    """Build and fingerprint reference the same declared image — evalspec never re-resolves it.
+    """Build and fingerprint reference the same declared image — harnessbench never re-resolves it.
 
-    evalspec hashes and pulls the declared reference as-is (no separate digest lookup), so the
+    harnessbench hashes and pulls the declared reference as-is (no separate digest lookup), so the
     image the cache key names and the image the build pulls cannot diverge.
     """
     fake = FakeSandbox()

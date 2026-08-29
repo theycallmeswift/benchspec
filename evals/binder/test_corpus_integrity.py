@@ -12,8 +12,8 @@ import pytest
 import yaml
 from conftest import _latency_cost_summary, _recording_call_model
 
-from evalspec.grading import binder
-from evalspec.grading.checkers import derive_text
+from harnessbench.grading import binder
+from harnessbench.grading.checkers import derive_text
 
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
 
@@ -354,10 +354,10 @@ def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     assert summary["total_output_tokens"] == 40
 
 
-def test_recording_call_model_honors_evalspec_binder_model_env_override(
+def test_recording_call_model_honors_harnessbench_binder_model_env_override(
     monkeypatch: object,
 ) -> None:
-    """Verify the corpus's recording call_model reads EVALSPEC_BINDER_MODEL, not `_call_gemini`.
+    """Verify the corpus's recording call_model reads HARNESSBENCH_BINDER_MODEL, not `_call_gemini`.
 
     This is where the model env-override behavior lives — `_call_gemini` itself takes
     `model` as a plain keyword with no env fallback; only this corpus-side wrapper
@@ -369,7 +369,7 @@ def test_recording_call_model_honors_evalspec_binder_model_env_override(
         captured["model"] = model
         return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
 
-    monkeypatch.setenv("EVALSPEC_BINDER_MODEL", "gemini-3.1-flash")
+    monkeypatch.setenv("HARNESSBENCH_BINDER_MODEL", "gemini-3.1-flash")
     monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
 
     call_model = _recording_call_model([])

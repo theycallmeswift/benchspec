@@ -4,17 +4,17 @@ from typing import NoReturn
 
 import pytest
 
-from evalspec.agents.claude import ClaudeCodeAgent
-from evalspec.agents.codex import CodexAgent
-from evalspec.grading.judges.config import JudgeConfig
-from evalspec.grading.judges.registry import (
+from harnessbench.agents.claude import ClaudeCodeAgent
+from harnessbench.agents.codex import CodexAgent
+from harnessbench.grading.judges.config import JudgeConfig
+from harnessbench.grading.judges.registry import (
     judge_binary,
     known_judge_harnesses,
     preflight_judge_binary,
     probe_judge_version,
     run_judge,
 )
-from evalspec.specs.schema import SchemaError
+from harnessbench.specs.schema import SchemaError
 
 
 def test_known_judge_harnesses() -> None:

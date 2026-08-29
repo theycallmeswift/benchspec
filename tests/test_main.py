@@ -1,4 +1,4 @@
-"""Command dispatch for the `evalspec` CLI entry point.
+"""Command dispatch for the `harnessbench` CLI entry point.
 
 Each test drives `main` with real argv and asserts which subcommand handler ran and the
 root it resolved, with the handler stubbed so no eval discovery happens.
@@ -12,8 +12,8 @@ from textwrap import dedent
 
 import pytest
 
-from evalspec import __main__
-from evalspec.specs.schema import SchemaError
+from harnessbench import __main__
+from harnessbench.specs.schema import SchemaError
 
 
 def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:
@@ -38,7 +38,7 @@ def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Pa
 
 
 def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
-    """Verify `evalspec analyze <dir>` routes to analyze.run with the resolved root."""
+    """Verify `harnessbench analyze <dir>` routes to analyze.run with the resolved root."""
     seen: list[Path] = []
 
     def fake_run(root: Path) -> int:
@@ -55,7 +55,7 @@ def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
 
 
 def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
-    """Verify `evalspec lint <dir>` still routes to lint.run with the resolved root."""
+    """Verify `harnessbench lint <dir>` still routes to lint.run with the resolved root."""
     seen: list[Path] = []
 
     def fake_run(root: Path) -> int:
@@ -89,7 +89,7 @@ def test_run_command_splits_passthrough_at_double_dash(monkeypatch: object) -> N
 
 
 def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
-    """Verify `evalspec run` routes to run.run and returns its exit code."""
+    """Verify `harnessbench run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)
 
     exit_code = __main__.main(["run"])
@@ -178,7 +178,7 @@ def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object)
     ) -> None:
         """Raise the SchemaError a docker set produces at resolution."""
         raise SchemaError(
-            "[tool.evalspec.sets.dock]: unsupported sandbox `docker` "
+            "[tool.harnessbench.sets.dock]: unsupported sandbox `docker` "
             "(supported: ['microsandbox']). Docker is not implemented."
         )
 

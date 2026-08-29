@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from evalspec.agents import base as agent_base
-from evalspec.agents.base import probe_guest_version
-from evalspec.agents.claude import ClaudeCodeAgent
-from evalspec.agents.codex import CodexAgent
+from harnessbench.agents import base as agent_base
+from harnessbench.agents.base import probe_guest_version
+from harnessbench.agents.claude import ClaudeCodeAgent
+from harnessbench.agents.codex import CodexAgent
 
 
 class _FakeGuestBackend:

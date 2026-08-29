@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from evalspec.agents.codex import CodexAgent
-from evalspec.grading.judges.config import JudgeConfig
+from harnessbench.agents.codex import CodexAgent
+from harnessbench.grading.judges.config import JudgeConfig
 
 
 def _fake_proc(
