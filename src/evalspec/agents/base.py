@@ -82,7 +82,7 @@ async def probe_guest_version(
             backend.guest_shell(sandbox, agent, script),
             timeout=GUEST_VERSION_PROBE_TIMEOUT_SECONDS,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None, f"guest version probe timed out after {GUEST_VERSION_PROBE_TIMEOUT_SECONDS}s"
     except Exception as error:
         # Broad on purpose: this probe's contract is "never raise" (see docstring), and

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
 import os
@@ -347,7 +346,7 @@ class CodexAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError, RuntimeError) as error:
+        except (TimeoutError, MicrosandboxError, OSError, RuntimeError) as error:
             return RunResult(
                 eval_id,
                 config,

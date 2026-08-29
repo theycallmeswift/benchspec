@@ -15,11 +15,10 @@ are `step_finish.part.tokens.total`.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess
-import sys
+import tomllib
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -281,10 +280,6 @@ class OpenCodeAgent(BaseAgent):
         `Path.cwd()` so direct `cli_build` invocations from the repo root still find the
         pin. Returns None if the file is missing or the value isn't a string.
         """
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            import tomli as tomllib
         candidates = []
         env_root = os.environ.get("PROJECT_ROOT")
         if env_root:
@@ -428,7 +423,7 @@ class OpenCodeAgent(BaseAgent):
                 # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
-        except (MicrosandboxError, asyncio.TimeoutError, OSError) as error:
+        except (TimeoutError, MicrosandboxError, OSError) as error:
             return RunResult(
                 eval_id,
                 config,

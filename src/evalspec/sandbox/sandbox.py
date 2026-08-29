@@ -422,7 +422,7 @@ async def _route_in_sandbox_async(
         try:
             await asyncio.wait_for(_drain(), timeout=timeout)
             timed_out = False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timed_out = True
             await backend.kill_quietly(handle)
     finally:

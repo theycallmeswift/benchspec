@@ -55,8 +55,8 @@ class RunResult:
 
 def utc_today(now: datetime.datetime | None = None) -> str:
     """Return today's date in UTC as YYYY-MM-DD."""
-    now = now or datetime.datetime.now(datetime.timezone.utc)
-    return now.astimezone(datetime.timezone.utc).date().isoformat()
+    now = now or datetime.datetime.now(datetime.UTC)
+    return now.astimezone(datetime.UTC).date().isoformat()
 
 
 def sum_tokens(usage: dict) -> int:

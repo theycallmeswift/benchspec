@@ -1411,7 +1411,7 @@ def _patch_build_primitives(monkeypatch: object, fake: object) -> None:
         """Provide a fake snapshot for tests."""
 
         @staticmethod
-        async def create(build_name: object, *, name: object, record_integrity: object) -> None:
+        async def create(name: object, *, from_sandbox: object, record_integrity: object) -> None:
             """Create."""
             fake.sealed = True
             return None

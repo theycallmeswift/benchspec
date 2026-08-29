@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -39,10 +39,6 @@ def _read_scratch_evalspec_table(config_path: str | None) -> dict:
     """
     if not config_path:
         return {}
-    if sys.version_info >= (3, 11):
-        import tomllib
-    else:
-        import tomli as tomllib
     try:
         with Path(config_path).open("rb") as config_file:
             raw = tomllib.load(config_file)
