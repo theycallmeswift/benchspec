@@ -1,4 +1,4 @@
-**TL;DR** — Move the binder's prose→checker classification off host Claude onto a fixed direct Gemini API call (`gemini-3.1-flash-lite` via `GEMINI_API_KEY`), delete `agents/judge_cli.py`, and relocate the corpus suite to `evals/binder/` with latency and cost reporting — Phase 2 of the #1 roadmap.
+**TL;DR** — Move the binder's prose→checker classification off host Claude onto a fixed direct Gemini API call (`gemini-3.5-flash-lite` via `GEMINI_API_KEY`), delete `agents/judge_cli.py`, and relocate the corpus suite to `evals/binder/` with latency and cost reporting — Phase 2 of the #1 roadmap.
 
 ## Problem
 
@@ -14,7 +14,7 @@
 
 ```python
 # binder.py — fixed transport, no production config surface
-GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
+GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"
 
 class BinderAuthError(Exception): ...   # credential rejected — NOT a RuntimeError: never degradable
 
@@ -45,7 +45,7 @@ assertion text ──► binder.bind ──► _bind_bare_exists (regex fast pat
                         │ no match
                         ▼
                   _call_gemini ── POST generativelanguage.googleapis.com
-                        │           /v1beta/models/gemini-3.1-flash-lite:generateContent
+                        │           /v1beta/models/gemini-3.5-flash-lite:generateContent
                         │           (x-goog-api-key: $GEMINI_API_KEY, temperature 0, JSON mime)
         ┌───────────────┼───────────────────────────┐
         ▼ GeminiReply   ▼ RuntimeError (transient)   ▼ BinderAuthError (credential)
@@ -55,7 +55,7 @@ assertion text ──► binder.bind ──► _bind_bare_exists (regex fast pat
    checker spec dict | None punt ──► checkers.run_assertion | judge fallback
 ```
 
-- **The binder model is fixed in production; the corpus suite alone can override it.** `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"` is a module constant — no `[tool.evalspec.binder]` table, no CLI flag (the roadmap exposes no binder config surface). The corpus suite honors `EVALSPEC_BINDER_MODEL` (beside `EVALSPEC_BINDER_SAMPLES`) so binder quality decisions can compare a candidate model against the incumbent without editing source — satisfying the roadmap's `--model`-parameterized corpus verification without adding a production knob.
+- **The binder model is fixed in production; the corpus suite alone can override it.** `GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"` is a module constant — no `[tool.evalspec.binder]` table, no CLI flag (the roadmap exposes no binder config surface). The corpus suite honors `EVALSPEC_BINDER_MODEL` (beside `EVALSPEC_BINDER_SAMPLES`) so binder quality decisions can compare a candidate model against the incumbent without editing source — satisfying the roadmap's `--model`-parameterized corpus verification without adding a production knob.
 - **The transport returns a `GeminiReply`, not a string.** `_call_gemini` extracts `candidates[0].content.parts[*].text` plus `usageMetadata` token counts and measures per-attempt latency inside the call — the channel the corpus metrics need. `bind()` consumes `.text`; its outward `dict | None` contract is untouched. The shape mirrors `lib/style_lint/gemini.py`'s `GeminiResponse` (same model, same endpoint), which is precedent, not an import — the wheel ships only `src/evalspec`.
   - Adopt the linter's `generationConfig.responseMimeType: "application/json"` — structured output reduces fence/prose parse-punts, and the corpus retention gate measures the effect directly.
   - Diverge on auth: `x-goog-api-key` header, not the linter's key-in-URL — keys don't belong in URLs.
@@ -68,7 +68,7 @@ assertion text ──► binder.bind ──► _bind_bare_exists (regex fast pat
 - **`agents/judge_cli.py` is deleted — full inventory.** `run_host_judge` and `raise_for_judge_cli_failure` die with the module (the latter's only consumer is `run_host_judge` itself); `raise_for_is_error_envelope` moves into `agents/claude.py`, whose `ClaudeCodeAgent.judge` is its sole remaining consumer. Fallout the deletion must also touch: the `ClaudeCodeAgent.judge` docstring (`agents/claude.py:236`) still ends "…via judge_cli"; `tests/agents/test_judge_cli.py` — only its is_error-envelope test survives, rewritten at the helper's new home, while the three `run_host_judge` tests die with their subject; `tests/test_execution.py:1063` monkeypatches `evalspec.agents.judge_cli.subprocess.run` and is retargeted; the stale transport references in `judges/__init__.py:8-9` and `docs/agents.md:71` are rewritten. The PR #6 fallback option — folding the binder onto `ClaudeCodeAgent.for_host()` — is superseded: the Gemini transport replaces the host-Claude call outright, and the file dies either way.
 - **The corpus suite moves to `evals/binder/`.** `corpus.yaml`, `conftest.py`, `test_corpus.py`, `test_corpus_integrity.py` — replacing the top-level `evals/binder_corpus.yaml` shape per the roadmap. The Makefile `evals` target's positional arg becomes `evals/binder` — pinned deliberately: the controller-side aggregation and infra-guard hooks load only as an *initial* conftest on the args' ancestry path, so leaving the arg at `evals` would silently drop the summary, the results wipe, and the ≥5% gate under xdist. The `binder_corpus` marker description in `pyproject.toml` updates (no longer "Haiku"); `evals/lib/` stays put; `EVALSPEC_BINDER_SAMPLES` and the xdist sharding are unchanged.
 - **Corpus metrics extend, with API-bearing draws separated from regex fast-path draws.** Each per-draw record gains `source: "regex" | "gemini"`, `attempts`, per-attempt `latency_ms`, and the reply's token counts. Session-summary aggregates — mean/p95 latency, total tokens, estimated cost from an in-suite pricing constant (documented as approximate) — compute over Gemini-sourced draws only; the regex fast-path count is reported as its own line (two current corpus `file_exists` entries bind without any API call, and folding their near-zero latencies into the mean would corrupt it). The per-draw zero-leak assertion, heavy-cohort sample floors, retention/over-punt/mismatch rates, an explicit leak count, and the ≥5% infra-error guard are unchanged. The existing mismatch rate is this suite's complement of the roadmap's "model accuracy" metric — nothing is dropped, only named differently.
-- **The corpus run is the acceptance gate for the model swap.** Binder quality decisions come from direct Gemini API corpus runs; prompt-wording adjustments to `_BINDING_PROMPT` needed to hold the zero-leak gate on `gemini-3.1-flash-lite` are in scope, corpus re-labeling is not.
+- **The corpus run is the acceptance gate for the model swap.** Binder quality decisions come from direct Gemini API corpus runs; prompt-wording adjustments to `_BINDING_PROMPT` needed to hold the zero-leak gate on `gemini-3.5-flash-lite` are in scope, corpus re-labeling is not.
 - **Integration tests stay small and harness-level.** With an injected `call_model` (no network), they prove the grading path invokes the binder, records deterministic checker results with their artifact `type`/`result`/`error` fields, falls through to the judge on punts, degrades a binder `RuntimeError` to judge grading with the degradation counted, and propagates `BinderAuthError` — the roadmap's stated bound for this layer, plus the default-transport assertion above.
 
 ## Testing Plan
@@ -90,7 +90,7 @@ assertion text ──► binder.bind ──► _bind_bare_exists (regex fast pat
 
 ## Documentation Plan
 
-- **`docs/configuration.md`**: `GEMINI_API_KEY` requirement, the fixed `gemini-3.1-flash-lite` binder model, binder-degradation visibility, and the distinction between direct-API corpus runs and evalspec harness integration tests.
+- **`docs/configuration.md`**: `GEMINI_API_KEY` requirement, the fixed `gemini-3.5-flash-lite` binder model, binder-degradation visibility, and the distinction between direct-API corpus runs and evalspec harness integration tests.
 - **`docs/agents.md`**: rewrite the line-71 binder paragraph — the binder is a fixed Gemini API call, and `ClaudeCodeAgent.judge` is the only host-Claude call site.
 - **`docs/quickstart.md`**: add `GEMINI_API_KEY` to the credential prerequisites for graded runs.
 - **`docs/concepts.md`**: update the binder-contract description where it names the host-Claude/haiku transport (`concepts.md:15` "cheap (Haiku) classifier", `:117` "separate, unrelated host-Claude call").
@@ -124,7 +124,7 @@ assertion text ──► binder.bind ──► _bind_bare_exists (regex fast pat
 - `make lint` — the package and docs pass lint after the transport swap, deletion, and suite move.
 - `make test` — offline suites green: failure-taxonomy and parse tests, the default-transport assertion, relocated corpus integrity, and grading integration (deterministic results, judge fallback, degradation counting, `BinderAuthError` propagation) with injected `call_model`.
 - `grep -rEn "agents[./]judge_cli" src tests evals` — returns nothing: the code trees are fully scrubbed (`docs/agents.md`/`concepts.md` rewrites are the Documentation Plan's; historical plans under `docs/superpowers/` and this spec keep their references, and `plugin.py`'s unrelated `_parse_judge_cli_table` doesn't match the scoped pattern).
-- `make evals:binder` (with `GEMINI_API_KEY` set) — live corpus run against `gemini-3.1-flash-lite`: zero punt-leaks, and the "binder corpus" summary section prints leaks, retention, over-punt, mismatch, latency, cost, and the regex fast-path count.
+- `make evals:binder` (with `GEMINI_API_KEY` set) — live corpus run against `gemini-3.5-flash-lite`: zero punt-leaks, and the "binder corpus" summary section prints leaks, retention, over-punt, mismatch, latency, cost, and the regex fast-path count.
 - `GEMINI_API_KEY= make evals:binder` — fails fast before any API call: empty counts as missing, and a set-but-empty var can't be repopulated from `.env` by `load_dotenv`.
 - `EVALSPEC_BINDER_MODEL=<candidate> make evals:binder` — the corpus-only override runs the identical gate against a candidate binder model, no source edit.
 - `uv run pytest tests/test_execution.py -k "bind or binder"` — proves degradation counting, judge fallback on punts, artifact `type`/`result`/`error` fields, and loud `BinderAuthError` propagation (the relevant tests are named `test_bind_*`).

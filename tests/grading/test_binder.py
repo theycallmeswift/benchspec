@@ -300,7 +300,7 @@ def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: objec
     binder._call_gemini("prompt", model="gemini-3.1-flash")
 
     assert "gemini-3.1-flash" in captured["url"]
-    assert "gemini-3.1-flash-lite" not in captured["url"]
+    assert "gemini-3.5-flash-lite" not in captured["url"]
 
 
 def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
@@ -421,7 +421,7 @@ def test_binder_identity_matches_spec_shape() -> None:
     """Verify binder_identity() returns the exact spec 82-86 dict."""
     assert binder.binder_identity() == {
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": "gemini-3.5-flash-lite",
         "api_path": "generativelanguage.googleapis.com/v1beta",
     }
 

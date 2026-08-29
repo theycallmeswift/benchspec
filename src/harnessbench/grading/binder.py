@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from harnessbench.grading.judge import _balanced_objects
 from harnessbench.specs.schema import SchemaError, _validate_checker_obj
 
-GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
+GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"
 
 GEMINI_API_PATH = "generativelanguage.googleapis.com/v1beta"
 _GEMINI_URL = f"https://{GEMINI_API_PATH}/models/{{model}}:generateContent"
@@ -99,6 +99,8 @@ _BINDING_PROMPT = textwrap.dedent(
     the pre-run SHA map is keyed by the full path, so a basename or label will not resolve. For a
     SELF-COMPARISON ("byte-identical to its pre-run content" — no separate file named), set
     `original` to the SAME full path as `path`.
+    A placeholder token inside a path such as `{{TODAY}}` is part of the path — copy it
+    verbatim; it never makes a path claim compound or uncheckable.
 
     Punt on any assertion whose truth needs reading content for meaning, correctness, or
     faithfulness — e.g. "reflects the facts", "names the three primitives", "the summary
@@ -130,6 +132,9 @@ _BINDING_PROMPT = textwrap.dedent(
 
     Assertion: exactly 3 files match notes/*.md
     {{"checker":"glob_count","glob":"notes/*.md","count":3}}
+
+    Assertion: At least one file matches ./out/{{TODAY}}/*.json
+    {{"checker":"glob_count","glob":"./out/{{TODAY}}/*.json","min":1}}
 
     Assertion: - Skill `my-skill` invoked
     {{"checker":"skill_invoked","skill":"my-skill"}}

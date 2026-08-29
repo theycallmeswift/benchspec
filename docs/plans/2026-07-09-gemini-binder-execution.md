@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the binder's host-Claude transport with a fixed, stdlib-only Gemini API call (`gemini-3.1-flash-lite`), give the binder's failure taxonomy a total, non-degradable `BinderAuthError` carve-out, make binder degradation to judge grading visible instead of silent, delete `agents/judge_cli.py` now that the binder no longer needs it, and relocate + extend the binder corpus suite with latency/cost reporting under `evals/binder/`.
+**Goal:** Replace the binder's host-Claude transport with a fixed, stdlib-only Gemini API call (`gemini-3.5-flash-lite`), give the binder's failure taxonomy a total, non-degradable `BinderAuthError` carve-out, make binder degradation to judge grading visible instead of silent, delete `agents/judge_cli.py` now that the binder no longer needs it, and relocate + extend the binder corpus suite with latency/cost reporting under `evals/binder/`.
 
 **Architecture:** `binder.py` grows a `_call_gemini` transport (mirroring `lib/style_lint/gemini.py`'s request shape, with no shared import — the wheel ships only `src/evalspec`) that returns a `GeminiReply` dataclass and raises exactly two exception types: `BinderAuthError` (credential rejected, never degradable) or `RuntimeError` (everything else). `bind()`'s injection point renames `call_host` → `call_model`, defaulting to `_call_gemini`. `execution.py`'s `_grade_mixed` narrows its except tuple to `RuntimeError` only and counts each degradation once per `bind_cache` miss; the count rides in `grading.json` as `binder_degraded`, gets summed by `report._arm_stats`, and `plugin.py`'s `pytest_sessionfinish` appends a WARN summary line when nonzero — mirroring the existing `fail_under` gate pattern. `agents/judge_cli.py` is deleted in one atomic commit once the binder no longer imports it: its one surviving helper (`raise_for_is_error_envelope`) moves into `agents/claude.py`, the module's only remaining consumer. The corpus suite moves to `evals/binder/{corpus.yaml,conftest.py,test_corpus.py,test_corpus_integrity.py}`, and each per-draw record gains `source`/`attempts`/`latency_ms`/token counts by having the corpus inject its own recording `call_model` wrapper around `_call_gemini`.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"` is a fixed module constant in `binder.py` — no `[tool.evalspec.binder]` table, no CLI flag. `_call_gemini` takes the model as an explicit keyword parameter (`model: str = GEMINI_BINDER_MODEL`) and never reads any environment variable itself — production code has no env override. Only the corpus suite's recording `call_model` wrapper (Task 7, `evals/binder/conftest.py`) reads `EVALSPEC_BINDER_MODEL` via `os.environ.get("EVALSPEC_BINDER_MODEL", GEMINI_BINDER_MODEL)` and passes it through as `_call_gemini(..., model=...)`; `bind()` itself never threads a model parameter.
+- `GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"` is a fixed module constant in `binder.py` — no `[tool.evalspec.binder]` table, no CLI flag. `_call_gemini` takes the model as an explicit keyword parameter (`model: str = GEMINI_BINDER_MODEL`) and never reads any environment variable itself — production code has no env override. Only the corpus suite's recording `call_model` wrapper (Task 7, `evals/binder/conftest.py`) reads `EVALSPEC_BINDER_MODEL` via `os.environ.get("EVALSPEC_BINDER_MODEL", GEMINI_BINDER_MODEL)` and passes it through as `_call_gemini(..., model=...)`; `bind()` itself never threads a model parameter.
 - The failure taxonomy is total: no raw `urllib`/socket/JSON exception may escape `_call_gemini`. Every failure normalizes to `BinderAuthError` (HTTP 401, 403, or 400 with `API_KEY_INVALID` in the body) or `RuntimeError` (every other HTTP status, transport failure, or degenerate 200 — no candidates, empty parts, `finishReason` `SAFETY`/`MAX_TOKENS`, `promptFeedback` block).
 - `BinderAuthError` is deliberately **not** a `RuntimeError` subclass. Every `except RuntimeError` / `except (RuntimeError, ...)` site this plan touches (execution.py's degrade path, the corpus retry loop) must let it propagate unchanged.
 - `bind()` keeps its `dict | None` outward contract; `_parse_binding` never raises.
@@ -55,7 +55,7 @@
 - Modify: `tests/test_binder.py` (near-total rewrite)
 
 **Interfaces:**
-- Produces: `GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"`, `class BinderAuthError(Exception)`, `@dataclass(frozen=True) class GeminiReply: text: str; prompt_tokens: int; output_tokens: int; latency_ms: float`, `_call_gemini(prompt: str, *, timeout: float = 60.0, model: str = GEMINI_BINDER_MODEL) -> GeminiReply` (no env read — `model` is a plain keyword, defaulting to the fixed production constant), `bind(assertion_text: str, *, call_model: object = _call_gemini) -> dict | None` (renamed `call_host` → `call_model`, `model` param dropped), `_parse_binding(text: str) -> dict | None` (envelope-unwrap removed — takes reply text directly).
+- Produces: `GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"`, `class BinderAuthError(Exception)`, `@dataclass(frozen=True) class GeminiReply: text: str; prompt_tokens: int; output_tokens: int; latency_ms: float`, `_call_gemini(prompt: str, *, timeout: float = 60.0, model: str = GEMINI_BINDER_MODEL) -> GeminiReply` (no env read — `model` is a plain keyword, defaulting to the fixed production constant), `bind(assertion_text: str, *, call_model: object = _call_gemini) -> dict | None` (renamed `call_host` → `call_model`, `model` param dropped), `_parse_binding(text: str) -> dict | None` (envelope-unwrap removed — takes reply text directly).
 - Consumes: `os`, `time`, `urllib.request`, `urllib.error` (new imports); existing `_balanced_objects`, `_validate_checker_obj`, `SchemaError`, `_bind_bare_exists` unchanged.
 
 - [ ] **Step 1: Write the failing tests**
@@ -226,7 +226,7 @@ def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: objec
     binder._call_gemini("prompt", model="gemini-3.1-flash")
 
     assert "gemini-3.1-flash" in captured["url"]
-    assert "gemini-3.1-flash-lite" not in captured["url"]
+    assert "gemini-3.5-flash-lite" not in captured["url"]
 
 
 def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
@@ -333,7 +333,7 @@ Expected: FAIL — `binder.GEMINI_BINDER_MODEL`/`BinderAuthError`/`GeminiReply`/
 Add imports (`os`, `time`, `urllib.error`, `urllib.request`, `dataclasses.dataclass`), drop `from evalspec.agents.judge_cli import run_host_judge`, add:
 
 ```python
-GEMINI_BINDER_MODEL = "gemini-3.1-flash-lite"
+GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"
 
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 _GEMINI_TIMEOUT_SECONDS = 60.0
@@ -1585,12 +1585,12 @@ Replace:
 With:
 
 ```
-`binder.py`'s prose→checker classifier is a fixed, direct Gemini API call (`gemini-3.1-flash-lite`, stdlib `urllib` — no harness, no host CLI), independent from the configured judge harness and from every task arm's own harness. `ClaudeCodeAgent.judge` is the only host-Claude call site left in the package.
+`binder.py`'s prose→checker classifier is a fixed, direct Gemini API call (`gemini-3.5-flash-lite`, stdlib `urllib` — no harness, no host CLI), independent from the configured judge harness and from every task arm's own harness. `ClaudeCodeAgent.judge` is the only host-Claude call site left in the package.
 ```
 
 - [ ] **Step 2: `docs/concepts.md:15` and `:117`**
 
-Line 15, replace `"an author-invisible, cheap (Haiku) classifier"` with `"an author-invisible, cheap (\`gemini-3.1-flash-lite\`, a direct Gemini API call) classifier"` — leave the rest of the bullet (checker list, false-negative tuning, A9 rule, `make evals:binder` pointer) unchanged.
+Line 15, replace `"an author-invisible, cheap (Haiku) classifier"` with `"an author-invisible, cheap (\`gemini-3.5-flash-lite\`, a direct Gemini API call) classifier"` — leave the rest of the bullet (checker list, false-negative tuning, A9 rule, `make evals:binder` pointer) unchanged.
 
 Line 117, replace:
 
@@ -1617,7 +1617,7 @@ Add a bullet after the existing credential bullet (around line 10):
 Disambiguate the existing `GEMINI_API_KEY` row in the Environment variables table (currently describes only OpenCode's provider fallback) — replace it:
 
 ```markdown
-| `GEMINI_API_KEY` | Two independent consumers. (1) **The binder** (`binder.py`) — required unconditionally for any graded run; classification always calls `gemini-3.1-flash-lite` directly, regardless of the task or judge harness. Empty counts as missing. (2) **OpenCode's** Google/Gemini provider credential — conditional, used only when neither `OPENROUTER_API_KEY` nor `ANTHROPIC_API_KEY` is set, and only for OpenCode arms. |
+| `GEMINI_API_KEY` | Two independent consumers. (1) **The binder** (`binder.py`) — required unconditionally for any graded run; classification always calls `gemini-3.5-flash-lite` directly, regardless of the task or judge harness. Empty counts as missing. (2) **OpenCode's** Google/Gemini provider credential — conditional, used only when neither `OPENROUTER_API_KEY` nor `ANTHROPIC_API_KEY` is set, and only for OpenCode arms. |
 ```
 
 Add a new `## The binder` section after `## The judge` (before `## CLI flags`), covering the fixed model, the corpus-only override, and degradation visibility:
@@ -1625,7 +1625,7 @@ Add a new `## The binder` section after `## The judge` (before `## CLI flags`), 
 ```markdown
 ## The binder
 
-The binder (`binder.py`) maps each prose assertion to a deterministic checker or punts to the judge, via a fixed, direct call to `gemini-3.1-flash-lite` — no `[tool.evalspec.binder]` table, no CLI flag; the model is a module constant, not a config surface. Every graded run needs `GEMINI_API_KEY` (see Environment variables above); a missing or empty key fails fast, before any paid arm runs.
+The binder (`binder.py`) maps each prose assertion to a deterministic checker or punts to the judge, via a fixed, direct call to `gemini-3.5-flash-lite` — no `[tool.evalspec.binder]` table, no CLI flag; the model is a module constant, not a config surface. Every graded run needs `GEMINI_API_KEY` (see Environment variables above); a missing or empty key fails fast, before any paid arm runs.
 
 A transient binder infra failure degrades that one assertion to judge grading rather than erroring the cell — this is by design (see [`concepts.md`](concepts.md#the-binder)) — but is never silent: each degraded assertion increments `binder_degraded` in the arm's `grading.json`, and the run prints a `WARN binder: N assertion(s) degraded…` summary line when the total is nonzero. A credential rejection (`BinderAuthError`) is never degraded — it fails the run outright.
 
