@@ -127,9 +127,15 @@ discovery without running anything, forward `--collect-only` to pytest:
 .venv/bin/harnessbench run -- --collect-only -q
 ```
 
-You should see two collected items — `test_eval[hello-greets-by-name-baseline]`
-and `test_eval[hello-greets-by-name-trial]` — one per arm. A malformed eval fails
-here, loudly, with the offending path quoted.
+You should see two collected items, one per arm, each filed under the eval file
+that produced it:
+
+```
+skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-baseline]
+skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-trial]
+```
+
+A malformed eval fails here, loudly, with the offending path quoted.
 
 ## Step 5 — Run
 
@@ -139,15 +145,22 @@ here, loudly, with the offending path quoted.
 
 The first run builds the sandbox snapshot — a few minutes to download the base
 image and install the agent CLI — and every later run reuses it. (To pay that
-cost up front instead, run `harnessbench sandbox:build` once.) Both cells then run,
-grade, and the session ends with a benchmark line:
+cost up front instead, run `harnessbench sandbox:build` once.) Both cells then run
+under their eval file's progress line, grade, and the session ends with the
+benchmark table:
 
 ```
-iteration_01: baseline 0% -> trial 100%  (delta +100pp)  -> tmp/evals/iteration_01/benchmark.md
+skills/hello/evals/hello/greets-by-name.eval.md ..                       [100%]
+
+============================ harnessbench benchmark ============================
+Eval                  baseline          trial
+hello/greets-by-name        0%  100% (+100pp)
+All evals                   0%  100% (+100pp)
+Report: tmp/evals/iteration_01/benchmark.md
 ```
 
 Your numbers will differ — the baseline arm may guess the right shape, the trial
-arm may miss an assertion. What matters is that both arms ran and the report
+arm may miss an assertion. What matters is that both arms ran and the table
 shows a delta rather than a lone score.
 
 ## Step 6 — Look at what you got

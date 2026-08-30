@@ -337,26 +337,24 @@ def _rate_cell(rate: float | None, delta_pp: float | None) -> str:
     return f"{rate:.0%} ({delta_pp:+.0f}pp)"
 
 
-def _matrix_table(benchmark: dict) -> list[str]:
-    """Return the run-level group/eval-by-arm matrix with an All evals footer."""
+def _matrix_cells(benchmark: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:
+    """Return the matrix's arm column order and its `(label, cells)` rows, footer last.
+
+    Columns are the baseline first, then the remaining arms in declared order. Rows come
+    from the roster, not the per-eval union, so an all-errored eval (which has no
+    per-eval row in any arm) still renders a row of — cells; the `All evals` footer
+    carries each arm's pooled rate. The Markdown and terminal renderers both consume
+    this, so their cells never disagree.
+    """
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
-    # baseline column first, then the rest in declared order (dict preserves it).
     names = ([baseline] if baseline in arms else []) + [
         arm_name for arm_name in arms if arm_name != baseline
     ]
     if not names:
-        return []
-    headers = [f"{name} ({arms[name].get('harness') or '?'})" for name in names]
+        return [], []
 
-    lines = [
-        "## Matrix",
-        "",
-        "| Eval | " + " | ".join(headers) + " |",
-        "|------|" + "|".join(["------"] * len(names)) + "|",
-    ]
-    # Rows come from the roster, not the per-eval union, so an all-errored eval (which
-    # has no per-eval row in any arm) still renders a row of — cells.
+    rows = []
     for entry in benchmark["roster"]:
         group = entry["group"]
         eval_id = entry["eval_id"]
@@ -367,15 +365,72 @@ def _matrix_table(benchmark: dict) -> list[str]:
             measured = arm_name != baseline and ref_rate is not None and rate is not None
             delta_pp = (rate - ref_rate) * 100 if measured else None
             cells.append(_rate_cell(rate, delta_pp))
-        lines.append(f"| {group}/{eval_id} | " + " | ".join(cells) + " |")
+        rows.append((f"{group}/{eval_id}", cells))
 
     footer_cells = []
     for arm_name in names:
         delta_pp = None if arm_name == baseline else arms[arm_name].get("delta_pp")
         footer_cells.append(_rate_cell(arms[arm_name]["pass_rate"], delta_pp))
-    lines.append("| All evals | " + " | ".join(footer_cells) + " |")
+    rows.append(("All evals", footer_cells))
+
+    return names, rows
+
+
+def _matrix_table(benchmark: dict) -> list[str]:
+    """Return the run-level group/eval-by-arm matrix with an All evals footer."""
+    names, rows = _matrix_cells(benchmark)
+    if not names:
+        return []
+    arms = benchmark["arms"]
+    headers = [f"{name} ({arms[name].get('harness') or '?'})" for name in names]
+
+    lines = [
+        "## Matrix",
+        "",
+        "| Eval | " + " | ".join(headers) + " |",
+        "|------|" + "|".join(["------"] * len(names)) + "|",
+    ]
+    for label, cells in rows:
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
     lines.append("")
+    return lines
+
+
+def terminal_matrix(benchmark: dict, report_path: Path) -> list[str]:
+    """Render the matrix as width-aligned plain text for the pytest terminal summary.
+
+    Same rows and cells as the Markdown matrix. The eval column is left-aligned and every
+    arm column right-aligned so rates line up; the last line points at the written report.
+
+    Args:
+        benchmark: A built benchmark (see `build_benchmark`).
+        report_path: The `benchmark.md` path to name on the closing `Report:` line.
+
+    Returns:
+        The lines to print, header first, `Report:` pointer last.
+    """
+    names, rows = _matrix_cells(benchmark)
+    if not names:
+        return [f"Report: {report_path}"]
+
+    label_width = max(len("Eval"), *(len(label) for label, _cells in rows))
+    column_widths = [
+        max(len(name), *(len(cells[column]) for _label, cells in rows))
+        for column, name in enumerate(names)
+    ]
+
+    def aligned(label: str, cells: list[str]) -> str:
+        """Join one row's label and cells into a padded line."""
+        padded_cells = [
+            cell.rjust(width) for cell, width in zip(cells, column_widths, strict=True)
+        ]
+        return "  ".join([label.ljust(label_width), *padded_cells])
+
+    lines = [aligned("Eval", names)]
+    for label, cells in rows:
+        lines.append(aligned(label, cells))
+    lines.append(f"Report: {report_path}")
     return lines
 
 
@@ -637,35 +692,3 @@ def write_benchmark(
     return benchmark
 
 
-def delta_line(skill: str, benchmark: dict, benchmark_md: Path) -> str:
-    """Return one terminal-summary line for a benchmark."""
-    arms = benchmark["arms"]
-    baseline = benchmark.get("baseline")
-    parts = []
-    if baseline is None:
-        scored = [f"{name} {_pct(stats.get('pass_rate'))}" for name, stats in arms.items()]
-        if scored:
-            parts.append(" · ".join(scored))
-    else:
-        ref_rate = arms.get(baseline, {}).get("pass_rate")
-        for name, stats in arms.items():
-            if name == baseline:
-                continue
-            rate = stats.get("pass_rate")
-            if rate is None and ref_rate is None:
-                continue
-            seg = f"baseline {_pct(ref_rate)} -> {name} {_pct(rate)}"
-            if rate is not None and ref_rate is not None:
-                delta_pp = (rate - ref_rate) * 100
-                seg += f"  (delta {delta_pp:+.0f}pp"
-                band = stats.get("delta_noise_pp")
-                if band is not None and abs(delta_pp) <= band:
-                    seg += f", within noise ±{band:.0f}pp"
-                seg += ")"
-            parts.append(seg)
-
-        # Baseline-only sweep: show the baseline's own rate so the terminal line still
-        # carries a score, not just a bare path.
-        if not parts and baseline in arms:
-            parts.append(f"{baseline} {_pct(ref_rate)}")
-    return f"{skill}: " + "  |  ".join(parts) + f"  -> {benchmark_md}"

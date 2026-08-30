@@ -355,18 +355,6 @@ def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> No
     assert "50%" in headline
 
 
-def test_delta_line_reference_only_shows_its_rate(tmp_path: object) -> None:
-    """Verify delta line reference only shows its rate."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {"baseline": {"pass_rate": 0.5}},
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "baseline 50%" in line
-
-
 def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
     """Verify errored samples surface instead of vanishing."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=0)
@@ -382,55 +370,103 @@ def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
     assert "1 sample(s) excluded" in md
 
 
-def test_delta_line_shows_delta(tmp_path: object) -> None:
-    """Verify delta line shows delta."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {
-            "trial": {"pass_rate": 0.9},
-            "baseline": {"pass_rate": 0.4},
-        },
+def _terminal_rows(lines: list[str]) -> dict[str, str]:
+    """Map each terminal matrix row's label to its whitespace-normalized cell text."""
+    rows = {}
+    for line in lines[1:-1]:
+        label, *cells = line.split("  ")
+        rows[label.strip()] = " ".join(cell.strip() for cell in cells if cell.strip())
+    return rows
+
+
+def test_terminal_matrix_aligns_columns(tmp_path: object) -> None:
+    """Verify the terminal matrix pads every column so header and rows line up."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "ingest", "long-eval-name", "baseline", passes=2, total=2)
+    seed_arm(tmp_path / "ingest", "long-eval-name", "trial", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    header, *rows, pointer = lines
+    assert header.split() == ["Eval", "baseline", "trial"]
+    assert [row.split("  ")[0].strip() for row in rows] == [
+        "archive/alpha",
+        "ingest/long-eval-name",
+        "All evals",
+    ]
+    # Right-aligned arm cells end where the header does, so every table line is the
+    # same width and the eval column is padded to its longest label.
+    assert {len(line) for line in (header, *rows)} == {len(header)}
+    assert rows[0].startswith("archive/alpha".ljust(len("ingest/long-eval-name")) + "  ")
+    assert rows[0].endswith("100% (+50pp)")
+    assert pointer == f"Report: {tmp_path / 'benchmark.md'}"
+
+
+def test_terminal_matrix_cells_match_markdown_matrix(tmp_path: object) -> None:
+    """Verify the terminal cells are the persisted matrix's cells, row for row."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100%
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=0, total=2)  # 0%
+    bench = report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    markdown = (tmp_path / "benchmark.md").read_text()
+    matrix_section = markdown.split("## Matrix", 1)[1].split("## ", 1)[0]
+    markdown_rows = {}
+    for line in matrix_section.splitlines():
+        if line.startswith("| ") and not line.startswith("| Eval"):
+            label, *cells = [cell.strip() for cell in line.strip("|").split("|")]
+            markdown_rows[label] = " ".join(cells)
+    assert _terminal_rows(lines) == {
+        "archive/alpha": "50% 100% (+50pp)",
+        "archive/beta": "100% 0% (-100pp)",
+        "All evals": "75% 50% (-25pp)",
+    }
+    assert _terminal_rows(lines) == markdown_rows
+
+
+def test_terminal_matrix_missing_rates_render_dash(tmp_path: object) -> None:
+    """Verify an all-errored eval and a never-run arm both render — cells."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "ghost", "baseline", passes=0, total=2, errored=True)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        label="iteration_01",
+        baseline="baseline",
+        arm_meta={"baseline": {"harness": "claude-code"}, "trial": {"harness": "codex"}},
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert lines[0].split() == ["Eval", "baseline", "trial"]
+    assert _terminal_rows(lines) == {
+        "archive/alpha": "50% —",
+        "archive/ghost": "— —",
+        "All evals": "50% —",
     }
 
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
 
-    assert "archive" in line
-    assert "90%" in line
-    assert "40%" in line
-    assert "+50pp" in line
+def test_terminal_matrix_absolute_without_baseline(tmp_path: object) -> None:
+    """Verify a no-baseline sweep shows each arm's absolute rate with no delta."""
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
 
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
 
-def test_delta_line_handles_missing_arm(tmp_path: object) -> None:
-    """Verify delta line handles missing arm."""
-    bench = {
-        "baseline": "baseline",
-        "arms": {
-            "trial": {"pass_rate": 0.8},
-            "baseline": {"pass_rate": None},
-        },
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "n/a" in line
-    assert "pp" not in line  # no delta when the baseline arm is missing
-
-
-def test_delta_line_absolute_when_no_reference(tmp_path: object) -> None:
-    """Verify delta line absolute when no reference."""
-    bench = {
-        "baseline": None,
-        "arms": {
-            "trial-opus": {"pass_rate": 0.8},
-            "trial-sonnet": {"pass_rate": 0.6},
-        },
-    }
-
-    line = report.delta_line("archive", bench, tmp_path / "benchmark.md")
-
-    assert "80%" in line
-    assert "60%" in line
-    assert "pp" not in line  # no delta without a reference
+    assert lines[0].split() == ["Eval", "trial-opus", "trial-sonnet"]
+    assert _terminal_rows(lines) == {"archive/alpha": "100% 50%", "All evals": "100% 50%"}
+    assert not any("pp" in line for line in lines[1:-1])
 
 
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
@@ -630,8 +666,8 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
     assert report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"]) is None
 
 
-def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None:
-    """Verify within noise label in markdown and delta line."""
+def test_within_noise_label_in_markdown(tmp_path: object) -> None:
+    """Verify a delta inside its noise band is labeled within noise in the headline."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
     archive = tmp_path / "archive"
     for sample_index, passes in enumerate((2, 0, 1)):
@@ -644,8 +680,8 @@ def test_within_noise_label_in_markdown_and_delta_line(tmp_path: object) -> None
     )
     md = (tmp_path / "benchmark.md").read_text()
 
+    assert bench["arms"]["trial"]["delta_noise_pp"] is not None
     assert "within noise" in md
-    assert "within noise" in report.delta_line("demo", bench, tmp_path / "benchmark.md")
 
 
 def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: object) -> None:
