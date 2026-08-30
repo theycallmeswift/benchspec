@@ -3,14 +3,14 @@
   <img alt="harnessbench" src="docs/assets/harnessbench-wordmark-light.svg" width="228" height="48">
 </picture>
 
-**Benchmark what your coding agent does, not what it says.**
+**Benchmark what your agent does, not what it says.**
 
 [![CI](https://github.com/theycallmeswift/harnessbench/actions/workflows/ci.yml/badge.svg)](https://github.com/theycallmeswift/harnessbench/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/harnessbench)](https://pypi.org/project/harnessbench/)
 [![Python](https://img.shields.io/pypi/pyversions/harnessbench)](https://pypi.org/project/harnessbench/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-harnessbench runs a coding agent (Claude Code, Codex, or OpenCode) against a task
+harnessbench runs an agent (Claude Code, Codex, or OpenCode) against a task
 in a fresh microVM, checks what it actually did in the workspace, and reports the
 result as a comparison: with your skill versus without, one model versus another,
 one harness versus another.

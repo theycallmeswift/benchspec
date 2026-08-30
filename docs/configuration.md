@@ -46,7 +46,7 @@ differs. The full key set for `[tool.harnessbench.sets.<name>]`:
 | `runner` | string | The test harness driving the set. `pytest` is the only supported value (and the default); anything else fails fast with exit `2`. |
 | `sandbox` | string | The sandbox backend. `microsandbox` is the only implementation (and the default); `docker` is recognized but fails fast as not implemented. |
 
-> **Key concept:** `runner` names the *test harness*, not the coding agent;
+> **Key concept:** `runner` names the *test harness*, not the agent;
 > agents are chosen per arm via `harness`. Both `runner` and `sandbox` are
 > set-level only: no arm override, no CLI override.
 

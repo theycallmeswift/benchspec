@@ -1,4 +1,4 @@
-"""Coding agents for harnessbench.
+"""Agents for harnessbench.
 
 `sandbox.py` talks only to the `CodingAgent` interface and to the factory/preflight
 helpers here — never to a concrete agent. The active agent is resolved via
@@ -86,7 +86,7 @@ def agent_class(harness: str) -> type:
 
 
 def make_agent(harness: str | None = None) -> CodingAgent:
-    """The coding agent for a run or a single arm.
+    """The agent for a run or a single arm.
 
     With no `harness`, reads the run-level agent from `HARNESSBENCH_AGENT` (the plugin
     normalizes the precedence chain at configure time). With an explicit `harness` (an
