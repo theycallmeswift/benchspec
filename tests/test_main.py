@@ -6,6 +6,7 @@ root it resolved, with the handler stubbed so no eval discovery happens.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -290,3 +291,18 @@ def test_sandbox_build_missing_package_exits_two_before_importing_errors(
     monkeypatch.setattr(__main__.sandbox, "cli_build", missing_package_cli_build)
 
     assert __main__.main(["sandbox:build", "some/dir"]) == 2
+
+
+def test_main_loads_repo_dotenv_for_every_subcommand(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify the CLI loads a repo-root `.env` before dispatching any subcommand."""
+    _write_eval(tmp_path, ["./out.md exists"])
+    (tmp_path / ".env").write_text("HARNESSBENCH_DOTENV_SENTINEL=loaded\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HARNESSBENCH_DOTENV_SENTINEL", raising=False)
+
+    exit_code = __main__.main(["lint", str(tmp_path)])
+
+    assert exit_code == 0
+    assert os.environ.get("HARNESSBENCH_DOTENV_SENTINEL") == "loaded"
