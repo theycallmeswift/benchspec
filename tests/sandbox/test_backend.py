@@ -255,8 +255,8 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
 
     The backend is the primary home for the concrete runtime; the CLI wrapper and the
     three agent adapters keep their own legitimate lazy imports (exit-code split /
-    microsandbox.Secret). Everything else — notably sandbox.py and execution.py, which
-    Phase 7 cleared — must drive a resolved SandboxBackend. This guards that boundary so a
+    microsandbox.Secret). Everything else — notably sandbox.py and execution.py — must
+    drive a resolved SandboxBackend. This guards that boundary so a
     future edit cannot reintroduce a scattered `import microsandbox` there.
     """
     import re

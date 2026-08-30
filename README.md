@@ -11,7 +11,7 @@ a baseline, each comparison cell includes its percentage-point delta.
 > unit of measurement is what an agent *did* in an isolated workspace — the files
 > it wrote, the skills it invoked, the claims its output satisfies.
 
-> **Status: alpha.** One production consumer. Breaking changes are possible before
+> **Status: alpha.** Breaking changes are possible before
 > 1.0; the eval format and artifact schemas are the most likely surfaces to move.
 
 ## The measurement is a comparison

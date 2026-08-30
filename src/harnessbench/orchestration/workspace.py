@@ -4,7 +4,8 @@ Artifacts land under `<repo_root>/tmp/evals/iteration_NN/skills/<skill>/eval-<id
 (sample zero-indexed; `sample-0/` even at `--count 1`). Iterations are a global
 counter shared across skills; one run writes every touched skill under the same
 `iteration_NN`. The name is chosen once on the pytest controller and shared with
-xdist workers (see `plugin.py`) — read from the environment, not recomputed per process.
+xdist workers (see `harnessbench.runners.pytest`) — read from the environment, not
+recomputed per process.
 
 `workspace_parent` stays at `tmp/` (not `tmp/evals/`): `sandbox.py` anchors the
 microsandbox snapshot lock files there, alongside (not inside) the eval outputs.

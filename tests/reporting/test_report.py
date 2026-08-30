@@ -319,7 +319,7 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
 
     md = (tmp_path / "benchmark.md").read_text()
     assert md.splitlines()[0] == "# Benchmark — iteration_01"
-    # Headline lists each non-reference arm's `baseline <ref%> → <arm> <pct%> (Δpp)`.
+    # Headline lists each non-baseline arm's `baseline <ref%> → <arm> <pct%> (Δpp)`.
     assert "baseline 0%" in md
     assert "trial 100%" in md
     assert "+100pp" in md

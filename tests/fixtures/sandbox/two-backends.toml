@@ -5,9 +5,8 @@
 #   harnessbench run --set micro  --config tests/fixtures/sandbox/two-backends.toml   -> exit 2 (still)
 # `resolved_run_set` calls `parse_sets` on the whole sets table before any set is
 # selected, so the docker set's SchemaError fails the file even when only `micro` is
-# requested; pytest maps it to a UsageError, i.e. exit 2. Execution stays on the
-# microsandbox default until Phase 8 — nothing here is "resolved" to a backend.
-# `harnessbench sandbox:build --config tests/fixtures/sandbox/two-backends.toml` (Task 7)
+# requested; pytest maps it to a UsageError, i.e. exit 2.
+# `harnessbench sandbox:build --config tests/fixtures/sandbox/two-backends.toml`
 # also exits 2 selecting either set, for the same eager-validation reason.
 [tool.harnessbench]
 default-set = "micro"

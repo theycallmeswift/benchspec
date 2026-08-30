@@ -140,7 +140,7 @@ def resolve_judge_config(
     CLI override > scratch --harnessbench-config > pyproject [tool.harnessbench.judge] >
     built-in defaults. `env` shallow-merges across layers (later layer's keys win);
     every other field fully replaces. Raises SchemaError on any structural defect —
-    callers (plugin.py) turn that into a pytest.UsageError at collection time, before
+    the pytest plugin turns that into a pytest.UsageError at collection time, before
     any paid task arm runs.
     """
     resolved: dict = {

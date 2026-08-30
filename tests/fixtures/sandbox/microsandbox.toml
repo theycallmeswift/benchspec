@@ -1,11 +1,10 @@
 # tests/fixtures/sandbox/microsandbox.toml
 # Accept-path fixture: a single microsandbox set that parses and resolves cleanly.
-# Tested today: `parse_sets` + `resolve_set` on this file yield
+# `parse_sets` + `resolve_set` on this file yield
 #   Set(sandbox="microsandbox", runner="pytest", ...)
-# with no error. Nothing on the `run` path resolves a backend from `Set.sandbox` in
-# Phase 7 (that's Phase 8). `harnessbench sandbox:build --config tests/fixtures/sandbox/
-# microsandbox.toml` (and `--set micro`) now resolves this set and drives the build
-# from its microsandbox backend (Task 7).
+# with no error, and `harnessbench sandbox:build --config tests/fixtures/sandbox/
+# microsandbox.toml` (and `--set micro`) resolves this set and drives the build from
+# its microsandbox backend.
 [tool.harnessbench]
 default-set = "micro"
 
