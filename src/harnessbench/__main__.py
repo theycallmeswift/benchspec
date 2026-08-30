@@ -6,6 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from dotenv import find_dotenv, load_dotenv
+
 from harnessbench.exit_codes import ExitCode
 from harnessbench.reporting import analyze
 from harnessbench.runners import run
@@ -111,8 +113,21 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
     return ExitCode.SUCCESS
 
 
+def _load_repo_dotenv() -> None:
+    """Load a repo-root `.env` into the environment before any subcommand runs.
+
+    `usecwd=True` walks up from the invocation directory — the same rule the pytest
+    plugin applies — so `lint`, `analyze`, `sandbox:build`, and `run` all see the same
+    credentials. Variables already exported win over `.env` values.
+    """
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        load_dotenv(dotenv_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatch the harnessbench command-line interface."""
+    _load_repo_dotenv()
     parser = argparse.ArgumentParser(prog="harnessbench")
     sub = parser.add_subparsers(dest="command", required=True)
     _add_root_argument(
