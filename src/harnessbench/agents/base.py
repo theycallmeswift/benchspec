@@ -1,4 +1,4 @@
-"""The coding-agent interface.
+"""The agent interface.
 
 A `CodingAgent` hides everything agent-specific behind one boundary: where its home
 lives in the guest, how to provision the CLI into a microVM (the cached step), which
@@ -180,7 +180,7 @@ class AgentCapabilities:
 
 @runtime_checkable
 class CodingAgent(Protocol):
-    """Define the coding agent interface."""
+    """Define the agent interface."""
 
     id: str  # snapshot-cache key + report label
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)

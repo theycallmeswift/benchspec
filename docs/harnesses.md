@@ -6,7 +6,7 @@ reuses the same adapters, and how to add a harness of your own. It is for anyone
 configuring a multi-harness set or integrating a new CLI; terms (harness, arm,
 judge, snapshot) are defined in [concepts.md](concepts.md).
 
-A **harness** is the coding-agent CLI an arm drives: the thing under test.
+A **harness** is the agent CLI an arm drives: the thing under test.
 harnessbench keeps everything harness-specific (how to install the CLI into a
 microVM, which credentials it needs, how to build its headless command, how to
 parse its stream) behind one interface, the `CodingAgent` protocol, so the

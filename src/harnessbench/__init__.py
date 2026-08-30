@@ -1,4 +1,4 @@
-"""harnessbench — a benchmark framework for coding agents.
+"""harnessbench — a benchmark framework for agents.
 
 An eval is one Markdown file: a prompt plus a checklist of prose assertions. Each eval
 runs across the named arms of an eval set — harness × model × effort × environment —

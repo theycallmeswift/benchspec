@@ -134,7 +134,7 @@ def pytest_addoption(parser: object) -> None:
         "--harnessbench-agent",
         default=None,
         help=_help(
-            "coding agent for the `__route__` sandbox path (default: claude-code).",
+            "agent for the `__route__` sandbox path (default: claude-code).",
             "Output-eval task arms select their harness per arm, so this flag no longer",
             "governs them. Precedence: this flag > HARNESSBENCH_AGENT > [tool.harnessbench]",
             "agent in pyproject.toml. Unknown values fail at startup naming the source.",

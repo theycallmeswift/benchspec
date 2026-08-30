@@ -32,7 +32,7 @@ identity, `(group, eval_id)`, and the artifact tree is keyed on it. Sibling
 
 ## Harness
 
-The coding-agent CLI under test: `claude-code`, `codex`, or `opencode`. Each is
+The agent CLI under test: `claude-code`, `codex`, or `opencode`. Each is
 one adapter that knows how to install the CLI into a microVM, which credential it
 needs, how to run it headless, and how to read its output stream. Chosen per arm.
 Details and how to add one: [harnesses.md](harnesses.md).
