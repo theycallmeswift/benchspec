@@ -1,38 +1,43 @@
 # The sandbox
 
-This page explains where an eval cell actually runs: what a microVM is and why
-harnessbench uses one, what gets baked into a snapshot and when it rebuilds, what
-a running cell can see, and how credentials get in without ever being readable
-in the guest. It is for anyone who wants to trust or customize the isolation;
-the [quickstart](quickstart.md) does not require it. Terms (cell, clean room,
-`/workspace`, `/project`) are defined in [concepts.md](concepts.md).
+This page explains where an eval cell actually runs: why every cell gets its own
+microVM, what a snapshot is and when it rebuilds, what the guest can see, and how
+credentials get in without ever being readable inside it. It is for anyone who
+wants to trust or customize the isolation; the [quickstart](quickstart.md) does
+not require it. Terms (cell, clean room, `/workspace`, `/project`) are defined in
+[concepts.md](concepts.md).
 
 A microVM is a small virtual machine with its own kernel, booted in about a
-second by a hypervisor: hardware isolation like a full VM, startup cost closer
-to a container. harnessbench runs every cell in one because an agent under test
-executes arbitrary commands, and the measurement is only honest if the agent
-starts from a known image, sees only the files the eval seeded, and cannot
-touch your machine, your credentials, or earlier runs' artifacts. A staged copy
-of your repo is readable, but immutable, at `/project` so `setup.sh` can install
-the skill under test.
+second: hardware isolation like a full VM, startup cost closer to a container.
+harnessbench runs every cell in one because an agent under test executes
+arbitrary commands, and the measurement is only honest if the agent starts from
+a known image, sees only the files the eval seeded, and cannot touch your
+machine, your credentials, or earlier runs' artifacts.
 
-The implementation is [microsandbox](https://github.com/superradcompany/microsandbox),
-behind a `SandboxBackend` seam. A set selects its backend with the `sandbox`
-key; `microsandbox` is the only implementation (`docker` is recognized but fails
-fast as not implemented, so a typo cannot silently fall back).
+Isolation sits behind a `SandboxBackend` seam: preflight, the snapshot cache,
+and the per-cell mounts belong to the backend, and everything else in
+harnessbench is backend-agnostic. A set selects its backend with the `sandbox`
+key. [microsandbox](https://github.com/superradcompany/microsandbox) is the only
+backend implemented to date (`docker` is recognized but fails fast as not
+implemented, so a typo cannot silently fall back). The contract on this page —
+the mounts, the staging rules, the credential model — holds for any backend;
+cache paths and VM sizes are microsandbox specifics and are labeled as such.
 
 ## Host requirements and preflight
 
-microsandbox runs hardware-virtualized guests, so the host must be an **Apple
-Silicon Mac** or **Linux with `/dev/kvm`**. Before any cell runs, harnessbench
-preflights the host (platform, the microsandbox runtime, and a usable agent
-credential) and fails with every problem listed, as exit `2`, before a single VM
-boots or a paid call is made.
+microsandbox runs hardware-virtualized guests, so the host must be one of:
+
+- an **Apple Silicon Mac**, or
+- **Linux with `/dev/kvm`**.
+
+Before any cell runs, harnessbench preflights the host — platform, the sandbox
+runtime, a usable agent credential — and fails with every problem listed, as
+exit `2`, before a single VM boots or a paid call is made.
 
 ## Snapshots: build once, boot many
 
-Booting a bare Ubuntu image and installing an agent CLI takes minutes; an eval
-run boots dozens of VMs. So harnessbench builds one **snapshot** per configuration
+Booting a bare OS image and installing an agent CLI takes minutes; an eval run
+boots dozens of VMs. So harnessbench builds one **snapshot** per configuration
 and boots every cell from it. A snapshot is sealed in five steps:
 
 1. **Base image**: `ubuntu:latest` by default, or `[tool.harnessbench] base_image`.
@@ -43,21 +48,22 @@ and boots every cell from it. A snapshot is sealed in five steps:
    the fixed, harness-neutral `/home/harnessbench/skills`, so a per-eval `setup.sh`
    installs to one path regardless of harness.
 4. **Environment script**: `[tool.harnessbench] environment_script`, if declared,
-   runs under `set -e`: the escape hatch for extra system tools an eval suite
-   needs. A failing command aborts the build loudly.
+   runs under `set -e` — the escape hatch for extra system tools a suite needs.
+   A failing command aborts the build loudly.
 5. **Seal**: the VM stops and the snapshot is recorded.
 
-Snapshots are cached under `~/.microsandbox/snapshots/` and named
+Snapshots are cached (for microsandbox, under `~/.microsandbox/snapshots/`) and
+named `harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. The
+8-character fingerprint hashes four ingredients:
 
-```
-harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>
-```
+- the backend id,
+- the declared base-image reference,
+- the harness's install script,
+- the environment script's *bytes*.
 
-where the 8-character fingerprint hashes the backend id, the declared base-image
-reference, the agent's install script, and the environment script's *bytes*.
-Change any ingredient (bump `HARNESSBENCH_CLAUDE_VERSION`, edit the environment
-script in place, swap `base_image`) and the name changes, forcing a rebuild; old
-snapshots coexist, so a multi-harness set reuses each harness's cache.
+Change any one — bump a version pin, edit the environment script, swap
+`base_image` — and the name changes, forcing a rebuild. Old snapshots coexist,
+so a multi-harness set reuses each harness's cache.
 
 > **Edge case:** the fingerprint hashes the base-image *reference*, not the
 > pulled digest. A floating tag like `ubuntu:latest` that moves upstream does
@@ -67,13 +73,13 @@ snapshots coexist, so a multi-harness set reuses each harness's cache.
 > `observed_arms[arm].sandbox.image_digest`: an audit trail, not a cache key.
 
 Builds are lazy and concurrent-safe: the first run that needs a snapshot builds
-it under a file lock (at `tmp/.harnessbench-snapshot-<name>.lock` in your repo),
-so parallel `pytest -n` workers wait for one build instead of racing. To pay the
-cost up front (CI warmup, before a demo, offline prep), build explicitly:
+it under a file lock (`tmp/.harnessbench-snapshot-<name>.lock` in your repo), so
+parallel `pytest -n` workers wait for one build instead of racing. To pay the
+cost up front — CI warmup, before a demo, offline prep — build explicitly:
 
 ```bash
 harnessbench sandbox:build                 # default backend + repo env
-harnessbench sandbox:build --set e2e       # that set's sandbox backend + env, one snapshot per harness
+harnessbench sandbox:build --set e2e       # that set's backend + env, one snapshot per harness
 harnessbench sandbox:build --config x.toml # with a scratch config layered over pyproject
 ```
 
@@ -82,8 +88,20 @@ config or host-preflight problem, and `1` on a genuine build failure.
 
 ## Inside a running cell
 
-Each `(eval × arm × sample)` boots its own VM from the snapshot (2 vCPUs, 2 GiB
-of memory) and tears it down after the turn. The guest sees:
+Each `(eval × arm × sample)` boots its own VM from the snapshot (for
+microsandbox: 2 vCPUs, 2 GiB of memory) and tears it down after the turn. A cell,
+in order:
+
+1. Stages the project (see below).
+2. Boots from the snapshot.
+3. Runs `setup.sh` if present, with the `HARNESSBENCH_*` cell variables and the
+   arm's `env`.
+4. Invokes the agent with its working directory at `/workspace`.
+5. Gathers facts: file tree, contents, SHA-256s, the final message, the
+   tool-call stream.
+6. Tears down and removes the stage.
+
+The guest sees three paths:
 
 | Path | Mount | Contents |
 |---|---|---|
@@ -91,38 +109,39 @@ of memory) and tears it down after the turn. The guest sees:
 | `/project` | read-only | A staged copy of your repo (below). Exists so the eval's own `setup.sh` can copy the skill under test into the guest; read-only, so nothing an agent or script does can write back into your checkout. |
 | `/home/harnessbench/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
-The order of events in a cell: stage the project, boot from snapshot, run
-`setup.sh` (if present, with the `HARNESSBENCH_*` cell variables and the arm's
-`env`), invoke the agent with its working directory at `/workspace`, gather
-facts (file tree, contents, SHA-256s, the final message, the tool-call stream),
-tear down and remove the stage.
-
 ### What `/project` contains
 
 `/project` is never a bind mount of your checkout. Each cell stages a fresh copy
-of what a `git clone` would contain (tracked files plus untracked files that
-`.gitignore` does not ignore) and mounts that. Three things are always left out,
-tracked or not: any dotenv file (`.env`, `.env.local`, `.env.example`, and so
-on), `.git`, and harnessbench's own `tmp/` artifact root (earlier runs'
-transcripts and grades, which an agent must not be able to crib from). The
-relative layout is preserved, so `setup.sh` paths, a project-local
-`.claude/skills/`, and `harness_args = ["--plugin-dir", "/project"]` all resolve
-as they would against the checkout. Outside a git checkout (or without `git` on
-`PATH`) the stage falls back to a plain walk that skips `.venv`, `node_modules`,
-`__pycache__`, and `.worktrees` by name; `.gitignore` is not honored on that
-path. If a dotenv file would still land in the stage, the cell refuses to boot
-rather than mount it.
+and mounts that:
+
+- **In**: what a `git clone` would contain — tracked files plus untracked files
+  that `.gitignore` does not ignore — with the relative layout preserved, so
+  `setup.sh` paths, a project-local `.claude/skills/`, and
+  `harness_args = ["--plugin-dir", "/project"]` resolve as they would against
+  the checkout.
+- **Always out**, tracked or not: dotenv files (`.env`, `.env.local`,
+  `.env.example`, …), `.git`, and harnessbench's own `tmp/` artifact root —
+  earlier runs' transcripts and grades, which an agent must not be able to crib
+  from.
+- **Without git** (or outside a checkout): a plain walk that skips `.venv`,
+  `node_modules`, `__pycache__`, and `.worktrees` by name; `.gitignore` is not
+  honored on that path.
+- **Fail-closed**: if a dotenv file would still land in the stage, the cell
+  refuses to boot rather than mount it.
 
 ## Credentials
 
-Provider credentials never appear as plain environment variables in the guest.
-Each harness adapter declares its credential as a microsandbox **secret**, scoped
-to the provider's hosts (for example, an `ANTHROPIC_API_KEY` is usable only
-toward `api.anthropic.com`): the value is injected at the network boundary and
-is not readable by the agent or by `setup.sh`. The one file-shaped exception is
-Codex subscription auth: `CODEX_AUTH_JSON_PATH` is mounted read-only and copied
-to `/root/.codex/auth.json` inside the guest. Details per harness in
-[`harnesses.md`](harnesses.md).
+Provider credentials never appear as plain environment variables in the guest:
+
+- Each harness adapter declares its credential as a scoped **secret** — usable
+  only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward
+  `api.anthropic.com`). The value is injected at the network boundary and is
+  not readable by the agent or by `setup.sh`.
+- The one file-shaped exception is Codex subscription auth:
+  `CODEX_AUTH_JSON_PATH` is mounted read-only and copied to
+  `/root/.codex/auth.json` inside the guest.
+
+Per-harness credential details live in [`harnesses.md`](harnesses.md).
 
 ## Customizing the image
 

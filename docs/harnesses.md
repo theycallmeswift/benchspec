@@ -78,7 +78,24 @@ installed on the host, and why an `opencode` judge needs a provider-qualified
 model. The binder is not a harness call at all: it is a direct Gemini API call,
 unaffected by either the task or judge harness.
 
-## Adding a harness
+## Custom harnesses
+
+A custom harness is used exactly like a built-in one: register it under a name,
+and that name becomes legal everywhere a `harness` appears — an arm, a set-level
+default, or the judge:
+
+```toml
+[tool.harnessbench.sets.mine]
+baseline = "claude"
+arms = [
+  { name = "claude", harness = "claude-code", model = "sonnet" },
+  { name = "mine",   harness = "my-agent",    model = "my-model-name" },
+]
+```
+
+There is no plugin entry point yet, so an adapter lives in-tree: a custom
+harness today means a fork of harnessbench (and, ideally, a pull request — an
+adapter for a real agent CLI is very welcome).
 
 The `CodingAgent` protocol (`src/harnessbench/agents/base.py`) is the whole
 integration surface. An adapter declares:

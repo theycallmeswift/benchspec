@@ -193,9 +193,18 @@ shows a delta rather than a lone score.
 cat tmp/evals/iteration_01/benchmark.md
 ```
 
-The report opens with the per-arm headline, then the eval × arm matrix, per-arm
-detail (timing, tokens, per-eval rates), and a provenance section recording
-which agent version and sandbox snapshot each arm ran on. Alongside it:
+Rendered, the report's headline and matrix for this walkthrough look like:
+
+> **trial:** baseline 0% → trial 100% (**+100pp**)
+
+| Eval | baseline (claude-code) | trial (claude-code) |
+|------|------|------|
+| hello/greets-by-name | 0% | 100% (+100pp) |
+| All evals | 0% | 100% (+100pp) |
+
+The full report continues with per-arm detail (timing, tokens, per-eval rates)
+and a provenance section recording which agent version and sandbox snapshot
+each arm ran on. Alongside it:
 
 - `meta.json`: the run manifest (identity, planned arms, observed provenance).
 - `index.jsonl`: one row per `(eval × arm × sample)`, for aggregation.
