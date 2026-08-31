@@ -162,9 +162,13 @@ skills/hello/evals/hello/greets-by-name.eval.md ..                       [100%]
 ============================ harnessbench benchmark ============================
 Eval                  baseline          trial
 hello/greets-by-name        0%  100% (+100pp)
+---------------------------------------------
 All evals                   0%  100% (+100pp)
 Report: tmp/evals/iteration_01/benchmark.md
 ```
+
+On a color terminal, rates are color-coded by band (green from 80%, yellow from
+50%, red below) and deltas by sign.
 
 Your numbers will differ: the baseline arm may guess the right shape, the trial
 arm may miss an assertion. What matters is that both arms ran and the table

@@ -15,7 +15,7 @@ in a fresh microVM, checks what it actually did in the workspace, and reports th
 result as a comparison: with your skill versus without, one model versus another,
 one harness versus another.
 
-<img src="docs/assets/benchmark-terminal.svg" width="800" alt="Terminal output: a benchmark matrix with evals as rows, arms as columns, and percentage-point deltas">
+<img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: harnessbench run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
 
 *End-of-run summary for a two-arm run of the in-repo [`hello`](evals/e2e/hello/)
 suite (illustrative numbers).* Rows are evals, columns are arms (`baseline` ran

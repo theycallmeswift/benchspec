@@ -397,15 +397,59 @@ def _matrix_table(benchmark: dict) -> list[str]:
     return lines
 
 
-def terminal_matrix(benchmark: dict, report_path: Path) -> list[str]:
+_GREEN, _YELLOW, _RED, _RESET = "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[0m"
+
+_CELL_RE = re.compile(r"(?P<rate>\d+%)(?P<delta> \((?P<pp>[+-]\d+)pp\))?$")
+
+
+def _rate_ansi(rate_token: str) -> str:
+    """Return the ANSI color for a rate token by band: green ≥80, yellow ≥50, red below."""
+    rate = int(rate_token.rstrip("%"))
+    if rate >= 80:
+        return _GREEN
+    if rate >= 50:
+        return _YELLOW
+    return _RED
+
+
+def _delta_ansi(pp_token: str) -> str:
+    """Return the ANSI color for a delta by sign: green positive, red negative, yellow zero."""
+    delta = int(pp_token)
+    if delta > 0:
+        return _GREEN
+    if delta < 0:
+        return _RED
+    return _YELLOW
+
+
+def _colorize_cell(padded_cell: str) -> str:
+    """Wrap a padded cell's rate and delta in ANSI colors; a — cell passes through.
+
+    Runs on the already-padded text so alignment is computed on visible characters;
+    the escape codes add zero display width.
+    """
+    match = _CELL_RE.search(padded_cell)
+    if match is None:
+        return padded_cell
+    colored = _rate_ansi(match["rate"]) + match["rate"] + _RESET
+    if match["delta"]:
+        colored += _delta_ansi(match["pp"]) + match["delta"] + _RESET
+    return padded_cell[: match.start()] + colored
+
+
+def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) -> list[str]:
     """Render the matrix as width-aligned plain text for the pytest terminal summary.
 
     Same rows and cells as the Markdown matrix. The eval column is left-aligned and every
-    arm column right-aligned so rates line up; the last line points at the written report.
+    arm column right-aligned so rates line up; a rule separates the eval rows from the
+    `All evals` footer; the last line points at the written report.
 
     Args:
         benchmark: A built benchmark (see `build_benchmark`).
         report_path: The `benchmark.md` path to name on the closing `Report:` line.
+        color: Wrap rates and deltas in ANSI colors — rates by band (green ≥80%,
+            yellow ≥50%, red below), deltas by sign (green up, red down, yellow zero).
+            Off by default so files and pipes get plain text.
 
     Returns:
         The lines to print, header first, `Report:` pointer last.
@@ -425,10 +469,16 @@ def terminal_matrix(benchmark: dict, report_path: Path) -> list[str]:
         padded_cells = [
             cell.rjust(width) for cell, width in zip(cells, column_widths, strict=True)
         ]
+        if color:
+            padded_cells = [_colorize_cell(cell) for cell in padded_cells]
         return "  ".join([label.ljust(label_width), *padded_cells])
 
+    table_width = label_width + sum(column_widths) + 2 * len(column_widths)
     lines = [aligned("Eval", names)]
     for label, cells in rows:
+        # `_matrix_cells` puts the pooled footer last; rule it off from the eval rows.
+        if label == "All evals":
+            lines.append("-" * table_width)
         lines.append(aligned(label, cells))
     lines.append(f"Report: {report_path}")
     return lines

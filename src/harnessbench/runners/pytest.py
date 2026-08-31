@@ -347,7 +347,10 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()
         )
         lines += report.terminal_matrix(
-            benchmark, _display_path(skills_root.parent / "benchmark.md")
+            benchmark,
+            _display_path(skills_root.parent / "benchmark.md"),
+            # pytest's writer already folds in TTY detection, CI, and NO_COLOR.
+            color=config.get_terminal_writer().hasmarkup,
         )
 
     for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):

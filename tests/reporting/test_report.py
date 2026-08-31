@@ -374,6 +374,8 @@ def _terminal_rows(lines: list[str]) -> dict[str, str]:
     """Map each terminal matrix row's label to its whitespace-normalized cell text."""
     rows = {}
     for line in lines[1:-1]:
+        if set(line) == {"-"}:
+            continue
         label, *cells = line.split("  ")
         rows[label.strip()] = " ".join(cell.strip() for cell in cells if cell.strip())
     return rows
@@ -396,6 +398,7 @@ def test_terminal_matrix_aligns_columns(tmp_path: object) -> None:
     assert [row.split("  ")[0].strip() for row in rows] == [
         "archive/alpha",
         "ingest/long-eval-name",
+        "-" * len(header),
         "All evals",
     ]
     # Right-aligned arm cells end where the header does, so every table line is the
@@ -881,3 +884,54 @@ def test_index_rows_omit_axes_for_unknown_arm(tmp_path: object) -> None:
     assert "harness" not in row
     assert "model" not in row
     assert "effort" not in row
+
+
+def test_terminal_matrix_rules_off_the_footer(tmp_path: object) -> None:
+    """Verify a full-width rule sits directly above the All evals footer."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    footer_index = next(index for index, line in enumerate(lines) if line.startswith("All evals"))
+    assert lines[footer_index - 1] == "-" * len(lines[0])
+
+
+def test_terminal_matrix_color_codes_rates_by_band_and_deltas_by_sign(
+    tmp_path: object,
+) -> None:
+    """Verify color mode wraps rates green/yellow/red by band and deltas by sign."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50% yellow
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100% green, +50 green
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100% green
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=0, total=2)  # 0% red, -100 red
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
+
+    alpha = next(line for line in lines if line.startswith("archive/alpha"))
+    beta = next(line for line in lines if line.startswith("archive/beta"))
+    assert "\x1b[33m50%\x1b[0m" in alpha
+    assert "\x1b[32m100%\x1b[0m\x1b[32m (+50pp)\x1b[0m" in alpha
+    assert "\x1b[31m0%\x1b[0m\x1b[31m (-100pp)\x1b[0m" in beta
+
+
+def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: object) -> None:
+    """Verify a zero delta colors yellow and the default render carries no escapes."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    colored = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
+    plain = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    alpha = next(line for line in colored if line.startswith("archive/alpha"))
+    assert "\x1b[33m (+0pp)\x1b[0m" in alpha
+    assert not any("\x1b" in line for line in plain)
