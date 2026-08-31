@@ -8,6 +8,7 @@ runs; we assert on the parametrized node ids the plugin generates. Each project 
 import json
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -410,12 +411,19 @@ class _FakeConfig:
     surface they read.
     """
 
-    def __init__(self: object, repo_root: object, fail_under: object = None) -> None:
+    def __init__(
+        self: object, repo_root: object, fail_under: object = None, hasmarkup: bool = False
+    ) -> None:
         """Initialize the instance."""
         self.rootpath = repo_root
         self._repo_root = str(repo_root)
         self._fail_under = fail_under
+        self._hasmarkup = hasmarkup
         self.stash = pytest.Stash()
+
+    def get_terminal_writer(self: object) -> object:
+        """Return a writer stub carrying only the markup flag the summary reads."""
+        return SimpleNamespace(hasmarkup=self._hasmarkup)
 
     def getoption(self: object, name: object) -> object:
         """Getoption."""
@@ -515,9 +523,10 @@ def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
     assert ("separator", "harnessbench benchmark") in terminal_reporter.events
-    header, eval_row, footer, pointer = terminal_reporter.lines
+    header, eval_row, rule, footer, pointer = terminal_reporter.lines
     assert header.split() == ["Eval", "baseline", "trial"]
     assert eval_row.split() == ["archive/alpha", "0%", "100%", "(+100pp)"]
+    assert rule == "-" * len(header)
     assert footer.split() == ["All", "evals", "0%", "100%", "(+100pp)"]
     benchmark_md = skill_results_dir.parent.parent / "benchmark.md"
     assert pointer == f"Report: {benchmark_md}"
@@ -550,6 +559,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
         "Eval",
         "archive/alpha",
         "ingest/beta",
+        "-" * len(table[0]),
         "All evals",
     ]
     assert pointer.startswith("Report: ")
@@ -1427,3 +1437,26 @@ def test_dotenv_loads_before_conftests_run(pytester: object, monkeypatch: object
 
     assert "HARNESSBENCH_DOTENV_PROBE missing" not in (result.stdout.str() + result.stderr.str())
     result.assert_outcomes(passed=1)
+
+
+def test_summary_matrix_is_colored_only_when_the_writer_has_markup(
+    tmp_path: object, monkeypatch: object
+) -> None:
+    """Verify session-finish renders ANSI colors exactly when the terminal supports them."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)
+
+    plain_config = _FakeConfig(tmp_path)
+    plugin.pytest_sessionfinish(_FakeSession(plain_config), 0)
+    color_config = _FakeConfig(tmp_path, hasmarkup=True)
+    plugin.pytest_sessionfinish(_FakeSession(color_config), 0)
+
+    plain_lines = plain_config.stash.get(plugin._SUMMARY_LINES, [])
+    color_lines = color_config.stash.get(plugin._SUMMARY_LINES, [])
+    assert plain_lines
+    assert not any("\x1b[" in line for line in plain_lines)
+    assert any("\x1b[" in line for line in color_lines)
