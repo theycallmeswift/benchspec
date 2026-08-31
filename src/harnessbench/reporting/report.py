@@ -405,6 +405,7 @@ _CELL_RE = re.compile(r"(?P<rate>\d+%)(?P<delta> \((?P<pp>[+-]\d+)pp\))?$")
 def _rate_ansi(rate_token: str) -> str:
     """Return the ANSI color for a rate token by band: green ≥80, yellow ≥50, red below."""
     rate = int(rate_token.rstrip("%"))
+
     if rate >= 80:
         return _GREEN
     if rate >= 50:
@@ -415,6 +416,7 @@ def _rate_ansi(rate_token: str) -> str:
 def _delta_ansi(pp_token: str) -> str:
     """Return the ANSI color for a delta by sign: green positive, red negative, yellow zero."""
     delta = int(pp_token)
+
     if delta > 0:
         return _GREEN
     if delta < 0:
@@ -431,9 +433,11 @@ def _colorize_cell(padded_cell: str) -> str:
     match = _CELL_RE.search(padded_cell)
     if match is None:
         return padded_cell
+
     colored = _rate_ansi(match["rate"]) + match["rate"] + _RESET
     if match["delta"]:
         colored += _delta_ansi(match["pp"]) + match["delta"] + _RESET
+
     return padded_cell[: match.start()] + colored
 
 
@@ -474,6 +478,7 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
         return "  ".join([label.ljust(label_width), *padded_cells])
 
     table_width = label_width + sum(column_widths) + 2 * len(column_widths)
+
     lines = [aligned("Eval", names)]
     for label, cells in rows:
         # `_matrix_cells` puts the pooled footer last; rule it off from the eval rows.
@@ -481,6 +486,7 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
             lines.append("-" * table_width)
         lines.append(aligned(label, cells))
     lines.append(f"Report: {report_path}")
+
     return lines
 
 
