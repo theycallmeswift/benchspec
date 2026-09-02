@@ -197,3 +197,145 @@ def test_docker_sync_timeout_message_names_the_call_without_its_argv(
 
     assert "sk-super-secret" not in str(raised.value)
     assert "`docker login ...`" in str(raised.value)
+
+
+def _fake_sync(monkeypatch: object, result: object, calls: list | None = None) -> None:
+    """Point the blocking docker seam at a canned result, optionally recording arguments."""
+
+    def fake(*args: str, timeout: float = 30.0, description: object = None) -> object:
+        """Return the canned result for any blocking docker call."""
+        if calls is not None:
+            calls.append(args)
+        return result
+
+    monkeypatch.setattr(docker_mod, "_docker_sync", fake)
+
+
+def test_preflight_reports_a_missing_cli_with_an_install_remedy(monkeypatch: object) -> None:
+    """No `docker` on PATH yields one actionable error naming what to install."""
+    monkeypatch.setattr(docker_mod.shutil, "which", lambda binary: None)
+    backend = docker_mod.DockerBackend()
+
+    errors = backend.preflight()
+
+    assert len(errors) == 1
+    assert "docker CLI not found on PATH" in errors[0]
+    assert "Docker Engine" in errors[0]
+
+
+def test_preflight_reports_an_unreachable_daemon(monkeypatch: object) -> None:
+    """A `docker info` that exits nonzero is reported as an unreachable daemon."""
+    monkeypatch.setattr(docker_mod.shutil, "which", lambda binary: "/usr/local/bin/docker")
+    _fake_sync(
+        monkeypatch,
+        DockerResult(("info",), 1, "", "Cannot connect to the Docker daemon at unix:///..."),
+    )
+    backend = docker_mod.DockerBackend()
+
+    errors = backend.preflight()
+
+    assert len(errors) == 1
+    assert "docker daemon unreachable" in errors[0]
+    assert "Cannot connect to the Docker daemon" in errors[0]
+
+
+def test_preflight_is_clean_when_the_daemon_answers(monkeypatch: object) -> None:
+    """A CLI on PATH plus a zero-exit `docker info` means the host is ready."""
+    monkeypatch.setattr(docker_mod.shutil, "which", lambda binary: "/usr/local/bin/docker")
+    _fake_sync(monkeypatch, DockerResult(("info",), 0, "Server Version: 27.0.3", ""))
+    backend = docker_mod.DockerBackend()
+
+    assert backend.preflight() == []
+
+
+def test_snapshot_exists_inspects_the_sanitized_image_reference(monkeypatch: object) -> None:
+    """An existing local image means the snapshot is present; the ref is the sanitized one."""
+    calls: list = []
+    _fake_sync(monkeypatch, DockerResult(("image", "inspect"), 0, "[]", ""), calls)
+    backend = docker_mod.DockerBackend()
+
+    present = backend.snapshot_exists("harnessbench-docker-claude-code-V1-ab12cd34")
+
+    assert present is True
+    assert calls == [
+        ("image", "inspect", "harnessbench-docker-claude-code-v1-ab12cd34-da7a2cb7")
+    ]
+
+
+def test_snapshot_exists_false_when_the_image_is_absent(monkeypatch: object) -> None:
+    """A nonzero inspect whose stderr has the image-absent shape means "not built yet"."""
+    _fake_sync(
+        monkeypatch,
+        DockerResult(
+            ("image", "inspect"),
+            1,
+            "",
+            "Error response from daemon: No such image: harnessbench-docker-x:latest",
+        ),
+    )
+    backend = docker_mod.DockerBackend()
+
+    assert backend.snapshot_exists("harnessbench-docker-claude-code-latest-ab12cd34") is False
+
+
+def test_snapshot_exists_raises_when_the_daemon_is_unreachable(monkeypatch: object) -> None:
+    """A dead daemon is a sandbox-runtime failure, never a "the snapshot isn't cached" False.
+
+    Answering False here would send `ensure_snapshot` into a build against a daemon that
+    is not there, reporting a confusing build failure instead of the daemon problem.
+    """
+    _fake_sync(
+        monkeypatch,
+        DockerResult(
+            ("image", "inspect"),
+            1,
+            "",
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.",
+        ),
+    )
+    backend = docker_mod.DockerBackend()
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="Cannot connect to the Docker daemon"):
+        backend.snapshot_exists("harnessbench-docker-claude-code-latest-ab12cd34")
+
+
+def test_image_identity_available_from_the_local_image_id(monkeypatch: object) -> None:
+    """A committed image has no registry digest, so its local Id is the recorded identity."""
+    _fake_sync(monkeypatch, DockerResult(("image", "inspect"), 0, "sha256:abc123\n", ""))
+    backend = docker_mod.DockerBackend()
+
+    identity = backend.image_identity("harnessbench-docker-claude-code-latest-ab12cd34")
+
+    assert identity.image_digest == "sha256:abc123"
+    assert identity.image_digest_status == "available"
+    assert identity.image_digest_error is None
+
+
+def test_image_identity_unavailable_with_an_explanation_on_a_failed_inspect(
+    monkeypatch: object,
+) -> None:
+    """A failed lookup degrades to an explained unavailable, never an exception."""
+    _fake_sync(monkeypatch, DockerResult(("image", "inspect"), 1, "", "No such image: nope"))
+    backend = docker_mod.DockerBackend()
+
+    identity = backend.image_identity("nope")
+
+    assert identity.image_digest is None
+    assert identity.image_digest_status == "unavailable"
+    assert "No such image" in identity.image_digest_error
+
+
+def test_image_identity_unavailable_when_the_docker_cli_is_missing(monkeypatch: object) -> None:
+    """A missing binary is an explained unavailable, so provenance capture never aborts."""
+
+    def missing(*args: str, timeout: float = 30.0, description: object = None) -> object:
+        """Fail the way the seam does with no docker binary present."""
+        raise docker_mod.SandboxRuntimeError("docker CLI not found on PATH")
+
+    monkeypatch.setattr(docker_mod, "_docker_sync", missing)
+    backend = docker_mod.DockerBackend()
+
+    identity = backend.image_identity("any-snapshot")
+
+    assert identity.image_digest_status == "unavailable"
+    assert "docker CLI not found" in identity.image_digest_error

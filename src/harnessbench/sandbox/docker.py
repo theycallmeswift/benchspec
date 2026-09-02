@@ -25,12 +25,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
 
 from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.sandbox.primitives import VM_CPUS, VM_MEMORY_MIB
+from harnessbench.sandbox.provenance import ImageIdentity
 
 DOCKER_BINARY = "docker"
 # Docker container names match [a-zA-Z0-9][a-zA-Z0-9_.-]*; everything else is replaced.
@@ -40,6 +42,9 @@ _ILLEGAL_IMAGE_CHARS = re.compile(r"[^a-z0-9._-]")
 _REPEATED_SEPARATORS = re.compile(r"[-._]{2,}")
 # A blocking `docker` call (preflight, image inspect) must not hang a collection-time check.
 SYNC_CALL_TIMEOUT_SECONDS = 30.0
+# The only nonzero `docker image inspect` that means "not cached yet". Every other
+# failure — a dead daemon, a permission problem — must be raised, not read as absence.
+_IMAGE_ABSENT_PATTERN = re.compile(r"[Nn]o such image", re.MULTILINE)
 
 OWNER_LABEL = "harnessbench.owner"
 OWNER_LABEL_VALUE = "harnessbench"
@@ -295,3 +300,87 @@ def _label_flags() -> list[str]:
         "--label",
         f"{RUN_LABEL}={RUN_NONCE}",
     ]
+
+
+class DockerBackend:
+    """The Docker implementation of `SandboxBackend`."""
+
+    id = "docker"
+
+    # A `docker commit`-ed image has no registry digest, so RepoDigests is empty and the
+    # local image Id is the only stable identity there is; a pulled base image keeps its
+    # registry digest, which is the stronger record when one exists.
+    _IMAGE_DIGEST_FORMAT = "{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}"
+
+    def preflight(self: object) -> list[str]:
+        """Return host-readiness errors: the CLI on PATH and a reachable daemon.
+
+        The Docker-specific remedy lives here, not in the shared preflight, exactly as
+        the microsandbox backend owns its Apple-Silicon/KVM remedy.
+        """
+        if shutil.which(DOCKER_BINARY) is None:
+            return [
+                "docker CLI not found on PATH — install Docker Engine or Docker Desktop"
+            ]
+        try:
+            info = _docker_sync("info")
+        except SandboxRuntimeError as error:
+            return [f"docker daemon unreachable: {error}"]
+        if info.exit_code != 0:
+            return [
+                f"docker daemon unreachable (`docker info` exited {info.exit_code}) — "
+                f"start Docker and retry: {info.stderr.strip()[-500:]}"
+            ]
+        return []
+
+    def snapshot_exists(self: object, name: str) -> bool:
+        """Return whether the committed snapshot image is present in the local image store.
+
+        Raises:
+            SandboxRuntimeError: If the inspect fails for any reason OTHER than the image
+                being absent — an unreachable daemon above all. See the classification
+                rule in this task's Interfaces.
+        """
+        reference = image_ref(name)
+        result = _docker_sync(
+            "image", "inspect", reference, description=f"`docker image inspect {reference}`"
+        )
+        if result.exit_code == 0:
+            return True
+        if _IMAGE_ABSENT_PATTERN.search(result.stderr):
+            return False
+        raise SandboxRuntimeError(
+            f"docker image inspect for `{reference}` exited {result.exit_code}: "
+            f"{result.stderr.strip()[-500:] or '(no output)'}"
+        )
+
+    def image_identity(self: object, snapshot: str) -> ImageIdentity:
+        """Return the snapshot image's registry digest when it has one, else its image Id.
+
+        Any failure — the image missing, the daemon gone, no docker binary at all —
+        becomes an explained `unavailable` result rather than propagating: a backend
+        lookup failure must never abort provenance capture or artifact aggregation.
+        """
+        try:
+            reference = image_ref(snapshot)
+            result = _docker_sync(
+                "image",
+                "inspect",
+                reference,
+                "--format",
+                self._IMAGE_DIGEST_FORMAT,
+                description=f"`docker image inspect {reference}`",
+            )
+        except SandboxRuntimeError as error:
+            return ImageIdentity.unavailable(str(error) or "docker image digest read failed")
+        if result.exit_code != 0:
+            detail = result.stderr.strip()[-500:] or "(no output)"
+            return ImageIdentity.unavailable(
+                f"docker image inspect exited {result.exit_code}: {detail}"
+            )
+        digest = result.stdout.strip()
+        if not digest:
+            return ImageIdentity.unavailable(
+                f"docker reported no image digest for `{snapshot}`"
+            )
+        return ImageIdentity.available(digest)
