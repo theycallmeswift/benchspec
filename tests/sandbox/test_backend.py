@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from harnessbench.agents.claude import ClaudeCodeAgent
-from harnessbench.sandbox import backend
+from harnessbench.sandbox import backend, primitives
 from harnessbench.specs.discovery import EnvConfig
 from harnessbench.specs.schema import SchemaError
 
@@ -309,3 +309,40 @@ def test_microsandbox_maps_guest_credentials_to_host_scoped_secrets() -> None:
     assert secrets[0].env_var == "ANTHROPIC_API_KEY"
     assert secrets[0].value == "sk-test-value"
     assert secrets[0].allow_hosts == ("api.anthropic.com",)
+
+
+def test_microsandbox_fingerprint_payload_is_unchanged_by_the_extraction() -> None:
+    """The microsandbox digest is recomputed by hand: a drift here invalidates every cache.
+
+    The payload is NUL-joined backend id, declared base-image reference, agent install
+    fingerprint, and the raw environment-script bytes, truncated to 8 hex characters.
+    """
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    agent = _agent()
+    env = EnvConfig(base_image="ubuntu:22.04", script=b"echo hi\n", script_path="s.sh")
+    payload = b"\0".join(
+        (
+            b"microsandbox",
+            b"ubuntu:22.04",
+            agent.install_fingerprint().encode(),
+            b"echo hi\n",
+        )
+    )
+
+    digest = microsandbox_backend.cache_fingerprint(agent, env)
+
+    assert digest == hashlib.sha256(payload).hexdigest()[:8]
+
+
+def test_primitives_build_fingerprint_inputs_varies_only_with_the_backend_id() -> None:
+    """Two backend ids over one agent+env produce different digests, same other ingredients."""
+    agent = _agent()
+    env = EnvConfig(script=b"echo one\n", script_path="s.sh")
+
+    micro = primitives.build_fingerprint_inputs(backend_id="microsandbox", agent=agent, env=env)
+    docker = primitives.build_fingerprint_inputs(backend_id="docker", agent=agent, env=env)
+
+    assert micro.digest != docker.digest
+    assert micro.base_image_ref == docker.base_image_ref
+    assert micro.install_fingerprint == docker.install_fingerprint
+    assert micro.env_script_sha256 == docker.env_script_sha256

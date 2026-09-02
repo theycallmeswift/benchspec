@@ -18,39 +18,45 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import os
 import platform
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from harnessbench.agents import CodingAgent
+from harnessbench.sandbox.primitives import (
+    BASE_IMAGE,
+    GUEST_WORKDIR,
+    PROJECT_MOUNT,
+    VM_CPUS,
+    VM_MEMORY_MIB,
+    FingerprintInputs,
+    bridge_skills_home,
+    build_fingerprint_inputs,
+    host_mount_path,
+    run_environment_script,
+)
 from harnessbench.sandbox.provenance import ImageIdentity
 from harnessbench.specs.discovery import EnvConfig
 from harnessbench.specs.schema import SchemaError
 
-GUEST_WORKDIR = "/workspace"
-PROJECT_MOUNT = "/project"
+__all__ = [
+    "BASE_IMAGE",
+    "DEFAULT_SANDBOX",
+    "GUEST_WORKDIR",
+    "PROJECT_MOUNT",
+    "VM_CPUS",
+    "VM_MEMORY_MIB",
+    "FingerprintInputs",
+    "MicrosandboxBackend",
+    "SandboxBackend",
+    "host_mount_path",
+    "msb_binary",
+    "resolve_sandbox",
+]
 
-
-def host_mount_path(path: object) -> str:
-    """Return the host path to hand the VM runtime for a bind mount.
-
-    The runtime binds the literal path it is given. On macOS the temp root — where the
-    clean room and the staged project live — sits behind the `/var` → `/private/var`
-    symlink, and a mount through that link fails with "Not a directory". Resolving
-    first makes every bind site immune to that.
-    """
-    return str(Path(path).resolve())
-
-
-BASE_IMAGE = "ubuntu:latest"
 # The only implemented backend today; the single source other modules default to.
 DEFAULT_SANDBOX = "microsandbox"
-# Agent CLI installers and real eval work need this memory budget.
-VM_CPUS = 2
-VM_MEMORY_MIB = 2048
 
 
 def msb_binary() -> Path | None:
@@ -68,22 +74,6 @@ def msb_binary() -> Path | None:
     except ImportError:
         return None
     return msb_path()
-
-
-@dataclass(frozen=True)
-class FingerprintInputs:
-    """The raw ingredients behind a snapshot cache fingerprint, plus the digest itself.
-
-    `snapshot_name()` and provenance capture both read fingerprint data from one
-    `fingerprint_inputs()` call rather than re-hashing or parsing the snapshot-name
-    suffix — this is the single source both consumers share.
-    """
-
-    backend_id: str
-    base_image_ref: str
-    install_fingerprint: str
-    env_script_sha256: str
-    digest: str
 
 
 @runtime_checkable
@@ -175,34 +165,8 @@ class MicrosandboxBackend:
         return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
     def fingerprint_inputs(self: object, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
-        """Return the structured inputs and digest behind the snapshot cache fingerprint.
-
-        Folds in: the backend id, the DECLARED base-image reference (the tag/ref as
-        configured — harnessbench does not resolve it to a digest; a floating tag is therefore
-        not reproducible across time/machines, and the backend records the actual pulled
-        digest in Phase-8 artifacts), the agent install fingerprint (installer inputs beyond
-        `version()`), and the raw environment script bytes. `snapshot_name()` and provenance
-        capture both call this instead of re-hashing or parsing the snapshot name.
-        """
-        base_image_ref = env.base_image or BASE_IMAGE
-        install_fingerprint = agent.install_fingerprint()
-        env_script_sha256 = hashlib.sha256(env.script).hexdigest()
-        payload = b"\0".join(
-            (
-                self.id.encode(),
-                base_image_ref.encode(),
-                install_fingerprint.encode(),
-                env.script,
-            )
-        )
-        digest = hashlib.sha256(payload).hexdigest()[:8]
-        return FingerprintInputs(
-            backend_id=self.id,
-            base_image_ref=base_image_ref,
-            install_fingerprint=install_fingerprint,
-            env_script_sha256=env_script_sha256,
-            digest=digest,
-        )
+        """Return the structured inputs and digest behind the snapshot cache fingerprint."""
+        return build_fingerprint_inputs(backend_id=self.id, agent=agent, env=env)
 
     def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the snapshot cache fingerprint for this backend, agent, and env."""
@@ -268,8 +232,8 @@ class MicrosandboxBackend:
         )
         try:
             await agent.provision(sandbox)
-            await self._bridge_skills_home(sandbox, agent)
-            await self._run_environment_script(sandbox, agent, env)
+            await bridge_skills_home(sandbox, agent)
+            await run_environment_script(sandbox, agent, env)
             await sandbox.stop()  # snapshots require a stopped sandbox
             await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
         finally:
@@ -277,29 +241,6 @@ class MicrosandboxBackend:
 
             with contextlib.suppress(MicrosandboxError, OSError):
                 await Sandbox.remove(build_name)
-
-    async def _bridge_skills_home(self: object, sandbox: object, agent: object) -> None:
-        """Link the agent skill directory to the fixed skills-home path."""
-        result = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
-        if result.exit_code != 0:
-            raise RuntimeError(
-                f"skills-home bridge failed (exit {result.exit_code}): "
-                f"{result.stderr_text[-2000:]}"
-            )
-
-    async def _run_environment_script(
-        self: object, sandbox: object, agent: object, env: EnvConfig
-    ) -> None:
-        """Run the host's environment script after provisioning, before sealing."""
-        if not env.script:
-            return
-        script = b"set -e\n" + env.script
-        result = await sandbox.shell(script.decode(), env=agent.guest_env())
-        if result.exit_code != 0:
-            raise RuntimeError(
-                f"environment_script failed (exit {result.exit_code}): "
-                f"{result.stderr_text[-2000:]}"
-            )
 
     def _runtime_secrets(self: object, agent: object) -> list:
         """Map the agent's backend-neutral credentials onto microsandbox scoped secrets."""
