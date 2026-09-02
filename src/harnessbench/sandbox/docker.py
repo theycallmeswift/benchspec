@@ -23,6 +23,7 @@ container through an `--env-file`, and every failure names the call by descripti
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import re
 import shutil
@@ -33,6 +34,7 @@ from dataclasses import dataclass
 from harnessbench.agents import CodingAgent
 from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.sandbox.primitives import (
+    GUEST_WORKDIR,
     VM_CPUS,
     VM_MEMORY_MIB,
     FingerprintInputs,
@@ -398,6 +400,107 @@ class DockerExecOutput:
     stderr_text: str
 
 
+@dataclass(frozen=True)
+class DockerStreamEvent:
+    """One `exec_stream` event: a `stdout` chunk, or the terminal `exited` code.
+
+    Mirrors the microsandbox event shape `sandbox._route_in_sandbox_async` drains, so
+    trigger routing reads either backend's stream with the same code. Docker reports a
+    failed launch through a nonzero exit code rather than a distinct `failed` event, and
+    routing's own `exit_code not in (None, 0)` check already covers that.
+    """
+
+    event_type: str
+    data: bytes | None = None
+    code: int | None = None
+
+
+class DockerExecStream:
+    """An async iterator over a running `docker exec`'s stdout, ending with its exit code.
+
+    Stderr is drained on a concurrent task rather than left in the pipe. `_docker_stream`
+    pipes all three streams, and a piped stderr nobody reads blocks the guest the moment
+    it writes past one pipe buffer (64 KiB on Linux): stdout stops arriving and the turn
+    deadlocks until its timeout. Only a bounded tail is retained, for diagnostics.
+    """
+
+    _CHUNK_BYTES = 65536
+    # Enough stderr to explain a failure; the rest is discarded so a chatty guest cannot
+    # grow the host's memory for the length of a turn.
+    _STDERR_TAIL_BYTES = 8192
+
+    def __init__(self: object, process: object) -> None:
+        """Wrap the live `docker exec` process whose stdout is drained."""
+        self._process = process
+        self._finished = False
+        self._stderr_tail = bytearray()
+        self._stderr_drain = None
+
+    @property
+    def stderr_tail(self: object) -> str:
+        """The retained tail of the guest's stderr, for diagnosing a failed stream."""
+        return self._stderr_tail.decode("utf-8", errors="replace")
+
+    def _start_stderr_drain(self: object) -> None:
+        """Start the stderr drain on first use.
+
+        Deferred to first use rather than done in `__init__` so constructing a stream
+        outside a running event loop stays legal.
+        """
+        if self._stderr_drain is None and getattr(self._process, "stderr", None) is not None:
+            self._stderr_drain = asyncio.ensure_future(self._drain_stderr())
+
+    async def _drain_stderr(self: object) -> None:
+        """Keep stderr empty, retaining only a bounded tail."""
+        while True:
+            chunk = await self._process.stderr.read(self._CHUNK_BYTES)
+            if not chunk:
+                return
+            self._stderr_tail.extend(chunk)
+            del self._stderr_tail[: -self._STDERR_TAIL_BYTES]
+
+    async def _finish_stderr_drain(self: object) -> None:
+        """Wait out the stderr drain, tolerating a cancelled or already-closed pipe."""
+        if self._stderr_drain is None:
+            return
+        drain, self._stderr_drain = self._stderr_drain, None
+        with contextlib.suppress(asyncio.CancelledError, OSError, ValueError):
+            await drain
+
+    def __aiter__(self: object) -> DockerExecStream:
+        """Iterate this stream's own events."""
+        return self
+
+    async def __anext__(self: object) -> DockerStreamEvent:
+        """Yield the next stdout chunk, then exactly one terminal `exited` event."""
+        if self._finished:
+            raise StopAsyncIteration
+        self._start_stderr_drain()
+        chunk = b""
+        if self._process.stdout is not None:
+            chunk = await self._process.stdout.read(self._CHUNK_BYTES)
+        if chunk:
+            return DockerStreamEvent("stdout", data=chunk)
+        self._finished = True
+        code = await self._process.wait()
+        await self._finish_stderr_drain()
+        return DockerStreamEvent("exited", code=code)
+
+    async def kill(self: object) -> None:
+        """Terminate the `docker exec` client process.
+
+        WARNING: this kills the local client, not the process inside the container. The
+        caller (`_route_in_sandbox_async`) removes the container immediately afterwards
+        via `stop_quietly`, and that removal is what actually reaps the guest process.
+        """
+        if self._stderr_drain is not None:
+            self._stderr_drain.cancel()
+        if self._process.returncode is None:
+            self._process.kill()
+            await self._process.wait()
+        await self._finish_stderr_drain()
+
+
 class DockerSandbox:
     """A live container satisfying the guest contract `sandbox.py` and the agents drive."""
 
@@ -569,6 +672,53 @@ class DockerSandbox:
             stdin=stdin,
             timeout=timeout,
         )
+
+    async def exec_stream(
+        self: object,
+        command: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: dict | None = None,
+        stdin: bytes | None = None,
+    ) -> DockerExecStream:
+        """Start `command` in the container and stream its stdout incrementally."""
+        self._require_alive()
+        process = await _docker_stream(
+            *self._exec_args(cwd=cwd, env=env),
+            command,
+            *(args or []),
+            stdin=stdin,
+            description=f"`docker exec {self._container}`",
+        )
+        return DockerExecStream(process)
+
+    async def stop(self: object, timeout: float | None = None) -> None:
+        """Restore host ownership of the workspace, then remove the container.
+
+        A container is disposable, so removal — not a stop — is the Docker analogue of a
+        microVM stop. The chown runs first because it needs the container to still exist:
+        the guest ran as root, so under rootful Docker every file it wrote into the
+        bind-mounted clean room is root-owned, and the host can then neither gather facts
+        from it nor delete the temporary directory holding it.
+
+        Args:
+            timeout: Seconds to allow the removal, defaulting to `REMOVE_TIMEOUT_SECONDS`.
+
+        Raises:
+            SandboxRuntimeError: If the daemon refused or wedged the removal. Callers that
+                must not fail on teardown use `DockerBackend.stop_quietly`.
+        """
+        if self._restore_owner is not None and self._alive:
+            # Best effort: a chown failure must not stop the container from being removed.
+            with contextlib.suppress(SandboxRuntimeError, TimeoutError, OSError):
+                await self.shell(f"chown -R {self._restore_owner} {GUEST_WORKDIR}")
+        self._alive = False
+        outcome = await _remove_container(
+            self._container, timeout=timeout or REMOVE_TIMEOUT_SECONDS
+        )
+        if outcome.error is not None:
+            raise SandboxRuntimeError(outcome.error)
 
 
 class DockerBackend:

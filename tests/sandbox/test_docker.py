@@ -637,3 +637,199 @@ def test_exec_timeout_reports_when_the_reaping_removal_itself_fails(
     assert "the guest may still be running" in str(raised.value)
     assert "Cannot connect to the Docker daemon" in str(raised.value)
     assert sandbox.alive is False
+
+
+class FakeStdout:
+    """A stdout pipe that hands back queued chunks, then EOF."""
+
+    def __init__(self: object, chunks: list) -> None:
+        """Queue the chunks this pipe will yield before EOF."""
+        self._chunks = list(chunks)
+
+    async def read(self: object, limit: int) -> bytes:
+        """Return the next queued chunk, or b"" once they are exhausted."""
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class FakeStderr:
+    """A stderr pipe that hands back one large canned payload in pipe-sized chunks."""
+
+    def __init__(self: object, payload: bytes) -> None:
+        """Queue the bytes this pipe will yield before EOF."""
+        self._payload = payload
+        self.exhausted = False
+
+    async def read(self: object, limit: int) -> bytes:
+        """Return up to `limit` bytes, then b"" and a record that the pipe emptied."""
+        chunk, self._payload = self._payload[:limit], self._payload[limit:]
+        if not chunk:
+            self.exhausted = True
+        return chunk
+
+
+class FakeProcess:
+    """A `docker exec` process double recording kills and returning a canned exit code."""
+
+    def __init__(self: object, chunks: list, code: int = 0, stderr: bytes | None = None) -> None:
+        """Wire the stdout chunks, optional stderr payload, and the reported exit code."""
+        self.stdout = FakeStdout(chunks)
+        self.stderr = FakeStderr(stderr) if stderr is not None else None
+        self.returncode = None
+        self.killed = False
+        self._code = code
+
+    async def wait(self: object) -> int:
+        """Report the process's exit code and mark it reaped."""
+        self.returncode = self._code
+        return self._code
+
+    def kill(self: object) -> None:
+        """Record that the client process was killed."""
+        self.killed = True
+
+
+def test_exec_stream_yields_stdout_chunks_then_a_terminal_exit_event() -> None:
+    """The stream shape matches what trigger routing drains: stdout chunks, then `exited`."""
+    stream = docker_mod.DockerExecStream(FakeProcess([b'{"a":1}\n', b'{"b":2}\n'], code=0))
+
+    async def drain() -> list:
+        """Collect every event the stream yields."""
+        return [event async for event in stream]
+
+    events = asyncio.run(drain())
+
+    assert [event.event_type for event in events] == ["stdout", "stdout", "exited"]
+    assert [event.data for event in events[:2]] == [b'{"a":1}\n', b'{"b":2}\n']
+    assert events[-1].code == 0
+
+
+def test_exec_stream_reports_a_nonzero_exit_code() -> None:
+    """A crashed guest command surfaces its code, which routing turns into a RoutingError."""
+    stream = docker_mod.DockerExecStream(FakeProcess([], code=127))
+
+    async def drain() -> list:
+        """Collect every event the stream yields."""
+        return [event async for event in stream]
+
+    events = asyncio.run(drain())
+
+    assert [event.event_type for event in events] == ["exited"]
+    assert events[0].code == 127
+
+
+def test_exec_stream_kill_terminates_the_process_once() -> None:
+    """Killing a stream is idempotent: a second kill on a reaped process is a no-op."""
+    process = FakeProcess([b"chunk"], code=0)
+    stream = docker_mod.DockerExecStream(process)
+
+    asyncio.run(stream.kill())
+    asyncio.run(stream.kill())
+
+    assert process.killed is True
+
+
+def test_exec_stream_drains_stderr_larger_than_a_pipe_buffer() -> None:
+    """A guest that floods stderr must not stall the stream, and the tail stays bounded.
+
+    `_docker_stream` pipes stderr. A piped stderr that nobody reads blocks the guest the
+    moment it writes past one pipe buffer (64 KiB on Linux): stdout stops arriving and the
+    routing turn deadlocks until its own timeout. The payload here is four buffers' worth,
+    so a stream that only drains stdout cannot pass this test.
+    """
+    process = FakeProcess([b"out\n"], code=0, stderr=b"E" * (256 * 1024))
+    stream = docker_mod.DockerExecStream(process)
+
+    async def drain() -> list:
+        """Collect every event the stream yields."""
+        return [event async for event in stream]
+
+    events = asyncio.run(drain())
+
+    assert [event.event_type for event in events] == ["stdout", "exited"]
+    assert process.stderr.exhausted is True
+    assert len(stream.stderr_tail) == docker_mod.DockerExecStream._STDERR_TAIL_BYTES
+
+
+def test_exec_stream_spawns_docker_exec_with_stdin_closed(monkeypatch: object) -> None:
+    """The streaming spawn carries the same exec arguments and forces EOF on stdin."""
+    calls: list = []
+
+    async def fake_stream(
+        *args: str, stdin: object = None, description: object = None
+    ) -> object:
+        """Record the streaming spawn and return a process double."""
+        calls.append({"args": args, "stdin": stdin})
+        return FakeProcess([], code=0)
+
+    monkeypatch.setattr(docker_mod, "_docker_stream", fake_stream)
+    sandbox = docker_mod.DockerSandbox("trigger-main")
+
+    asyncio.run(
+        sandbox.exec_stream(
+            "/root/.local/bin/claude", ["-p", "route"], cwd="/root", env={"HOME": "/root"},
+            stdin=b"",
+        )
+    )
+
+    assert calls[0]["args"] == (
+        "exec", "-i", "-e", "HOME=/root", "-w", "/root",
+        "trigger-main", "/root/.local/bin/claude", "-p", "route",
+    )
+    assert calls[0]["stdin"] == b""
+
+
+def test_stop_removes_the_container_within_the_callers_timeout(monkeypatch: object) -> None:
+    """Stopping a Docker session removes the container — the analogue of a VM stop."""
+    calls = _record_docker(monkeypatch, DockerResult(("rm",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    asyncio.run(sandbox.stop(timeout=5))
+
+    assert calls[0]["args"] == ("rm", "-f", "eval-hello-alpha-main")
+    assert calls[0]["timeout"] == 5
+    assert sandbox.alive is False
+
+
+def test_stop_raises_when_the_daemon_refuses_the_removal(monkeypatch: object) -> None:
+    """A removal the daemon rejected is a runtime failure, not a silent leak.
+
+    `stop_quietly` is the caller that chooses to swallow this; `stop` itself must report
+    it, or a container leaked by a dying daemon would go unnoticed until the disk filled.
+    """
+    _record_docker(
+        monkeypatch,
+        DockerResult(("rm",), 1, "", "Cannot connect to the Docker daemon at unix:///..."),
+    )
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="Cannot connect"):
+        asyncio.run(sandbox.stop())
+
+
+def test_stop_restores_workspace_ownership_before_removing_the_container(
+    monkeypatch: object,
+) -> None:
+    """On a Linux host the guest hands `/workspace` back before the container goes away.
+
+    The container runs as `--user 0:0`, so under rootful Docker every file the agent wrote
+    into the bind-mounted clean room is root-owned. The host then cannot read facts out of
+    it, and `TemporaryDirectory` cleanup fails. The chown must happen while the container
+    still exists, hence "before removing".
+    """
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main", restore_owner="501:20")
+
+    asyncio.run(sandbox.stop())
+
+    assert calls[0]["args"][-3:] == ("/bin/sh", "-c", "chown -R 501:20 /workspace")
+    assert calls[1]["args"] == ("rm", "-f", "eval-hello-alpha-main")
+
+
+def test_stop_without_a_restore_owner_skips_the_chown(monkeypatch: object) -> None:
+    """On macOS, Docker Desktop's file-sharing layer maps ownership, so no chown runs."""
+    calls = _record_docker(monkeypatch, DockerResult(("rm",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    asyncio.run(sandbox.stop())
+
+    assert [call["args"][0] for call in calls] == ["rm"]
