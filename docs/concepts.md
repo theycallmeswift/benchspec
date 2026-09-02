@@ -152,11 +152,11 @@ delta. Example: `harnessbench run -- --count 5`. See
 
 ## Sandbox and snapshot
 
-Every cell runs inside a microVM, a small hardware-isolated virtual machine
-booted from a **snapshot**: a sealed image with the base OS, the harness CLI,
-and any suite-wide tools already installed. Snapshots build once per
-configuration and are cached; cells boot from them in seconds. Reference:
-[sandbox.md](sandbox.md).
+Every cell runs inside its own sandbox — a microVM under the default
+`microsandbox` backend, a container under `docker` — booted from a **snapshot**:
+a sealed image with the base OS, the harness CLI, and any suite-wide tools
+already installed. Snapshots build once per configuration and are cached; cells
+boot from them in seconds. Reference: [sandbox.md](sandbox.md).
 
 ## `setup.sh`
 

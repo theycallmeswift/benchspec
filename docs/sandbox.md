@@ -17,22 +17,41 @@ machine, your credentials, or earlier runs' artifacts.
 Isolation sits behind a `SandboxBackend` seam: preflight, the snapshot cache,
 and the per-cell mounts belong to the backend, and everything else in
 harnessbench is backend-agnostic. A set selects its backend with the `sandbox`
-key. [microsandbox](https://github.com/superradcompany/microsandbox) is the only
-backend implemented to date (`docker` is recognized but fails fast as not
-implemented, so a typo cannot silently fall back). The contract on this page —
-the mounts, the staging rules, the credential model — holds for any backend;
-cache paths and VM sizes are microsandbox specifics and are labeled as such.
+key, and two are implemented:
+
+| `sandbox` | Runtime | Host requirement | Isolation |
+|---|---|---|---|
+| `microsandbox` (default) | [microsandbox](https://github.com/superradcompany/microsandbox) microVMs | Apple Silicon Mac, or Linux with `/dev/kvm` | Own kernel; credentials injected at the network boundary and never readable in the guest |
+| `docker` | Docker containers | macOS or Linux with a **local** Docker Engine or Docker Desktop; Windows is untested and a remote `DOCKER_HOST` is not supported | Shared host kernel; credentials are plain environment variables the guest can read |
+
+The contract on this page — the mounts, the staging rules, the cache identity —
+holds for both. Where they differ (cache location, sizing, credential handling)
+the difference is labeled.
+
+> **Read this before choosing `docker`.** A container shares the host kernel, and
+> the agent runs as root with `bypassPermissions` on the promise that the sandbox
+> is the containment boundary. Docker also has no equivalent of microsandbox's
+> host-scoped secrets, so the arm's provider credential is a readable environment
+> variable inside the guest — an agent under test can print it. Choose `docker`
+> when microsandbox cannot run on your host, and treat the credential as exposed
+> to whatever the agent does.
 
 ## Host requirements and preflight
 
-microsandbox runs hardware-virtualized guests, so the host must be one of:
+**microsandbox** runs hardware-virtualized guests, so the host must be one of:
 
 - an **Apple Silicon Mac**, or
 - **Linux with `/dev/kvm`**.
 
-Before any cell runs, harnessbench preflights the host — platform, the sandbox
-runtime, a usable agent credential — and fails with every problem listed, as
-exit `2`, before a single VM boots or a paid call is made.
+**Docker** needs the `docker` CLI on `PATH` and a **local** daemon that answers
+`docker info` — no virtualization extensions required. Supported on macOS and
+Linux; Windows is untested (harnessbench itself uses POSIX-only APIs), and a
+remote `DOCKER_HOST` is not supported: every mount is a host path that a remote
+daemon would resolve on the wrong machine.
+
+Before any cell runs, harnessbench preflights the *selected* backend — platform
+or daemon, plus a usable agent credential — and fails with every problem listed,
+as exit `2`, before a single cell boots or a paid call is made.
 
 ## Snapshots: build once, boot many
 
@@ -52,9 +71,15 @@ and boots every cell from it. A snapshot is sealed in five steps:
    A failing command aborts the build loudly.
 5. **Seal**: the VM stops and the snapshot is recorded.
 
-Snapshots are cached (for microsandbox, under `~/.microsandbox/snapshots/`) and
-named `harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. The
-8-character fingerprint hashes four ingredients:
+Snapshots are cached — for microsandbox under `~/.microsandbox/snapshots/`, for
+Docker as local images in the daemon's image store — and named
+`harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. The backend id
+is the first ingredient of the 8-character fingerprint, so a Docker and a
+microsandbox snapshot of the same agent and environment never collide. List the
+Docker ones with `docker images "harnessbench-docker-*"` and reclaim the space
+with `docker image rm`; they rebuild on demand.
+
+The 8-character fingerprint hashes four ingredients:
 
 - the backend id,
 - the declared base-image reference,
@@ -72,6 +97,12 @@ so a multi-harness set reuses each harness's cache.
 > got pulled is recorded per arm in `meta.json` under
 > `observed_arms[arm].sandbox.image_digest`: an audit trail, not a cache key.
 
+> **Docker caveat.** A snapshot is sealed with `docker commit`, and a commit does
+> not capture paths the base image declares as a `VOLUME`. If your `base_image`
+> declares a volume over somewhere the harness CLI or your `environment_script`
+> installs into, those files will be missing at cell boot. Pick a base image
+> without a `VOLUME` over your install paths.
+
 Builds are lazy and concurrent-safe: the first run that needs a snapshot builds
 it under a file lock (`tmp/.harnessbench-snapshot-<name>.lock` in your repo), so
 parallel `pytest -n` workers wait for one build instead of racing. To pay the
@@ -88,9 +119,9 @@ config or host-preflight problem, and `1` on a genuine build failure.
 
 ## Inside a running cell
 
-Each `(eval × arm × sample)` boots its own VM from the snapshot (for
-microsandbox: 2 vCPUs, 2 GiB of memory) and tears it down after the turn. A cell,
-in order:
+Each `(eval × arm × sample)` boots its own guest from the snapshot — a microVM
+under microsandbox, a container under Docker, both sized 2 vCPUs and 2 GiB — and
+tears it down after the turn. A cell, in order:
 
 1. Stages the project (see below).
 2. Boots from the snapshot.
@@ -131,17 +162,24 @@ and mounts that:
 
 ## Credentials
 
-Provider credentials never appear as plain environment variables in the guest:
-
-- Each harness adapter declares its credential as a scoped **secret** — usable
-  only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward
-  `api.anthropic.com`). The value is injected at the network boundary and is
-  not readable by the agent or by `setup.sh`.
-- The one file-shaped exception is Codex subscription auth:
+- **Under `microsandbox`**, each harness adapter declares its credential as a
+  scoped **secret** — usable only toward the provider's hosts (an
+  `ANTHROPIC_API_KEY` works only toward `api.anthropic.com`). The value is
+  injected at the network boundary and is not readable by the agent or by
+  `setup.sh`.
+- **Under `docker`**, the same declaration becomes a plain container environment
+  variable. Docker has no host-scoping primitive, so the value IS readable in the
+  guest and `allow_hosts` is not enforced. Prefer a narrowly-scoped API key over a
+  subscription token for Docker runs.
+- The one file-shaped exception, on either backend, is Codex subscription auth:
   `CODEX_AUTH_JSON_PATH` is mounted read-only and copied to
   `/root/.codex/auth.json` inside the guest.
 
 Per-harness credential details live in [`harnesses.md`](harnesses.md).
+
+Trigger routing — the probe that asks whether a harness would reach for your
+skill unprompted — runs under `microsandbox` only. A set with `sandbox = "docker"`
+runs its evals in containers as normal; routing checks are not available for it.
 
 ## Customizing the image
 
@@ -161,7 +199,9 @@ runtimes). Per-eval and per-arm setup belongs in the eval's own `setup.sh`
 instead, which runs per cell and can branch on `HARNESSBENCH_ARM` and
 `HARNESSBENCH_SET`.
 
-The authoritative modules are `harnessbench.sandbox.backend` (preflight,
-fingerprint, snapshot build, mounts), `harnessbench.sandbox.sandbox` (the cell
-lifecycle), and `harnessbench.sandbox.project` (the `/project` stage). If this
-page and those modules ever disagree, the modules are right.
+The authoritative modules are `harnessbench.sandbox.backend` (the microsandbox
+backend) and `harnessbench.sandbox.docker` (the Docker backend) for preflight,
+snapshot build, and mounts; `harnessbench.sandbox.primitives` for the pieces
+both share (mount paths, VM sizing, the cache fingerprint); `harnessbench.sandbox.sandbox`
+for the cell lifecycle; and `harnessbench.sandbox.project` for the `/project`
+stage. If this page and those modules ever disagree, the modules are right.

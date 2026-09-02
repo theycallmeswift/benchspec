@@ -681,8 +681,9 @@ class DockerSandbox:
         """Return an error message when `result` is docker failing, not the guest exiting.
 
         Known daemon/container stderr shapes classify outright. An otherwise-unexplained
-        125/126/127 is ambiguous — `docker exec` reserves those codes, but so does a guest
-        shell reporting `command not found` — so the container's running state settles it.
+        exit code in `_AMBIGUOUS_EXIT_CODES` is ambiguous — `docker exec` reserves those
+        codes for its own failures, but a guest process can exit with any of them too — so
+        the container's running state settles it.
         """
         if result.exit_code == 0:
             return None

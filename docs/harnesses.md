@@ -56,11 +56,13 @@ Notes that matter in practice:
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.
-- **Credentials ride as scoped secrets.** Each adapter injects its credential at
-  the sandbox's network boundary, scoped to the provider's hosts; the value is
-  never a readable environment variable in the guest. OpenCode's quirk: a host
-  `GEMINI_API_KEY` is injected under the SDK's expected
-  `GOOGLE_GENERATIVE_AI_API_KEY` name.
+- **Credentials are declared once, injected per backend.** Each adapter declares
+  its credential and the provider hosts it may be used toward. Under
+  `microsandbox` that becomes a host-scoped secret substituted at the network
+  boundary — never a readable guest variable. Under `docker` it becomes a plain
+  container environment variable, readable in the guest, because Docker has no
+  scoping equivalent. OpenCode's quirk holds either way: a host `GEMINI_API_KEY`
+  is injected under the SDK's expected `GOOGLE_GENERATIVE_AI_API_KEY` name.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
   your tokens to its invocation but rejects flags harnessbench owns (model, effort,
   prompt delivery, output format, session, and permission controls) including

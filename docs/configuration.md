@@ -44,7 +44,7 @@ differs. The full key set for `[tool.harnessbench.sets.<name>]`:
 | `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags harnessbench owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional: without it, arms report absolute rates and no delta. Must name a declared arm. |
 | `runner` | string | The test harness driving the set. `pytest` is the only supported value (and the default); anything else fails fast with exit `2`. |
-| `sandbox` | string | The sandbox backend. `microsandbox` is the only implementation (and the default); `docker` is recognized but fails fast as not implemented. |
+| `sandbox` | string | The sandbox backend: `microsandbox` (the default; microVMs, needs Apple Silicon or Linux+KVM) or `docker` (containers, needs a local Docker daemon on macOS or Linux; shared kernel and guest-readable credentials — see [`sandbox.md`](sandbox.md)). Any other value fails fast with exit `2`. |
 
 > **Key concept:** `runner` names the *test harness*, not the agent;
 > agents are chosen per arm via `harness`. Both `runner` and `sandbox` are

@@ -11,9 +11,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 harnessbench runs an agent (Claude Code, Codex, or OpenCode) against a task
-in a fresh microVM, checks what it actually did in the workspace, and reports the
-result as a comparison: with your skill versus without, one model versus another,
-one harness versus another.
+in a fresh sandbox — a microVM, or a container — checks what it actually did in
+the workspace, and reports the result as a comparison: with your skill versus
+without, one model versus another, one harness versus another.
 
 <img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: harnessbench run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
 
@@ -36,8 +36,9 @@ pip install "harnessbench[microsandbox]"
 ```
 
 > **Pre-1.0.** The eval format and the artifact schemas are the surfaces most
-> likely to change. microsandbox is the only sandbox backend today; `docker` is
-> recognized in config but fails fast as not implemented.
+> likely to change. Two sandbox backends ship: `microsandbox` (microVMs; needs
+> Apple Silicon or Linux+KVM) and `docker` (containers; needs a reachable Docker
+> daemon, weaker isolation — see [docs/sandbox.md](docs/sandbox.md)).
 
 An eval is one Markdown file: a prompt, then a checklist of plain-prose claims
 about the workspace after the agent is done. There is no checker syntax to learn;
