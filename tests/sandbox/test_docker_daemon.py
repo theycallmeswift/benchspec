@@ -217,25 +217,42 @@ def test_stop_hands_workspace_files_back_to_the_host_user(tmp_path: object) -> N
     Under rootful Docker on Linux, files the guest writes into the bind mount land as
     root-owned. The host then cannot read facts out of the workspace, and the
     TemporaryDirectory holding it fails to delete — so `stop()` chowns them back first.
+    Covers a plain file AND a root-only 0600 file inside a root-only 0700 directory: the
+    `-R` chown runs as root inside the guest, so it must reach both regardless of the
+    restrictive modes that would block a host-side walk from even seeing them.
     """
     container = _unique("harnessbench-test")
     workspace = tmp_path / "workdir"
     workspace.mkdir()
 
     async def exercise() -> None:
-        """Write a file as root inside the guest, then stop the session."""
+        """Write a plain file and a root-only file/dir as root, then stop the session."""
         sandbox = await _start_container(
             container, volumes=["-v", f"{workspace.resolve()}:/workspace"]
         )
         sandbox._restore_owner = f"{os.getuid()}:{os.getgid()}"
         written = await sandbox.shell("echo hi > /workspace/authored.txt")
         assert written.exit_code == 0, written.stderr_text
+        locked_down = await sandbox.shell(
+            "mkdir -m 700 /workspace/private && "
+            "echo secret > /workspace/private/secret.txt && "
+            "chmod 600 /workspace/private/secret.txt"
+        )
+        assert locked_down.exit_code == 0, locked_down.stderr_text
         await sandbox.stop()
 
     asyncio.run(exercise())
 
     assert (workspace / "authored.txt").read_text(encoding="utf-8").strip() == "hi"
     assert (workspace / "authored.txt").stat().st_uid == os.getuid()
+
+    private_dir = workspace / "private"
+    secret_file = private_dir / "secret.txt"
+    assert private_dir.stat().st_uid == os.getuid()
+    assert private_dir.stat().st_mode & 0o777 == 0o700
+    assert secret_file.stat().st_uid == os.getuid()
+    assert secret_file.stat().st_mode & 0o777 == 0o600
+    assert secret_file.read_text(encoding="utf-8").strip() == "secret"
 
 
 def test_the_suite_leaked_no_harnessbench_containers() -> None:

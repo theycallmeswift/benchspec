@@ -307,6 +307,13 @@ class SandboxSession:
             extra_env=self._arm_env,
             harness_args=self._harness_args,
         )
+        # Docker only: hand `/workspace` back to the host user right after the turn, not
+        # just at teardown. The caller's own host-side fact-gathering reads that mount
+        # before `__aexit__` ever runs, and a `_reap`-ed sandbox never reaches `stop()` at
+        # all. `getattr` keeps the microsandbox path — which has no such method — untouched.
+        restore = getattr(self._sandbox, "restore_workspace_owner", None)
+        if restore is not None:
+            await restore()
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(
             self._sandbox, self._agent, self._artifact_base, self._backend
@@ -316,9 +323,16 @@ class SandboxSession:
         return result
 
     async def __aexit__(self: object, *exc: object) -> object:
-        """Close the arm session and release sandbox resources."""
+        """Close the arm session and release sandbox resources.
+
+        Routes teardown through the backend's `stop_quietly` rather than a raw `.stop()`:
+        a daemon-down (or otherwise wedged) teardown must not raise out of `__aexit__`,
+        which would unwind the whole `asyncio.run` and discard the turn's already-recorded
+        `RunResult` — including one already flagged `is_error` — before it ever reaches
+        the caller.
+        """
         try:
-            await self._sandbox.stop()
+            await self._backend.stop_quietly(self._sandbox)
         finally:
             discard_stage(self._staged_project)
 

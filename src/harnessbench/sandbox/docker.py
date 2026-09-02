@@ -305,16 +305,6 @@ def image_ref(snapshot: str) -> str:
     return f"{stem or 'harnessbench-snapshot'}-{digest}"
 
 
-def _env_flags(env: dict[str, str] | None) -> list[str]:
-    """Render a NON-SECRET guest environment mapping as repeated `docker exec -e` arguments.
-
-    `HOME`, `TZ`, and the `HARNESSBENCH_*` cell variables belong here. Credentials do NOT:
-    an `-e` value is visible to every user on the host through `ps` and is echoed back by
-    `docker inspect`, so `_credential_env_file` renders those through a `--env-file`.
-    """
-    return [flag for name, value in (env or {}).items() for flag in ("-e", f"{name}={value}")]
-
-
 def _volume_flags(volumes: dict[str, DockerVolume]) -> list[str]:
     """Render a guest-path → volume mapping as repeated `docker run -v` arguments."""
     return [
@@ -324,19 +314,76 @@ def _volume_flags(volumes: dict[str, DockerVolume]) -> list[str]:
     ]
 
 
+def _write_env_file(pairs: dict[str, str]) -> str | None:
+    """Write a mode-0600 `NAME=value` file that `--env-file` reads, or None for no pairs.
+
+    This is the ONLY way a guest environment variable — secret or not — reaches a
+    `docker run`/`exec` call in this module: an `-e NAME=value` argument would put the
+    value in the container's argv, which every user on the host can read out of `ps`.
+    `--env-file` never touches argv, and the file itself is gone the moment its caller
+    deletes it with `_delete_env_file`.
+
+    `docker inspect .Config.Env` still shows the value for as long as the container
+    exists, exactly as `-e` would — this only closes the host-`ps`/argv leak, not that one.
+
+    Args:
+        pairs: The `NAME` → `value` mapping to write, one per line, unquoted and
+            unescaped (docker's env-file format).
+
+    Returns:
+        The file's path, or None when `pairs` is empty — a caller skips the
+        `--env-file` flag entirely rather than pointing docker at an empty file.
+    """
+    if not pairs:
+        return None
+    handle, path = tempfile.mkstemp(prefix="harnessbench-env-")
+    os.fchmod(handle, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as env_file:
+        for name, value in pairs.items():
+            env_file.write(f"{name}={value}\n")
+    return path
+
+
+def _delete_env_file(path: str | None) -> None:
+    """Delete a file `_write_env_file` returned, tolerating None or an already-gone file."""
+    if path is None:
+        return
+    with contextlib.suppress(OSError):
+        os.unlink(path)
+
+
+@contextlib.contextmanager
+def _env_file(pairs: dict[str, str]) -> object:
+    """Yield `--env-file` flags for `pairs`, deleting the file when the block exits.
+
+    Fits a caller whose file only needs to live for one `await` (`_guest_call`,
+    `_credential_env_file`'s `docker run`). A caller whose file must outlive the
+    enclosing scope — `exec_stream`'s process keeps running after `_docker_stream`
+    returns — uses `_write_env_file`/`_delete_env_file` directly instead.
+
+    Yields:
+        `["--env-file", path]`, or an empty list when `pairs` is empty.
+    """
+    path = _write_env_file(pairs)
+    try:
+        yield [] if path is None else ["--env-file", path]
+    finally:
+        _delete_env_file(path)
+
+
 @contextlib.contextmanager
 def _credential_env_file(agent: object) -> object:
     """Yield `docker run` flags that carry the agent's credentials out of band.
 
     Docker has no equivalent of microsandbox's network-scoped secret substitution, so
-    `allow_hosts` cannot be enforced and the value IS readable inside the guest. That much
-    is the documented cost of selecting `sandbox = "docker"`.
+    `allow_hosts` cannot be enforced and the value IS readable inside the guest — and, for
+    as long as the container exists, back out again via `docker inspect .Config.Env`. That
+    much is the documented cost of selecting `sandbox = "docker"`.
 
-    What is NOT acceptable is leaking the value to the HOST. `-e NAME=value` puts the
-    token in the container's argv, where any user on the machine reads it out of `ps` and
-    where `docker inspect` echoes it back for as long as the container exists. So the
-    values go into a mode-0600 file that is deleted as soon as `docker run` returns — by
-    then the daemon has copied them into the container's environment.
+    What `--env-file` buys over `-e NAME=value` is narrower but real: the value never rides
+    the container's argv, so it never shows up in host `ps` output, and the mode-0600 file
+    itself is deleted the moment `docker run` returns — by then the daemon has already read
+    it into the container's environment. `docker inspect` exposure is unchanged either way.
 
     Args:
         agent: The agent whose `secrets()` are rendered.
@@ -344,21 +391,9 @@ def _credential_env_file(agent: object) -> object:
     Yields:
         The `--env-file` flags, or an empty list when the agent declares no credentials.
     """
-    credentials = agent.secrets()
-    if not credentials:
-        yield []
-        return
-    handle, path = tempfile.mkstemp(prefix="harnessbench-credentials-")
-    try:
-        os.fchmod(handle, 0o600)
-        # docker's env-file format is one NAME=value per line, unquoted and unescaped.
-        with os.fdopen(handle, "w", encoding="utf-8") as env_file:
-            for credential in credentials:
-                env_file.write(f"{credential.env_name}={credential.value}\n")
-        yield ["--env-file", path]
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(path)
+    pairs = {credential.env_name: credential.value for credential in agent.secrets()}
+    with _env_file(pairs) as flags:
+        yield flags
 
 
 def _workspace_restore_owner() -> str | None:
@@ -537,12 +572,27 @@ class DockerExecStream:
     # grow the host's memory for the length of a turn.
     _STDERR_TAIL_BYTES = 8192
 
-    def __init__(self: object, process: object) -> None:
-        """Wrap the live `docker exec` process whose stdout is drained."""
+    def __init__(self: object, process: object, *, env_file_path: str | None = None) -> None:
+        """Wrap the live `docker exec` process whose stdout is drained.
+
+        Args:
+            process: The live `docker exec` client process.
+            env_file_path: The credential/env `--env-file` this exec's spawn used, if any.
+                Held here rather than deleted right after the spawn: unlike `_guest_call`'s
+                single blocking `_docker` call, `_docker_stream` only starts the client
+                process, which may still be parsing its own argv (including this file) when
+                the spawn returns. Deleted on the terminal `exited` event or `kill()`.
+        """
         self._process = process
         self._finished = False
         self._stderr_tail = bytearray()
         self._stderr_drain = None
+        self._env_file_path = env_file_path
+
+    def _cleanup_env_file(self: object) -> None:
+        """Delete this stream's `--env-file`, if any. Idempotent: safe to call twice."""
+        _delete_env_file(self._env_file_path)
+        self._env_file_path = None
 
     @property
     def stderr_tail(self: object) -> str:
@@ -594,6 +644,7 @@ class DockerExecStream:
         self._finished = True
         code = await self._process.wait()
         await self._finish_stderr_drain()
+        self._cleanup_env_file()
         return DockerStreamEvent("exited", code=code)
 
     async def kill(self: object) -> None:
@@ -602,6 +653,9 @@ class DockerExecStream:
         WARNING: this kills the local client, not the process inside the container. The
         caller (`_route_in_sandbox_async`) removes the container immediately afterwards
         via `stop_quietly`, and that removal is what actually reaps the guest process.
+
+        Idempotent, and also the path that cleans up the env-file when a timeout cancels
+        the caller's drain loop before the terminal `exited` event is ever reached.
         """
         if self._stderr_drain is not None:
             self._stderr_drain.cancel()
@@ -609,28 +663,47 @@ class DockerExecStream:
             self._process.kill()
             await self._process.wait()
         await self._finish_stderr_drain()
+        self._cleanup_env_file()
 
 
 class DockerSandbox:
     """A live container satisfying the guest contract `sandbox.py` and the agents drive."""
 
-    def __init__(self: object, container: str, *, restore_owner: str | None = None) -> None:
-        """Wrap an already-running container by name.
+    def __init__(
+        self: object,
+        container: str,
+        *,
+        name: str | None = None,
+        restore_owner: str | None = None,
+    ) -> None:
+        """Wrap an already-running container, addressed by its immutable ID.
 
         Args:
-            container: The running container's name.
+            container: The container's ID (what `docker run --detach` printed), or its
+                name when no ID was captured. Every `docker exec`/`rm`/`inspect` this
+                sandbox issues targets THIS value, so a concurrent process that reuses the
+                same name after this container starts can never receive our exec or eat
+                our removal.
+            name: The human-readable name, used only in error text. Defaults to
+                `container` when omitted (unit tests wrapping a container by name only).
             restore_owner: `uid:gid` to chown `/workspace` to before teardown, or None to
                 skip. Set only on Linux hosts, where rootful Docker would otherwise leave
                 root-owned files the host cannot read or delete.
         """
         self._container = container
+        self._name = name if name is not None else container
         self._restore_owner = restore_owner
         self._alive = True
 
     @property
     def container(self: object) -> str:
-        """The name of the container this sandbox drives."""
+        """The ID (or name, when no ID was captured) this sandbox execs and removes by."""
         return self._container
+
+    @property
+    def name(self: object) -> str:
+        """The human-readable container name shown in error text."""
+        return self._name
 
     @property
     def alive(self: object) -> bool:
@@ -647,17 +720,19 @@ class DockerSandbox:
         """
         if not self._alive:
             raise SandboxRuntimeError(
-                f"container `{self._container}` is no longer usable (reaped after a "
+                f"container `{self._name}` is no longer usable (reaped after a "
                 f"timeout, or lost to a control-plane failure)"
             )
 
-    def _exec_args(self: object, *, cwd: str | None, env: dict | None) -> list[str]:
+    def _exec_args(self: object, *, cwd: str | None, env_flags: list[str]) -> list[str]:
         """Build the leading `docker exec` arguments shared by every guest call.
 
         `-i` keeps stdin attached so the caller can force EOF on it; without that a
-        guest CLI can block forever on an open pipe.
+        guest CLI can block forever on an open pipe. `env_flags` is a pre-rendered
+        `--env-file` pair (or empty): env never rides argv here, so this never renders
+        `-e NAME=value` itself.
         """
-        args = ["exec", "-i", *_env_flags(env)]
+        args = ["exec", "-i", *env_flags]
         if cwd:
             args += ["-w", cwd]
         return [*args, self._container]
@@ -669,13 +744,41 @@ class DockerSandbox:
         container: without this, an agent whose turn timed out keeps running — and keeps
         spending — for the rest of the benchmark. Removing the container reaps it.
 
+        The ownership restore runs first, and while the container is still alive: a reaped
+        sandbox is removed here rather than through `stop()`, so without this call a
+        timed-out turn would leave the workspace root-owned on a Linux host.
+
         Returns:
             The removal outcome, so a caller building a timeout message can tell a
             confirmed reap from a removal that itself failed (the guest may still be
             running).
         """
+        await self.restore_workspace_owner()
         self._alive = False
         return await _remove_container(self._container)
+
+    async def restore_workspace_owner(self: object) -> None:
+        """Chown `/workspace` back to the host user, best effort and idempotent.
+
+        No-op when there is nothing to restore: `restore_owner` is None (non-Linux hosts,
+        or a sandbox with no `/workspace` mount) or the container is already gone. Callers
+        besides `stop()` and `_reap()` — `SandboxSession._run`, once per turn — call this
+        too, because a host-side fact-gathering read can otherwise run against a
+        root-owned workspace before either of those ever fires.
+
+        Never raises: a chown failure must not stop the container from being removed, or
+        an arm's already-recorded result from being returned.
+        """
+        if self._restore_owner is None or not self._alive:
+            return
+        # DockerCallTimeout already subclasses SandboxRuntimeError, so a wedged chown is
+        # bounded by REMOVE_TIMEOUT_SECONDS and caught here rather than hanging teardown.
+        with contextlib.suppress(SandboxRuntimeError, OSError):
+            await self.exec(
+                "chown",
+                ["-R", self._restore_owner, GUEST_WORKDIR],
+                timeout=REMOVE_TIMEOUT_SECONDS,
+            )
 
     async def _control_plane_failure(self: object, result: DockerResult) -> str | None:
         """Return an error message when `result` is docker failing, not the guest exiting.
@@ -689,7 +792,7 @@ class DockerSandbox:
             return None
         if _CONTROL_PLANE_PATTERN.search(result.stderr):
             return (
-                f"docker exec against container `{self._container}` failed: "
+                f"docker exec against container `{self._name}` failed: "
                 f"{result.stderr.strip()[-500:] or '(no output)'}"
             )
         if result.exit_code not in _AMBIGUOUS_EXIT_CODES:
@@ -701,30 +804,39 @@ class DockerSandbox:
                 "{{.State.Running}}",
                 self._container,
                 timeout=SYNC_CALL_TIMEOUT_SECONDS,
-                description=f"`docker inspect {self._container}`",
+                description=f"`docker inspect {self._name}`",
             )
         except DockerCallTimeout:
             # A wedged disambiguation inspect means the daemon itself is unresponsive,
             # which is a control-plane failure by definition — not a guest exit code.
             return (
-                f"could not determine whether container `{self._container}` is still "
+                f"could not determine whether container `{self._name}` is still "
                 f"running (docker exec exited {result.exit_code}, and the disambiguating "
                 f"`docker inspect` timed out)"
             )
         if state.exit_code == 0 and state.stdout.strip() == "true":
             return None
         return (
-            f"container `{self._container}` is not running "
+            f"container `{self._name}` is not running "
             f"(docker exec exited {result.exit_code})"
         )
 
     async def _guest_call(
         self: object,
-        *args: str,
+        command: str,
+        args: list[str] | tuple[str, ...] = (),
+        *,
+        cwd: str | None = None,
+        env: dict | None = None,
         stdin: bytes | None = None,
         timeout: float | None = None,
     ) -> DockerExecOutput:
         """Run one guest command, telling a docker failure apart from a guest exit code.
+
+        `env` reaches the guest through a `--env-file`, never `-e NAME=value`: the file's
+        whole lifetime is this one `await _docker(...)`, which is safe because the CLI has
+        already parsed `--env-file` and hung the exec creation off the daemon by the time
+        that call returns — so the file can be deleted the moment control comes back here.
 
         Raises:
             SandboxRuntimeError: If the call times out (the container is reaped first) or
@@ -732,12 +844,15 @@ class DockerSandbox:
         """
         self._require_alive()
         try:
-            result = await _docker(
-                *args,
-                stdin=stdin,
-                timeout=timeout,
-                description=f"`docker exec {self._container}`",
-            )
+            with _env_file(env or {}) as env_flags:
+                result = await _docker(
+                    *self._exec_args(cwd=cwd, env_flags=env_flags),
+                    command,
+                    *args,
+                    stdin=stdin,
+                    timeout=timeout,
+                    description=f"`docker exec {self._name}`",
+                )
         except DockerCallTimeout as error:
             removal = await self._reap()
             if removal.removed or removal.absent:
@@ -748,7 +863,7 @@ class DockerSandbox:
                     f"be running"
                 )
             raise SandboxRuntimeError(
-                f"guest command in container `{self._container}` timed out after "
+                f"guest command in container `{self._name}` timed out after "
                 f"{timeout}s; {reap_note}"
             ) from error
         failure = await self._control_plane_failure(result)
@@ -761,9 +876,7 @@ class DockerSandbox:
         self: object, script: str, *, env: dict | None = None, cwd: str | None = None
     ) -> DockerExecOutput:
         """Run `script` under `/bin/sh -c` inside the container."""
-        return await self._guest_call(
-            *self._exec_args(cwd=cwd, env=env), "/bin/sh", "-c", script
-        )
+        return await self._guest_call("/bin/sh", ["-c", script], cwd=cwd, env=env)
 
     async def exec(
         self: object,
@@ -777,11 +890,7 @@ class DockerSandbox:
     ) -> DockerExecOutput:
         """Run `command` with `args` directly — no shell, so nothing re-quotes a prompt."""
         return await self._guest_call(
-            *self._exec_args(cwd=cwd, env=env),
-            command,
-            *(args or []),
-            stdin=stdin,
-            timeout=timeout,
+            command, args or [], cwd=cwd, env=env, stdin=stdin, timeout=timeout
         )
 
     async def exec_stream(
@@ -793,16 +902,29 @@ class DockerSandbox:
         env: dict | None = None,
         stdin: bytes | None = None,
     ) -> DockerExecStream:
-        """Start `command` in the container and stream its stdout incrementally."""
+        """Start `command` in the container and stream its stdout incrementally.
+
+        Unlike `_guest_call`, the env-file cannot be deleted as soon as the spawn returns:
+        `_docker_stream` only starts the client process, which may still be parsing its own
+        argv (this file included) when control comes back here. `DockerExecStream` holds
+        the path and deletes it once it is done with the process (its terminal `exited`
+        event, or `kill()`).
+        """
         self._require_alive()
-        process = await _docker_stream(
-            *self._exec_args(cwd=cwd, env=env),
-            command,
-            *(args or []),
-            stdin=stdin,
-            description=f"`docker exec {self._container}`",
-        )
-        return DockerExecStream(process)
+        env_file_path = _write_env_file(env or {})
+        env_flags = [] if env_file_path is None else ["--env-file", env_file_path]
+        try:
+            process = await _docker_stream(
+                *self._exec_args(cwd=cwd, env_flags=env_flags),
+                command,
+                *(args or []),
+                stdin=stdin,
+                description=f"`docker exec {self._name}`",
+            )
+        except BaseException:
+            _delete_env_file(env_file_path)
+            raise
+        return DockerExecStream(process, env_file_path=env_file_path)
 
     async def stop(self: object, timeout: float | None = None) -> None:
         """Restore host ownership of the workspace, then remove the container.
@@ -820,16 +942,7 @@ class DockerSandbox:
             SandboxRuntimeError: If the daemon refused or wedged the removal. Callers that
                 must not fail on teardown use `DockerBackend.stop_quietly`.
         """
-        if self._restore_owner is not None and self._alive:
-            # Best effort: a chown failure must not stop the container from being removed.
-            # DockerCallTimeout already subclasses SandboxRuntimeError, so a wedged chown
-            # is bounded by `timeout` below and caught here rather than hanging teardown.
-            with contextlib.suppress(SandboxRuntimeError, OSError):
-                await self.exec(
-                    "chown",
-                    ["-R", self._restore_owner, GUEST_WORKDIR],
-                    timeout=REMOVE_TIMEOUT_SECONDS,
-                )
+        await self.restore_workspace_owner()
         self._alive = False
         outcome = await _remove_container(
             self._container, timeout=timeout or REMOVE_TIMEOUT_SECONDS
@@ -977,7 +1090,12 @@ class DockerBackend:
                 f"docker run failed for base image `{base_image}` "
                 f"(exit {started.exit_code}): {started.stderr.strip()[-2000:]}"
             )
-        sandbox = DockerSandbox(build_container)
+        # `run --detach` prints the new container's ID; addressing it by ID (not the name)
+        # for the rest of this build closes the same race `_run_container` closes for an
+        # arm session — a concurrent process reusing this name cannot steal our provision,
+        # commit, or cleanup out from under us.
+        container_id = started.stdout.strip() or build_container
+        sandbox = DockerSandbox(container_id, name=build_container)
         try:
             try:
                 await agent.provision(sandbox)
@@ -993,7 +1111,7 @@ class DockerBackend:
                 ) from error
             committed = await _docker(
                 "commit",
-                build_container,
+                sandbox.container,
                 image_ref(name),
                 description=f"`docker commit {build_container}`",
             )
@@ -1004,7 +1122,7 @@ class DockerBackend:
                 )
         finally:
             # `_remove_container` never raises, so teardown can never mask a build failure.
-            await _remove_container(build_container)
+            await _remove_container(sandbox.container)
 
     async def create_sandbox(
         self: object,
@@ -1074,6 +1192,11 @@ class DockerBackend:
     ) -> DockerSandbox:
         """Free the container name, then run a fresh container from the snapshot image.
 
+        The returned sandbox execs and removes by the container's ID, not this name: once
+        `docker run` returns, a concurrent process is free to `docker run --name <name>`
+        again, and a name-addressed sandbox would then risk sending its exec into — or
+        removing — that unrelated container instead of its own.
+
         Raises:
             SandboxRuntimeError: If the name is held by a container harnessbench does not
                 own, or the container fails to start.
@@ -1113,7 +1236,8 @@ class DockerBackend:
                 f"docker run failed for snapshot `{snapshot}` "
                 f"(exit {started.exit_code}): {started.stderr.strip()[-2000:]}"
             )
-        return DockerSandbox(container, restore_owner=restore_owner)
+        container_id = started.stdout.strip() or container
+        return DockerSandbox(container_id, name=container, restore_owner=restore_owner)
 
     async def guest_shell(
         self: object, sandbox: object, agent: object, script: str

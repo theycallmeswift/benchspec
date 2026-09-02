@@ -630,6 +630,117 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
     assert fake.stopped is True
 
 
+class _RestoreCountingSandbox(FakeSandbox):
+    """A `FakeSandbox` that also exposes Docker's per-turn ownership-restore hook."""
+
+    def __init__(self: object, *args: object, **kwargs: object) -> None:
+        """Start with no restores recorded yet."""
+        super().__init__(*args, **kwargs)
+        self.restore_calls = 0
+
+    async def restore_workspace_owner(self: object) -> None:
+        """Record that ownership restore ran, mirroring `DockerSandbox`'s real method."""
+        self.restore_calls += 1
+
+
+def test_arm_session_restores_workspace_ownership_once_per_turn(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A sandbox exposing `restore_workspace_owner` gets it called once per turn.
+
+    Host-side fact gathering (`execution.py`) reads the workdir mount right after `run()`
+    returns, still inside this session — before `__aexit__`'s own restore would ever fire,
+    and before a later-reaped sandbox could skip that restore entirely. `getattr` is what
+    keeps the microsandbox path (`FakeSandbox`, with no such method) untouched.
+    """
+    fake = _RestoreCountingSandbox(
+        exec_outputs=[
+            FakeExecOutput(
+                0,
+                '{"type":"result","result":"ok","is_error":false,"session_id":"s","usage":{}}',
+            ),
+        ]
+    )
+
+    async def fake_create(**kwargs: object) -> object:
+        """Fake create."""
+        return fake
+
+    docker_backend = docker_mod.DockerBackend()
+    monkeypatch.setattr(docker_backend, "create_sandbox", fake_create)
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+
+    async def drive() -> object:
+        """Drive one turn through a Docker-flavored session."""
+        async with sandbox.arm_session(
+            agent=agent,
+            snapshot="snap",
+            eval_id="e1",
+            config="with_skill",
+            host_workdir=tmp_path / "wd",
+            host_repo_root=tmp_path,
+            model="sonnet",
+            effort="medium",
+            backend=docker_backend,
+        ) as run:
+            return await run("prompt", resume_session_id=None, detect_skill="archive")
+
+    response = asyncio.run(drive())
+
+    assert isinstance(response, RunResult)
+    assert fake.restore_calls == 1
+
+
+def test_arm_session_teardown_failure_does_not_discard_a_recorded_error_result(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A `stop()` that raises during teardown must not lose the turn's recorded result.
+
+    `__aexit__` used to await the raw sandbox `.stop()`; a wedged or dead daemon there
+    would unwind straight out of `asyncio.run` and discard the RunResult `run()` already
+    returned — including one already flagged `is_error` — before the caller ever saw it.
+    """
+    fake = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(
+                0,
+                '{"type":"result","result":"boom","is_error":true,"session_id":"s","usage":{}}',
+            ),
+        ],
+        stop_error=OSError("daemon gone"),
+    )
+
+    async def fake_create(**kwargs: object) -> object:
+        """Fake create."""
+        return fake
+
+    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+
+    async def drive() -> object:
+        """Run one turn, then let a failing teardown try to unwind the session."""
+        async with sandbox.arm_session(
+            agent=agent,
+            snapshot="snap",
+            eval_id="e1",
+            config="with_skill",
+            host_workdir=tmp_path / "wd",
+            host_repo_root=tmp_path,
+            model="sonnet",
+            effort="medium",
+            backend=microsandbox_backend,
+        ) as run:
+            return await run("prompt", resume_session_id=None, detect_skill="archive")
+
+    response = asyncio.run(drive())
+
+    assert isinstance(response, RunResult)
+    assert response.is_error is True
+    assert response.result_text == "boom"
+    assert fake.stopped is True
+
+
 def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: object) -> None:
     """Verify arm session propagates create failure."""
 

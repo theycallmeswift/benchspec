@@ -31,13 +31,15 @@ class FakeSandbox:
 
     `exec_outputs` is consumed in order, one per exec call, falling back to `default_exec`
     when exhausted. Set `exec_error` to make `exec()` raise instead of returning, for
-    exercising a caller's handling of a torn-down sandbox runtime.
+    exercising a caller's handling of a torn-down sandbox runtime. Set `stop_error` to make
+    `stop()` raise after recording, for exercising a caller's handling of teardown failing.
     """
 
     shell_output: FakeExecOutput = field(default_factory=FakeExecOutput)
     default_exec: FakeExecOutput = field(default_factory=FakeExecOutput)
     exec_outputs: list[FakeExecOutput] = field(default_factory=list)
     exec_error: BaseException | None = None
+    stop_error: BaseException | None = None
     calls: list[tuple] = field(default_factory=list)
     stopped: bool = False
 
@@ -56,6 +58,8 @@ class FakeSandbox:
         return self.default_exec
 
     async def stop(self: object, timeout: object = None) -> None:
-        """Mark the fake sandbox as stopped."""
+        """Mark the fake sandbox as stopped, or raise `stop_error` instead."""
         self.stopped = True
+        if self.stop_error is not None:
+            raise self.stop_error
         return None

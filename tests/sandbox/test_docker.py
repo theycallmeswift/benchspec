@@ -73,19 +73,41 @@ def test_volume_flags_render_every_mount_in_order() -> None:
     ]
 
 
-def test_env_flags_render_each_variable_as_a_docker_e_pair() -> None:
-    """Guest environment variables become repeated `-e NAME=VALUE` arguments."""
-    assert docker_mod._env_flags({"HOME": "/root", "TZ": "UTC"}) == [
-        "-e",
-        "HOME=/root",
-        "-e",
-        "TZ=UTC",
-    ]
+def test_write_env_file_writes_mode_0600_name_equals_value_lines(tmp_path: object) -> None:
+    """The low-level writer never puts a value in argv: it lands in a 0600 file instead."""
+    path = docker_mod._write_env_file({"HOME": "/root", "TZ": "UTC"})
+
+    try:
+        assert Path(path).read_text(encoding="utf-8") == "HOME=/root\nTZ=UTC\n"
+        assert Path(path).stat().st_mode & 0o777 == 0o600
+    finally:
+        docker_mod._delete_env_file(path)
 
 
-def test_env_flags_of_none_is_empty() -> None:
-    """No environment means no `-e` arguments at all."""
-    assert docker_mod._env_flags(None) == []
+def test_write_env_file_of_empty_mapping_writes_no_file() -> None:
+    """No pairs means no file at all, so a caller skips the `--env-file` flag entirely."""
+    assert docker_mod._write_env_file({}) is None
+
+
+def test_delete_env_file_of_none_is_a_noop() -> None:
+    """A caller that never wrote a file can still unconditionally call the deleter."""
+    docker_mod._delete_env_file(None)
+
+
+def test_env_file_yields_no_flags_for_an_empty_mapping() -> None:
+    """The context-manager wrapper mirrors `_write_env_file`'s empty-mapping shortcut."""
+    with docker_mod._env_file({}) as flags:
+        assert flags == []
+
+
+def test_env_file_yields_the_flag_pair_and_deletes_the_file_on_exit() -> None:
+    """The file exists inside the block and is gone the moment the block exits."""
+    with docker_mod._env_file({"HOME": "/root"}) as flags:
+        assert flags[0] == "--env-file"
+        path = Path(flags[1])
+        assert path.read_text(encoding="utf-8") == "HOME=/root\n"
+
+    assert path.exists() is False
 
 
 def test_resource_flags_come_from_the_shared_sizing_constants() -> None:
@@ -410,17 +432,38 @@ def _record_docker(monkeypatch: object, result: object) -> list:
     return calls
 
 
-def test_shell_runs_the_script_under_sh_inside_the_container(monkeypatch: object) -> None:
-    """`shell` becomes `docker exec -i -e ... -w ... <container> /bin/sh -c <script>`."""
-    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "done\n", ""))
+def test_shell_carries_env_through_an_env_file_never_the_argv(monkeypatch: object) -> None:
+    """`shell` becomes `docker exec -i --env-file <path> -w ... <container> /bin/sh -c ...`.
+
+    Guest env is a documented host-secret channel (arm `env`), so it must never ride
+    `docker exec` argv the way `docker run`'s credentials never do.
+    """
+    seen: dict = {}
+
+    async def fake(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Read the env-file while it still exists, then return a canned exec result."""
+        env_file = Path(args[args.index("--env-file") + 1])
+        seen["args"] = args
+        seen["content"] = env_file.read_text(encoding="utf-8")
+        seen["mode"] = env_file.stat().st_mode & 0o777
+        seen["path"] = env_file
+        return DockerResult(args, 0, "done\n", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
     sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
 
     result = asyncio.run(sandbox.shell("echo done", env={"HOME": "/root"}, cwd="/project"))
 
-    assert calls[0]["args"] == (
-        "exec", "-i", "-e", "HOME=/root", "-w", "/project",
-        "eval-hello-alpha-main", "/bin/sh", "-c", "echo done",
-    )
+    assert seen["args"][:2] == ("exec", "-i")
+    assert seen["args"][-4:] == ("eval-hello-alpha-main", "/bin/sh", "-c", "echo done")
+    assert "-w" in seen["args"]
+    assert "/project" in seen["args"]
+    assert not any(argument == "HOME=/root" for argument in seen["args"])
+    assert seen["content"] == "HOME=/root\n"
+    assert seen["mode"] == 0o600
+    assert seen["path"].exists() is False
     assert (result.exit_code, result.stdout_text, result.stderr_text) == (0, "done\n", "")
 
 
@@ -437,8 +480,24 @@ def test_shell_omits_the_workdir_flag_when_no_cwd_is_given(monkeypatch: object) 
 
 
 def test_exec_runs_the_command_without_a_shell(monkeypatch: object) -> None:
-    """`exec` passes argv straight through, so no quoting rule can mangle a prompt."""
-    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "{}", ""))
+    """`exec` passes argv straight through, so no quoting rule can mangle a prompt.
+
+    Its env, like `shell`'s, reaches the guest through `--env-file`, never `-e`.
+    """
+    seen: dict = {}
+
+    async def fake(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Read the env-file while it still exists, then return a canned exec result."""
+        env_file = Path(args[args.index("--env-file") + 1])
+        seen["args"] = args
+        seen["content"] = env_file.read_text(encoding="utf-8")
+        seen["stdin"] = stdin
+        seen["timeout"] = timeout
+        return DockerResult(args, 0, "{}", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
     sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
 
     asyncio.run(
@@ -452,12 +511,16 @@ def test_exec_runs_the_command_without_a_shell(monkeypatch: object) -> None:
         )
     )
 
-    assert calls[0]["args"] == (
-        "exec", "-i", "-e", "TZ=UTC", "-w", "/workspace",
+    assert seen["args"][:2] == ("exec", "-i")
+    assert seen["args"][-4:] == (
         "eval-hello-alpha-main", "/root/.local/bin/claude", "-p", "write a haiku",
     )
-    assert calls[0]["stdin"] == b""
-    assert calls[0]["timeout"] == 600
+    assert "-w" in seen["args"]
+    assert "/workspace" in seen["args"]
+    assert not any(argument == "TZ=UTC" for argument in seen["args"])
+    assert seen["content"] == "TZ=UTC\n"
+    assert seen["stdin"] == b""
+    assert seen["timeout"] == 600
 
 
 def test_exec_result_fields_match_the_guest_contract(monkeypatch: object) -> None:
@@ -505,6 +568,36 @@ def test_exec_timeout_removes_the_container_and_raises(monkeypatch: object) -> N
     with pytest.raises(docker_mod.SandboxRuntimeError, match="timed out"):
         asyncio.run(sandbox.exec("/root/.local/bin/claude", ["-p", "slow"], timeout=1))
 
+    assert calls[-1] == ("rm", "-f", "eval-hello-alpha-main")
+    assert sandbox.alive is False
+
+
+def test_exec_timeout_restores_workspace_ownership_before_reaping(monkeypatch: object) -> None:
+    """A timed-out turn still hands `/workspace` back before the container is removed.
+
+    `_reap` used to skip the chown entirely: a turn whose own exec call wedged — not just
+    ran long — left a Linux host with a root-owned workspace, since a reaped sandbox never
+    reaches `stop()` (the only place the chown used to run).
+    """
+    calls: list = []
+
+    async def fake(*args: str, stdin: object = None, timeout: object = None,
+                   description: object = None) -> object:
+        """Time out only the first exec (the turn itself); the chown and the rm succeed."""
+        calls.append(args)
+        if args[0] == "exec" and len(calls) == 1:
+            raise docker_mod.DockerCallTimeout("timed out")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main", restore_owner="501:20")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="timed out"):
+        asyncio.run(sandbox.exec("/root/.local/bin/claude", ["-p", "slow"], timeout=1))
+
+    assert calls[1] == (
+        "exec", "-i", "eval-hello-alpha-main", "chown", "-R", "501:20", "/workspace",
+    )
     assert calls[-1] == ("rm", "-f", "eval-hello-alpha-main")
     assert sandbox.alive is False
 
@@ -746,7 +839,10 @@ def test_exec_stream_drains_stderr_larger_than_a_pipe_buffer() -> None:
 
 
 def test_exec_stream_spawns_docker_exec_with_stdin_closed(monkeypatch: object) -> None:
-    """The streaming spawn carries the same exec arguments and forces EOF on stdin."""
+    """The streaming spawn carries the same exec arguments and forces EOF on stdin.
+
+    Env reaches the guest through `--env-file`, same as `shell`/`exec` — never `-e`.
+    """
     calls: list = []
 
     async def fake_stream(
@@ -759,18 +855,87 @@ def test_exec_stream_spawns_docker_exec_with_stdin_closed(monkeypatch: object) -
     monkeypatch.setattr(docker_mod, "_docker_stream", fake_stream)
     sandbox = docker_mod.DockerSandbox("trigger-main")
 
-    asyncio.run(
+    stream = asyncio.run(
         sandbox.exec_stream(
             "/root/.local/bin/claude", ["-p", "route"], cwd="/root", env={"HOME": "/root"},
             stdin=b"",
         )
     )
 
-    assert calls[0]["args"] == (
-        "exec", "-i", "-e", "HOME=/root", "-w", "/root",
-        "trigger-main", "/root/.local/bin/claude", "-p", "route",
-    )
+    args = calls[0]["args"]
+    env_file = Path(args[args.index("--env-file") + 1])
+    assert args[:2] == ("exec", "-i")
+    assert args[-4:] == ("trigger-main", "/root/.local/bin/claude", "-p", "route")
+    assert not any(argument == "HOME=/root" for argument in args)
+    assert env_file.read_text(encoding="utf-8") == "HOME=/root\n"
     assert calls[0]["stdin"] == b""
+
+    asyncio.run(stream.kill())
+
+
+def test_exec_stream_env_file_outlives_the_spawn_until_kill(monkeypatch: object) -> None:
+    """The env-file must not be deleted the instant `_docker_stream` returns.
+
+    Unlike `shell`/`exec`'s one blocking `_docker` call, the spawned client process may
+    still be starting up (and reading its own `--env-file` argument) after `exec_stream`
+    returns, so deleting eagerly here would risk a spawn that reads a half-deleted file.
+    """
+    async def fake_stream(
+        *args: str, stdin: object = None, description: object = None
+    ) -> object:
+        """Return a process double without ever inspecting the env-file."""
+        return FakeProcess([], code=0)
+
+    monkeypatch.setattr(docker_mod, "_docker_stream", fake_stream)
+    sandbox = docker_mod.DockerSandbox("trigger-main")
+
+    stream = asyncio.run(sandbox.exec_stream("claude", env={"HOME": "/root"}, stdin=b""))
+    env_file = Path(stream._env_file_path)
+    assert env_file.exists()
+
+    asyncio.run(stream.kill())
+
+    assert env_file.exists() is False
+
+
+def test_exec_stream_deletes_its_env_file_on_the_terminal_exited_event(
+    monkeypatch: object,
+) -> None:
+    """A stream drained to natural completion cleans up its env-file without a kill()."""
+
+    async def fake_stream(
+        *args: str, stdin: object = None, description: object = None
+    ) -> object:
+        """Return a process double that yields one chunk then exits cleanly."""
+        return FakeProcess([b"chunk"], code=0)
+
+    monkeypatch.setattr(docker_mod, "_docker_stream", fake_stream)
+    sandbox = docker_mod.DockerSandbox("trigger-main")
+
+    stream = asyncio.run(sandbox.exec_stream("claude", env={"HOME": "/root"}, stdin=b""))
+    env_file = Path(stream._env_file_path)
+    assert env_file.exists()
+
+    asyncio.run(_collect_events(stream))
+
+    assert env_file.exists() is False
+
+
+def test_exec_stream_kill_is_idempotent_with_an_env_file(monkeypatch: object) -> None:
+    """A second kill, after the file is already gone, must not raise."""
+
+    async def fake_stream(
+        *args: str, stdin: object = None, description: object = None
+    ) -> object:
+        """Return a process double."""
+        return FakeProcess([], code=0)
+
+    monkeypatch.setattr(docker_mod, "_docker_stream", fake_stream)
+    sandbox = docker_mod.DockerSandbox("trigger-main")
+    stream = asyncio.run(sandbox.exec_stream("claude", env={"HOME": "/root"}, stdin=b""))
+
+    asyncio.run(stream.kill())
+    asyncio.run(stream.kill())
 
 
 def test_stop_removes_the_container_within_the_callers_timeout(monkeypatch: object) -> None:
@@ -833,6 +998,39 @@ def test_stop_without_a_restore_owner_skips_the_chown(monkeypatch: object) -> No
     assert [call["args"][0] for call in calls] == ["rm"]
 
 
+def test_restore_workspace_owner_is_a_noop_without_a_restore_owner(monkeypatch: object) -> None:
+    """No `restore_owner` means no chown at all, matching the macOS no-op case."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    asyncio.run(sandbox.restore_workspace_owner())
+
+    assert calls == []
+
+
+def test_restore_workspace_owner_is_a_noop_once_the_sandbox_is_dead(monkeypatch: object) -> None:
+    """A reaped or stopped sandbox must not attempt a chown against a gone container."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main", restore_owner="501:20")
+    sandbox._alive = False
+
+    asyncio.run(sandbox.restore_workspace_owner())
+
+    assert calls == []
+
+
+def test_restore_workspace_owner_is_idempotent(monkeypatch: object) -> None:
+    """Calling it twice (once per turn, again at teardown) just chowns twice, harmlessly."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main", restore_owner="501:20")
+
+    asyncio.run(sandbox.restore_workspace_owner())
+    asyncio.run(sandbox.restore_workspace_owner())
+
+    assert len(calls) == 2
+    assert calls[0]["args"][-4:] == ("chown", "-R", "501:20", "/workspace")
+
+
 class RecordingAgent:
     """A CodingAgent stand-in that records the provisioning calls a build makes."""
 
@@ -857,8 +1055,13 @@ class RecordingAgent:
         self.provisioned.append(sandbox.container)
 
 
-def _fake_build_docker(monkeypatch: object, stdout: str = "") -> list:
-    """Fake the async seam for a build: no stale container exists, everything succeeds."""
+def _fake_build_docker(monkeypatch: object, *, run_stdout: str = "") -> list:
+    """Fake the async seam for a build: no stale container, `run` reports `run_stdout`.
+
+    `run_stdout` stands in for the container ID `docker run --detach` prints; an empty
+    default (the common case in these tests) exercises the documented no-ID fallback to
+    the container's name.
+    """
     calls: list = []
 
     async def fake_docker(
@@ -868,7 +1071,9 @@ def _fake_build_docker(monkeypatch: object, stdout: str = "") -> list:
         calls.append(args)
         if args[0] == "inspect":
             return DockerResult(args, 1, "", "Error: No such object: build")
-        return DockerResult(args, 0, stdout, "")
+        if args[0] == "run":
+            return DockerResult(args, 0, run_stdout, "")
+        return DockerResult(args, 0, "", "")
 
     monkeypatch.setattr(docker_mod, "_docker", fake_docker)
     return calls
@@ -900,7 +1105,7 @@ def test_build_container_name_is_scoped_to_the_repo_root(
 
 def test_build_snapshot_runs_provision_bridge_script_then_commits(monkeypatch: object) -> None:
     """The Docker build mirrors the microsandbox build and seals with `docker commit`."""
-    calls = _fake_build_docker(monkeypatch, stdout="sha256:committed\n")
+    calls = _fake_build_docker(monkeypatch, run_stdout="abc123containerid\n")
     build_container = docker_mod.build_container_name("claude-code")
     agent = RecordingAgent()
     env = EnvConfig(script=b"apt-get install -y jq\n", script_path="s.sh")
@@ -918,12 +1123,26 @@ def test_build_snapshot_runs_provision_bridge_script_then_commits(monkeypatch: o
         "--label", f"harnessbench.run={docker_mod.RUN_NONCE}",
         "--entrypoint", "sleep", "ubuntu:latest", "infinity",
     )
-    assert agent.provisioned == [build_container]
+    assert agent.provisioned == ["abc123containerid"]
     assert calls[-2] == (
         "commit",
-        build_container,
+        "abc123containerid",
         "harnessbench-docker-claude-code-latest-ab12cd34-0d462a07",
     )
+    assert calls[-1] == ("rm", "-f", "abc123containerid")
+
+
+def test_build_snapshot_falls_back_to_the_name_when_run_prints_no_id(
+    monkeypatch: object,
+) -> None:
+    """An empty `run --detach` stdout falls back to the name, not an empty exec target."""
+    calls = _fake_build_docker(monkeypatch)
+    build_container = docker_mod.build_container_name("claude-code")
+    agent = RecordingAgent()
+
+    docker_mod.DockerBackend().build_snapshot(agent, "snap", EnvConfig())
+
+    assert agent.provisioned == [build_container]
     assert calls[-1] == ("rm", "-f", build_container)
 
 
@@ -1044,8 +1263,13 @@ def test_docker_backend_satisfies_the_sandbox_backend_protocol() -> None:
     assert isinstance(docker_mod.DockerBackend(), backend_mod.SandboxBackend)
 
 
-def _fake_run_docker(monkeypatch: object) -> list:
-    """Fake the async seam for a container start: no stale container, everything succeeds."""
+def _fake_run_docker(monkeypatch: object, *, run_stdout: str = "") -> list:
+    """Fake the async seam for a container start: no stale container, run reports `run_stdout`.
+
+    `run_stdout` stands in for the container ID `docker run --detach` prints; an empty
+    default (the common case in these tests) exercises the documented no-ID fallback to
+    the container's name.
+    """
     calls: list = []
 
     async def fake_docker(
@@ -1055,6 +1279,8 @@ def _fake_run_docker(monkeypatch: object) -> list:
         calls.append(args)
         if args[0] == "inspect":
             return DockerResult(args, 1, "", "Error: No such object: eval")
+        if args[0] == "run":
+            return DockerResult(args, 0, run_stdout, "")
         return DockerResult(args, 0, "", "")
 
     monkeypatch.setattr(docker_mod, "_docker", fake_docker)
@@ -1101,14 +1327,71 @@ def test_create_sandbox_mounts_workspace_and_project_and_labels_the_container(
     assert sandbox.container == "eval-hello-alpha-main"
 
 
+def test_create_sandbox_execs_and_removes_by_the_containers_id_not_its_name(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A concurrent process that reuses the freed name can't steal our exec or removal.
+
+    The container's name is free again the instant `docker run --detach` returns, so a
+    concurrent run naming a container the same way could grab it. Addressing every later
+    call by the ID `run --detach` printed — never the name — closes that race.
+    """
+    calls = _fake_run_docker(monkeypatch, run_stdout="abc123containerid\n")
+
+    sandbox = asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    assert sandbox.container == "abc123containerid"
+    assert sandbox.name == "eval-hello-alpha-main"
+
+    asyncio.run(sandbox.shell("echo hi"))
+    assert calls[-1][:4] == ("exec", "-i", "abc123containerid", "/bin/sh")
+
+    asyncio.run(sandbox.stop())
+    assert calls[-1] == ("rm", "-f", "abc123containerid")
+
+
+def test_create_sandbox_falls_back_to_the_name_when_run_prints_no_id(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """An empty `run --detach` stdout falls back to the name, not an empty exec target."""
+    calls = _fake_run_docker(monkeypatch)
+
+    sandbox = asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    asyncio.run(sandbox.stop())
+
+    assert sandbox.container == sandbox.name == "eval-hello-alpha-main"
+    assert calls[-1] == ("rm", "-f", "eval-hello-alpha-main")
+
+
 def test_create_sandbox_never_puts_a_credential_in_the_container_argv(
     monkeypatch: object, tmp_path: object,
 ) -> None:
     """The token reaches the container through a 0600 env-file, never through `-e`.
 
-    `-e NAME=value` is visible to every user on the host in `ps` output and is echoed back
-    by `docker inspect`. The env-file is mode 0600 and is deleted the moment `docker run`
-    returns — the daemon has already copied the values into the container by then.
+    `-e NAME=value` puts the token in the container's argv, which every user on the host
+    can read via `ps`. `--env-file` fixes that specific leak — `docker inspect` still shows
+    the value for as long as the container exists, exactly as `-e` would — and the 0600
+    file itself is deleted the moment `docker run` returns, by which point the daemon has
+    already read it into the container's environment.
     """
     seen: dict = {}
 
