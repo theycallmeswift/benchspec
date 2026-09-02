@@ -264,6 +264,7 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
 
     allowlist = {
         "backend.py",
+        "errors.py",
         "__main__.py",
         "claude.py",
         "codex.py",
