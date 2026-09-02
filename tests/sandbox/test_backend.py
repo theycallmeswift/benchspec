@@ -253,22 +253,20 @@ def test_microsandbox_snapshot_exists_true_when_dir_present(
 def test_microsandbox_imported_only_under_allowlist() -> None:
     """No source file outside the allowlist imports the microsandbox package.
 
-    The backend is the primary home for the concrete runtime; the CLI wrapper and the
-    three agent adapters keep their own legitimate lazy imports (exit-code split /
-    microsandbox.Secret). Everything else — notably sandbox.py and execution.py — must
-    drive a resolved SandboxBackend. This guards that boundary so a
-    future edit cannot reintroduce a scattered `import microsandbox` there.
+    The backend is the primary home for the concrete runtime; the CLI wrapper keeps its
+    exit-code-split import and `sandbox/errors.py` keeps the one that builds the agents'
+    `except` tuple. Everything else — notably every agent adapter, sandbox.py, and
+    execution.py — must go through the resolved SandboxBackend or the neutral seams. This
+    guards that boundary so a future edit cannot reintroduce a scattered
+    `import microsandbox`.
     """
     import re
     from pathlib import Path
 
     allowlist = {
         "backend.py",
-        "errors.py",
         "__main__.py",
-        "claude.py",
-        "codex.py",
-        "opencode.py",
+        "errors.py",
     }
     src = Path("src/harnessbench")
     pattern = re.compile(r"^\s*(import microsandbox|from microsandbox)", re.MULTILINE)
@@ -292,3 +290,22 @@ def test_host_mount_path_resolves_symlinked_roots(tmp_path: Path) -> None:
 
     assert mount_path == str((real_root / "room").resolve())
     assert "linked" not in mount_path
+
+
+def test_microsandbox_maps_guest_credentials_to_host_scoped_secrets() -> None:
+    """One neutral credential renders as a real microsandbox SecretEntry, shape and all.
+
+    This asserts against the runtime's ACTUAL dataclass, not a stand-in: microsandbox's
+    `SecretEntry` (`microsandbox/types.py`) names the variable `env_var` — not `name` —
+    and `Secret.env` normalizes `allow_hosts` to a TUPLE. A test that invented a friendlier
+    shape here would pass while the mapping handed the runtime the wrong keyword.
+    """
+    microsandbox_backend = backend.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="sk-test-value", auth_env="ANTHROPIC_API_KEY")
+
+    secrets = microsandbox_backend._runtime_secrets(agent)
+
+    assert len(secrets) == 1
+    assert secrets[0].env_var == "ANTHROPIC_API_KEY"
+    assert secrets[0].value == "sk-test-value"
+    assert secrets[0].allow_hosts == ("api.anthropic.com",)

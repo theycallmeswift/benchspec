@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from harnessbench.agents.base import GuestCredential
 from harnessbench.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
 from harnessbench.sandbox.errors import SandboxRuntimeError
 from tests.support import FakeExecOutput, FakeSandbox
@@ -465,108 +466,55 @@ def test_parse_opencode_jsonl_skip_detect_when_no_skill() -> None:
     assert res.fired is False
 
 
-def test_secrets_scopes_to_provider_host(monkeypatch: object) -> None:
+def test_secrets_scopes_to_provider_host() -> None:
     """Verify secrets scopes to provider host."""
-    captured = {}
-
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
     agent = OpenCodeAgent(auth_value="or-key", auth_env="OPENROUTER_API_KEY")
 
-    secs = agent.secrets()
+    credentials = agent.secrets()
 
-    assert len(secs) == 1
-    assert captured["env_var"] == "OPENROUTER_API_KEY"
-    assert captured["value"] == "or-key"
-    assert captured["allow_hosts"] == ["openrouter.ai"]
+    assert credentials == [
+        GuestCredential(
+            env_name="OPENROUTER_API_KEY",
+            value="or-key",
+            allow_hosts=("openrouter.ai",),
+        )
+    ]
 
 
-def test_secrets_anthropic_fallback_scopes_to_anthropic_host(
-    monkeypatch: object,
-) -> None:
+def test_secrets_anthropic_fallback_scopes_to_anthropic_host() -> None:
     """Verify secrets anthropic fallback scopes to anthropic host."""
-    captured = {}
+    credentials = OpenCodeAgent(auth_value="ak", auth_env="ANTHROPIC_API_KEY").secrets()
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="ak", auth_env="ANTHROPIC_API_KEY").secrets()
-
-    assert captured["allow_hosts"] == ["api.anthropic.com"]
+    assert credentials[0].allow_hosts == ("api.anthropic.com",)
 
 
-def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host(
-    monkeypatch: object,
-) -> None:
-    """Verify secrets gemini remaps to sdk env name and scopes to google host."""
+def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host() -> None:
+    """A host GEMINI_API_KEY is declared under the SDK's own guest variable name."""
     # OpenCode is built on the Vercel AI SDK, whose Google provider reads
     # GOOGLE_GENERATIVE_AI_API_KEY (not GEMINI_API_KEY). Accept the friendlier
     # GEMINI_API_KEY on the host and inject under the SDK's name in the guest.
-    captured = {}
+    agent = OpenCodeAgent(auth_value="gk", auth_env="GEMINI_API_KEY")
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
+    credentials = agent.secrets()
 
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="gk", auth_env="GEMINI_API_KEY").secrets()
-
-    assert captured["env_var"] == "GOOGLE_GENERATIVE_AI_API_KEY"
-    assert captured["allow_hosts"] == ["generativelanguage.googleapis.com"]
+    assert credentials == [
+        GuestCredential(
+            env_name="GOOGLE_GENERATIVE_AI_API_KEY",
+            value="gk",
+            allow_hosts=("generativelanguage.googleapis.com",),
+        )
+    ]
 
 
-def test_secrets_google_generative_ai_passthrough_unchanged(
-    monkeypatch: object,
-) -> None:
+def test_secrets_google_generative_ai_passthrough_unchanged() -> None:
     """Verify secrets google generative ai passthrough unchanged."""
     # The SDK's native env var name passes through unchanged.
-    captured = {}
+    credentials = OpenCodeAgent(
+        auth_value="gk", auth_env="GOOGLE_GENERATIVE_AI_API_KEY"
+    ).secrets()
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="gk", auth_env="GOOGLE_GENERATIVE_AI_API_KEY").secrets()
-
-    assert captured["env_var"] == "GOOGLE_GENERATIVE_AI_API_KEY"
-    assert captured["allow_hosts"] == ["generativelanguage.googleapis.com"]
+    assert credentials[0].env_name == "GOOGLE_GENERATIVE_AI_API_KEY"
+    assert credentials[0].allow_hosts == ("generativelanguage.googleapis.com",)
 
 
 def test_guest_env_carries_home_tz_and_pinned_version() -> None:

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from harnessbench.agents.base import GuestCredential
 from harnessbench.agents.codex import CodexAgent, parse_codex_jsonl
 from harnessbench.sandbox.errors import SandboxRuntimeError
 from tests.support import FakeExecOutput, FakeSandbox
@@ -33,25 +34,6 @@ def _agent(auth_env: str = "CODEX_API_KEY", auth_json_path: str = "") -> CodexAg
         version="latest",
         auth_json_path=auth_json_path,
     )
-
-
-def _capture_secret(monkeypatch: object) -> dict:
-    """Provide the capture secret test helper."""
-    captured = {}
-
-    class DummySecret:
-        """Store dummy secret data."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> str:
-            """Env."""
-            captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
-            return "secret"
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", DummySecret)
-    return captured
 
 
 def test_build_command_shape_for_exec_json() -> None:
@@ -199,30 +181,36 @@ def test_guest_env_omits_credentials() -> None:
 
 def test_from_env_prefers_api_key(monkeypatch: object) -> None:
     """Verify from env prefers api key."""
-    captured = _capture_secret(monkeypatch)
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
     monkeypatch.setenv("HARNESSBENCH_CODEX_VERSION", "0.142.3")
 
     agent = CodexAgent.from_env()
 
-    assert agent.secrets() == ["secret"]
-    assert captured["env_var"] == "CODEX_API_KEY"
-    assert captured["value"] == "api-key"
+    assert agent.secrets() == [
+        GuestCredential(
+            env_name="CODEX_API_KEY",
+            value="api-key",
+            allow_hosts=("api.openai.com",),
+        )
+    ]
     assert agent.version() == "0.142.3"
 
 
 def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
     """Verify from env falls back to access token."""
-    captured = _capture_secret(monkeypatch)
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
 
     agent = CodexAgent.from_env()
 
-    assert agent.secrets() == ["secret"]
-    assert captured["env_var"] == "CODEX_ACCESS_TOKEN"
-    assert captured["value"] == "token"
+    assert agent.secrets() == [
+        GuestCredential(
+            env_name="CODEX_ACCESS_TOKEN",
+            value="token",
+            allow_hosts=("chatgpt.com", "auth.openai.com"),
+        )
+    ]
 
 
 def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) -> None:
@@ -287,29 +275,26 @@ def test_credential_error_none_when_auth_json_path_is_valid(
     assert CodexAgent.credential_error() is None
 
 
-def test_secrets_scopes_api_key_to_openai_host(monkeypatch: object) -> None:
+def test_secrets_scopes_api_key_to_openai_host() -> None:
     """Verify secrets scopes api key to openai host."""
-    captured = _capture_secret(monkeypatch)
+    credentials = CodexAgent(auth_value="api-key", auth_env="CODEX_API_KEY").secrets()
 
-    secs = CodexAgent(auth_value="api-key", auth_env="CODEX_API_KEY").secrets()
+    assert credentials == [
+        GuestCredential(
+            env_name="CODEX_API_KEY",
+            value="api-key",
+            allow_hosts=("api.openai.com",),
+        )
+    ]
 
-    assert secs == ["secret"]
-    assert captured == {
-        "env_var": "CODEX_API_KEY",
-        "value": "api-key",
-        "allow_hosts": ["api.openai.com"],
-    }
 
-
-def test_secrets_scopes_access_token_to_codex_hosts(monkeypatch: object) -> None:
+def test_secrets_scopes_access_token_to_codex_hosts() -> None:
     """Verify secrets scopes access token to codex hosts."""
-    captured = _capture_secret(monkeypatch)
+    credentials = CodexAgent(auth_value="token", auth_env="CODEX_ACCESS_TOKEN").secrets()
 
-    CodexAgent(auth_value="token", auth_env="CODEX_ACCESS_TOKEN").secrets()
-
-    assert captured["env_var"] == "CODEX_ACCESS_TOKEN"
-    assert "chatgpt.com" in captured["allow_hosts"]
-    assert "auth.openai.com" in captured["allow_hosts"]
+    assert credentials[0].env_name == "CODEX_ACCESS_TOKEN"
+    assert "chatgpt.com" in credentials[0].allow_hosts
+    assert "auth.openai.com" in credentials[0].allow_hosts
 
 
 def test_secrets_empty_when_auth_json_path_is_used() -> None:

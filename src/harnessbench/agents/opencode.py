@@ -23,7 +23,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from harnessbench.agents.base import AgentCapabilities, BaseAgent
+from harnessbench.agents.base import AgentCapabilities, BaseAgent, GuestCredential
 from harnessbench.grading.trajectory import iter_events
 from harnessbench.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from harnessbench.orchestration.results import RunResult
@@ -316,14 +316,16 @@ class OpenCodeAgent(BaseAgent):
             "HARNESSBENCH_OPENCODE_VERSION": self._version,
         }
 
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
-        from microsandbox import Secret
-
+    def secrets(self: object) -> list[GuestCredential]:
+        """Return the provider credential under the guest variable name the SDK reads."""
         allow_host = _PROVIDER_HOSTS[self._auth_env]
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
         return [
-            Secret.env(guest_env_name, value=self._auth_value, allow_hosts=[allow_host]),
+            GuestCredential(
+                env_name=guest_env_name,
+                value=self._auth_value,
+                allow_hosts=(allow_host,),
+            )
         ]
 
     def build_command(

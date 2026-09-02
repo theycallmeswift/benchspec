@@ -165,6 +165,23 @@ class BaseAgent:
 
 
 @dataclass(frozen=True)
+class GuestCredential:
+    """One provider credential an agent needs inside the guest, declared backend-neutrally.
+
+    The adapter declares WHAT the credential is; the backend decides HOW it reaches the
+    guest. `MicrosandboxBackend` renders it as a network-scoped `Secret.env`, so the value
+    is substituted at the network boundary and never becomes a readable guest variable.
+    `DockerBackend` renders it as a plain container environment variable, because Docker
+    has no equivalent scoping primitive — the value IS readable in the guest there, which
+    is part of what selecting `sandbox = "docker"` opts into.
+    """
+
+    env_name: str  # the variable name the agent's CLI reads INSIDE the guest
+    value: str
+    allow_hosts: tuple[str, ...]  # provider hosts the value may be used toward
+
+
+@dataclass(frozen=True)
 class AgentCapabilities:
     """What the harness can honestly do with this agent.
 
@@ -220,8 +237,8 @@ class CodingAgent(Protocol):
     #   the session snapshots them and merges the agent-authored files (diffed against the
     #   staged baseline) into the judge's facts. Each agent scaffolds skills differently, so
     #   each owns its answer; return [] for an agent that writes only to the workdir.
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
+    def secrets(self: object) -> list[GuestCredential]:
+        """Return the provider credentials this agent needs inside the guest."""
         ...
 
     def guest_env(self: object) -> dict:

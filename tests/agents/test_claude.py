@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from harnessbench.agents.base import GuestCredential
 from harnessbench.agents.claude import ClaudeCodeAgent
 from harnessbench.orchestration.results import parse_run_json
 from harnessbench.sandbox.errors import SandboxRuntimeError
@@ -432,30 +433,34 @@ def test_invoke_nonzero_exit_is_error() -> None:
     assert "bad" in res.result_text
 
 
-def test_secrets_uses_configured_auth_env(monkeypatch: object) -> None:
-    """Verify secrets uses configured auth env."""
-    captured = {}
-
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
+def test_secrets_uses_configured_auth_env() -> None:
+    """The configured credential name (not a hardcoded one) reaches the credential."""
     agent = ClaudeCodeAgent(auth_value="tok-123", auth_env="CLAUDE_CODE_OAUTH_TOKEN")
-    secs = agent.secrets()
-    assert len(secs) == 1
-    # the configured credential name (not a hardcoded one) reaches the injected secret,
-    # scoped to the Anthropic API host
-    assert captured["env_var"] == "CLAUDE_CODE_OAUTH_TOKEN"
-    assert captured["value"] == "tok-123"
-    assert captured["allow_hosts"] == ["api.anthropic.com"]
+
+    credentials = agent.secrets()
+
+    assert credentials == [
+        GuestCredential(
+            env_name="CLAUDE_CODE_OAUTH_TOKEN",
+            value="tok-123",
+            allow_hosts=("api.anthropic.com",),
+        )
+    ]
+
+
+def test_secrets_declares_a_host_scoped_guest_credential() -> None:
+    """The adapter declares WHAT the credential is; the backend decides HOW it is injected."""
+    agent = ClaudeCodeAgent(auth_value="sk-test-value", auth_env="ANTHROPIC_API_KEY")
+
+    credentials = agent.secrets()
+
+    assert credentials == [
+        GuestCredential(
+            env_name="ANTHROPIC_API_KEY",
+            value="sk-test-value",
+            allow_hosts=("api.anthropic.com",),
+        )
+    ]
 
 
 def test_guest_env_carries_home_and_sandbox_flag() -> None:

@@ -301,6 +301,19 @@ class MicrosandboxBackend:
                 f"{result.stderr_text[-2000:]}"
             )
 
+    def _runtime_secrets(self: object, agent: object) -> list:
+        """Map the agent's backend-neutral credentials onto microsandbox scoped secrets."""
+        from microsandbox import Secret
+
+        return [
+            Secret.env(
+                credential.env_name,
+                value=credential.value,
+                allow_hosts=list(credential.allow_hosts),
+            )
+            for credential in agent.secrets()
+        ]
+
     async def create_sandbox(
         self: object,
         *,
@@ -324,7 +337,7 @@ class MicrosandboxBackend:
             name,
             from_snapshot=snapshot,
             volumes=volumes,
-            secrets=agent.secrets(),
+            secrets=self._runtime_secrets(agent),
             cpus=VM_CPUS,
             memory=VM_MEMORY_MIB,
             replace=True,
@@ -348,7 +361,7 @@ class MicrosandboxBackend:
             name,
             from_snapshot=snapshot,
             volumes=volumes,
-            secrets=agent.secrets(),
+            secrets=self._runtime_secrets(agent),
             cpus=VM_CPUS,
             memory=VM_MEMORY_MIB,
             replace=True,

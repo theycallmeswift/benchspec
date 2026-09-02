@@ -12,7 +12,7 @@ import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from harnessbench.agents.base import AgentCapabilities, BaseAgent
+from harnessbench.agents.base import AgentCapabilities, BaseAgent, GuestCredential
 from harnessbench.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from harnessbench.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from harnessbench.orchestration.results import RunResult, parse_stream_run
@@ -165,15 +165,13 @@ class ClaudeCodeAgent(BaseAgent):
         # writes matches the date the assertions were substituted with.
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
 
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
-        from microsandbox import Secret
-
+    def secrets(self: object) -> list[GuestCredential]:
+        """Return the Anthropic credential, scoped to the Anthropic API host."""
         return [
-            Secret.env(
-                self._auth_env,
+            GuestCredential(
+                env_name=self._auth_env,
                 value=self._auth_value,
-                allow_hosts=["api.anthropic.com"],
+                allow_hosts=("api.anthropic.com",),
             )
         ]
 
