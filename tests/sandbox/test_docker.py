@@ -675,7 +675,7 @@ class FakeProcess:
         self.stdout = FakeStdout(chunks)
         self.stderr = FakeStderr(stderr) if stderr is not None else None
         self.returncode = None
-        self.killed = False
+        self.kill_count = 0
         self._code = code
 
     async def wait(self: object) -> int:
@@ -684,19 +684,20 @@ class FakeProcess:
         return self._code
 
     def kill(self: object) -> None:
-        """Record that the client process was killed."""
-        self.killed = True
+        """Record every call so a test can prove a double-kill only kills once."""
+        self.kill_count += 1
+
+
+async def _collect_events(stream: object) -> list:
+    """Drain a `DockerExecStream` (or double) into the list of events it yields."""
+    return [event async for event in stream]
 
 
 def test_exec_stream_yields_stdout_chunks_then_a_terminal_exit_event() -> None:
     """The stream shape matches what trigger routing drains: stdout chunks, then `exited`."""
     stream = docker_mod.DockerExecStream(FakeProcess([b'{"a":1}\n', b'{"b":2}\n'], code=0))
 
-    async def drain() -> list:
-        """Collect every event the stream yields."""
-        return [event async for event in stream]
-
-    events = asyncio.run(drain())
+    events = asyncio.run(_collect_events(stream))
 
     assert [event.event_type for event in events] == ["stdout", "stdout", "exited"]
     assert [event.data for event in events[:2]] == [b'{"a":1}\n', b'{"b":2}\n']
@@ -707,11 +708,7 @@ def test_exec_stream_reports_a_nonzero_exit_code() -> None:
     """A crashed guest command surfaces its code, which routing turns into a RoutingError."""
     stream = docker_mod.DockerExecStream(FakeProcess([], code=127))
 
-    async def drain() -> list:
-        """Collect every event the stream yields."""
-        return [event async for event in stream]
-
-    events = asyncio.run(drain())
+    events = asyncio.run(_collect_events(stream))
 
     assert [event.event_type for event in events] == ["exited"]
     assert events[0].code == 127
@@ -725,7 +722,7 @@ def test_exec_stream_kill_terminates_the_process_once() -> None:
     asyncio.run(stream.kill())
     asyncio.run(stream.kill())
 
-    assert process.killed is True
+    assert process.kill_count == 1
 
 
 def test_exec_stream_drains_stderr_larger_than_a_pipe_buffer() -> None:
@@ -739,11 +736,7 @@ def test_exec_stream_drains_stderr_larger_than_a_pipe_buffer() -> None:
     process = FakeProcess([b"out\n"], code=0, stderr=b"E" * (256 * 1024))
     stream = docker_mod.DockerExecStream(process)
 
-    async def drain() -> list:
-        """Collect every event the stream yields."""
-        return [event async for event in stream]
-
-    events = asyncio.run(drain())
+    events = asyncio.run(_collect_events(stream))
 
     assert [event.event_type for event in events] == ["stdout", "exited"]
     assert process.stderr.exhausted is True
@@ -821,7 +814,10 @@ def test_stop_restores_workspace_ownership_before_removing_the_container(
 
     asyncio.run(sandbox.stop())
 
-    assert calls[0]["args"][-3:] == ("/bin/sh", "-c", "chown -R 501:20 /workspace")
+    assert calls[0]["args"] == (
+        "exec", "-i", "eval-hello-alpha-main", "chown", "-R", "501:20", "/workspace",
+    )
+    assert calls[0]["timeout"] == docker_mod.REMOVE_TIMEOUT_SECONDS
     assert calls[1]["args"] == ("rm", "-f", "eval-hello-alpha-main")
 
 

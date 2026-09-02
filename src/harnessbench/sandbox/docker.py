@@ -448,7 +448,9 @@ class DockerExecStream:
         outside a running event loop stays legal.
         """
         if self._stderr_drain is None and getattr(self._process, "stderr", None) is not None:
-            self._stderr_drain = asyncio.ensure_future(self._drain_stderr())
+            self._stderr_drain = asyncio.create_task(
+                self._drain_stderr(), name="docker-exec-stream-stderr-drain"
+            )
 
     async def _drain_stderr(self: object) -> None:
         """Keep stderr empty, retaining only a bounded tail."""
@@ -711,8 +713,14 @@ class DockerSandbox:
         """
         if self._restore_owner is not None and self._alive:
             # Best effort: a chown failure must not stop the container from being removed.
-            with contextlib.suppress(SandboxRuntimeError, TimeoutError, OSError):
-                await self.shell(f"chown -R {self._restore_owner} {GUEST_WORKDIR}")
+            # DockerCallTimeout already subclasses SandboxRuntimeError, so a wedged chown
+            # is bounded by `timeout` below and caught here rather than hanging teardown.
+            with contextlib.suppress(SandboxRuntimeError, OSError):
+                await self.exec(
+                    "chown",
+                    ["-R", self._restore_owner, GUEST_WORKDIR],
+                    timeout=REMOVE_TIMEOUT_SECONDS,
+                )
         self._alive = False
         outcome = await _remove_container(
             self._container, timeout=timeout or REMOVE_TIMEOUT_SECONDS
