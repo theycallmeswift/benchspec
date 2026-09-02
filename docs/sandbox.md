@@ -1,18 +1,20 @@
 # The sandbox
 
 This page explains where an eval cell actually runs: why every cell gets its own
-microVM, what a snapshot is and when it rebuilds, what the guest can see, and how
-credentials get in without ever being readable inside it. It is for anyone who
-wants to trust or customize the isolation; the [quickstart](quickstart.md) does
-not require it. Terms (cell, clean room, `/workspace`, `/project`) are defined in
-[concepts.md](concepts.md).
+sandbox, what a snapshot is and when it rebuilds, what the guest can see, and how
+credentials reach it. It is for anyone who wants to trust or customize the
+isolation; the [quickstart](quickstart.md) does not require it. Terms (cell, clean
+room, `/workspace`, `/project`) are defined in [concepts.md](concepts.md).
 
-A microVM is a small virtual machine with its own kernel, booted in about a
-second: hardware isolation like a full VM, startup cost closer to a container.
-harnessbench runs every cell in one because an agent under test executes
-arbitrary commands, and the measurement is only honest if the agent starts from
-a known image, sees only the files the eval seeded, and cannot touch your
-machine, your credentials, or earlier runs' artifacts.
+harnessbench runs every cell in its own sandboxed guest because an agent under
+test executes arbitrary commands, and the measurement is only honest if the agent
+starts from a known image, sees only the files the eval seeded, and cannot touch
+your machine, your credentials, or earlier runs' artifacts. What kind of guest
+that is depends on the backend: under `microsandbox` (the default) it is a
+**microVM** — a small virtual machine with its own kernel, booted in about a
+second, with hardware isolation like a full VM but startup cost closer to a
+container; under `docker` it is a container. The isolation tradeoff between the
+two is real, not cosmetic — see the table and callout below.
 
 Isolation sits behind a `SandboxBackend` seam: preflight, the snapshot cache,
 and the per-cell mounts belong to the backend, and everything else in
@@ -56,7 +58,7 @@ as exit `2`, before a single cell boots or a paid call is made.
 ## Snapshots: build once, boot many
 
 Booting a bare OS image and installing an agent CLI takes minutes; an eval run
-boots dozens of VMs. So harnessbench builds one **snapshot** per configuration
+boots dozens of guests. So harnessbench builds one **snapshot** per configuration
 and boots every cell from it. A snapshot is sealed in five steps:
 
 1. **Base image**: `ubuntu:latest` by default, or `[tool.harnessbench] base_image`.
@@ -69,7 +71,8 @@ and boots every cell from it. A snapshot is sealed in five steps:
 4. **Environment script**: `[tool.harnessbench] environment_script`, if declared,
    runs under `set -e` — the escape hatch for extra system tools a suite needs.
    A failing command aborts the build loudly.
-5. **Seal**: the VM stops and the snapshot is recorded.
+5. **Seal**: the guest stops (microsandbox) or is committed (`docker commit`), and
+   the snapshot is recorded.
 
 Snapshots are cached — for microsandbox under `~/.microsandbox/snapshots/`, for
 Docker as local images in the daemon's image store — and named
@@ -138,7 +141,7 @@ The guest sees three paths:
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory. The host grades this directory afterward. |
 | `/project` | read-only | A staged copy of your repo (below). Exists so the eval's own `setup.sh` can copy the skill under test into the guest; read-only, so nothing an agent or script does can write back into your checkout. |
-| `/home/harnessbench/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
+| `/home/harnessbench/skills` | in-guest | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
 ### What `/project` contains
 
