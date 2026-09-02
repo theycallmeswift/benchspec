@@ -30,9 +30,16 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 
+from harnessbench.agents import CodingAgent
 from harnessbench.sandbox.errors import SandboxRuntimeError
-from harnessbench.sandbox.primitives import VM_CPUS, VM_MEMORY_MIB
+from harnessbench.sandbox.primitives import (
+    VM_CPUS,
+    VM_MEMORY_MIB,
+    FingerprintInputs,
+    build_fingerprint_inputs,
+)
 from harnessbench.sandbox.provenance import ImageIdentity
+from harnessbench.specs.discovery import EnvConfig
 
 DOCKER_BINARY = "docker"
 # Docker container names match [a-zA-Z0-9][a-zA-Z0-9_.-]*; everything else is replaced.
@@ -354,6 +361,16 @@ class DockerBackend:
             f"docker image inspect for `{reference}` exited {result.exit_code}: "
             f"{result.stderr.strip()[-500:] or '(no output)'}"
         )
+
+    def fingerprint_inputs(
+        self: object, agent: CodingAgent, env: EnvConfig
+    ) -> FingerprintInputs:
+        """Return the structured inputs and digest behind the snapshot cache fingerprint."""
+        return build_fingerprint_inputs(backend_id=self.id, agent=agent, env=env)
+
+    def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
+        """Return the snapshot cache fingerprint for this backend, agent, and env."""
+        return self.fingerprint_inputs(agent, env).digest
 
     def image_identity(self: object, snapshot: str) -> ImageIdentity:
         """Return the snapshot image's registry digest when it has one, else its image Id.

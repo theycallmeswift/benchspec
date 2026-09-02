@@ -13,8 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from harnessbench.agents.claude import ClaudeCodeAgent
+from harnessbench.sandbox import backend as backend_mod
 from harnessbench.sandbox import docker as docker_mod
 from harnessbench.sandbox.docker import DockerResult, DockerVolume
+from harnessbench.sandbox.sandbox import snapshot_name
+from harnessbench.specs.discovery import EnvConfig
 
 
 def test_docker_module_imports_only_stdlib_and_harnessbench() -> None:
@@ -339,3 +343,49 @@ def test_image_identity_unavailable_when_the_docker_cli_is_missing(monkeypatch: 
 
     assert identity.image_digest_status == "unavailable"
     assert "docker CLI not found" in identity.image_digest_error
+
+
+def test_fingerprint_inputs_carry_the_docker_backend_id() -> None:
+    """The Docker fingerprint folds the same four ingredients with backend_id="docker"."""
+    backend = docker_mod.DockerBackend()
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    env = EnvConfig(base_image="ubuntu:22.04", script=b"echo hi\n", script_path="s.sh")
+
+    inputs = backend.fingerprint_inputs(agent, env)
+
+    assert inputs.backend_id == "docker"
+    assert inputs.base_image_ref == "ubuntu:22.04"
+    assert inputs.install_fingerprint == agent.install_fingerprint()
+    assert inputs.digest == backend.cache_fingerprint(agent, env)
+
+
+def test_docker_and_microsandbox_snapshots_of_one_agent_never_collide() -> None:
+    """A Docker and a microsandbox snapshot of the same agent+env get different names."""
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    env = EnvConfig(script=b"echo one\n", script_path="s.sh")
+
+    docker_name = snapshot_name(agent, env, backend=docker_mod.DockerBackend())
+    micro_name = snapshot_name(agent, env, backend=backend_mod.MicrosandboxBackend())
+
+    assert docker_name.startswith("harnessbench-docker-claude-code-1.2.3-")
+    assert micro_name.startswith("harnessbench-microsandbox-claude-code-1.2.3-")
+    assert docker_name != micro_name
+
+
+def test_docker_fingerprint_changes_with_every_ingredient() -> None:
+    """Base image, installer, and environment script each independently force a rebuild."""
+    backend = docker_mod.DockerBackend()
+    agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    other_agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
+    other_agent.provision_script = lambda: "install a different revision"
+    baseline = backend.cache_fingerprint(agent, EnvConfig(script=b"one\n", script_path="s.sh"))
+
+    assert baseline != backend.cache_fingerprint(
+        agent, EnvConfig(base_image="ubuntu:24.04", script=b"one\n", script_path="s.sh")
+    )
+    assert baseline != backend.cache_fingerprint(
+        other_agent, EnvConfig(script=b"one\n", script_path="s.sh")
+    )
+    assert baseline != backend.cache_fingerprint(
+        agent, EnvConfig(script=b"two\n", script_path="s.sh")
+    )
