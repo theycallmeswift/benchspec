@@ -434,8 +434,8 @@ class DockerSandbox:
         """
         if not self._alive:
             raise SandboxRuntimeError(
-                f"container `{self._container}` is no longer usable (it was removed after "
-                f"an earlier timeout or runtime failure)"
+                f"container `{self._container}` is no longer usable (reaped after a "
+                f"timeout, or lost to a control-plane failure)"
             )
 
     def _exec_args(self: object, *, cwd: str | None, env: dict | None) -> list[str]:
@@ -449,15 +449,20 @@ class DockerSandbox:
             args += ["-w", cwd]
         return [*args, self._container]
 
-    async def _reap(self: object) -> None:
-        """Remove the container and mark this sandbox dead.
+    async def _reap(self: object) -> ContainerRemoval:
+        """Remove the container, mark this sandbox dead, and report the removal outcome.
 
         Killing the local `docker exec` client does NOT stop the process inside the
         container: without this, an agent whose turn timed out keeps running — and keeps
         spending — for the rest of the benchmark. Removing the container reaps it.
+
+        Returns:
+            The removal outcome, so a caller building a timeout message can tell a
+            confirmed reap from a removal that itself failed (the guest may still be
+            running).
         """
         self._alive = False
-        await _remove_container(self._container)
+        return await _remove_container(self._container)
 
     async def _control_plane_failure(self: object, result: DockerResult) -> str | None:
         """Return an error message when `result` is docker failing, not the guest exiting.
@@ -475,13 +480,23 @@ class DockerSandbox:
             )
         if result.exit_code not in _AMBIGUOUS_EXIT_CODES:
             return None
-        state = await _docker(
-            "inspect",
-            "--format",
-            "{{.State.Running}}",
-            self._container,
-            description=f"`docker inspect {self._container}`",
-        )
+        try:
+            state = await _docker(
+                "inspect",
+                "--format",
+                "{{.State.Running}}",
+                self._container,
+                timeout=SYNC_CALL_TIMEOUT_SECONDS,
+                description=f"`docker inspect {self._container}`",
+            )
+        except DockerCallTimeout:
+            # A wedged disambiguation inspect means the daemon itself is unresponsive,
+            # which is a control-plane failure by definition — not a guest exit code.
+            return (
+                f"could not determine whether container `{self._container}` is still "
+                f"running (docker exec exited {result.exit_code}, and the disambiguating "
+                f"`docker inspect` timed out)"
+            )
         if state.exit_code == 0 and state.stdout.strip() == "true":
             return None
         return (
@@ -510,10 +525,17 @@ class DockerSandbox:
                 description=f"`docker exec {self._container}`",
             )
         except DockerCallTimeout as error:
-            await self._reap()
+            removal = await self._reap()
+            if removal.removed or removal.absent:
+                reap_note = "the container was removed to reap it"
+            else:
+                reap_note = (
+                    f"container removal FAILED: {removal.error} — the guest may still "
+                    f"be running"
+                )
             raise SandboxRuntimeError(
                 f"guest command in container `{self._container}` timed out after "
-                f"{timeout}s; the container was removed to reap it"
+                f"{timeout}s; {reap_note}"
             ) from error
         failure = await self._control_plane_failure(result)
         if failure is not None:

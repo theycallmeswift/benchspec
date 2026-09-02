@@ -585,3 +585,55 @@ def test_remove_container_reports_a_daemon_failure_without_raising(monkeypatch: 
     assert outcome.removed is False
     assert outcome.absent is False
     assert "Cannot connect to the Docker daemon" in outcome.error
+
+
+def test_exec_classifies_a_wedged_disambiguation_inspect_as_an_infra_failure(
+    monkeypatch: object,
+) -> None:
+    """A daemon too wedged to answer `docker inspect` is a control-plane failure.
+
+    An ambiguous 125-127 exit is normally settled by asking the container's running
+    state. If that ask itself times out, the daemon is unresponsive — which is worse
+    than ambiguous, not a reason to let a guest exit code through ungraded.
+    """
+
+    async def fake(*args: str, stdin: object = None, timeout: object = None,
+                   description: object = None) -> object:
+        """Report a 126 exec, then time out on the disambiguating inspect."""
+        if args[0] == "inspect":
+            raise docker_mod.DockerCallTimeout("`docker inspect` timed out after 30.0s")
+        return DockerResult(args, 126, "", "sh: 1: nosuchcmd: not found")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="disambiguating"):
+        asyncio.run(sandbox.shell("nosuchcmd"))
+
+
+def test_exec_timeout_reports_when_the_reaping_removal_itself_fails(
+    monkeypatch: object,
+) -> None:
+    """A timeout whose reap also fails must say so, not falsely claim the guest was stopped.
+
+    If the daemon goes down right after a hung exec, `docker rm -f` fails too. Claiming
+    "the container was removed to reap it" in that case would tell an operator the
+    runaway agent is stopped when it may still be running.
+    """
+    async def timing_out_then_failing_to_remove(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Time out the exec, then fail the removal that follows with a daemon error."""
+        if args[0] == "exec":
+            raise docker_mod.DockerCallTimeout("timed out")
+        return DockerResult(args, 1, "", "Cannot connect to the Docker daemon at unix:///...")
+
+    monkeypatch.setattr(docker_mod, "_docker", timing_out_then_failing_to_remove)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="removal FAILED") as raised:
+        asyncio.run(sandbox.exec("claude", timeout=1))
+
+    assert "the guest may still be running" in str(raised.value)
+    assert "Cannot connect to the Docker daemon" in str(raised.value)
+    assert sandbox.alive is False
