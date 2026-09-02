@@ -337,9 +337,10 @@ class DockerBackend:
         """Return whether the committed snapshot image is present in the local image store.
 
         Raises:
-            SandboxRuntimeError: If the inspect fails for any reason OTHER than the image
-                being absent — an unreachable daemon above all. See the classification
-                rule in this task's Interfaces.
+            SandboxRuntimeError: If the inspect fails for any reason other than the image
+                being absent — an unreachable daemon above all. Only an
+                `_IMAGE_ABSENT_PATTERN` match on stderr reads as "not built yet"; every
+                other nonzero exit is raised rather than reported as a cache miss.
         """
         reference = image_ref(name)
         result = _docker_sync(
