@@ -406,7 +406,6 @@ class OpenCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
-
         # One tuple, every backend: the neutral error plus whatever native type the
         # resolved runtime raises.
         infra_errors = (TimeoutError, OSError, *sandbox_error_types())

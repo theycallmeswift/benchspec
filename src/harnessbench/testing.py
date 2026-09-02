@@ -30,12 +30,14 @@ class FakeSandbox:
     """Records calls; returns canned outputs.
 
     `exec_outputs` is consumed in order, one per exec call, falling back to `default_exec`
-    when exhausted.
+    when exhausted. Set `exec_error` to make `exec()` raise instead of returning, for
+    exercising a caller's handling of a torn-down sandbox runtime.
     """
 
     shell_output: FakeExecOutput = field(default_factory=FakeExecOutput)
     default_exec: FakeExecOutput = field(default_factory=FakeExecOutput)
     exec_outputs: list[FakeExecOutput] = field(default_factory=list)
+    exec_error: BaseException | None = None
     calls: list[tuple] = field(default_factory=list)
     stopped: bool = False
 
@@ -45,8 +47,10 @@ class FakeSandbox:
         return self.shell_output
 
     async def exec(self: object, cmd: str, args: object = None, **kw: object) -> FakeExecOutput:
-        """Record a fake exec command and return a canned output."""
+        """Record a fake exec command and return a canned output, or raise `exec_error`."""
         self.calls.append(("exec", cmd, args, kw))
+        if self.exec_error is not None:
+            raise self.exec_error
         if self.exec_outputs:
             return self.exec_outputs.pop(0)
         return self.default_exec

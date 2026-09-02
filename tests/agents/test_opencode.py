@@ -1153,19 +1153,12 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
 
 def test_invoke_records_a_neutral_sandbox_error_as_an_errored_arm() -> None:
     """A backend-neutral runtime failure is recorded as an errored arm, never raised."""
-
-    class ExplodingSandbox:
-        """A guest whose exec fails the way a broken sandbox runtime does."""
-
-        async def exec(self: object, *args: object, **kwargs: object) -> object:
-            """Fail like a torn-down sandbox."""
-            raise SandboxRuntimeError("container 1234 is not running")
-
+    sandbox = FakeSandbox(exec_error=SandboxRuntimeError("container 1234 is not running"))
     agent = OpenCodeAgent(auth_value="ok", auth_env="OPENROUTER_API_KEY")
 
     result = asyncio.run(
         agent.invoke(
-            ExplodingSandbox(),
+            sandbox,
             "do the thing",
             eval_id="e1",
             config="alpha",
