@@ -545,9 +545,9 @@ def cli_build(
     With neither `--set` nor `--config`, preserves the Phase-5 bare-build path: a single
     `make_agent()`, env from the repo root, and the default microsandbox backend — NO sets
     table required. With `--set`/`--config`, layers config over pyproject, resolves the set,
-    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2),
-    building one snapshot per DISTINCT harness in the set (two arms sharing a harness build
-    once) via `make_agent(harness)`.
+    and drives the resolved set's sandbox backend (an unsupported `sandbox` name raises
+    SchemaError → exit 2), building one snapshot per DISTINCT harness in the set (two arms
+    sharing a harness build once) via `make_agent(harness)`.
 
     Args:
         repo_root: Repo root whose pyproject + environment config drive the build.

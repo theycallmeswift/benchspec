@@ -547,17 +547,34 @@ def test_parse_sets_unsupported_runner_fails() -> None:
         )
 
 
-def test_parse_sets_unsupported_sandbox_fails_naming_set() -> None:
-    """An unsupported sandbox (docker) fails fast naming Docker and the offending set."""
+def test_parse_sets_accepts_the_docker_sandbox() -> None:
+    """`sandbox = "docker"` is a valid set-level value now that the backend exists."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "sandbox": "docker",
+                    "arms": [{"name": "alpha", "harness": "claude-code"}],
+                }
+            }
+        )
+    )
+
+    assert resolve_set(rawsets, default).sandbox == "docker"
+
+
+def test_parse_sets_unknown_sandbox_fails_naming_set() -> None:
+    """An unknown sandbox fails fast naming the offending set and the supported values."""
     with pytest.raises(
-        SchemaError, match=r"tool\.harnessbench\.sets\.default.*docker.*not implemented"
+        SchemaError, match=r"tool\.harnessbench\.sets\.default.*unsupported sandbox `qemu`"
     ):
         parse_sets(
             _sets_table(
                 {
                     "default": {
                         "model": "sonnet",
-                        "sandbox": "docker",
+                        "sandbox": "qemu",
                         "arms": [{"name": "alpha", "harness": "claude-code"}],
                     }
                 }
@@ -607,14 +624,16 @@ def test_resolve_set_carries_declared_runner_and_sandbox() -> None:
     assert resolved.sandbox == "microsandbox"
 
 
-def test_two_backends_fixture_fails_whole_file() -> None:
-    """The fail-fast fixture: the docker set makes the whole file fail to parse."""
+def test_two_backends_fixture_parses_both_sets() -> None:
+    """The two-backend fixture parses: one microsandbox set and one docker set, side by side."""
     raw = tomllib.loads(
         Path("tests/fixtures/sandbox/two-backends.toml").read_text(encoding="utf-8")
     )
 
-    with pytest.raises(SchemaError, match="docker.*not implemented"):
-        parse_sets(raw["tool"]["harnessbench"])
+    rawsets, default = parse_sets(raw["tool"]["harnessbench"])
+
+    assert resolve_set(rawsets, default, set_name="micro").sandbox == "microsandbox"
+    assert resolve_set(rawsets, default, set_name="dock").sandbox == "docker"
 
 
 def test_microsandbox_fixture_parses_and_resolves() -> None:

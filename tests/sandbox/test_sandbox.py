@@ -13,7 +13,9 @@ from harnessbench.agents.codex import CodexAgent
 from harnessbench.agents.opencode import OpenCodeAgent
 from harnessbench.orchestration.results import RunResult
 from harnessbench.sandbox import backend as backend_mod
+from harnessbench.sandbox import docker as docker_mod
 from harnessbench.sandbox import sandbox
+from harnessbench.sandbox.provenance import ImageIdentity
 from harnessbench.specs.discovery import EnvConfig
 from harnessbench.testing import FakeExecOutput, FakeSandbox
 
@@ -513,10 +515,10 @@ def test_cli_build_bare_path_requires_no_sets_table(
     assert make_agent_calls == [None]
 
 
-def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:
-    """A docker set fails fast at resolution, never reaching preflight or the build."""
-    from harnessbench.specs.schema import SchemaError
-
+def test_cli_build_docker_set_drives_the_docker_backend(
+    monkeypatch: object, tmp_path: object, capsys: object
+) -> None:
+    """A docker set resolves, preflights the Docker backend, and names a docker snapshot."""
     (tmp_path / "pyproject.toml").write_text(
         "[tool.harnessbench]\n"
         'default-set = "dock"\n'
@@ -527,15 +529,20 @@ def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path:
         'arms = [{ name = "baseline", harness = "claude-code" }]\n',
         encoding="utf-8",
     )
-    called_preflight: list = []
+    preflighted: list = []
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: preflighted.append(backend.id))
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(docker_mod.DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(
-        sandbox, "preflight", lambda backend=None: called_preflight.append(True)
+        docker_mod.DockerBackend,
+        "image_identity",
+        lambda self, name: ImageIdentity.available("sha256:abc123"),
     )
 
-    with pytest.raises(SchemaError):
-        sandbox.cli_build(repo_root=tmp_path, set_name="dock")
+    sandbox.cli_build(repo_root=tmp_path, set_name="dock")
 
-    assert called_preflight == []
+    assert preflighted == ["docker"]
+    assert "snapshot harnessbench-docker-claude-code-v-" in capsys.readouterr().out
 
 
 def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:

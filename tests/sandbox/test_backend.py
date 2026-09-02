@@ -9,6 +9,7 @@ import pytest
 
 from harnessbench.agents.claude import ClaudeCodeAgent
 from harnessbench.sandbox import backend, primitives
+from harnessbench.sandbox import docker as docker_mod
 from harnessbench.specs.discovery import EnvConfig
 from harnessbench.specs.schema import SchemaError
 
@@ -24,15 +25,17 @@ def test_resolve_sandbox_returns_microsandbox_backend() -> None:
     assert resolved.id == "microsandbox"
 
 
-def test_resolve_sandbox_docker_fails_naming_not_implemented() -> None:
-    """`docker` is a known-but-unimplemented backend: fail fast naming Docker."""
-    with pytest.raises(SchemaError, match="docker.*not implemented"):
-        backend.resolve_sandbox("docker")
+def test_resolve_sandbox_returns_docker_backend() -> None:
+    """`docker` resolves to a backend whose id is `docker`."""
+    resolved = backend.resolve_sandbox("docker")
+
+    assert resolved.id == "docker"
+    assert isinstance(resolved, docker_mod.DockerBackend)
 
 
-def test_resolve_sandbox_unknown_fails() -> None:
-    """An unknown backend name fails fast listing the supported values."""
-    with pytest.raises(SchemaError, match="microsandbox"):
+def test_resolve_sandbox_unknown_lists_both_supported_backends() -> None:
+    """An unknown name fails fast listing every implemented backend."""
+    with pytest.raises(SchemaError, match=r"\['docker', 'microsandbox'\]"):
         backend.resolve_sandbox("qemu")
 
 

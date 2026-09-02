@@ -171,16 +171,40 @@ def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None
     assert seen == {"set_name": None, "config": None}
 
 
-def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object) -> None:
-    """A set whose sandbox is `docker` fails fast at exit 2 before any build."""
+def test_sandbox_build_unknown_sandbox_set_exits_two(
+    monkeypatch: object, capsys: object
+) -> None:
+    """A set whose sandbox is unknown fails fast at exit 2 before any build."""
 
     def failing_cli_build(
         repo_root: object, *, set_name: object = None, config: object = None
     ) -> None:
-        """Raise the SchemaError a docker set produces at resolution."""
+        """Raise the SchemaError an unknown sandbox produces at resolution."""
         raise SchemaError(
-            "[tool.harnessbench.sets.dock]: unsupported sandbox `docker` "
-            "(supported: ['microsandbox']). Docker is not implemented."
+            "[tool.harnessbench.sets.weird]: unsupported sandbox `qemu` "
+            "(supported: ['docker', 'microsandbox'])"
+        )
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
+
+    exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "weird"])
+
+    assert exit_code == 2
+    assert "qemu" in capsys.readouterr().err
+
+
+def test_sandbox_build_docker_preflight_failure_exits_two(
+    monkeypatch: object, capsys: object
+) -> None:
+    """An unreachable Docker daemon is a host-preflight problem: exit 2, readable message."""
+
+    def failing_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Raise the RuntimeError the shared preflight raises for a dead daemon."""
+        raise RuntimeError(
+            "harnessbench sandbox preflight failed:\n  - docker daemon unreachable "
+            "(`docker info` exited 1)"
         )
 
     monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
@@ -188,7 +212,7 @@ def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object)
     exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
 
     assert exit_code == 2
-    assert "docker" in capsys.readouterr().err
+    assert "docker daemon unreachable" in capsys.readouterr().err
 
 
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:

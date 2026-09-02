@@ -5,9 +5,10 @@ host preflight, snapshot existence, the cache fingerprint, snapshot build, and t
 per-arm / trigger session creation. `sandbox.py` and `execution.py` drive a resolved
 backend and never import a concrete runtime package themselves.
 
-microsandbox is the only implementation today. Docker is a registered-but-unimplemented
-name so `sandbox = "docker"` fails fast with a readable diagnostic instead of silently
-defaulting. Adding a real second backend is additive: implement the protocol, register it.
+microsandbox and Docker are the implemented backends. microsandbox boots hardware-isolated
+microVMs and needs Apple Silicon or Linux+KVM; Docker runs containers on any host with a
+reachable daemon, trading a shared kernel and guest-readable credentials for that reach.
+Adding a third backend is additive: implement the protocol, register it.
 
 IMPORTANT: importing this module must NOT import the `microsandbox` package. Every
 `import microsandbox` stays inside a method body so `lint`/`analyze` keep working on a
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from harnessbench.agents import CodingAgent
+from harnessbench.sandbox.docker import DockerBackend
 from harnessbench.sandbox.primitives import (
     BASE_IMAGE,
     GUEST_WORKDIR,
@@ -47,6 +49,7 @@ __all__ = [
     "PROJECT_MOUNT",
     "VM_CPUS",
     "VM_MEMORY_MIB",
+    "DockerBackend",
     "FingerprintInputs",
     "MicrosandboxBackend",
     "SandboxBackend",
@@ -315,19 +318,24 @@ class MicrosandboxBackend:
         return sandbox
 
 
-_REGISTRY: dict[str, type] = {DEFAULT_SANDBOX: MicrosandboxBackend}
+_REGISTRY: dict[str, type] = {
+    DEFAULT_SANDBOX: MicrosandboxBackend,
+    DockerBackend.id: DockerBackend,
+}
 
-# Known-but-unimplemented backends: named so the fail-fast message can be specific.
-_NOT_IMPLEMENTED = {"docker": "Docker is not implemented"}
+# Known-but-unimplemented backends: named so the fail-fast message can be specific. Empty
+# today — every registered name is implemented — but kept as the seam a future named-but-
+# unbuilt backend plugs into.
+_NOT_IMPLEMENTED: dict[str, str] = {}
 
 
 def resolve_sandbox(name: str) -> SandboxBackend:
     """Return the backend for a set's `sandbox` value, or fail fast.
 
     Returns a FRESH backend instance each call. An implemented name returns its backend.
-    A known-but-unimplemented name (`docker`) raises naming it as not implemented. Any
-    other name raises listing the supported values. The raised `SchemaError` maps to
-    exit 2 through the CLI/plugin.
+    A known-but-unimplemented name raises naming it as not implemented. Any other name
+    raises listing the supported values. The raised `SchemaError` maps to exit 2 through
+    the CLI/plugin.
     """
     if name in _REGISTRY:
         return _REGISTRY[name]()

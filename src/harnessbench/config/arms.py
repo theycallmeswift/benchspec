@@ -165,9 +165,9 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         sandbox_name = body.get("sandbox", DEFAULT_SANDBOX)
         if not isinstance(sandbox_name, str) or not sandbox_name:
             raise SchemaError(f"{where}: sandbox must be a non-empty string")
-        # resolve_sandbox raises SchemaError on docker/unknown with the specific
-        # "not implemented" wording; re-raise with the set's `where` prefix so the
-        # message names the offending [tool.harnessbench.sets.<name>] (spec example).
+        # resolve_sandbox raises SchemaError on an unsupported name; re-raise with the
+        # set's `where` prefix so the message names the offending
+        # [tool.harnessbench.sets.<name>] (spec example).
         try:
             resolve_sandbox(sandbox_name)
         except SchemaError as err:
