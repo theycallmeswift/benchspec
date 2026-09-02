@@ -426,6 +426,11 @@ async def _route_in_sandbox_async(
     lines: list[str] = []
     dispatched = False
     exit_code: int | None = None
+    # Set before the try: if `exec_stream` itself raises, or `_drain` raises something
+    # other than the TimeoutError handled below, the `finally` still needs to know whether
+    # there is a handle to kill — an unset name here would be a NameError, and a handle
+    # left un-killed leaks its exec-stream's credential env-file (see `DockerExecStream`).
+    handle = None
     try:
         cmd = _trigger_command(agent, query, repo_root, model, effort, project_marker)
         handle = await sandbox.exec_stream(
@@ -468,6 +473,13 @@ async def _route_in_sandbox_async(
             timed_out = True
             await backend.kill_quietly(handle)
     finally:
+        # A last-resort kill: the dispatch and timeout paths above already kill their own
+        # way out, but any OTHER exception out of `_drain` (a bug, an unexpected backend
+        # error) would otherwise skip both and leave the handle's resources — Docker's
+        # exec-stream env-file among them — never cleaned up. `kill_quietly` is idempotent,
+        # so re-killing an already-killed handle here is harmless.
+        if handle is not None:
+            await backend.kill_quietly(handle)
         await backend.stop_quietly(sandbox)
         discard_stage(staged_project)
 

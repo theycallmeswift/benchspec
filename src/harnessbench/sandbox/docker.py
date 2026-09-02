@@ -446,7 +446,7 @@ class ContainerRemoval:
 
 
 async def _remove_container(
-    name: str, *, timeout: float = REMOVE_TIMEOUT_SECONDS
+    name: str, *, label: str | None = None, timeout: float = REMOVE_TIMEOUT_SECONDS
 ) -> ContainerRemoval:
     """Remove one container by name, bounded and idempotent.
 
@@ -458,28 +458,33 @@ async def _remove_container(
     for the caller to decide about.
 
     Args:
-        name: The container to remove.
+        name: The container to remove — the actual `docker rm -f` argv target, which may
+            be an opaque container ID.
+        label: How to name the container in the returned `ContainerRemoval` and any error
+            text, defaulting to `name`. Lets a caller addressing the daemon by ID still
+            report failures by a human-readable name.
         timeout: Seconds to allow before treating the removal as wedged.
 
     Returns:
         Whether the container was removed, was already absent, or the daemon failed.
     """
+    display = label if label is not None else name
     try:
         result = await _docker(
-            "rm", "-f", name, timeout=timeout, description=f"`docker rm -f {name}`"
+            "rm", "-f", name, timeout=timeout, description=f"`docker rm -f {display}`"
         )
     except SandboxRuntimeError as error:
-        return ContainerRemoval(name, removed=False, absent=False, error=str(error))
+        return ContainerRemoval(display, removed=False, absent=False, error=str(error))
     if result.exit_code == 0:
-        return ContainerRemoval(name, removed=True, absent=False, error=None)
+        return ContainerRemoval(display, removed=True, absent=False, error=None)
     if _CONTAINER_ABSENT_PATTERN.search(result.stderr):
-        return ContainerRemoval(name, removed=False, absent=True, error=None)
+        return ContainerRemoval(display, removed=False, absent=True, error=None)
     return ContainerRemoval(
-        name,
+        display,
         removed=False,
         absent=False,
         error=(
-            f"docker rm -f `{name}` exited {result.exit_code}: "
+            f"docker rm -f `{display}` exited {result.exit_code}: "
             f"{result.stderr.strip()[-500:] or '(no output)'}"
         ),
     )
@@ -694,6 +699,7 @@ class DockerSandbox:
         self._name = name if name is not None else container
         self._restore_owner = restore_owner
         self._alive = True
+        self._restoring = False
 
     @property
     def container(self: object) -> str:
@@ -755,30 +761,42 @@ class DockerSandbox:
         """
         await self.restore_workspace_owner()
         self._alive = False
-        return await _remove_container(self._container)
+        return await _remove_container(self._container, label=self._name)
 
     async def restore_workspace_owner(self: object) -> None:
         """Chown `/workspace` back to the host user, best effort and idempotent.
 
         No-op when there is nothing to restore: `restore_owner` is None (non-Linux hosts,
-        or a sandbox with no `/workspace` mount) or the container is already gone. Callers
-        besides `stop()` and `_reap()` — `SandboxSession._run`, once per turn — call this
-        too, because a host-side fact-gathering read can otherwise run against a
-        root-owned workspace before either of those ever fires.
+        or a sandbox with no `/workspace` mount), the container is already gone, or a
+        restore is already in flight. That last guard breaks a mutual-recursion cycle: a
+        chown that itself wedges raises `DockerCallTimeout` out of `self.exec`, which
+        `_guest_call` turns into `_reap()` — and `_reap` calls back into this method while
+        `_alive` is still True (the chown runs before `_alive` flips). Without the guard
+        that second call would exec another chown, wedge the same way, `_reap` again, and
+        so on until the stack overflows. Callers besides `stop()` and `_reap()` —
+        `SandboxSession._run`, once per turn — call this too, because a host-side
+        fact-gathering read can otherwise run against a root-owned workspace before either
+        of those ever fires.
 
         Never raises: a chown failure must not stop the container from being removed, or
         an arm's already-recorded result from being returned.
         """
-        if self._restore_owner is None or not self._alive:
+        if self._restore_owner is None or not self._alive or self._restoring:
             return
-        # DockerCallTimeout already subclasses SandboxRuntimeError, so a wedged chown is
-        # bounded by REMOVE_TIMEOUT_SECONDS and caught here rather than hanging teardown.
-        with contextlib.suppress(SandboxRuntimeError, OSError):
-            await self.exec(
-                "chown",
-                ["-R", self._restore_owner, GUEST_WORKDIR],
-                timeout=REMOVE_TIMEOUT_SECONDS,
-            )
+        self._restoring = True
+        try:
+            # DockerCallTimeout already subclasses SandboxRuntimeError, so a wedged chown
+            # is bounded by REMOVE_TIMEOUT_SECONDS and caught here rather than hanging
+            # teardown — and, since `_restoring` is already True, a `_reap()` this call
+            # triggers cannot recurse back into another chown attempt.
+            with contextlib.suppress(SandboxRuntimeError, OSError):
+                await self.exec(
+                    "chown",
+                    ["-R", self._restore_owner, GUEST_WORKDIR],
+                    timeout=REMOVE_TIMEOUT_SECONDS,
+                )
+        finally:
+            self._restoring = False
 
     async def _control_plane_failure(self: object, result: DockerResult) -> str | None:
         """Return an error message when `result` is docker failing, not the guest exiting.
@@ -945,7 +963,7 @@ class DockerSandbox:
         await self.restore_workspace_owner()
         self._alive = False
         outcome = await _remove_container(
-            self._container, timeout=timeout or REMOVE_TIMEOUT_SECONDS
+            self._container, label=self._name, timeout=timeout or REMOVE_TIMEOUT_SECONDS
         )
         if outcome.error is not None:
             raise SandboxRuntimeError(outcome.error)

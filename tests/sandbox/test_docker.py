@@ -682,6 +682,23 @@ def test_remove_container_reports_a_daemon_failure_without_raising(monkeypatch: 
     assert "Cannot connect to the Docker daemon" in outcome.error
 
 
+def test_remove_container_reports_failure_by_label_not_the_raw_argv_target(
+    monkeypatch: object,
+) -> None:
+    """`label` names the container in the outcome/error text; `name` stays the argv target."""
+    calls = _record_docker(
+        monkeypatch,
+        DockerResult(("rm",), 1, "", "Cannot connect to the Docker daemon at unix:///..."),
+    )
+
+    outcome = asyncio.run(docker_mod._remove_container("abc123id", label="human-name"))
+
+    assert calls[0]["args"] == ("rm", "-f", "abc123id")
+    assert outcome.name == "human-name"
+    assert "human-name" in outcome.error
+    assert "abc123id" not in outcome.error
+
+
 def test_exec_classifies_a_wedged_disambiguation_inspect_as_an_infra_failure(
     monkeypatch: object,
 ) -> None:
@@ -966,6 +983,28 @@ def test_stop_raises_when_the_daemon_refuses_the_removal(monkeypatch: object) ->
         asyncio.run(sandbox.stop())
 
 
+def test_stop_removal_failure_names_the_container_by_name_not_its_raw_id(
+    monkeypatch: object,
+) -> None:
+    """A failed removal's error text names the container by its human name.
+
+    `docker rm -f` still targets the container's ID underneath — only the message a human
+    (or a run artifact) sees prefers the readable name.
+    """
+    calls = _record_docker(
+        monkeypatch,
+        DockerResult(("rm",), 1, "", "Cannot connect to the Docker daemon at unix:///..."),
+    )
+    sandbox = docker_mod.DockerSandbox("abc123containerid", name="eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError) as raised:
+        asyncio.run(sandbox.stop())
+
+    assert calls[0]["args"] == ("rm", "-f", "abc123containerid")
+    assert "eval-hello-alpha-main" in str(raised.value)
+    assert "abc123containerid" not in str(raised.value)
+
+
 def test_stop_restores_workspace_ownership_before_removing_the_container(
     monkeypatch: object,
 ) -> None:
@@ -1029,6 +1068,36 @@ def test_restore_workspace_owner_is_idempotent(monkeypatch: object) -> None:
 
     assert len(calls) == 2
     assert calls[0]["args"][-4:] == ("chown", "-R", "501:20", "/workspace")
+
+
+def test_restore_workspace_owner_survives_a_chown_that_itself_times_out(
+    monkeypatch: object,
+) -> None:
+    """A chown that wedges reaps ONCE and returns — no recursive restore, no runaway retries.
+
+    `restore_workspace_owner` runs the chown before `_alive` flips false, so a timed-out
+    chown routes through `_guest_call`'s `_reap()`, which calls back into this very method
+    while `_alive` is still True. Without the `_restoring` re-entrancy guard that second
+    call would exec another chown, wedge the same way, `_reap` again, forever — reproduced
+    as a `RecursionError` before the guard existed.
+    """
+    calls: list = []
+
+    async def fake(*args: str, stdin: object = None, timeout: object = None,
+                   description: object = None) -> object:
+        """Time out every `exec` (the chown, however many times it is attempted)."""
+        calls.append(args)
+        if args[0] == "exec":
+            raise docker_mod.DockerCallTimeout("chown timed out")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main", restore_owner="501:20")
+
+    asyncio.run(sandbox.restore_workspace_owner())
+
+    assert [call[0] for call in calls] == ["exec", "rm"]
+    assert sandbox.alive is False
 
 
 class RecordingAgent:

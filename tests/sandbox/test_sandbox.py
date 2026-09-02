@@ -691,14 +691,29 @@ def test_arm_session_restores_workspace_ownership_once_per_turn(
     assert fake.restore_calls == 1
 
 
+@pytest.mark.parametrize(
+    ("backend_name", "stop_error"),
+    [
+        pytest.param("microsandbox", OSError("daemon gone"), id="microsandbox"),
+        pytest.param(
+            "docker", docker_mod.SandboxRuntimeError("daemon gone"), id="docker"
+        ),
+    ],
+)
 def test_arm_session_teardown_failure_does_not_discard_a_recorded_error_result(
-    monkeypatch: object, tmp_path: object,
+    monkeypatch: object,
+    tmp_path: object,
+    backend_name: str,
+    stop_error: BaseException,
 ) -> None:
     """A `stop()` that raises during teardown must not lose the turn's recorded result.
 
     `__aexit__` used to await the raw sandbox `.stop()`; a wedged or dead daemon there
     would unwind straight out of `asyncio.run` and discard the RunResult `run()` already
     returned — including one already flagged `is_error` — before the caller ever saw it.
+    Parametrized over each backend's own `stop_quietly` suppression list (microsandbox's
+    `OSError`, Docker's `SandboxRuntimeError`) so the shipped Docker path is covered too,
+    not just the generic fake.
     """
     fake = FakeSandbox(
         exec_outputs=[
@@ -707,15 +722,15 @@ def test_arm_session_teardown_failure_does_not_discard_a_recorded_error_result(
                 '{"type":"result","result":"boom","is_error":true,"session_id":"s","usage":{}}',
             ),
         ],
-        stop_error=OSError("daemon gone"),
+        stop_error=stop_error,
     )
 
     async def fake_create(**kwargs: object) -> object:
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
+    backend = backend_mod.resolve_sandbox(backend_name)
+    monkeypatch.setattr(backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> object:
@@ -729,7 +744,7 @@ def test_arm_session_teardown_failure_does_not_discard_a_recorded_error_result(
             host_repo_root=tmp_path,
             model="sonnet",
             effort="medium",
-            backend=microsandbox_backend,
+            backend=backend,
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill="archive")
 
@@ -810,6 +825,67 @@ def test_route_in_sandbox_raises_on_nonzero_exit(monkeypatch: object, tmp_path: 
             agent_factory=_claude_agent,
             model="sonnet",
         )
+
+
+def test_route_in_sandbox_kills_the_handle_when_drain_raises_a_non_timeout_error(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A `_drain` failure other than a timeout still gets the handle killed.
+
+    Only `TimeoutError` was ever caught around `_drain()`; any other exception used to
+    skip straight past both existing `kill_quietly` call sites (the dispatch return and
+    the timeout `except`), leaking the handle's resources — Docker's exec-stream
+    credential env-file among them — while the failure still correctly propagated.
+    """
+    kill_calls: list = []
+
+    class ExplodingHandle:
+        """A handle whose iteration raises a non-timeout error immediately."""
+
+        def __aiter__(self: object) -> object:
+            """Iterate this handle's own events."""
+            return self
+
+        async def __anext__(self: object) -> object:
+            """Blow up with something other than a TimeoutError."""
+            raise RuntimeError("stream exploded")
+
+        async def kill(self: object) -> None:
+            """Record that kill was called."""
+            kill_calls.append(True)
+
+    class FakeTriggerSandbox:
+        """A trigger sandbox whose `exec_stream` hands back the exploding handle."""
+
+        async def shell(self: object, *args: object, **kwargs: object) -> object:
+            """Shell."""
+            return FakeExecOutput(0)
+
+        async def exec_stream(self: object, *args: object, **kwargs: object) -> object:
+            """Exec stream."""
+            return ExplodingHandle()
+
+        async def stop(self: object, timeout: object = None) -> None:
+            """Stop."""
+            return None
+
+    monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
+    monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+
+    async def fake_create_trigger(self: object, **kwargs: object) -> object:
+        """Fake create trigger (class-level: takes self)."""
+        return FakeTriggerSandbox()
+
+    monkeypatch.setattr(
+        backend_mod.MicrosandboxBackend, "create_trigger_sandbox", fake_create_trigger
+    )
+
+    with pytest.raises(RuntimeError, match="stream exploded"):
+        sandbox.route_in_sandbox(
+            "query", tmp_path, "sonnet", 20, effort="low", skill_name="archive"
+        )
+
+    assert kill_calls == [True]
 
 
 def test_route_passes_empty_stdin_to_exec_stream(monkeypatch: object, tmp_path: object) -> None:
