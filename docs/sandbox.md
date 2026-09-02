@@ -30,13 +30,14 @@ The contract on this page — the mounts, the staging rules, the cache identity 
 holds for both. Where they differ (cache location, sizing, credential handling)
 the difference is labeled.
 
-> **Read this before choosing `docker`.** A container shares the host kernel, and
-> the agent runs as root with `bypassPermissions` on the promise that the sandbox
-> is the containment boundary. Docker also has no equivalent of microsandbox's
-> host-scoped secrets, so the arm's provider credential is a readable environment
-> variable inside the guest — an agent under test can print it. Choose `docker`
-> when microsandbox cannot run on your host, and treat the credential as exposed
-> to whatever the agent does.
+> **Best practice:** treat `docker` as an isolation downgrade, not a drop-in
+> swap. A container shares the host kernel, and the agent runs as root with
+> `bypassPermissions` on the promise that the sandbox is the containment
+> boundary. Docker also has no equivalent of microsandbox's host-scoped secrets,
+> so the arm's provider credential is a readable environment variable inside the
+> guest — an agent under test can print it. Choose `docker` only when
+> microsandbox cannot run on your host, and treat the credential as exposed to
+> whatever the agent does.
 
 ## Host requirements and preflight
 
@@ -100,8 +101,8 @@ so a multi-harness set reuses each harness's cache.
 > got pulled is recorded per arm in `meta.json` under
 > `observed_arms[arm].sandbox.image_digest`: an audit trail, not a cache key.
 
-> **Docker caveat.** A snapshot is sealed with `docker commit`, and a commit does
-> not capture paths the base image declares as a `VOLUME`. If your `base_image`
+> **Edge case:** a snapshot is sealed with `docker commit`, and a commit does not
+> capture paths the base image declares as a `VOLUME`. If your `base_image`
 > declares a volume over somewhere the harness CLI or your `environment_script`
 > installs into, those files will be missing at cell boot. Pick a base image
 > without a `VOLUME` over your install paths.
@@ -204,7 +205,8 @@ instead, which runs per cell and can branch on `HARNESSBENCH_ARM` and
 
 The authoritative modules are `harnessbench.sandbox.backend` (the microsandbox
 backend) and `harnessbench.sandbox.docker` (the Docker backend) for preflight,
-snapshot build, and mounts; `harnessbench.sandbox.primitives` for the pieces
-both share (mount paths, VM sizing, the cache fingerprint); `harnessbench.sandbox.sandbox`
-for the cell lifecycle; and `harnessbench.sandbox.project` for the `/project`
-stage. If this page and those modules ever disagree, the modules are right.
+snapshot build, and mounts; `harnessbench.sandbox.primitives` for the pieces both
+share (mount paths, VM sizing, the cache fingerprint);
+`harnessbench.sandbox.sandbox` for the cell lifecycle; and
+`harnessbench.sandbox.project` for the `/project` stage. If this page and those
+modules ever disagree, the modules are right.

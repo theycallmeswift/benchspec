@@ -124,7 +124,7 @@ self-contained, so put values in the workspace, not in placeholders.
 
 If the eval folder has a `workspace/` directory, its contents are copied into a
 fresh temporary directory, the **clean room**, that is bind-mounted into the
-microVM at `/workspace`, which is also the agent's working directory. No
+guest at `/workspace`, which is also the agent's working directory. No
 `workspace/` means the agent starts in an empty directory.
 
 The clean room lives outside your project on purpose. It contains exactly what
@@ -143,7 +143,7 @@ the judge all see the workspace.
 ## `setup.sh`: what differs per arm
 
 The eval file is identical across arms; `setup.sh` is where arms diverge. If the
-eval folder contains one, it runs inside the VM before the prompt, from the eval
+eval folder contains one, it runs inside the guest before the prompt, from the eval
 folder itself under the read-only `/project` mount, with these variables set:
 
 | Variable | Meaning |

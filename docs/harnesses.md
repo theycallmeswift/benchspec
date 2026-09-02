@@ -7,8 +7,8 @@ configuring a multi-harness set or integrating a new CLI; terms (harness, arm,
 judge, snapshot) are defined in [concepts.md](concepts.md).
 
 A **harness** is the agent CLI an arm drives: the thing under test.
-harnessbench keeps everything harness-specific (how to install the CLI into a
-microVM, which credentials it needs, how to build its headless command, how to
+harnessbench keeps everything harness-specific (how to install the CLI into the
+guest, which credentials it needs, how to build its headless command, how to
 parse its stream) behind one interface, the `CodingAgent` protocol, so the
 sandbox lifecycle, grading, and reporting never name a concrete agent. Three
 harnesses ship in-tree; adding another is one adapter file plus a registry entry.
@@ -127,7 +127,7 @@ The steps:
    name becomes a legal `harness` value everywhere at once.
 3. Test against `harnessbench.testing.FakeSandbox`, a recording sandbox double, so
    command construction, secret injection, and stream parsing are unit-tested
-   without booting a VM. Mirror an existing suite under `tests/agents/`.
+   without booting a guest. Mirror an existing suite under `tests/agents/`.
 4. Verify with `make test` and `make lint`, then prove an end-to-end boot by
    running a real set with an arm on the new harness.
 

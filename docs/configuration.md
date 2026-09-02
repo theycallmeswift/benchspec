@@ -162,7 +162,7 @@ Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
 harnessbench run -- -k greets-by-name     # one eval (substring match on the test id)
-harnessbench run -- -n 8                  # fan cells across 8 microVMs (pytest-xdist)
+harnessbench run -- -n 8                  # fan cells across 8 guests (pytest-xdist)
 harnessbench run -- --count 5             # 5 samples per cell (pytest-repeat)
 harnessbench run -- --collect-only -q     # list the cells without running
 ```
