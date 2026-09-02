@@ -14,10 +14,12 @@ from pathlib import Path
 
 import pytest
 
+from harnessbench.agents.base import GuestCredential
 from harnessbench.agents.claude import ClaudeCodeAgent
 from harnessbench.orchestration.environments import GuestSandbox
 from harnessbench.sandbox import backend as backend_mod
 from harnessbench.sandbox import docker as docker_mod
+from harnessbench.sandbox import sandbox as sandbox_mod
 from harnessbench.sandbox.docker import DockerResult, DockerVolume
 from harnessbench.sandbox.sandbox import snapshot_name
 from harnessbench.specs.discovery import EnvConfig
@@ -1017,3 +1019,339 @@ def test_build_snapshot_reports_a_failed_provision_as_a_sandbox_runtime_error(
     assert isinstance(raised.value.__cause__, RuntimeError)
     assert calls[-1] == ("rm", "-f", build_container)
     assert not any(call[0] == "commit" for call in calls)
+
+
+class CredentialAgent(RecordingAgent):
+    """A RecordingAgent that also declares one backend-neutral credential."""
+
+    def secrets(self: object) -> list:
+        """Declare the Anthropic credential this agent needs in the guest."""
+        return [
+            GuestCredential(
+                env_name="ANTHROPIC_API_KEY",
+                value="sk-test-value",
+                allow_hosts=("api.anthropic.com",),
+            )
+        ]
+
+    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
+        """Record that project assets were staged into the trigger container."""
+        self.provisioned.append(f"staged:{project_mount}")
+
+
+def test_docker_backend_satisfies_the_sandbox_backend_protocol() -> None:
+    """The whole protocol is implemented, so `resolve_sandbox` can hand it to any caller."""
+    assert isinstance(docker_mod.DockerBackend(), backend_mod.SandboxBackend)
+
+
+def _fake_run_docker(monkeypatch: object) -> list:
+    """Fake the async seam for a container start: no stale container, everything succeeds."""
+    calls: list = []
+
+    async def fake_docker(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Record every docker call, reporting no pre-existing container."""
+        calls.append(args)
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: eval")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake_docker)
+    return calls
+
+
+def test_create_sandbox_mounts_workspace_and_project_and_labels_the_container(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """An arm container gets a writable workspace, a read-only project, and owner labels."""
+    calls = _fake_run_docker(monkeypatch)
+    workdir = tmp_path / "room" / "workdir"
+    workdir.mkdir(parents=True)
+    stage = tmp_path / "stage"
+    stage.mkdir()
+
+    sandbox = asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="harnessbench-docker-claude-code-latest-ab12cd34",
+            name="eval-hello-alpha-main",
+            host_workdir=workdir,
+            host_repo_root=stage,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    run_args = calls[1]
+    assert calls[0] == (
+        "inspect", "--format", docker_mod.OWNER_LABEL_FORMAT, "eval-hello-alpha-main"
+    )
+    assert "-v" in run_args
+    assert f"{workdir.resolve()}:/workspace" in run_args
+    assert f"{stage.resolve()}:/project:ro" in run_args
+    assert "harnessbench.owner=harnessbench" in run_args
+    assert f"harnessbench.run={docker_mod.RUN_NONCE}" in run_args
+    assert ("--user", "0:0") == run_args[4:6]
+    assert run_args[-4:] == (
+        "--entrypoint",
+        "sleep",
+        "harnessbench-docker-claude-code-latest-ab12cd34-0d462a07",
+        "infinity",
+    )
+    assert sandbox.container == "eval-hello-alpha-main"
+
+
+def test_create_sandbox_never_puts_a_credential_in_the_container_argv(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """The token reaches the container through a 0600 env-file, never through `-e`.
+
+    `-e NAME=value` is visible to every user on the host in `ps` output and is echoed back
+    by `docker inspect`. The env-file is mode 0600 and is deleted the moment `docker run`
+    returns — the daemon has already copied the values into the container by then.
+    """
+    seen: dict = {}
+
+    async def fake_docker(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Read the env-file while it still exists, recording its content and mode."""
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: eval")
+        if args[0] == "run":
+            env_file = Path(args[args.index("--env-file") + 1])
+            seen["args"] = args
+            seen["content"] = env_file.read_text(encoding="utf-8")
+            seen["mode"] = env_file.stat().st_mode & 0o777
+            seen["path"] = env_file
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake_docker)
+
+    asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    assert not any("sk-test-value" in argument for argument in seen["args"])
+    assert seen["content"] == "ANTHROPIC_API_KEY=sk-test-value\n"
+    assert seen["mode"] == 0o600
+    assert seen["path"].exists() is False
+
+
+def test_create_sandbox_keeps_the_credential_out_of_the_failure_message(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A start failure reports the snapshot, never the argv that carried the credential.
+
+    This message becomes `<sandbox-error>` result text, which is written to run artifacts.
+    """
+
+    async def failing_run(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Report no stale container, then fail the run."""
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: eval")
+        if args[0] == "run":
+            return DockerResult(args, 125, "", "No such image: snap")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", failing_run)
+
+    with pytest.raises(docker_mod.SandboxRuntimeError) as raised:
+        asyncio.run(
+            docker_mod.DockerBackend().create_sandbox(
+                agent=CredentialAgent(),
+                snapshot="snap",
+                name="eval-hello-alpha-main",
+                host_workdir=tmp_path,
+                host_repo_root=None,
+                extra_volumes=lambda agent, volume_cls: {},
+            )
+        )
+
+    assert "sk-test-value" not in str(raised.value)
+    assert "--env-file" not in str(raised.value)
+
+
+def test_create_sandbox_restores_workspace_ownership_on_linux(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """On Linux the session carries the host uid:gid it must chown `/workspace` back to.
+
+    Rootful Docker on Linux writes root-owned files into the bind-mounted clean room; the
+    host then cannot gather facts from it or delete it. macOS maps ownership itself.
+    """
+    _fake_run_docker(monkeypatch)
+    monkeypatch.setattr(docker_mod.sys, "platform", "linux")
+    monkeypatch.setattr(docker_mod.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(docker_mod.os, "getgid", lambda: 1000, raising=False)
+
+    sandbox = asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    assert sandbox._restore_owner == "1000:1000"
+
+
+def test_create_sandbox_omits_the_project_mount_when_there_is_no_stage(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """With no staged project there is no `/project` mount at all."""
+    calls = _fake_run_docker(monkeypatch)
+
+    asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=CredentialAgent(),
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=lambda agent, volume_cls: {},
+        )
+    )
+
+    assert not any(argument.endswith(":/project:ro") for argument in calls[1])
+
+
+def test_create_sandbox_renders_agent_extra_volumes_through_docker_volume(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """The real `_agent_extra_volumes` hands DockerVolume the same call it hands microsandbox."""
+    calls = _fake_run_docker(monkeypatch)
+    auth_json = tmp_path / "auth.json"
+    auth_json.write_text("{}", encoding="utf-8")
+    agent = CredentialAgent()
+    agent.auth_json_path = lambda: str(auth_json)
+
+    asyncio.run(
+        docker_mod.DockerBackend().create_sandbox(
+            agent=agent,
+            snapshot="snap",
+            name="eval-hello-alpha-main",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=sandbox_mod._agent_extra_volumes,
+        )
+    )
+
+    assert f"{auth_json.resolve()}:/harnessbench-codex-auth/auth.json:ro" in calls[1]
+
+
+def test_create_trigger_sandbox_stages_project_assets(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """The routing container mounts the stage read-only and stages the agent's assets.
+
+    Trigger routing itself stays microsandbox-only in this change; this method exists so
+    `DockerBackend` satisfies the runtime-checkable protocol in full.
+    """
+    _fake_run_docker(monkeypatch)
+    agent = CredentialAgent()
+
+    asyncio.run(
+        docker_mod.DockerBackend().create_trigger_sandbox(
+            agent=agent,
+            snapshot="snap",
+            name="trigger-main",
+            host_repo_root=tmp_path,
+            extra_volumes=lambda agent_arg, volume_cls: {},
+        )
+    )
+
+    assert agent.provisioned == ["staged:/project"]
+
+
+def test_create_sandbox_cleans_up_after_a_container_that_will_not_start(
+    monkeypatch: object, tmp_path: object,
+) -> None:
+    """A container that cannot boot is a runtime failure — and leaves nothing behind.
+
+    `docker run --detach` can leave a created-but-not-started container when it exits
+    nonzero, so the failure path attempts a removal before it raises.
+    """
+    calls: list = []
+
+    async def failing_run(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Report no stale container, fail the run, succeed on cleanup."""
+        calls.append(args)
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: eval")
+        if args[0] == "run":
+            return DockerResult(args, 125, "", "No such image: snap")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", failing_run)
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="No such image"):
+        asyncio.run(
+            docker_mod.DockerBackend().create_sandbox(
+                agent=CredentialAgent(),
+                snapshot="snap",
+                name="eval-hello-alpha-main",
+                host_workdir=tmp_path,
+                host_repo_root=None,
+                extra_volumes=lambda agent, volume_cls: {},
+            )
+        )
+
+    assert calls[-1] == ("rm", "-f", "eval-hello-alpha-main")
+
+
+def test_guest_shell_returns_stdout_on_success_and_none_on_failure(monkeypatch: object) -> None:
+    """A zero exit yields stdout; a nonzero exit or a runtime failure yields None."""
+    agent = CredentialAgent()
+    backend = docker_mod.DockerBackend()
+
+    _record_docker(monkeypatch, DockerResult(("exec",), 0, "1.2.3\n", ""))
+    ok = asyncio.run(backend.guest_shell(docker_mod.DockerSandbox("c"), agent, "claude --version"))
+
+    _record_docker(monkeypatch, DockerResult(("exec",), 1, "", "not found"))
+    failed = asyncio.run(
+        backend.guest_shell(docker_mod.DockerSandbox("c"), agent, "claude --version")
+    )
+
+    assert ok == "1.2.3\n"
+    assert failed is None
+
+
+def test_stop_quietly_swallows_a_runtime_failure() -> None:
+    """Teardown never masks the real flow, even when the daemon has already gone."""
+
+    class BrokenSandbox:
+        """A sandbox whose teardown fails."""
+
+        async def stop(self: object, timeout: object = None) -> None:
+            """Fail the way a vanished daemon does."""
+            raise docker_mod.SandboxRuntimeError("daemon gone")
+
+    asyncio.run(docker_mod.DockerBackend().stop_quietly(BrokenSandbox()))
+
+
+def test_kill_quietly_swallows_a_runtime_failure() -> None:
+    """The routing timeout path must not raise out of its own cleanup."""
+
+    class BrokenHandle:
+        """A stream handle whose kill fails."""
+
+        async def kill(self: object) -> None:
+            """Fail the way an already-reaped process does."""
+            raise OSError("no such process")
+
+    asyncio.run(docker_mod.DockerBackend().kill_quietly(BrokenHandle()))

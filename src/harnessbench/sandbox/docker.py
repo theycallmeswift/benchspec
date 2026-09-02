@@ -25,9 +25,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,11 +40,13 @@ from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.sandbox.primitives import (
     BASE_IMAGE,
     GUEST_WORKDIR,
+    PROJECT_MOUNT,
     VM_CPUS,
     VM_MEMORY_MIB,
     FingerprintInputs,
     bridge_skills_home,
     build_fingerprint_inputs,
+    host_mount_path,
     run_environment_script,
 )
 from harnessbench.sandbox.provenance import ImageIdentity
@@ -315,6 +320,56 @@ def _volume_flags(volumes: dict[str, DockerVolume]) -> list[str]:
         for guest_path, volume in volumes.items()
         for flag in ("-v", volume.flag_value(guest_path))
     ]
+
+
+@contextlib.contextmanager
+def _credential_env_file(agent: object) -> object:
+    """Yield `docker run` flags that carry the agent's credentials out of band.
+
+    Docker has no equivalent of microsandbox's network-scoped secret substitution, so
+    `allow_hosts` cannot be enforced and the value IS readable inside the guest. That much
+    is the documented cost of selecting `sandbox = "docker"`.
+
+    What is NOT acceptable is leaking the value to the HOST. `-e NAME=value` puts the
+    token in the container's argv, where any user on the machine reads it out of `ps` and
+    where `docker inspect` echoes it back for as long as the container exists. So the
+    values go into a mode-0600 file that is deleted as soon as `docker run` returns — by
+    then the daemon has copied them into the container's environment.
+
+    Args:
+        agent: The agent whose `secrets()` are rendered.
+
+    Yields:
+        The `--env-file` flags, or an empty list when the agent declares no credentials.
+    """
+    credentials = agent.secrets()
+    if not credentials:
+        yield []
+        return
+    handle, path = tempfile.mkstemp(prefix="harnessbench-credentials-")
+    try:
+        os.fchmod(handle, 0o600)
+        # docker's env-file format is one NAME=value per line, unquoted and unescaped.
+        with os.fdopen(handle, "w", encoding="utf-8") as env_file:
+            for credential in credentials:
+                env_file.write(f"{credential.env_name}={credential.value}\n")
+        yield ["--env-file", path]
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+
+
+def _workspace_restore_owner() -> str | None:
+    """Return the `uid:gid` a guest must chown `/workspace` back to, or None.
+
+    Containers run as root. Under rootful Docker on Linux that means every file the agent
+    writes into the bind-mounted clean room is root-owned, and the host can then neither
+    gather facts from it nor delete the temporary directory holding it. On macOS, Docker
+    Desktop maps ownership in its own file-sharing layer, so nothing needs restoring.
+    """
+    if sys.platform != "linux":
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
 
 
 def _resource_flags() -> list[str]:
@@ -947,3 +1002,132 @@ class DockerBackend:
         finally:
             # `_remove_container` never raises, so teardown can never mask a build failure.
             await _remove_container(build_container)
+
+    async def create_sandbox(
+        self: object,
+        *,
+        agent: object,
+        snapshot: object,
+        name: object,
+        host_workdir: object,
+        host_repo_root: object,
+        extra_volumes: object,
+    ) -> DockerSandbox:
+        """Boot a container from the snapshot image for one arm session."""
+        volumes = {
+            GUEST_WORKDIR: DockerVolume.bind(host_mount_path(host_workdir), readonly=False)
+        }
+        if host_repo_root is not None:
+            # The project mounts read-only so a per-eval setup.sh can install the
+            # suite-specific skill without risking a write back into the host checkout.
+            volumes[PROJECT_MOUNT] = DockerVolume.bind(
+                host_mount_path(host_repo_root), readonly=True
+            )
+        volumes.update(extra_volumes(agent, DockerVolume))
+        return await self._run_container(
+            snapshot=snapshot,
+            name=name,
+            agent=agent,
+            volumes=volumes,
+            restore_owner=_workspace_restore_owner(),
+        )
+
+    async def create_trigger_sandbox(
+        self: object,
+        *,
+        agent: object,
+        snapshot: object,
+        name: object,
+        host_repo_root: object,
+        extra_volumes: object,
+    ) -> DockerSandbox:
+        """Boot the container used for trigger-routing probes.
+
+        Trigger routing is microsandbox-only today; this exists so `DockerBackend`
+        satisfies the runtime-checkable `SandboxBackend` protocol in full, and so enabling
+        routing under Docker later is a switch rather than a rewrite. There is no
+        `/workspace` bind here, so no ownership to restore.
+        """
+        volumes = {PROJECT_MOUNT: DockerVolume.bind(host_mount_path(host_repo_root), readonly=True)}
+        volumes.update(extra_volumes(agent, DockerVolume))
+        sandbox = await self._run_container(
+            snapshot=snapshot, name=name, agent=agent, volumes=volumes
+        )
+        try:
+            await agent.stage_project_assets(sandbox, PROJECT_MOUNT)
+        except BaseException:
+            await self.stop_quietly(sandbox)
+            raise
+        return sandbox
+
+    async def _run_container(
+        self: object,
+        *,
+        snapshot: object,
+        name: object,
+        agent: object,
+        volumes: dict,
+        restore_owner: str | None = None,
+    ) -> DockerSandbox:
+        """Free the container name, then run a fresh container from the snapshot image.
+
+        Raises:
+            SandboxRuntimeError: If the name is held by a container harnessbench does not
+                own, or the container fails to start.
+        """
+        container = container_name(str(name))
+        # `replace=True` semantics: a name collision left by an earlier aborted cell must
+        # not fail this one. Label-gated, so a container harnessbench did not start is
+        # reported rather than removed.
+        await _replace_container(container)
+        reference = image_ref(str(snapshot))
+        with _credential_env_file(agent) as credential_flags:
+            started = await _docker(
+                "run",
+                "--detach",
+                "--name",
+                container,
+                # Agents install their CLIs under /root and run with bypassPermissions:
+                # the sandbox, not the uid, is the containment boundary.
+                "--user",
+                "0:0",
+                *_resource_flags(),
+                *_label_flags(),
+                *_volume_flags(volumes),
+                *credential_flags,
+                "--entrypoint",
+                "sleep",
+                reference,
+                "infinity",
+                # Never the argv: it holds the --env-file path.
+                description=f"`docker run {reference}`",
+            )
+        if started.exit_code != 0:
+            # A nonzero `run --detach` can still leave a created container behind. This
+            # helper never raises, so it cannot mask the failure being reported.
+            await _remove_container(container)
+            raise SandboxRuntimeError(
+                f"docker run failed for snapshot `{snapshot}` "
+                f"(exit {started.exit_code}): {started.stderr.strip()[-2000:]}"
+            )
+        return DockerSandbox(container, restore_owner=restore_owner)
+
+    async def guest_shell(
+        self: object, sandbox: object, agent: object, script: str
+    ) -> str | None:
+        """Run `script` in the guest, returning stdout on success or None on any failure."""
+        try:
+            result = await sandbox.shell(script, env=agent.guest_env())
+        except (TimeoutError, SandboxRuntimeError, OSError):
+            return None
+        return result.stdout_text if result.exit_code == 0 else None
+
+    async def stop_quietly(self: object, sandbox: object) -> None:
+        """Best-effort container teardown that never masks the real flow."""
+        with contextlib.suppress(SandboxRuntimeError, TimeoutError, OSError):
+            await sandbox.stop()
+
+    async def kill_quietly(self: object, handle: object) -> None:
+        """Best-effort kill of a streaming exec handle (routing timeout path)."""
+        with contextlib.suppress(SandboxRuntimeError, OSError):
+            await handle.kill()
