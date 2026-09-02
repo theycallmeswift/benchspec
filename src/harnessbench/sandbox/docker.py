@@ -76,9 +76,11 @@ _CONTROL_PLANE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 # `docker exec` reserves these for its own failures, but a guest command may exit with
-# them too (127 is `command not found` from the guest's own shell), so they make a result
-# AMBIGUOUS rather than infra — the container's state settles it.
-_AMBIGUOUS_EXIT_CODES = frozenset({125, 126, 127})
+# them too (127 is `command not found` from the guest's own shell; 137 is 128+SIGKILL,
+# which an attached `docker exec` also reports when `docker rm -f` kills it out from under
+# a running command), so they make a result AMBIGUOUS rather than infra — the container's
+# state settles it.
+_AMBIGUOUS_EXIT_CODES = frozenset({125, 126, 127, 137})
 # The only nonzero `docker rm`/`docker inspect` that means "already gone", which is a
 # successful teardown. `rm` says "No such container"; `inspect` says "No such object".
 _CONTAINER_ABSENT_PATTERN = re.compile(r"[Nn]o such (container|object)")
