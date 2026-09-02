@@ -52,6 +52,27 @@ SYNC_CALL_TIMEOUT_SECONDS = 30.0
 # The only nonzero `docker image inspect` that means "not cached yet". Every other
 # failure — a dead daemon, a permission problem — must be raised, not read as absence.
 _IMAGE_ABSENT_PATTERN = re.compile(r"[Nn]o such image", re.MULTILINE)
+# Stderr shapes that mean docker itself failed, not the guest command.
+_CONTROL_PLANE_PATTERN = re.compile(
+    r"Cannot connect to the Docker daemon"
+    r"|Is the docker daemon running"
+    r"|error during connect"
+    r"|No such container"
+    r"|is not running"
+    r"|is restarting"
+    r"|is paused"
+    r"|removal of container .* is already in progress",
+    re.IGNORECASE,
+)
+# `docker exec` reserves these for its own failures, but a guest command may exit with
+# them too (127 is `command not found` from the guest's own shell), so they make a result
+# AMBIGUOUS rather than infra — the container's state settles it.
+_AMBIGUOUS_EXIT_CODES = frozenset({125, 126, 127})
+# The only nonzero `docker rm`/`docker inspect` that means "already gone", which is a
+# successful teardown. `rm` says "No such container"; `inspect` says "No such object".
+_CONTAINER_ABSENT_PATTERN = re.compile(r"[Nn]o such (container|object)")
+# A wedged removal must not hang teardown behind a dead daemon.
+REMOVE_TIMEOUT_SECONDS = 30.0
 
 OWNER_LABEL = "harnessbench.owner"
 OWNER_LABEL_VALUE = "harnessbench"
@@ -307,6 +328,225 @@ def _label_flags() -> list[str]:
         "--label",
         f"{RUN_LABEL}={RUN_NONCE}",
     ]
+
+
+@dataclass(frozen=True)
+class ContainerRemoval:
+    """The outcome of one bounded `docker rm -f`.
+
+    `absent` and `removed` are both successes — teardown is idempotent, and a container
+    that is already gone is exactly what the caller wanted. `error` is set only for a
+    genuine daemon failure.
+    """
+
+    name: str
+    removed: bool
+    absent: bool
+    error: str | None
+
+
+async def _remove_container(
+    name: str, *, timeout: float = REMOVE_TIMEOUT_SECONDS
+) -> ContainerRemoval:
+    """Remove one container by name, bounded and idempotent.
+
+    This is the ONLY place in the module that removes a container: teardown, the timeout
+    reap, the pre-start replace, and cleanup after a failed start all route through it.
+
+    It never raises. Every caller is either a `finally` block or an `except` handler where
+    a raise would mask the primary exception, so a daemon failure comes back in `.error`
+    for the caller to decide about.
+
+    Args:
+        name: The container to remove.
+        timeout: Seconds to allow before treating the removal as wedged.
+
+    Returns:
+        Whether the container was removed, was already absent, or the daemon failed.
+    """
+    try:
+        result = await _docker(
+            "rm", "-f", name, timeout=timeout, description=f"`docker rm -f {name}`"
+        )
+    except SandboxRuntimeError as error:
+        return ContainerRemoval(name, removed=False, absent=False, error=str(error))
+    if result.exit_code == 0:
+        return ContainerRemoval(name, removed=True, absent=False, error=None)
+    if _CONTAINER_ABSENT_PATTERN.search(result.stderr):
+        return ContainerRemoval(name, removed=False, absent=True, error=None)
+    return ContainerRemoval(
+        name,
+        removed=False,
+        absent=False,
+        error=(
+            f"docker rm -f `{name}` exited {result.exit_code}: "
+            f"{result.stderr.strip()[-500:] or '(no output)'}"
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class DockerExecOutput:
+    """One completed guest command's captured outcome.
+
+    Field names match the microsandbox exec result that `sandbox.py`, the agents, and
+    `GuestSandbox` already read, so the guest contract is identical across backends.
+    """
+
+    exit_code: int
+    stdout_text: str
+    stderr_text: str
+
+
+class DockerSandbox:
+    """A live container satisfying the guest contract `sandbox.py` and the agents drive."""
+
+    def __init__(self: object, container: str, *, restore_owner: str | None = None) -> None:
+        """Wrap an already-running container by name.
+
+        Args:
+            container: The running container's name.
+            restore_owner: `uid:gid` to chown `/workspace` to before teardown, or None to
+                skip. Set only on Linux hosts, where rootful Docker would otherwise leave
+                root-owned files the host cannot read or delete.
+        """
+        self._container = container
+        self._restore_owner = restore_owner
+        self._alive = True
+
+    @property
+    def container(self: object) -> str:
+        """The name of the container this sandbox drives."""
+        return self._container
+
+    @property
+    def alive(self: object) -> bool:
+        """Whether the container is still believed to be usable."""
+        return self._alive
+
+    def _require_alive(self: object) -> None:
+        """Fail fast once the container is known to be gone.
+
+        Raises:
+            SandboxRuntimeError: If a previous call reaped or lost the container. Each
+                later call would otherwise pay a full `docker exec` round trip to learn
+                the same thing, and the arm is already recorded as errored.
+        """
+        if not self._alive:
+            raise SandboxRuntimeError(
+                f"container `{self._container}` is no longer usable (it was removed after "
+                f"an earlier timeout or runtime failure)"
+            )
+
+    def _exec_args(self: object, *, cwd: str | None, env: dict | None) -> list[str]:
+        """Build the leading `docker exec` arguments shared by every guest call.
+
+        `-i` keeps stdin attached so the caller can force EOF on it; without that a
+        guest CLI can block forever on an open pipe.
+        """
+        args = ["exec", "-i", *_env_flags(env)]
+        if cwd:
+            args += ["-w", cwd]
+        return [*args, self._container]
+
+    async def _reap(self: object) -> None:
+        """Remove the container and mark this sandbox dead.
+
+        Killing the local `docker exec` client does NOT stop the process inside the
+        container: without this, an agent whose turn timed out keeps running — and keeps
+        spending — for the rest of the benchmark. Removing the container reaps it.
+        """
+        self._alive = False
+        await _remove_container(self._container)
+
+    async def _control_plane_failure(self: object, result: DockerResult) -> str | None:
+        """Return an error message when `result` is docker failing, not the guest exiting.
+
+        Known daemon/container stderr shapes classify outright. An otherwise-unexplained
+        125/126/127 is ambiguous — `docker exec` reserves those codes, but so does a guest
+        shell reporting `command not found` — so the container's running state settles it.
+        """
+        if result.exit_code == 0:
+            return None
+        if _CONTROL_PLANE_PATTERN.search(result.stderr):
+            return (
+                f"docker exec against container `{self._container}` failed: "
+                f"{result.stderr.strip()[-500:] or '(no output)'}"
+            )
+        if result.exit_code not in _AMBIGUOUS_EXIT_CODES:
+            return None
+        state = await _docker(
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            self._container,
+            description=f"`docker inspect {self._container}`",
+        )
+        if state.exit_code == 0 and state.stdout.strip() == "true":
+            return None
+        return (
+            f"container `{self._container}` is not running "
+            f"(docker exec exited {result.exit_code})"
+        )
+
+    async def _guest_call(
+        self: object,
+        *args: str,
+        stdin: bytes | None = None,
+        timeout: float | None = None,
+    ) -> DockerExecOutput:
+        """Run one guest command, telling a docker failure apart from a guest exit code.
+
+        Raises:
+            SandboxRuntimeError: If the call times out (the container is reaped first) or
+                docker itself failed rather than the guest command.
+        """
+        self._require_alive()
+        try:
+            result = await _docker(
+                *args,
+                stdin=stdin,
+                timeout=timeout,
+                description=f"`docker exec {self._container}`",
+            )
+        except DockerCallTimeout as error:
+            await self._reap()
+            raise SandboxRuntimeError(
+                f"guest command in container `{self._container}` timed out after "
+                f"{timeout}s; the container was removed to reap it"
+            ) from error
+        failure = await self._control_plane_failure(result)
+        if failure is not None:
+            self._alive = False
+            raise SandboxRuntimeError(failure)
+        return DockerExecOutput(result.exit_code, result.stdout, result.stderr)
+
+    async def shell(
+        self: object, script: str, *, env: dict | None = None, cwd: str | None = None
+    ) -> DockerExecOutput:
+        """Run `script` under `/bin/sh -c` inside the container."""
+        return await self._guest_call(
+            *self._exec_args(cwd=cwd, env=env), "/bin/sh", "-c", script
+        )
+
+    async def exec(
+        self: object,
+        command: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: dict | None = None,
+        timeout: float | None = None,
+        stdin: bytes | None = None,
+    ) -> DockerExecOutput:
+        """Run `command` with `args` directly — no shell, so nothing re-quotes a prompt."""
+        return await self._guest_call(
+            *self._exec_args(cwd=cwd, env=env),
+            command,
+            *(args or []),
+            stdin=stdin,
+            timeout=timeout,
+        )
 
 
 class DockerBackend:

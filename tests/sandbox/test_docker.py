@@ -8,12 +8,14 @@ the daemon-gated behavior suite lives in `test_docker_daemon.py`.
 from __future__ import annotations
 
 import ast
+import asyncio
 import sys
 from pathlib import Path
 
 import pytest
 
 from harnessbench.agents.claude import ClaudeCodeAgent
+from harnessbench.orchestration.environments import GuestSandbox
 from harnessbench.sandbox import backend as backend_mod
 from harnessbench.sandbox import docker as docker_mod
 from harnessbench.sandbox.docker import DockerResult, DockerVolume
@@ -389,3 +391,197 @@ def test_docker_fingerprint_changes_with_every_ingredient() -> None:
     assert baseline != backend.cache_fingerprint(
         agent, EnvConfig(script=b"two\n", script_path="s.sh")
     )
+
+
+def _record_docker(monkeypatch: object, result: object) -> list:
+    """Point the async docker seam at a canned result and record every invocation."""
+    calls: list = []
+
+    async def fake(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Record one async docker call and return the canned result."""
+        calls.append({"args": args, "stdin": stdin, "timeout": timeout})
+        return result
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
+    return calls
+
+
+def test_shell_runs_the_script_under_sh_inside_the_container(monkeypatch: object) -> None:
+    """`shell` becomes `docker exec -i -e ... -w ... <container> /bin/sh -c <script>`."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "done\n", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    result = asyncio.run(sandbox.shell("echo done", env={"HOME": "/root"}, cwd="/project"))
+
+    assert calls[0]["args"] == (
+        "exec", "-i", "-e", "HOME=/root", "-w", "/project",
+        "eval-hello-alpha-main", "/bin/sh", "-c", "echo done",
+    )
+    assert (result.exit_code, result.stdout_text, result.stderr_text) == (0, "done\n", "")
+
+
+def test_shell_omits_the_workdir_flag_when_no_cwd_is_given(monkeypatch: object) -> None:
+    """No cwd means no `-w`, so the image's own working directory stands."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "", ""))
+    sandbox = docker_mod.DockerSandbox("build-claude-code")
+
+    asyncio.run(sandbox.shell("apt-get update"))
+
+    assert calls[0]["args"] == (
+        "exec", "-i", "build-claude-code", "/bin/sh", "-c", "apt-get update",
+    )
+
+
+def test_exec_runs_the_command_without_a_shell(monkeypatch: object) -> None:
+    """`exec` passes argv straight through, so no quoting rule can mangle a prompt."""
+    calls = _record_docker(monkeypatch, DockerResult(("exec",), 0, "{}", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    asyncio.run(
+        sandbox.exec(
+            "/root/.local/bin/claude",
+            ["-p", "write a haiku"],
+            cwd="/workspace",
+            env={"TZ": "UTC"},
+            timeout=600,
+            stdin=b"",
+        )
+    )
+
+    assert calls[0]["args"] == (
+        "exec", "-i", "-e", "TZ=UTC", "-w", "/workspace",
+        "eval-hello-alpha-main", "/root/.local/bin/claude", "-p", "write a haiku",
+    )
+    assert calls[0]["stdin"] == b""
+    assert calls[0]["timeout"] == 600
+
+
+def test_exec_result_fields_match_the_guest_contract(monkeypatch: object) -> None:
+    """The result exposes exit_code/stdout_text/stderr_text, which GuestSandbox reads."""
+    _record_docker(monkeypatch, DockerResult(("exec",), 3, "out", "err"))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    result = asyncio.run(sandbox.exec("false"))
+
+    assert (result.exit_code, result.stdout_text, result.stderr_text) == (3, "out", "err")
+
+
+def test_guest_sandbox_drives_a_docker_sandbox_unchanged(monkeypatch: object) -> None:
+    """The agents' transport wrapper works against DockerSandbox with no adaptation."""
+    _record_docker(monkeypatch, DockerResult(("exec",), 0, "hi", ""))
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    proc = asyncio.run(
+        GuestSandbox(sandbox).exec(["echo", "hi"], env={}, timeout=5, cwd="/workspace")
+    )
+
+    assert (proc.exit_code, proc.stdout, proc.stderr) == (0, "hi", "")
+
+
+def test_exec_timeout_removes_the_container_and_raises(monkeypatch: object) -> None:
+    """A timed-out turn reaps the guest process by removing the container.
+
+    Killing the local `docker exec` client leaves the agent running inside the container,
+    burning tokens for the rest of the benchmark. Removal is the only thing that stops it,
+    and the raise is what lands the arm as `is_error`.
+    """
+    calls: list = []
+
+    async def timing_out(*args: str, stdin: object = None, timeout: object = None,
+                         description: object = None) -> object:
+        """Time out the exec, succeed on the removal that follows."""
+        calls.append(args)
+        if args[0] == "exec":
+            raise docker_mod.DockerCallTimeout("`docker exec eval-hello-alpha-main` timed out")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", timing_out)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="timed out"):
+        asyncio.run(sandbox.exec("/root/.local/bin/claude", ["-p", "slow"], timeout=1))
+
+    assert calls[-1] == ("rm", "-f", "eval-hello-alpha-main")
+    assert sandbox.alive is False
+
+
+def test_a_reaped_sandbox_fails_every_later_call_fast(monkeypatch: object) -> None:
+    """Once the container is gone, later guest calls fail immediately instead of hanging."""
+
+    async def timing_out(*args: str, stdin: object = None, timeout: object = None,
+                         description: object = None) -> object:
+        """Time out the exec, succeed on the removal that follows."""
+        if args[0] == "exec":
+            raise docker_mod.DockerCallTimeout("timed out")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", timing_out)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+    with pytest.raises(docker_mod.SandboxRuntimeError):
+        asyncio.run(sandbox.exec("claude", timeout=1))
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="no longer usable"):
+        asyncio.run(sandbox.shell("echo late"))
+
+
+def test_exec_classifies_a_removed_container_as_an_infra_failure(monkeypatch: object) -> None:
+    """A vanished container is a sandbox failure, not a guest command that exited 126."""
+    _record_docker(
+        monkeypatch,
+        DockerResult(("exec",), 126, "", "Error: No such container: eval-hello-alpha-main"),
+    )
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="No such container"):
+        asyncio.run(sandbox.exec("claude"))
+
+
+def test_exec_keeps_an_ordinary_guest_exit_code_when_the_container_is_still_running(
+    monkeypatch: object,
+) -> None:
+    """127 from the guest's own shell stays a graded result; the container is asked.
+
+    `docker exec` reserves 125-127 for its own failures, but `sh -c "nosuchcmd"` also
+    exits 127. Treating that as infra would record a real agent miss as an errored arm.
+    """
+
+    async def fake(*args: str, stdin: object = None, timeout: object = None,
+                   description: object = None) -> object:
+        """Report a 127 exec, and a container that is very much still running."""
+        if args[0] == "inspect":
+            return DockerResult(args, 0, "true\n", "")
+        return DockerResult(args, 127, "", "sh: 1: nosuchcmd: not found")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake)
+    sandbox = docker_mod.DockerSandbox("eval-hello-alpha-main")
+
+    result = asyncio.run(sandbox.shell("nosuchcmd"))
+
+    assert result.exit_code == 127
+
+
+def test_remove_container_treats_an_absent_container_as_success(monkeypatch: object) -> None:
+    """Removing what is already gone is fine — teardown must be idempotent."""
+    _record_docker(
+        monkeypatch, DockerResult(("rm",), 1, "", "Error: No such container: gone")
+    )
+
+    outcome = asyncio.run(docker_mod._remove_container("gone"))
+
+    assert (outcome.removed, outcome.absent, outcome.error) == (False, True, None)
+
+
+def test_remove_container_reports_a_daemon_failure_without_raising(monkeypatch: object) -> None:
+    """Removal never raises: it is called from `finally` blocks that must not be masked."""
+    _record_docker(
+        monkeypatch,
+        DockerResult(("rm",), 1, "", "Cannot connect to the Docker daemon at unix:///..."),
+    )
+
+    outcome = asyncio.run(docker_mod._remove_container("stuck"))
+
+    assert outcome.removed is False
+    assert outcome.absent is False
+    assert "Cannot connect to the Docker daemon" in outcome.error
