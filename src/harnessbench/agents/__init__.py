@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import os
 
-from harnessbench.agents.base import AgentCapabilities, CodingAgent
+from harnessbench.agents.base import AgentCapabilities, CodingAgent, GuestCredential
 from harnessbench.agents.claude import ClaudeCodeAgent
 from harnessbench.agents.codex import CodexAgent
 from harnessbench.agents.opencode import OpenCodeAgent
 
 __all__ = [
     "AgentCapabilities",
+    "GuestCredential",
     "CodingAgent",
     "ClaudeCodeAgent",
     "CodexAgent",

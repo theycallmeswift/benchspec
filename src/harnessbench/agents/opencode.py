@@ -1,7 +1,7 @@
 """OpenCode (sst/opencode) implementation of the CodingAgent interface.
 
-Provisions OpenCode into a microVM via `npm i -g opencode-ai@<pinned>`, passes the
-provider credential as a host-substituted secret scoped to the provider host, builds
+Provisions OpenCode into a microVM via `npm i -g opencode-ai@<pinned>`, declares the
+provider credential as a backend-neutral, host-scoped `GuestCredential`, builds
 the `opencode run --format json` command, and parses its JSONL output. Pinning,
 model surface, and effort taxonomy are documented in `docs/harnesses.md`.
 
@@ -32,9 +32,9 @@ from harnessbench.sandbox.errors import sandbox_error_types
 if TYPE_CHECKING:
     from harnessbench.grading.judges.config import JudgeConfig
 
-# Credentials OpenCode reads (host-side env var names), in preference order. The
-# runner injects whichever is set as a microsandbox secret, substituted only for
-# the matching provider host.
+# Credentials OpenCode reads (host-side env var names), in preference order. The agent
+# declares whichever is set as a GuestCredential scoped to the matching provider host;
+# the resolved SandboxBackend decides how that credential actually reaches the guest.
 AUTH_ENV_VARS = (
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",

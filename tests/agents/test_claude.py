@@ -433,8 +433,12 @@ def test_invoke_nonzero_exit_is_error() -> None:
     assert "bad" in res.result_text
 
 
-def test_secrets_uses_configured_auth_env() -> None:
-    """The configured credential name (not a hardcoded one) reaches the credential."""
+def test_secrets_declares_a_host_scoped_guest_credential() -> None:
+    """The adapter declares WHAT the credential is; the backend decides HOW it is injected.
+
+    Uses a non-default auth_env (CLAUDE_CODE_OAUTH_TOKEN) so the assertion also proves the
+    configured credential name reaches the GuestCredential rather than a hardcoded one.
+    """
     agent = ClaudeCodeAgent(auth_value="tok-123", auth_env="CLAUDE_CODE_OAUTH_TOKEN")
 
     credentials = agent.secrets()
@@ -443,21 +447,6 @@ def test_secrets_uses_configured_auth_env() -> None:
         GuestCredential(
             env_name="CLAUDE_CODE_OAUTH_TOKEN",
             value="tok-123",
-            allow_hosts=("api.anthropic.com",),
-        )
-    ]
-
-
-def test_secrets_declares_a_host_scoped_guest_credential() -> None:
-    """The adapter declares WHAT the credential is; the backend decides HOW it is injected."""
-    agent = ClaudeCodeAgent(auth_value="sk-test-value", auth_env="ANTHROPIC_API_KEY")
-
-    credentials = agent.secrets()
-
-    assert credentials == [
-        GuestCredential(
-            env_name="ANTHROPIC_API_KEY",
-            value="sk-test-value",
             allow_hosts=("api.anthropic.com",),
         )
     ]

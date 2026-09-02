@@ -1,8 +1,9 @@
 """Claude Code implementation of the `CodingAgent` interface.
 
-Provisions the Claude Code CLI into a microVM (the cached snapshot step), injects the
-Anthropic credential as a host-substituted secret, builds the headless `claude -p`
-command, and parses its output through the shared helpers in `results.py`.
+Provisions the Claude Code CLI into a microVM (the cached snapshot step), declares the
+Anthropic credential as a backend-neutral, host-scoped `GuestCredential`, builds the
+headless `claude -p` command, and parses its output through the shared helpers in
+`results.py`.
 """
 
 from __future__ import annotations
@@ -21,8 +22,9 @@ from harnessbench.sandbox.errors import sandbox_error_types
 if TYPE_CHECKING:
     from harnessbench.grading.judges.config import JudgeConfig
 
-# Credentials Claude Code reads, in preference order. The runner injects whichever is set as
-# a microsandbox secret (substituted only for the Anthropic API host).
+# Credentials Claude Code reads, in preference order. The agent declares whichever is set
+# as a GuestCredential scoped to the Anthropic API host; the resolved SandboxBackend
+# decides how that credential actually reaches the guest.
 AUTH_ENV_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 _RESERVED_HARNESS_ARGS = {
     "-p",
