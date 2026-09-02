@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from harnessbench.exit_codes import ExitCode
 from harnessbench.reporting import analyze
 from harnessbench.runners import run
 from harnessbench.sandbox import sandbox
+from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.specs import lint
 from harnessbench.specs.schema import SchemaError
 
@@ -76,14 +78,18 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
     once — so selected-backend diagnostics are not hidden behind a default-microsandbox preflight,
     and a future backend can build independently. Error mapping:
 
-    - `SchemaError` (bad config, or a `docker`/unsupported set): propagates to the `main` boundary
+    - `SchemaError` (bad config, or an unsupported set): propagates to the `main` boundary
       → USAGE (2). Config error, not a build failure.
-    - `RuntimeError` (host preflight, including microsandbox-not-installed): USAGE (2), surfaced
-      before any provisioning. This branch imports no microsandbox, so a host without the package
-      still exits 2 cleanly rather than raising `ModuleNotFoundError`.
-    - `MicrosandboxError` (a genuine build/provision failure): FINDING (1). Only reachable after
-      preflight passed, which guarantees `import microsandbox` works, so importing the error type
-      here is safe.
+    - `SandboxRuntimeError` (a backend's own build/provision failure): FINDING (1).
+      WARNING: this branch must precede the `RuntimeError` branch below — it IS a
+      RuntimeError, and reversing them would report every Docker build failure as a
+      usage error.
+    - `RuntimeError` (host preflight, including microsandbox-not-installed): USAGE (2),
+      surfaced before any provisioning. This branch imports no microsandbox, so a host
+      without the package still exits 2 cleanly rather than raising `ModuleNotFoundError`.
+    - `MicrosandboxError` (a genuine build/provision failure): FINDING (1). Only reachable
+      after preflight passed, which guarantees `import microsandbox` works, so importing
+      the error type here is safe.
 
     Args:
         args: The parsed `sandbox:build` namespace, with `root` a `Path`.
@@ -96,18 +102,24 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
 
     try:
         sandbox.cli_build(root, set_name=args.set, config=args.config)
+    except SandboxRuntimeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return ExitCode.FINDING
     except RuntimeError as error:
         print(f"error: {error}", file=sys.stderr)
         return ExitCode.USAGE
     except SchemaError:
         raise  # a bad config / unsupported backend is a usage error; let `main` map it to 2
     except Exception as error:
-        # Reached only after preflight passed, so microsandbox is importable here.
-        from microsandbox.errors import MicrosandboxError
+        # Guarded: on a Docker-only install microsandbox is not installed at all, and an
+        # unguarded import here would raise ModuleNotFoundError over whatever actually
+        # went wrong.
+        with contextlib.suppress(ImportError):
+            from microsandbox.errors import MicrosandboxError
 
-        if isinstance(error, MicrosandboxError):
-            print(f"error: {error}", file=sys.stderr)
-            return ExitCode.FINDING
+            if isinstance(error, MicrosandboxError):
+                print(f"error: {error}", file=sys.stderr)
+                return ExitCode.FINDING
         raise
 
     return ExitCode.SUCCESS

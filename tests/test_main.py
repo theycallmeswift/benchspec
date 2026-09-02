@@ -14,6 +14,7 @@ from textwrap import dedent
 import pytest
 
 from harnessbench import __main__
+from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.specs.schema import SchemaError
 
 
@@ -213,6 +214,54 @@ def test_sandbox_build_docker_preflight_failure_exits_two(
 
     assert exit_code == 2
     assert "docker daemon unreachable" in capsys.readouterr().err
+
+
+def test_sandbox_build_docker_runtime_failure_exits_one(
+    monkeypatch: object, capsys: object
+) -> None:
+    """A genuine Docker build failure is a finding (exit 1), not a usage error (exit 2).
+
+    SandboxRuntimeError subclasses RuntimeError, so this pins the branch ORDER: the
+    neutral-error branch must be checked before the preflight RuntimeError branch.
+    """
+
+    def failing_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Raise the neutral error a failed `docker commit` produces."""
+        raise SandboxRuntimeError("docker commit failed for `snap` (exit 1): no space left")
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
+
+    exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
+
+    assert exit_code == 1
+    assert "docker commit failed" in capsys.readouterr().err
+
+
+def test_sandbox_build_unexpected_error_survives_a_missing_microsandbox(
+    monkeypatch: object,
+) -> None:
+    """On a Docker-only install the fallback branch must not mask the real error.
+
+    The last `except` reaches for `microsandbox.errors` to classify a native microsandbox
+    failure. With the package absent — a perfectly ordinary Docker-only install — an
+    unguarded import raises ModuleNotFoundError, and the operator sees a bogus
+    missing-package message instead of what actually broke.
+    """
+
+    def failing_cli_build(
+        repo_root: object, *, set_name: object = None, config: object = None
+    ) -> None:
+        """Raise something the exit-code mapping does not recognize."""
+        raise ValueError("something unexpected broke")
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
+    monkeypatch.setitem(sys.modules, "microsandbox", None)
+    monkeypatch.setitem(sys.modules, "microsandbox.errors", None)
+
+    with pytest.raises(ValueError, match="something unexpected broke"):
+        __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
 
 
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
