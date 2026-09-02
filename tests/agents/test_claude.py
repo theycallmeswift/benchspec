@@ -9,6 +9,7 @@ import pytest
 
 from harnessbench.agents.claude import ClaudeCodeAgent
 from harnessbench.orchestration.results import parse_run_json
+from harnessbench.sandbox.errors import SandboxRuntimeError
 from tests.support import FakeExecOutput, FakeSandbox
 
 
@@ -616,3 +617,35 @@ def test_claude_invoke_extra_env_overrides_guest_env() -> None:
     assert kw["env"]["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home  # guest_env still present
+
+
+def test_invoke_records_a_neutral_sandbox_error_as_an_errored_arm() -> None:
+    """A backend-neutral runtime failure is recorded as an errored arm, never raised."""
+
+    class ExplodingSandbox:
+        """A guest whose exec fails the way a broken sandbox runtime does."""
+
+        async def exec(self: object, *args: object, **kwargs: object) -> object:
+            """Fail like a torn-down sandbox."""
+            raise SandboxRuntimeError("container 1234 is not running")
+
+    agent = ClaudeCodeAgent(auth_value="test-token")
+
+    result = asyncio.run(
+        agent.invoke(
+            ExplodingSandbox(),
+            "do the thing",
+            eval_id="e1",
+            config="alpha",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="sonnet",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert result.is_error is True
+    assert "container 1234 is not running" in result.result_text
+    assert result.result_text.startswith("<sandbox-error> ")

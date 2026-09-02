@@ -16,6 +16,7 @@ from harnessbench.agents.base import AgentCapabilities, BaseAgent
 from harnessbench.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from harnessbench.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from harnessbench.orchestration.results import RunResult, parse_stream_run
+from harnessbench.sandbox.errors import sandbox_error_types
 
 if TYPE_CHECKING:
     from harnessbench.grading.judges.config import JudgeConfig
@@ -299,8 +300,6 @@ class ClaudeCodeAgent(BaseAgent):
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
-        from microsandbox.errors import MicrosandboxError
-
         cmd = self.build_command(
             prompt,
             plugin_dir=plugin_dir,
@@ -310,6 +309,9 @@ class ClaudeCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+        # One tuple, every backend: the neutral error plus whatever native type the
+        # resolved runtime raises.
+        infra_errors = (TimeoutError, OSError, *sandbox_error_types())
         try:
             res = await GuestSandbox(sandbox).exec(
                 cmd,
@@ -320,7 +322,7 @@ class ClaudeCodeAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (TimeoutError, MicrosandboxError, OSError) as error:
+        except infra_errors as error:
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.

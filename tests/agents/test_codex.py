@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from harnessbench.agents.codex import CodexAgent, parse_codex_jsonl
+from harnessbench.sandbox.errors import SandboxRuntimeError
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -730,3 +731,35 @@ def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
 
     assert res.is_error is True
     assert "copy failed" in res.result_text
+
+
+def test_invoke_records_a_neutral_sandbox_error_as_an_errored_arm() -> None:
+    """A backend-neutral runtime failure is recorded as an errored arm, never raised."""
+
+    class ExplodingSandbox:
+        """A guest whose exec fails the way a broken sandbox runtime does."""
+
+        async def exec(self: object, *args: object, **kwargs: object) -> object:
+            """Fail like a torn-down sandbox."""
+            raise SandboxRuntimeError("container 1234 is not running")
+
+    agent = CodexAgent(auth_value="ck", auth_env="CODEX_API_KEY")
+
+    result = asyncio.run(
+        agent.invoke(
+            ExplodingSandbox(),
+            "do the thing",
+            eval_id="e1",
+            config="alpha",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="sonnet",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert result.is_error is True
+    assert "container 1234 is not running" in result.result_text
+    assert result.result_text.startswith("<sandbox-error> ")

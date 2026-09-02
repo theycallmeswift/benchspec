@@ -12,6 +12,7 @@ from harnessbench.agents.base import AgentCapabilities, BaseAgent
 from harnessbench.grading.trajectory import iter_events
 from harnessbench.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from harnessbench.orchestration.results import RunResult
+from harnessbench.sandbox.errors import sandbox_error_types
 
 if TYPE_CHECKING:
     from harnessbench.grading.judges.config import JudgeConfig
@@ -327,8 +328,6 @@ class CodexAgent(BaseAgent):
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
-        from microsandbox.errors import MicrosandboxError
-
         cmd = self.build_command(
             prompt,
             plugin_dir=plugin_dir,
@@ -339,6 +338,8 @@ class CodexAgent(BaseAgent):
             harness_args=harness_args,
             workdir=workdir,
         )
+        # RuntimeError stays because `_write_auth_json` raises a bare one.
+        infra_errors = (TimeoutError, OSError, RuntimeError, *sandbox_error_types())
         try:
             await self._write_auth_json(sandbox)
             res = await GuestSandbox(sandbox).exec(
@@ -348,7 +349,7 @@ class CodexAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (TimeoutError, MicrosandboxError, OSError, RuntimeError) as error:
+        except infra_errors as error:
             return RunResult(
                 eval_id,
                 config,

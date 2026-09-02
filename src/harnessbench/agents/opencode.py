@@ -27,6 +27,7 @@ from harnessbench.agents.base import AgentCapabilities, BaseAgent
 from harnessbench.grading.trajectory import iter_events
 from harnessbench.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from harnessbench.orchestration.results import RunResult
+from harnessbench.sandbox.errors import sandbox_error_types
 
 if TYPE_CHECKING:
     from harnessbench.grading.judges.config import JudgeConfig
@@ -396,8 +397,6 @@ class OpenCodeAgent(BaseAgent):
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
-        from microsandbox.errors import MicrosandboxError
-
         cmd = self.build_command(
             prompt,
             plugin_dir=plugin_dir,
@@ -408,6 +407,9 @@ class OpenCodeAgent(BaseAgent):
             harness_args=harness_args,
         )
 
+        # One tuple, every backend: the neutral error plus whatever native type the
+        # resolved runtime raises.
+        infra_errors = (TimeoutError, OSError, *sandbox_error_types())
         try:
             # Per-arm extra_env merges over guest_env(), arm env winning.
             env = {**self.guest_env(), **(extra_env or {})}
@@ -420,7 +422,7 @@ class OpenCodeAgent(BaseAgent):
                 # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
-        except (TimeoutError, MicrosandboxError, OSError) as error:
+        except infra_errors as error:
             return RunResult(
                 eval_id,
                 config,

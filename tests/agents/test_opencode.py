@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from harnessbench.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
+from harnessbench.sandbox.errors import SandboxRuntimeError
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -1148,3 +1149,35 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
     assert kw["env"]["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert kw["env"]["HOME"] == OpenCodeAgent.guest_home  # guest_env still present
+
+
+def test_invoke_records_a_neutral_sandbox_error_as_an_errored_arm() -> None:
+    """A backend-neutral runtime failure is recorded as an errored arm, never raised."""
+
+    class ExplodingSandbox:
+        """A guest whose exec fails the way a broken sandbox runtime does."""
+
+        async def exec(self: object, *args: object, **kwargs: object) -> object:
+            """Fail like a torn-down sandbox."""
+            raise SandboxRuntimeError("container 1234 is not running")
+
+    agent = OpenCodeAgent(auth_value="ok", auth_env="OPENROUTER_API_KEY")
+
+    result = asyncio.run(
+        agent.invoke(
+            ExplodingSandbox(),
+            "do the thing",
+            eval_id="e1",
+            config="alpha",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="anthropic/claude-sonnet-4-6",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert result.is_error is True
+    assert "container 1234 is not running" in result.result_text
+    assert result.result_text.startswith("<sandbox-error> ")
