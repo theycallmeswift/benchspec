@@ -30,15 +30,19 @@ import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from harnessbench.agents import CodingAgent
 from harnessbench.sandbox.errors import SandboxRuntimeError
 from harnessbench.sandbox.primitives import (
+    BASE_IMAGE,
     GUEST_WORKDIR,
     VM_CPUS,
     VM_MEMORY_MIB,
     FingerprintInputs,
+    bridge_skills_home,
     build_fingerprint_inputs,
+    run_environment_script,
 )
 from harnessbench.sandbox.provenance import ImageIdentity
 from harnessbench.specs.discovery import EnvConfig
@@ -78,6 +82,8 @@ REMOVE_TIMEOUT_SECONDS = 30.0
 
 OWNER_LABEL = "harnessbench.owner"
 OWNER_LABEL_VALUE = "harnessbench"
+# Prints the owner label, or `<no value>` when the container carries none.
+OWNER_LABEL_FORMAT = '{{index .Config.Labels "' + OWNER_LABEL + '"}}'
 RUN_LABEL = "harnessbench.run"
 # One nonce per harnessbench process: it makes this run's containers identifiable in
 # `docker ps` and lets a cleanup sweep tell a live sibling run's containers from its own.
@@ -385,6 +391,51 @@ async def _remove_container(
             f"{result.stderr.strip()[-500:] or '(no output)'}"
         ),
     )
+
+
+def build_container_name(agent_id: str) -> str:
+    """Return the name of the throwaway container a snapshot is provisioned in.
+
+    Folds in a short hash of the resolved working directory — harnessbench's repo root.
+    `build_snapshot` carries no repo-root argument, and the snapshot file lock in
+    `ensure_snapshot` only serializes builds within one repo, so two checkouts building a
+    snapshot for the same harness at the same time would otherwise share one name and the
+    pre-start replace in one would destroy the other's build mid-provision.
+    """
+    root_digest = hashlib.sha256(str(Path.cwd().resolve()).encode("utf-8")).hexdigest()[:8]
+    return container_name(f"harnessbench-build-{agent_id}-{root_digest}")
+
+
+async def _replace_container(name: str) -> None:
+    """Free a container name, but only by removing a container harnessbench started.
+
+    `replace=True` semantics: a container left behind by an aborted run must not collide
+    with this one. A container harnessbench did NOT start is never removed — `docker rm -f`
+    on a name collision is indistinguishable from `docker rm -f` on somebody's running
+    work, and the owner label is the only thing that tells them apart.
+
+    Raises:
+        SandboxRuntimeError: If the name is held by a container harnessbench does not own,
+            or the daemon could not answer, or the removal failed.
+    """
+    owner = await _docker(
+        "inspect", "--format", OWNER_LABEL_FORMAT, name, description=f"`docker inspect {name}`"
+    )
+    if owner.exit_code != 0:
+        if _CONTAINER_ABSENT_PATTERN.search(owner.stderr):
+            return
+        raise SandboxRuntimeError(
+            f"docker inspect for `{name}` exited {owner.exit_code}: "
+            f"{owner.stderr.strip()[-500:] or '(no output)'}"
+        )
+    if owner.stdout.strip() != OWNER_LABEL_VALUE:
+        raise SandboxRuntimeError(
+            f"container `{name}` already exists and is not owned by harnessbench — "
+            f"remove it yourself or free the name; harnessbench will not delete it"
+        )
+    outcome = await _remove_container(name)
+    if outcome.error is not None:
+        raise SandboxRuntimeError(outcome.error)
 
 
 @dataclass(frozen=True)
@@ -822,3 +873,77 @@ class DockerBackend:
                 f"docker reported no image digest for `{snapshot}`"
             )
         return ImageIdentity.available(digest)
+
+    def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
+        """Provision a container from the base image and commit it as the snapshot image."""
+        asyncio.run(self._build_snapshot_async(agent, name, env))
+
+    async def _build_snapshot_async(
+        self: object, agent: object, name: str, env: EnvConfig
+    ) -> None:
+        """Provision and seal the reusable snapshot image asynchronously.
+
+        Every failure leaves at the neutral error type, which `__main__` maps to exit 1:
+        a build that failed is a finding, not a usage error.
+
+        Raises:
+            SandboxRuntimeError: If the name is held by a foreign container, the base image
+                cannot start, a provisioning step fails, or the commit fails.
+        """
+        base_image = env.base_image or BASE_IMAGE
+        build_container = build_container_name(agent.id)
+        await _replace_container(build_container)
+        started = await _docker(
+            "run",
+            "--detach",
+            "--name",
+            build_container,
+            # Agents install their CLIs under /root and run with bypassPermissions: the
+            # sandbox, not the uid, is the containment boundary.
+            "--user",
+            "0:0",
+            *_resource_flags(),
+            *_label_flags(),
+            # An explicit entrypoint keeps the container alive regardless of what the
+            # base image declares, so provisioning has something to exec into.
+            "--entrypoint",
+            "sleep",
+            base_image,
+            "infinity",
+            description=f"`docker run {base_image}`",
+        )
+        if started.exit_code != 0:
+            # A nonzero `run --detach` can still leave a created container behind.
+            await _remove_container(build_container)
+            raise SandboxRuntimeError(
+                f"docker run failed for base image `{base_image}` "
+                f"(exit {started.exit_code}): {started.stderr.strip()[-2000:]}"
+            )
+        sandbox = DockerSandbox(build_container)
+        try:
+            try:
+                await agent.provision(sandbox)
+                await bridge_skills_home(sandbox, agent)
+                await run_environment_script(sandbox, agent, env)
+            except SandboxRuntimeError:
+                raise
+            except RuntimeError as error:
+                # These three raise bare RuntimeErrors, which __main__ maps to exit 2 (a
+                # usage error). A build that genuinely failed is exit 1.
+                raise SandboxRuntimeError(
+                    f"docker snapshot build failed for `{name}`: {error}"
+                ) from error
+            committed = await _docker(
+                "commit",
+                build_container,
+                image_ref(name),
+                description=f"`docker commit {build_container}`",
+            )
+            if committed.exit_code != 0:
+                raise SandboxRuntimeError(
+                    f"docker commit failed for `{name}` (exit {committed.exit_code}): "
+                    f"{committed.stderr.strip()[-2000:]}"
+                )
+        finally:
+            # `_remove_container` never raises, so teardown can never mask a build failure.
+            await _remove_container(build_container)

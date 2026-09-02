@@ -829,3 +829,191 @@ def test_stop_without_a_restore_owner_skips_the_chown(monkeypatch: object) -> No
     asyncio.run(sandbox.stop())
 
     assert [call["args"][0] for call in calls] == ["rm"]
+
+
+class RecordingAgent:
+    """A CodingAgent stand-in that records the provisioning calls a build makes."""
+
+    id = "claude-code"
+    guest_home = "/root"
+    skill_load_dir = "/root/.claude/skills"
+
+    def __init__(self: object) -> None:
+        """Start with an empty provisioning log."""
+        self.provisioned: list = []
+
+    def guest_env(self: object) -> dict:
+        """Return the guest environment the build steps run under."""
+        return {"HOME": "/root"}
+
+    def bridge_skills_home_script(self: object) -> str:
+        """Return the skills-home bridge script."""
+        return "ln -s /home/harnessbench/skills /root/.claude/skills"
+
+    async def provision(self: object, sandbox: object) -> None:
+        """Record that the agent installed its CLI into the build container."""
+        self.provisioned.append(sandbox.container)
+
+
+def _fake_build_docker(monkeypatch: object, stdout: str = "") -> list:
+    """Fake the async seam for a build: no stale container exists, everything succeeds."""
+    calls: list = []
+
+    async def fake_docker(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Record every docker call, reporting no pre-existing container."""
+        calls.append(args)
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: build")
+        return DockerResult(args, 0, stdout, "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake_docker)
+    return calls
+
+
+def test_build_container_name_is_scoped_to_the_repo_root(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Two checkouts building one harness's snapshot never share a build container.
+
+    `build_snapshot` carries no repo-root argument, so the name folds in a hash of the
+    resolved working directory. Sharing one name would let the pre-start replace in one
+    checkout destroy the other checkout's build container mid-provision — and the snapshot
+    file lock only serializes builds *within* a repo.
+    """
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    monkeypatch.chdir(first)
+    from_first = docker_mod.build_container_name("claude-code")
+    monkeypatch.chdir(second)
+    from_second = docker_mod.build_container_name("claude-code")
+
+    assert from_first.startswith("harnessbench-build-claude-code-")
+    assert from_first != from_second
+
+
+def test_build_snapshot_runs_provision_bridge_script_then_commits(monkeypatch: object) -> None:
+    """The Docker build mirrors the microsandbox build and seals with `docker commit`."""
+    calls = _fake_build_docker(monkeypatch, stdout="sha256:committed\n")
+    build_container = docker_mod.build_container_name("claude-code")
+    agent = RecordingAgent()
+    env = EnvConfig(script=b"apt-get install -y jq\n", script_path="s.sh")
+
+    docker_mod.DockerBackend().build_snapshot(
+        agent, "harnessbench-docker-claude-code-latest-ab12cd34", env
+    )
+
+    assert calls[0] == ("inspect", "--format", docker_mod.OWNER_LABEL_FORMAT, build_container)
+    assert calls[1] == (
+        "run", "--detach", "--name", build_container,
+        "--user", "0:0",
+        "--cpus", "2", "--memory", "2048m",
+        "--label", "harnessbench.owner=harnessbench",
+        "--label", f"harnessbench.run={docker_mod.RUN_NONCE}",
+        "--entrypoint", "sleep", "ubuntu:latest", "infinity",
+    )
+    assert agent.provisioned == [build_container]
+    assert calls[-2] == (
+        "commit",
+        build_container,
+        "harnessbench-docker-claude-code-latest-ab12cd34-0d462a07",
+    )
+    assert calls[-1] == ("rm", "-f", build_container)
+
+
+def test_build_snapshot_uses_the_declared_base_image(monkeypatch: object) -> None:
+    """A declared base_image replaces the default in the build container's run."""
+    calls = _fake_build_docker(monkeypatch)
+
+    docker_mod.DockerBackend().build_snapshot(
+        RecordingAgent(), "snap", EnvConfig(base_image="python:3.12-slim")
+    )
+
+    assert "python:3.12-slim" in calls[1]
+
+
+def test_build_snapshot_refuses_to_remove_a_container_it_does_not_own(
+    monkeypatch: object,
+) -> None:
+    """A same-named container without harnessbench's label is reported, never destroyed.
+
+    `docker rm -f` on a name collision is indistinguishable from `docker rm -f` on
+    somebody's long-running work. The owner label is the only thing that tells them apart,
+    so an unlabelled container stops the build instead of being removed.
+    """
+
+    async def fake_docker(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Report an existing container that carries no harnessbench owner label."""
+        if args[0] == "inspect":
+            return DockerResult(args, 0, "<no value>\n", "")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", fake_docker)
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="not owned by harnessbench"):
+        docker_mod.DockerBackend().build_snapshot(RecordingAgent(), "snap", EnvConfig())
+
+
+def test_build_snapshot_raises_a_neutral_error_when_the_base_run_fails(
+    monkeypatch: object,
+) -> None:
+    """A base image that cannot start is a loud runtime failure, and leaves nothing behind.
+
+    `docker run --detach` can leave a created-but-not-started container behind when it
+    exits nonzero, so the failure path attempts a removal before it raises.
+    """
+    calls: list = []
+
+    async def failing_run(
+        *args: str, stdin: object = None, timeout: object = None, description: object = None
+    ) -> object:
+        """Report no stale container, fail the run, succeed on cleanup."""
+        calls.append(args)
+        if args[0] == "inspect":
+            return DockerResult(args, 1, "", "Error: No such object: build")
+        if args[0] == "run":
+            return DockerResult(args, 125, "", "Unable to find image 'nope:latest' locally")
+        return DockerResult(args, 0, "", "")
+
+    monkeypatch.setattr(docker_mod, "_docker", failing_run)
+    build_container = docker_mod.build_container_name("claude-code")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="Unable to find image"):
+        docker_mod.DockerBackend().build_snapshot(
+            RecordingAgent(), "snap", EnvConfig(base_image="nope:latest")
+        )
+
+    assert calls[-1] == ("rm", "-f", build_container)
+
+
+def test_build_snapshot_reports_a_failed_provision_as_a_sandbox_runtime_error(
+    monkeypatch: object,
+) -> None:
+    """A failed provision tears the container down AND reports at the neutral error type.
+
+    `provision` raises a bare RuntimeError, which `__main__` maps to exit 2 — a usage
+    error. A build that genuinely failed is exit 1, so the Docker build boundary re-raises
+    it as SandboxRuntimeError with the original chained.
+    """
+    calls = _fake_build_docker(monkeypatch)
+    build_container = docker_mod.build_container_name("claude-code")
+
+    class ExplodingAgent(RecordingAgent):
+        """An agent whose CLI install fails mid-build."""
+
+        async def provision(self: object, sandbox: object) -> None:
+            """Fail the way a broken installer does."""
+            raise RuntimeError("claude-code provision failed (exit 1)")
+
+    with pytest.raises(docker_mod.SandboxRuntimeError, match="provision failed") as raised:
+        docker_mod.DockerBackend().build_snapshot(ExplodingAgent(), "snap", EnvConfig())
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert calls[-1] == ("rm", "-f", build_container)
+    assert not any(call[0] == "commit" for call in calls)
