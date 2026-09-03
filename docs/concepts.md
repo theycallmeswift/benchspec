@@ -58,7 +58,7 @@ judge. It never grades anything itself. Reference:
 ## Cell
 
 One `(eval × arm)` pair. Each cell becomes one parametrized pytest test that
-boots its own guest — a microVM under microsandbox, a container under docker —
+boots its own sandbox — a microVM under microsandbox, a container under docker —
 runs the agent, and grades the result. A two-eval, three-arm set has six
 cells. Example: `test_eval[hello-greets-by-name-trial]`.
 
@@ -74,7 +74,7 @@ variance, zero judge cost. Example: "./out/report.md exists" binds to
 
 The clean room is a fresh temporary directory on the host, seeded from the
 eval's `workspace/` folder (or empty), that is mounted read-write into the
-guest at `/workspace`. It is the agent's working directory, and the host
+sandbox at `/workspace`. It is the agent's working directory, and the host
 grades the same directory afterward. Every path in an eval is written
 `./`-relative to it. Example: an eval with `workspace/request.md` starts the
 agent in a directory containing exactly `request.md`.
@@ -116,7 +116,7 @@ identity, `(group, eval_id)`, and the artifact tree is keyed on it. Sibling
 ## Harness
 
 The agent CLI under test: `claude-code`, `codex`, or `opencode`. Each is
-one adapter that knows how to install the CLI into the guest, which credential it
+one adapter that knows how to install the CLI into the sandbox, which credential it
 needs, how to run it headless, and how to read its output stream. Chosen per arm.
 Details and how to add one: [harnesses.md](harnesses.md).
 
@@ -161,7 +161,7 @@ boot from them in seconds. Reference: [sandbox.md](sandbox.md).
 
 ## `setup.sh`
 
-An optional script beside the eval file that runs inside the guest before the
+An optional script beside the eval file that runs inside the sandbox before the
 prompt, with `HARNESSBENCH_ARM` set to the arm's name. It is the one place arms
 diverge: the canonical script installs a skill on `trial` and exits early on
 `baseline`. Reference:

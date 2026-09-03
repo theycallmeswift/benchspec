@@ -1,20 +1,19 @@
 # The sandbox
 
 This page explains where an eval cell actually runs: why every cell gets its own
-sandbox, what a snapshot is and when it rebuilds, what the guest can see, and how
-credentials reach it. It is for anyone who wants to trust or customize the
-isolation; the [quickstart](quickstart.md) does not require it. Terms (cell, clean
-room, `/workspace`, `/project`) are defined in [concepts.md](concepts.md).
+sandbox, what a snapshot is and when it rebuilds, what the sandbox can see, and
+how credentials reach it. The [quickstart](quickstart.md) does not require it.
+Terms (cell, clean room, `/workspace`, `/project`) are defined in
+[concepts.md](concepts.md).
 
-harnessbench runs every cell in its own sandboxed guest because an agent under
-test executes arbitrary commands, and the measurement is only honest if the agent
+harnessbench runs every cell in its own sandbox because an agent under test
+executes arbitrary commands, and the measurement is only honest if the agent
 starts from a known image, sees only the files the eval seeded, and cannot touch
-your machine, your credentials, or earlier runs' artifacts. What kind of guest
-that is depends on the backend: under `microsandbox` (the default) it is a
-**microVM** — a small virtual machine with its own kernel, booted in about a
-second, with hardware isolation like a full VM but startup cost closer to a
-container; under `docker` it is a container. The isolation tradeoff between the
-two is real, not cosmetic — see the table and callout below.
+your machine, your credentials, or earlier runs' artifacts. The sandbox kind
+depends on the backend: `microsandbox` (default) boots a **microVM** —
+hardware isolation like a full VM, startup cost like a container; `docker`
+boots a plain container. The isolation tradeoff is real, not cosmetic — see the
+table and callout below.
 
 Isolation sits behind a `SandboxBackend` seam: preflight, the snapshot cache,
 and the per-cell mounts belong to the backend, and everything else in
@@ -23,21 +22,18 @@ key, and two are implemented:
 
 | `sandbox` | Runtime | Host requirement | Isolation |
 |---|---|---|---|
-| `microsandbox` (default) | [microsandbox](https://github.com/superradcompany/microsandbox) microVMs | Apple Silicon Mac, or Linux with `/dev/kvm` | Own kernel; credentials injected at the network boundary and never readable in the guest |
-| `docker` | Docker containers | macOS or Linux with a **local** Docker Engine or Docker Desktop; Windows is untested and a remote `DOCKER_HOST` is not supported | Shared host kernel; credentials are plain environment variables the guest can read |
+| `microsandbox` (default) | [microsandbox](https://github.com/superradcompany/microsandbox) microVMs | Apple Silicon Mac, or Linux with `/dev/kvm` | Own kernel; credentials injected at the network boundary and never readable in the sandbox |
+| `docker` | Docker containers | macOS or Linux with a **local** Docker Engine or Docker Desktop; Windows is untested and a remote `DOCKER_HOST` is not supported | Shared host kernel; credentials are plain environment variables the sandbox can read |
 
 The contract on this page — the mounts, the staging rules, the cache identity —
 holds for both. Where they differ (cache location, sizing, credential handling)
 the difference is labeled.
 
 > **Best practice:** treat `docker` as an isolation downgrade, not a drop-in
-> swap. A container shares the host kernel, and the agent runs as root with
-> `bypassPermissions` on the promise that the sandbox is the containment
-> boundary. Docker also has no equivalent of microsandbox's host-scoped secrets,
-> so the arm's provider credential is a readable environment variable inside the
-> guest — an agent under test can print it. Choose `docker` only when
-> microsandbox cannot run on your host, and treat the credential as exposed to
-> whatever the agent does.
+> swap. The agent runs as root with `bypassPermissions` on the promise that the
+> sandbox is the containment boundary, and the provider credential is exposed to
+> whatever the agent does. Choose `docker` only when microsandbox cannot run on
+> your host.
 
 ## Host requirements and preflight
 
@@ -59,7 +55,7 @@ as exit `2`, before a single cell boots or a paid call is made.
 ## Snapshots: build once, boot many
 
 Booting a bare OS image and installing an agent CLI takes minutes; an eval run
-boots dozens of guests. So harnessbench builds one **snapshot** per configuration
+boots dozens of sandboxes. So harnessbench builds one **snapshot** per configuration
 and boots every cell from it. A snapshot is sealed in five steps:
 
 1. **Base image**: `ubuntu:latest` by default, or `[tool.harnessbench] base_image`.
@@ -72,20 +68,18 @@ and boots every cell from it. A snapshot is sealed in five steps:
 4. **Environment script**: `[tool.harnessbench] environment_script`, if declared,
    runs under `set -e` — the escape hatch for extra system tools a suite needs.
    A failing command aborts the build loudly.
-5. **Seal**: the guest stops (microsandbox) or is committed (`docker commit`), and
-   the snapshot is recorded.
+5. **Seal**: the sandbox stops (microsandbox) or is committed (`docker commit`),
+   and the snapshot is recorded.
 
 Snapshots are cached — for microsandbox under `~/.microsandbox/snapshots/`, for
 Docker as local images in the daemon's image store — and named
-`harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. The backend id
-is the first ingredient of the 8-character fingerprint, so a Docker and a
-microsandbox snapshot of the same agent and environment never collide. List the
+`harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. List the
 Docker ones with `docker images "harnessbench-docker-*"` and reclaim the space
 with `docker image rm`; they rebuild on demand.
 
 The 8-character fingerprint hashes four ingredients:
 
-- the backend id,
+- the backend id (so a Docker and a microsandbox snapshot never collide),
 - the declared base-image reference,
 - the harness's install script,
 - the environment script's *bytes*.
@@ -123,9 +117,9 @@ config or host-preflight problem, and `1` on a genuine build failure.
 
 ## Inside a running cell
 
-Each `(eval × arm × sample)` boots its own guest from the snapshot — a microVM
-under microsandbox, a container under Docker, both sized 2 vCPUs and 2 GiB — and
-tears it down after the turn. A cell, in order:
+Each `(eval × arm × sample)` boots its own sandbox from the snapshot — a
+microVM under microsandbox, a container under Docker, both sized 2 vCPUs and
+2 GiB — and tears it down after the turn. A cell, in order:
 
 1. Stages the project (see below).
 2. Boots from the snapshot.
@@ -136,13 +130,13 @@ tears it down after the turn. A cell, in order:
    tool-call stream.
 6. Tears down and removes the stage.
 
-The guest sees three paths:
+The sandbox sees three paths:
 
 | Path | Mount | Contents |
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory. The host grades this directory afterward. |
-| `/project` | read-only | A staged copy of your repo (below). Exists so the eval's own `setup.sh` can copy the skill under test into the guest; read-only, so nothing an agent or script does can write back into your checkout. |
-| `/home/harnessbench/skills` | in-guest | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
+| `/project` | read-only | A staged copy of your repo (below). Exists so the eval's own `setup.sh` can copy the skill under test into the sandbox; read-only, so nothing an agent or script does can write back into your checkout. |
+| `/home/harnessbench/skills` | in-sandbox | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
 ### What `/project` contains
 
@@ -173,11 +167,11 @@ and mounts that:
   `setup.sh`.
 - **Under `docker`**, the same declaration becomes a plain container environment
   variable. Docker has no host-scoping primitive, so the value IS readable in the
-  guest and `allow_hosts` is not enforced. Prefer a narrowly-scoped API key over a
+  sandbox and `allow_hosts` is not enforced. Prefer a narrowly-scoped API key over a
   subscription token for Docker runs.
 - The one file-shaped exception, on either backend, is Codex subscription auth:
   `CODEX_AUTH_JSON_PATH` is mounted read-only and copied to
-  `/root/.codex/auth.json` inside the guest.
+  `/root/.codex/auth.json` inside the sandbox.
 
 Per-harness credential details live in [`harnesses.md`](harnesses.md).
 

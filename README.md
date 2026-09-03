@@ -82,7 +82,7 @@ Then:
 ```bash
 harnessbench lint      # static checks on the assertions
 harnessbench analyze   # which assertions grade deterministically, which go to the judge
-harnessbench run       # every (eval × arm) in its own guest, graded, reported
+harnessbench run       # every (eval × arm) in its own sandbox, graded, reported
 ```
 
 ## What you need
@@ -96,7 +96,7 @@ harnessbench run       # every (eval × arm) in its own guest, graded, reported
 
 Credentials can live in a repo-root `.env`. A graded run can touch up to three
 vendors: the agent's, Gemini for the binder, and the judge's. `lint` is free;
-`analyze` and `run` spend API calls, and `run` also boots guests. Preflight lists
+`analyze` and `run` spend API calls, and `run` also boots sandboxes. Preflight lists
 every missing piece and exits before anything is spent.
 
 ## How a run works
@@ -114,7 +114,7 @@ flowchart LR
 
 Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
-1. **Boots a guest** — a microVM under microsandbox, a container under docker —
+1. **Boots a sandbox** — a microVM under microsandbox, a container under docker —
    from a cached snapshot with the agent CLI already installed. The first run
    builds the snapshot (a few minutes); later runs reuse it, or pay the cost up
    front with `harnessbench sandbox:build`.
@@ -129,19 +129,19 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
    it can do so without risk; the judge grades everything else from the
    collected evidence alone.
 
-Two guarantees hold throughout, though the second is backend-dependent. Nothing
-in the guest can write back to your checkout: `setup.sh` reaches the skill under
-test through a read-only staged copy of your repo at `/project` (what a
-`git clone` would contain — never `.env`, `.git`, or earlier runs' artifacts).
-And under the default `microsandbox` backend, provider credentials are injected
-at the network boundary, never a readable environment variable in the guest;
-`docker` has no equivalent, so there the credential IS a readable environment
-variable (see [docs/sandbox.md](docs/sandbox.md)).
+Two guarantees hold; the second is backend-dependent. Nothing in the sandbox
+can write back to your checkout: `setup.sh` reaches the skill under test through
+a read-only staged copy of your repo at `/project` (what a `git clone` would
+contain — never `.env`, `.git`, or earlier runs' artifacts). Under the default
+`microsandbox` backend, provider credentials are injected at the network
+boundary, never a readable environment variable in the sandbox; `docker` has no
+equivalent, so there the credential IS a readable environment variable (see
+[docs/sandbox.md](docs/sandbox.md)).
 
 `harnessbench run` is pytest underneath, and everything after `--` goes to
 pytest verbatim: `harnessbench run -- -k greets-by-name` (equivalently
 `pytest -k greets-by-name`) runs one eval, `-n 8` fans cells across eight
-guests, and `--count 5` samples each cell five times so the report can flag a
+sandboxes, and `--count 5` samples each cell five times so the report can flag a
 delta that sits within noise.
 
 ## Why harnessbench

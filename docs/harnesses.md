@@ -8,7 +8,7 @@ judge, snapshot) are defined in [concepts.md](concepts.md).
 
 A **harness** is the agent CLI an arm drives: the thing under test.
 harnessbench keeps everything harness-specific (how to install the CLI into the
-guest, which credentials it needs, how to build its headless command, how to
+sandbox, which credentials it needs, how to build its headless command, how to
 parse its stream) behind one interface, the `CodingAgent` protocol, so the
 sandbox lifecycle, grading, and reporting never name a concrete agent. Three
 harnesses ship in-tree; adding another is one adapter file plus a registry entry.
@@ -56,13 +56,13 @@ Notes that matter in practice:
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.
-- **Credentials are declared once, injected per backend.** Each adapter declares
-  its credential and the provider hosts it may be used toward. Under
-  `microsandbox` that becomes a host-scoped secret substituted at the network
-  boundary — never a readable guest variable. Under `docker` it becomes a plain
-  container environment variable, readable in the guest, because Docker has no
-  scoping equivalent. OpenCode's quirk holds either way: a host `GEMINI_API_KEY`
-  is injected under the SDK's expected `GOOGLE_GENERATIVE_AI_API_KEY` name.
+- **Credentials are declared once, injected per backend.** Each adapter
+  declares its credential and the hosts it may reach. Under `microsandbox` that
+  becomes a host-scoped secret at the network boundary — never a readable
+  sandbox variable. Under `docker`, with no scoping equivalent, it's a plain
+  container variable the sandbox can read. Either way, OpenCode's quirk holds: a
+  host `GEMINI_API_KEY` injects under the SDK's expected
+  `GOOGLE_GENERATIVE_AI_API_KEY` name.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
   your tokens to its invocation but rejects flags harnessbench owns (model, effort,
   prompt delivery, output format, session, and permission controls) including
@@ -127,7 +127,7 @@ The steps:
    name becomes a legal `harness` value everywhere at once.
 3. Test against `harnessbench.testing.FakeSandbox`, a recording sandbox double, so
    command construction, secret injection, and stream parsing are unit-tested
-   without booting a guest. Mirror an existing suite under `tests/agents/`.
+   without booting a sandbox. Mirror an existing suite under `tests/agents/`.
 4. Verify with `make test` and `make lint`, then prove an end-to-end boot by
    running a real set with an arm on the new harness.
 
