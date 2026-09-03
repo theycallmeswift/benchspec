@@ -4,7 +4,6 @@
     "pr": "",
     "sessionUrl": false
   },
-  "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
       "Bash(make test)",
