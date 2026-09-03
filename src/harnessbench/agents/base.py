@@ -176,9 +176,9 @@ class GuestCredential:
     is part of what selecting `sandbox = "docker"` opts into.
     """
 
-    env_name: str  # the variable name the agent's CLI reads INSIDE the guest
+    env_name: str
     value: str
-    allow_hosts: tuple[str, ...]  # provider hosts the value may be used toward
+    allow_hosts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
