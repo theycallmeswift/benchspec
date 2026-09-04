@@ -10,7 +10,7 @@ arm's delta against the set's baseline.
 
 from __future__ import annotations
 
-__version__ = "0.1.0a0"
+__version__ = "0.0.1"
 
 from harnessbench.agents import CodingAgent, make_agent
 
