@@ -1,0 +1,24 @@
+# tests/fixtures/sandbox/two-backends.toml
+# Fail-fast fixture. This file contains an unsupported `sandbox = "docker"` set, and
+# validation is eager in parse_sets, so LOADING OR SELECTING ANY set in this file exits 2:
+#   harnessbench run              --config tests/fixtures/sandbox/two-backends.toml   -> exit 2
+#   harnessbench run --set micro  --config tests/fixtures/sandbox/two-backends.toml   -> exit 2 (still)
+# `resolved_run_set` calls `parse_sets` on the whole sets table before any set is
+# selected, so the docker set's SchemaError fails the file even when only `micro` is
+# requested; pytest maps it to a UsageError, i.e. exit 2.
+# `harnessbench sandbox:build --config tests/fixtures/sandbox/two-backends.toml`
+# also exits 2 selecting either set, for the same eager-validation reason.
+[tool.harnessbench]
+default-set = "micro"
+
+[tool.harnessbench.sets.micro]
+model = "sonnet"
+sandbox = "microsandbox"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]
+
+[tool.harnessbench.sets.dock]
+model = "sonnet"
+sandbox = "docker"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]

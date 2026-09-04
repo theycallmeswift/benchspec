@@ -1,0 +1,15 @@
+# tests/fixtures/sandbox/microsandbox.toml
+# Accept-path fixture: a single microsandbox set that parses and resolves cleanly.
+# `parse_sets` + `resolve_set` on this file yield
+#   Set(sandbox="microsandbox", runner="pytest", ...)
+# with no error, and `harnessbench sandbox:build --config tests/fixtures/sandbox/
+# microsandbox.toml` (and `--set micro`) resolves this set and drives the build from
+# its microsandbox backend.
+[tool.harnessbench]
+default-set = "micro"
+
+[tool.harnessbench.sets.micro]
+model = "sonnet"
+sandbox = "microsandbox"
+baseline = "baseline"
+arms = [{ name = "baseline", harness = "claude-code" }]

@@ -1,0 +1,80 @@
+name: Evals
+
+# Model-backed eval suites: they cost money and need provider secrets, so each job
+# runs only on internal pull requests that touch what it measures, or on demand.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    # One flag per suite, read by that suite's job. A manual run skips the filter and
+    # every suite runs.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      binder: ${{ steps.filter.outputs.binder }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Detect which suites this change touches
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            binder:
+              - src/harnessbench/grading/binder.py
+              - evals/binder/**
+              - .github/workflows/evals.yml
+
+  binder:
+    # The corpus is the binder's false-positive gate. It needs the Gemini secret,
+    # which GitHub withholds from fork PRs and from Dependabot runs (a Dependabot
+    # touch to this file only moves action pins).
+    needs: changes
+    if: >-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        (needs.changes.outputs.binder == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         github.actor != 'dependabot[bot]')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run the binder corpus
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: make evals
+
+      - name: Upload the per-draw records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binder-results
+          path: tmp/binder_results/
+          if-no-files-found: ignore

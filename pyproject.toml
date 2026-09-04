@@ -1,0 +1,134 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harnessbench"
+dynamic = ["version"]
+description = "harnessbench is a framework for evaluating AI agents with repeatable, isolated benchmarks. Write evals as Markdown, run each eval across named benchmark arms, and compare how agent behavior changes by harness, model, effort, and environment."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Swift", email = "swift@majorleaguehacking.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "pytest>=8",
+    "python-dotenv>=1.0",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# Agent CLIs install out-of-band; extras document supported integrations.
+claude = []
+codex = []
+opencode = []
+microsandbox = ["microsandbox>=0.6.16,<0.7"]
+testing = []
+
+[dependency-groups]
+dev = [
+    "houserules>=0.1.1,<1.0.0",
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "pytest-repeat>=0.9,<1",
+    "ruff>=0.16",
+    "microsandbox>=0.6.16,<0.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/theycallmeswift/harnessbench"
+Documentation = "https://github.com/theycallmeswift/harnessbench/tree/dev/docs"
+Issues = "https://github.com/theycallmeswift/harnessbench/issues"
+
+[project.scripts]
+harnessbench = "harnessbench.__main__:main"
+
+[project.entry-points.pytest11]
+harnessbench = "harnessbench.runners.pytest"
+
+[tool.hatch.version]
+path = "src/harnessbench/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harnessbench"]
+
+[tool.hatch.build.targets.sdist]
+# Ship what a downstream builder needs: the package, its tests and the fixtures they
+# read, and the user docs. Planning records, agent config, the lockfile, and CI stay
+# in the repository.
+include = [
+    "src/harnessbench",
+    "tests",
+    "evals",
+    "docs/*.md",
+    "docs/style",
+    "Makefile",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors: syntax-adjacent readability and whitespace.
+    "F",      # Pyflakes: undefined names, unused imports, and invalid constructs.
+    "I",      # isort: stdlib, third-party, local import grouping and ordering.
+    "UP",     # pyupgrade: modern Python syntax for the supported version range.
+    "FA",     # flake8-future-annotations: require postponed annotations.
+    "D",      # pydocstyle: module, class, and function docstring requirements.
+    "ANN",    # flake8-annotations: function argument and return annotations.
+    "TID",    # flake8-tidy-imports: absolute imports and banned import shapes.
+    "PT",     # flake8-pytest-style: pytest-specific readability rules.
+    "B",      # flake8-bugbear: likely bugs and surprising Python behavior.
+    "A",      # flake8-builtins: avoid shadowing Python builtins.
+    "RUF100", # Ruff: remove stale noqa suppressions while houserules bans suppressions.
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "evals"]
+markers = [
+    "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals`)",
+    "harnessbench: skill-eval cases run via `harnessbench run` or `make e2e` (declared here too so importing harnessbench.orchestration.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
+]
+addopts = "-m 'not binder_corpus'"
+
+[tool.harnessbench]
+default-set = "e2e"
+eval_paths = ["evals"]
+
+[tool.harnessbench.sets.e2e]
+harness  = "claude-code"
+model    = "sonnet"
+effort   = "medium"
+baseline = "baseline"
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "baseline" },                                                   # installs no skill
+  { name = "trial" },                                                      # installs the skill, set defaults
+  { name = "trial-overrides", model = "opus", effort = "high", env = { GREETING_LOCALE = "en-GB" } },
+]
+
+[tool.harnessbench.judge]
+harness = "codex"
+model   = "gpt-5.5"

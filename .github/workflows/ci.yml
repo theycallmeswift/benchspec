@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        env:
+          GEMINI_API_KEY: test-key
+        run: make test
+
+  lint:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Check the lockfile is current
+        run: uv lock --check
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run Ruff
+        run: make lint:ruff
+
+      # Model-backed houserules needs the Gemini secret, which GitHub withholds
+      # from fork PRs and from Dependabot runs, and diffs against the PR base. Ruff
+      # above still runs everywhere; only gate this step.
+      - name: Run houserules
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: make lint:houserules LINT_BASE=origin/${{ github.base_ref }}
+
+  build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Build the wheel and sdist
+        run: uv build
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Verify the sdist holds only the intended files
+        run: |
+          tar tzf dist/*.tar.gz \
+            | sed 's#^[^/]*/##' \
+            | grep -v '^$' \
+            | grep -v -E '^(src/|tests/|evals/|docs/[a-z-]+\.md$|docs/style/|Makefile$|README\.md$|LICENSE$|pyproject\.toml$|PKG-INFO$|\.gitignore$)' \
+            > unexpected.txt || true
+          if [ -s unexpected.txt ]; then
+            echo "::error::unexpected files in the sdist:"
+            cat unexpected.txt
+            exit 1
+          fi
+
+      - name: Install the wheel into a clean environment and smoke it
+        run: |
+          uv venv --python 3.13 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/harnessbench --help
+          /tmp/smoke/bin/harnessbench lint .

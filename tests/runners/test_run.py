@@ -1,0 +1,295 @@
+"""The pure `run` flag translation into plugin `--harnessbench-*` option tokens.
+
+Each test builds a namespace inline and asserts the exact tokens `translate_run_flags`
+emits for it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import textwrap
+from pathlib import Path
+
+from harnessbench.runners import run
+from harnessbench.runners.run import translate_run_flags
+
+# The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
+# child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,
+# but no task arm executes and no sandbox or credentials are touched.
+
+_ARMS_TOML = textwrap.dedent(
+    """\
+    [tool.harnessbench]
+    default-set = "default"
+
+    [tool.harnessbench.sets.default]
+    harness = "claude-code"
+    model = "sonnet"
+    baseline = "baseline"
+    arms = [{name="baseline"}, {name="trial", model="opus"}]
+    """
+)
+
+_EVAL_MD = textwrap.dedent(
+    """\
+    ---
+    {}
+    ---
+
+    ## Prompt
+
+    Archive the source note.
+
+    ## Assertions
+
+    - [ ] source note archived
+    """
+)
+
+
+def _populated_eval_project(root: Path) -> None:
+    """Write a minimal but valid arms + one-eval project under `root` (no test_cases.py)."""
+    (root / "pyproject.toml").write_text(_ARMS_TOML)
+    evals = root / "skills" / "myskill" / "evals" / "myskill"
+    evals.mkdir(parents=True)
+    (evals / "alpha.eval.md").write_text(_EVAL_MD)
+
+
+def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
+    """Build a `run` namespace with every curated flag absent except the overrides."""
+    values: dict[str, object] = {
+        dest: None
+        for dest in (
+            "set",
+            "config",
+            "model",
+            "models",
+            "harness",
+            "effort",
+            "eval_paths",
+            "fail_under",
+            "judge_harness",
+            "judge_model",
+            "judge_effort",
+        )
+    }
+    values["env"] = []
+    values["passthrough"] = []
+    values.update(flags)
+    return argparse.Namespace(root=root, **values)
+
+
+class _FakeCompleted:
+    """A stand-in for `subprocess.CompletedProcess` exposing only `.returncode`."""
+
+    def __init__(self: object, returncode: int) -> None:
+        """Record the return code the fake runner should report."""
+        self.returncode = returncode
+
+
+def _runner_returning(returncode: int, recorder: dict[str, object]) -> object:
+    """Build a fake runner that records its argv/env and reports a fixed return code."""
+
+    def fake_runner(argv: list[str], env: dict[str, str] | None = None) -> _FakeCompleted:
+        """Record the spawned argv and env, then report the chosen return code."""
+        recorder["argv"] = argv
+        recorder["env"] = env
+        return _FakeCompleted(returncode)
+
+    return fake_runner
+
+
+def test_translates_set_to_harnessbench_set() -> None:
+    """Verify --set becomes an --harnessbench-set token."""
+    args = _run_namespace(Path("repo"), set="default")
+
+    tokens = translate_run_flags(args)
+
+    assert "--harnessbench-set=default" in tokens
+
+
+def test_translates_config_model_harness_effort() -> None:
+    """Verify config/model/harness/effort each become their --harnessbench-* token."""
+    args = _run_namespace(
+        Path("repo"),
+        config="harnessbench.toml",
+        model="opus",
+        harness="claude-code",
+        effort="high",
+    )
+
+    tokens = translate_run_flags(args)
+
+    assert "--harnessbench-config=harnessbench.toml" in tokens
+    assert "--harnessbench-model=opus" in tokens
+    assert "--harnessbench-harness=claude-code" in tokens
+    assert "--harnessbench-effort=high" in tokens
+
+
+def test_translates_models_and_eval_paths_and_fail_under() -> None:
+    """Verify the models sweep, eval paths, and fail-under gate each translate."""
+    args = _run_namespace(
+        Path("repo"),
+        models="opus,sonnet",
+        eval_paths="skills,evals",
+        fail_under="0.8",
+    )
+
+    tokens = translate_run_flags(args)
+
+    assert "--harnessbench-models=opus,sonnet" in tokens
+    assert "--harnessbench-eval-paths=skills,evals" in tokens
+    assert "--harnessbench-fail-under=0.8" in tokens
+
+
+def test_translates_common_judge_flags() -> None:
+    """Verify judge harness/model/effort each become their --harnessbench-judge-* token."""
+    args = _run_namespace(
+        Path("repo"),
+        judge_harness="gemini",
+        judge_model="gemini-2.5-pro",
+        judge_effort="low",
+    )
+
+    tokens = translate_run_flags(args)
+
+    assert "--harnessbench-judge-harness=gemini" in tokens
+    assert "--harnessbench-judge-model=gemini-2.5-pro" in tokens
+    assert "--harnessbench-judge-effort=low" in tokens
+
+
+def test_repeatable_env_emits_one_token_per_value() -> None:
+    """Verify a repeatable --env emits one --harnessbench-env token per value."""
+    args = _run_namespace(Path("repo"), env=["A=1", "B=2"])
+
+    tokens = translate_run_flags(args)
+
+    assert "--harnessbench-env=A=1" in tokens
+    assert "--harnessbench-env=B=2" in tokens
+
+
+def test_root_becomes_repo_root_token() -> None:
+    """Verify the root positional becomes a resolved --harnessbench-repo-root token."""
+    root = Path("some/dir")
+
+    tokens = translate_run_flags(_run_namespace(root))
+
+    assert tokens[0] == f"--harnessbench-repo-root={root.resolve()}"
+
+
+def test_absent_flags_add_nothing() -> None:
+    """Verify a namespace with no curated flags emits only the repo-root token."""
+    root = Path("some/dir")
+
+    tokens = translate_run_flags(_run_namespace(root))
+
+    assert tokens == [f"--harnessbench-repo-root={root.resolve()}"]
+
+
+def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None:
+    """Verify run spawns `python -m pytest` with translated flags and no `-p` plugin token."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"), set="default")
+    recorder: dict[str, object] = {}
+
+    exit_code = run.run(args, runner=_runner_returning(0, recorder))
+
+    assert exit_code == 0
+    assert recorder["argv"] == [
+        sys.executable,
+        "-m",
+        "pytest",
+        f"--harnessbench-repo-root={Path('repo').resolve()}",
+        "--harnessbench-set=default",
+    ]
+
+
+def test_run_forwards_passthrough_verbatim(monkeypatch: object) -> None:
+    """Verify passthrough args are appended verbatim as the argv tail."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"), passthrough=["-k", "hello", "-x"])
+    recorder: dict[str, object] = {}
+
+    run.run(args, runner=_runner_returning(0, recorder))
+
+    assert recorder["argv"][-3:] == ["-k", "hello", "-x"]
+
+
+def test_run_child_env_enables_plugin_autoload(monkeypatch: object) -> None:
+    """Verify the child env drops PYTEST_DISABLE_PLUGIN_AUTOLOAD so the plugin autoloads."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    args = _run_namespace(Path("repo"))
+    recorder: dict[str, object] = {}
+
+    run.run(args, runner=_runner_returning(0, recorder))
+
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in recorder["env"]
+
+
+def test_run_maps_gate_failure_to_one(monkeypatch: object) -> None:
+    """Verify a pytest status of 1 (tests failed) maps to exit 1."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"))
+
+    exit_code = run.run(args, runner=_runner_returning(1, {}))
+
+    assert exit_code == 1
+
+
+def test_run_maps_pytest_collection_usage_status_to_two(monkeypatch: object) -> None:
+    """Verify a pytest status of 2 (collection usage error) maps to exit 2."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"))
+
+    exit_code = run.run(args, runner=_runner_returning(2, {}))
+
+    assert exit_code == 2
+
+
+def test_run_maps_pytest_usage_error_status_to_two(monkeypatch: object) -> None:
+    """Verify a pytest status of 4 (usage error) maps to exit 2."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(Path("repo"))
+
+    exit_code = run.run(args, runner=_runner_returning(4, {}))
+
+    assert exit_code == 2
+
+
+def test_run_empty_root_reports_no_evals_without_spawning(
+    tmp_path: Path, capsys: object
+) -> None:
+    """Verify an empty root returns 5 with a readable message and never spawns the runner."""
+
+    def runner_that_must_not_run(argv: list[str], env: dict[str, str] | None = None) -> object:
+        """Fail loudly if the subprocess is spawned for an empty root."""
+        raise AssertionError("runner must not be called when no evals are discovered")
+
+    args = _run_namespace(tmp_path)
+
+    exit_code = run.run(args, runner=runner_that_must_not_run)
+
+    assert exit_code == 5
+    assert f"no evals discovered under {tmp_path.resolve()}" in capsys.readouterr().out
+
+
+def test_run_subprocess_collects_populated_fixture_cleanly(tmp_path: Path) -> None:
+    """Verify a real `--collect-only` subprocess loads the plugin once and maps success to 0."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, set="default", passthrough=["--collect-only"])
+
+    exit_code = run.run(args)
+
+    assert exit_code == 0
+
+
+def test_run_subprocess_unknown_set_exits_two(tmp_path: Path) -> None:
+    """Verify an unknown --set surfaces the collection UsageError as exit 2 end to end."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, set="does-not-exist", passthrough=["--collect-only"])
+
+    exit_code = run.run(args)
+
+    assert exit_code == 2
