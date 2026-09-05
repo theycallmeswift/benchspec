@@ -1,4 +1,4 @@
-"""Command dispatch for the `harnessbench` CLI entry point.
+"""Command dispatch for the `benchspec` CLI entry point.
 
 Each test drives `main` with real argv and asserts which subcommand handler ran and the
 root it resolved, with the handler stubbed so no eval discovery happens.
@@ -13,8 +13,8 @@ from textwrap import dedent
 
 import pytest
 
-from harnessbench import __main__
-from harnessbench.specs.schema import SchemaError
+from benchspec import __main__
+from benchspec.specs.schema import SchemaError
 
 
 def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Path:
@@ -39,7 +39,7 @@ def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Pa
 
 
 def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
-    """Verify `harnessbench analyze <dir>` routes to analyze.run with the resolved root."""
+    """Verify `benchspec analyze <dir>` routes to analyze.run with the resolved root."""
     seen: list[Path] = []
 
     def fake_run(root: Path) -> int:
@@ -56,7 +56,7 @@ def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
 
 
 def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
-    """Verify `harnessbench lint <dir>` still routes to lint.run with the resolved root."""
+    """Verify `benchspec lint <dir>` still routes to lint.run with the resolved root."""
     seen: list[Path] = []
 
     def fake_run(root: Path) -> int:
@@ -90,7 +90,7 @@ def test_run_command_splits_passthrough_at_double_dash(monkeypatch: object) -> N
 
 
 def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
-    """Verify `harnessbench run` routes to run.run and returns its exit code."""
+    """Verify `benchspec run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)
 
     exit_code = __main__.main(["run"])
@@ -179,7 +179,7 @@ def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object)
     ) -> None:
         """Raise the SchemaError a docker set produces at resolution."""
         raise SchemaError(
-            "[tool.harnessbench.sets.dock]: unsupported sandbox `docker` "
+            "[tool.benchspec.sets.dock]: unsupported sandbox `docker` "
             "(supported: ['microsandbox']). Docker is not implemented."
         )
 
@@ -298,11 +298,11 @@ def test_main_loads_repo_dotenv_for_every_subcommand(
 ) -> None:
     """Verify the CLI loads a repo-root `.env` before dispatching any subcommand."""
     _write_eval(tmp_path, ["./out.md exists"])
-    (tmp_path / ".env").write_text("HARNESSBENCH_DOTENV_SENTINEL=loaded\n")
+    (tmp_path / ".env").write_text("BENCHSPEC_DOTENV_SENTINEL=loaded\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HARNESSBENCH_DOTENV_SENTINEL", raising=False)
+    monkeypatch.delenv("BENCHSPEC_DOTENV_SENTINEL", raising=False)
 
     exit_code = __main__.main(["lint", str(tmp_path)])
 
     assert exit_code == 0
-    assert os.environ.get("HARNESSBENCH_DOTENV_SENTINEL") == "loaded"
+    assert os.environ.get("BENCHSPEC_DOTENV_SENTINEL") == "loaded"

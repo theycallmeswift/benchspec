@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from harnessbench.config.arms import (
+from benchspec.config.arms import (
     Arm,
     expand_env,
     parse_sets,
     resolve_set,
 )
-from harnessbench.specs.schema import SchemaError
+from benchspec.specs.schema import SchemaError
 
 
 def _sets_table(sets: object, default: object = "default", **extra: object) -> object:
@@ -49,7 +49,7 @@ def test_parse_sets_basic_default_and_baseline() -> None:
 
 def test_parse_sets_rejects_legacy_flat_config() -> None:
     """Verify parse sets rejects legacy flat config."""
-    # No [tool.harnessbench.sets.*] but the old flat shape present → fail-fast pointer.
+    # No [tool.benchspec.sets.*] but the old flat shape present → fail-fast pointer.
     with pytest.raises(SchemaError, match="eval set"):
         parse_sets(
             {
@@ -454,7 +454,7 @@ def test_resolve_set_does_not_expand_env_at_resolve_time() -> None:
 def test_resolve_set_unknown_cli_harness_raises() -> None:
     """Verify resolve set unknown cli harness raises."""
     # The arm declares no harness, so it inherits the set default — a bogus
-    # --harnessbench-harness override then reaches _materialize_arm and fails fast.
+    # --benchspec-harness override then reaches _materialize_arm and fails fast.
     rawsets, default = parse_sets(
         _sets_table(
             {
@@ -532,7 +532,7 @@ def test_resolve_set_models_sweep_dedupes_sanitized_name_collisions() -> None:
 def test_parse_sets_unsupported_runner_fails() -> None:
     """An unsupported runner fails fast naming the set, field, and supported values."""
     with pytest.raises(
-        SchemaError, match=r"tool\.harnessbench\.sets\.default.*runner.*jest.*pytest"
+        SchemaError, match=r"tool\.benchspec\.sets\.default.*runner.*jest.*pytest"
     ):
         parse_sets(
             _sets_table(
@@ -550,7 +550,7 @@ def test_parse_sets_unsupported_runner_fails() -> None:
 def test_parse_sets_unsupported_sandbox_fails_naming_set() -> None:
     """An unsupported sandbox (docker) fails fast naming Docker and the offending set."""
     with pytest.raises(
-        SchemaError, match=r"tool\.harnessbench\.sets\.default.*docker.*not implemented"
+        SchemaError, match=r"tool\.benchspec\.sets\.default.*docker.*not implemented"
     ):
         parse_sets(
             _sets_table(
@@ -614,7 +614,7 @@ def test_two_backends_fixture_fails_whole_file() -> None:
     )
 
     with pytest.raises(SchemaError, match="docker.*not implemented"):
-        parse_sets(raw["tool"]["harnessbench"])
+        parse_sets(raw["tool"]["benchspec"])
 
 
 def test_microsandbox_fixture_parses_and_resolves() -> None:
@@ -623,7 +623,7 @@ def test_microsandbox_fixture_parses_and_resolves() -> None:
         Path("tests/fixtures/sandbox/microsandbox.toml").read_text(encoding="utf-8")
     )
 
-    rawsets, default = parse_sets(raw["tool"]["harnessbench"])
+    rawsets, default = parse_sets(raw["tool"]["benchspec"])
     resolved = resolve_set(rawsets, default)
 
     assert resolved.sandbox == "microsandbox"

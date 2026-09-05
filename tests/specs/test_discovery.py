@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from harnessbench.specs import discovery, schema
-from harnessbench.specs.discovery import (
+from benchspec.specs import discovery, schema
+from benchspec.specs.discovery import (
     discover_eval_cases,
     resolve_environment_config,
     resolve_repo_root,
 )
-from harnessbench.specs.mdformat import MdFormatError
+from benchspec.specs.mdformat import MdFormatError
 
 
 class _FakeConfig:
@@ -29,9 +29,9 @@ class _FakeConfig:
 
     def getoption(self: object, option_name: object) -> object:
         """Getoption."""
-        if option_name == "harnessbench_repo_root":
+        if option_name == "benchspec_repo_root":
             return self._repo_root
-        if option_name == "harnessbench_eval_paths":
+        if option_name == "benchspec_eval_paths":
             return self._eval_paths
         return None
 
@@ -146,8 +146,8 @@ def test_discover_explicit_eval_paths_argument_overrides_defaults(tmp_path: obje
 
 
 def test_discover_reads_eval_paths_from_pyproject(tmp_path: object) -> None:
-    """Verify discover falls back to [tool.harnessbench] eval_paths when none is passed."""
-    (tmp_path / "pyproject.toml").write_text('[tool.harnessbench]\neval_paths = ["probes"]\n')
+    """Verify discover falls back to [tool.benchspec] eval_paths when none is passed."""
+    (tmp_path / "pyproject.toml").write_text('[tool.benchspec]\neval_paths = ["probes"]\n')
     _write_eval(tmp_path, "probes", "custom")
     _write_eval(tmp_path, "skills/real", "not-searched")
 
@@ -352,8 +352,8 @@ def test_resolve_eval_paths_defaults_when_unset(tmp_path: object) -> None:
 
 
 def test_resolve_eval_paths_reads_pyproject(tmp_path: object) -> None:
-    """Verify resolve_eval_paths reads [tool.harnessbench] eval_paths when no flag is set."""
-    (tmp_path / "pyproject.toml").write_text('[tool.harnessbench]\neval_paths = ["probes"]\n')
+    """Verify resolve_eval_paths reads [tool.benchspec] eval_paths when no flag is set."""
+    (tmp_path / "pyproject.toml").write_text('[tool.benchspec]\neval_paths = ["probes"]\n')
     config = _FakeConfig(repo_root=str(tmp_path))
 
     assert discovery.resolve_eval_paths(config) == ["probes"]
@@ -361,7 +361,7 @@ def test_resolve_eval_paths_reads_pyproject(tmp_path: object) -> None:
 
 def test_resolve_eval_paths_flag_overrides_pyproject(tmp_path: object) -> None:
     """Verify the CLI flag wins over pyproject and is split on commas."""
-    (tmp_path / "pyproject.toml").write_text('[tool.harnessbench]\neval_paths = ["probes"]\n')
+    (tmp_path / "pyproject.toml").write_text('[tool.benchspec]\neval_paths = ["probes"]\n')
     config = _FakeConfig(repo_root=str(tmp_path), eval_paths="a, b ,c")
 
     assert discovery.resolve_eval_paths(config) == ["a", "b", "c"]
@@ -372,10 +372,10 @@ def test_resolve_eval_paths_flag_overrides_pyproject(tmp_path: object) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_pyproject_table_reads_tool_harnessbench(tmp_path: object) -> None:
-    """Verify pyproject table reads tool harnessbench."""
+def test_pyproject_table_reads_tool_benchspec(tmp_path: object) -> None:
+    """Verify pyproject table reads tool benchspec."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.harnessbench]\nagent = "opencode"\neval_paths = ["evals/skills"]\n'
+        '[tool.benchspec]\nagent = "opencode"\neval_paths = ["evals/skills"]\n'
     )
     table = discovery.pyproject_table(tmp_path)
     assert table == {"agent": "opencode", "eval_paths": ["evals/skills"]}
@@ -393,7 +393,7 @@ def test_pyproject_table_missing_file_is_empty(tmp_path: object) -> None:
 
 def _write_pyproject(tmp_path: object, body: str) -> None:
     """Write pyproject."""
-    (tmp_path / "pyproject.toml").write_text(f"[tool.harnessbench]\n{body}", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(f"[tool.benchspec]\n{body}", encoding="utf-8")
 
 
 def test_env_config_absent_is_falsy_and_empty_digest(tmp_path: object) -> None:

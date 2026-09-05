@@ -1,4 +1,4 @@
-"""Schema tests for harnessbench.specs.schema — the self-contained `evals/<slug>/` shape."""
+"""Schema tests for benchspec.specs.schema — the self-contained `evals/<slug>/` shape."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import json
 
 import pytest
 
-from harnessbench.specs import schema as v
-from harnessbench.specs.schema import SchemaError, _validate, _validate_checker_obj
+from benchspec.specs import schema as v
+from benchspec.specs.schema import SchemaError, _validate, _validate_checker_obj
 
 
 def _doc(evals: list[dict]) -> dict:
     """Build the doc test fixture."""
-    return {"$schema": "harnessbench/v1", "evals": evals}
+    return {"$schema": "benchspec/v1", "evals": evals}
 
 
 def test_is_kebab() -> None:
@@ -32,7 +32,7 @@ def test_skill_name_rejected() -> None:
     with pytest.raises(SchemaError, match="unknown field"):
         _validate(
             {
-                "$schema": "harnessbench/v1",
+                "$schema": "benchspec/v1",
                 "skill_name": "ingest",
                 "evals": [{"id": "a", "prompt": "p", "assertions": ["x"]}],
             }
@@ -187,11 +187,11 @@ def test_skill_invoked_rejects_unknown_key() -> None:
 
 
 def test_former_trigger_doc_now_rejected() -> None:
-    """Verify a former harnessbench-trigger/v1 doc raises, naming only harnessbench/v1."""
+    """Verify a former benchspec-trigger/v1 doc raises, naming only benchspec/v1."""
     with pytest.raises(SchemaError) as ei:
         _validate(
             {
-                "$schema": "harnessbench-trigger/v1",
+                "$schema": "benchspec-trigger/v1",
                 "skill_name": "demo-skill",
                 "queries": [{"slug": "q-one", "query": "q", "should_trigger": True}],
             }
@@ -200,7 +200,7 @@ def test_former_trigger_doc_now_rejected() -> None:
     msg = str(ei.value)
     # The message names the sole supported schema and echoes the rejected value, but no
     # longer advertises the removed trigger schema as a supported option.
-    assert "harnessbench/v1" in msg
+    assert "benchspec/v1" in msg
     assert "trigger-evals.md" not in msg
 
 
@@ -227,5 +227,5 @@ def test_missing_schema_key_says_how_to_add_it() -> None:
     with pytest.raises(v.SchemaError) as ei:
         v._validate({"evals": []})
     msg = str(ei.value)
-    assert "harnessbench/v1" in msg
+    assert "benchspec/v1" in msg
     assert "first key" in msg

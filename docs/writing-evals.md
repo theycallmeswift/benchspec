@@ -29,15 +29,15 @@ Artifacts land under `<group>/eval-<eval_id>/` in the run tree.
 
 ### Discovery
 
-harnessbench finds evals by walking a configured list of **search paths** under
+benchspec finds evals by walking a configured list of **search paths** under
 the repo root: `skills`, `tests`, `evals`, and `benchmarks` by default. Any
 `eval.md` or `*.eval.md` file anywhere beneath a search path is an eval; the
 filename is the marker, so no particular ancestor directory is required.
-Override the list with `eval_paths` in `[tool.harnessbench]` or the
+Override the list with `eval_paths` in `[tool.benchspec]` or the
 `--eval-paths` flag; that is the only discovery knob:
 
 ```toml
-[tool.harnessbench]
+[tool.benchspec]
 eval_paths = ["evals"]   # only walk evals/; add ".claude/skills" or similar as needed
 ```
 
@@ -132,7 +132,7 @@ The clean room lives outside your project on purpose. It contains exactly what
 (what a clone would contain, never `.env`, `.git`, or earlier runs' artifacts) is
 separately mounted read-only at `/project` for `setup.sh`, and the agent can read
 it, so do not point prompts or harness arguments there unless repo access is part
-of the experiment. Before the agent runs, harnessbench records the SHA-256 of
+of the experiment. Before the agent runs, benchspec records the SHA-256 of
 every seeded file, so an assertion like "byte-identical to its pre-run content"
 is decidable mechanically afterward.
 
@@ -148,10 +148,10 @@ folder itself under the read-only `/project` mount, with these variables set:
 
 | Variable | Meaning |
 |---|---|
-| `HARNESSBENCH_ARM` | The arm's name, the usual branching key. |
-| `HARNESSBENCH_MODEL` | The arm's task model. Informational; it does not route the model. |
-| `HARNESSBENCH_HARNESS` | The harness running this cell (`claude-code`, `codex`, `opencode`). |
-| `HARNESSBENCH_SET` | The explicitly selected set name; empty when the run used `default-set`. |
+| `BENCHSPEC_ARM` | The arm's name, the usual branching key. |
+| `BENCHSPEC_MODEL` | The arm's task model. Informational; it does not route the model. |
+| `BENCHSPEC_HARNESS` | The harness running this cell (`claude-code`, `codex`, `opencode`). |
+| `BENCHSPEC_SET` | The explicitly selected set name; empty when the run used `default-set`. |
 
 The arm's own `env` table is layered on top, so a set that declares
 `env = { CONTEXT_PROFILE = "full" }` can be read here too. A non-zero exit aborts
@@ -162,14 +162,14 @@ The canonical use is the install split:
 ```bash
 #!/usr/bin/env bash
 set -e
-if [ "$HARNESSBENCH_ARM" = "baseline" ]; then
+if [ "$BENCHSPEC_ARM" = "baseline" ]; then
   exit 0
 fi
-mkdir -p /home/harnessbench/skills/my-skill
-cp ../../SKILL.md /home/harnessbench/skills/my-skill/SKILL.md
+mkdir -p /home/benchspec/skills/my-skill
+cp ../../SKILL.md /home/benchspec/skills/my-skill/SKILL.md
 ```
 
-`/home/harnessbench/skills` is the harness-neutral skills home; every agent's
+`/home/benchspec/skills` is the harness-neutral skills home; every agent's
 native skill directory is linked to it when the snapshot is built, so one script
 serves every harness in a mixed set.
 
@@ -231,7 +231,7 @@ finding: the skill was there and the agent did not use it.
 
 Two commands close the loop before a paid run.
 
-`harnessbench lint` is static and free. It scans every discovered assertion for
+`benchspec lint` is static and free. It scans every discovered assertion for
 wording the judge cannot fairly grade, and exits `1` on any finding:
 
 | Rule | Fires on |
@@ -240,7 +240,7 @@ wording the judge cannot fairly grade, and exits `1` on any finding:
 | `unseen-file` | A path-like string (`dir/file.ext`) with no `./` anchor anywhere in the line; the judge only sees workspace facts. |
 | `relative-claim` | `better`, `worse`, `cleaner`, `clearer`, `stronger`, `improved` with no "than" comparand. |
 
-`harnessbench analyze` asks the binder itself. It binds every assertion exactly
+`benchspec analyze` asks the binder itself. It binds every assertion exactly
 as a live run would and prints one label per line, `deterministic` or
 `judge-backed`, so you can see where each assertion lands and tighten wording
 until the facts you care most about grade deterministically. It needs
@@ -257,8 +257,8 @@ suite: it is a report, not a gate.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
 
-The authoritative validators are `harnessbench.specs.mdformat` (Markdown
-structure), `harnessbench.specs.schema` (the parsed shape), and
-`harnessbench.specs.lint` (the lint rules); the binder's prompt and checker list
-live in `harnessbench.grading.binder` and `harnessbench.grading.checkers`. If this
+The authoritative validators are `benchspec.specs.mdformat` (Markdown
+structure), `benchspec.specs.schema` (the parsed shape), and
+`benchspec.specs.lint` (the lint rules); the binder's prompt and checker list
+live in `benchspec.grading.binder` and `benchspec.grading.checkers`. If this
 page and those modules ever disagree, the modules are right.

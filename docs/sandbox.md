@@ -9,14 +9,14 @@ not require it. Terms (cell, clean room, `/workspace`, `/project`) are defined i
 
 A microVM is a small virtual machine with its own kernel, booted in about a
 second: hardware isolation like a full VM, startup cost closer to a container.
-harnessbench runs every cell in one because an agent under test executes
+benchspec runs every cell in one because an agent under test executes
 arbitrary commands, and the measurement is only honest if the agent starts from
 a known image, sees only the files the eval seeded, and cannot touch your
 machine, your credentials, or earlier runs' artifacts.
 
 Isolation sits behind a `SandboxBackend` seam: preflight, the snapshot cache,
 and the per-cell mounts belong to the backend, and everything else in
-harnessbench is backend-agnostic. A set selects its backend with the `sandbox`
+benchspec is backend-agnostic. A set selects its backend with the `sandbox`
 key. [microsandbox](https://github.com/superradcompany/microsandbox) is the only
 backend implemented to date (`docker` is recognized but fails fast as not
 implemented, so a typo cannot silently fall back). The contract on this page —
@@ -30,30 +30,30 @@ microsandbox runs hardware-virtualized guests, so the host must be one of:
 - an **Apple Silicon Mac**, or
 - **Linux with `/dev/kvm`**.
 
-Before any cell runs, harnessbench preflights the host — platform, the sandbox
+Before any cell runs, benchspec preflights the host — platform, the sandbox
 runtime, a usable agent credential — and fails with every problem listed, as
 exit `2`, before a single VM boots or a paid call is made.
 
 ## Snapshots: build once, boot many
 
 Booting a bare OS image and installing an agent CLI takes minutes; an eval run
-boots dozens of VMs. So harnessbench builds one **snapshot** per configuration
+boots dozens of VMs. So benchspec builds one **snapshot** per configuration
 and boots every cell from it. A snapshot is sealed in five steps:
 
-1. **Base image**: `ubuntu:latest` by default, or `[tool.harnessbench] base_image`.
+1. **Base image**: `ubuntu:latest` by default, or `[tool.benchspec] base_image`.
 2. **Agent provision**: the harness adapter installs its CLI (for Claude Code,
    `curl -fsSL https://claude.ai/install.sh | bash`; for Codex and OpenCode, an
    npm install of the pinned version).
 3. **Skills-home bridge**: the agent's native skill directory is symlinked to
-   the fixed, harness-neutral `/home/harnessbench/skills`, so a per-eval `setup.sh`
+   the fixed, harness-neutral `/home/benchspec/skills`, so a per-eval `setup.sh`
    installs to one path regardless of harness.
-4. **Environment script**: `[tool.harnessbench] environment_script`, if declared,
+4. **Environment script**: `[tool.benchspec] environment_script`, if declared,
    runs under `set -e` — the escape hatch for extra system tools a suite needs.
    A failing command aborts the build loudly.
 5. **Seal**: the VM stops and the snapshot is recorded.
 
 Snapshots are cached (for microsandbox, under `~/.microsandbox/snapshots/`) and
-named `harnessbench-<backend>-<harness>-<harness-version>-<fingerprint>`. The
+named `benchspec-<backend>-<harness>-<harness-version>-<fingerprint>`. The
 8-character fingerprint hashes four ingredients:
 
 - the backend id,
@@ -73,14 +73,14 @@ so a multi-harness set reuses each harness's cache.
 > `observed_arms[arm].sandbox.image_digest`: an audit trail, not a cache key.
 
 Builds are lazy and concurrent-safe: the first run that needs a snapshot builds
-it under a file lock (`tmp/.harnessbench-snapshot-<name>.lock` in your repo), so
+it under a file lock (`tmp/.benchspec-snapshot-<name>.lock` in your repo), so
 parallel `pytest -n` workers wait for one build instead of racing. To pay the
 cost up front — CI warmup, before a demo, offline prep — build explicitly:
 
 ```bash
-harnessbench sandbox:build                 # default backend + repo env
-harnessbench sandbox:build --set e2e       # that set's backend + env, one snapshot per harness
-harnessbench sandbox:build --config x.toml # with a scratch config layered over pyproject
+benchspec sandbox:build                 # default backend + repo env
+benchspec sandbox:build --set e2e       # that set's backend + env, one snapshot per harness
+benchspec sandbox:build --config x.toml # with a scratch config layered over pyproject
 ```
 
 `sandbox:build` exits `0` on a built or already-present snapshot, `2` on a
@@ -94,7 +94,7 @@ in order:
 
 1. Stages the project (see below).
 2. Boots from the snapshot.
-3. Runs `setup.sh` if present, with the `HARNESSBENCH_*` cell variables and the
+3. Runs `setup.sh` if present, with the `BENCHSPEC_*` cell variables and the
    arm's `env`.
 4. Invokes the agent with its working directory at `/workspace`.
 5. Gathers facts: file tree, contents, SHA-256s, the final message, the
@@ -107,7 +107,7 @@ The guest sees three paths:
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory. The host grades this directory afterward. |
 | `/project` | read-only | A staged copy of your repo (below). Exists so the eval's own `setup.sh` can copy the skill under test into the guest; read-only, so nothing an agent or script does can write back into your checkout. |
-| `/home/harnessbench/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
+| `/home/benchspec/skills` | in-VM | The fixed skills home the snapshot's bridge step created; whatever `setup.sh` installs here is what the agent's skill loader sees. |
 
 ### What `/project` contains
 
@@ -120,7 +120,7 @@ and mounts that:
   `harness_args = ["--plugin-dir", "/project"]` resolve as they would against
   the checkout.
 - **Always out**, tracked or not: dotenv files (`.env`, `.env.local`,
-  `.env.example`, …), `.git`, and harnessbench's own `tmp/` artifact root —
+  `.env.example`, …), `.git`, and benchspec's own `tmp/` artifact root —
   earlier runs' transcripts and grades, which an agent must not be able to crib
   from.
 - **Without git** (or outside a checkout): a plain walk that skips `.venv`,
@@ -145,11 +145,11 @@ Per-harness credential details live in [`harnesses.md`](harnesses.md).
 
 ## Customizing the image
 
-Two knobs, both top-level `[tool.harnessbench]` keys, both folded into the cache
+Two knobs, both top-level `[tool.benchspec]` keys, both folded into the cache
 identity so a change auto-rebuilds:
 
 ```toml
-[tool.harnessbench]
+[tool.benchspec]
 base_image = "python:3.12-slim"        # must be apt-family with glibc
 environment_script = "evals/setup.sh"  # runs after the agent installs, before seal
 ```
@@ -158,10 +158,10 @@ environment_script = "evals/setup.sh"  # runs after the agent installs, before s
 the provision step uses `apt-get` and installs glibc-linked CLIs.
 `environment_script` is for suite-wide system dependencies (compilers, language
 runtimes). Per-eval and per-arm setup belongs in the eval's own `setup.sh`
-instead, which runs per cell and can branch on `HARNESSBENCH_ARM` and
-`HARNESSBENCH_SET`.
+instead, which runs per cell and can branch on `BENCHSPEC_ARM` and
+`BENCHSPEC_SET`.
 
-The authoritative modules are `harnessbench.sandbox.backend` (preflight,
-fingerprint, snapshot build, mounts), `harnessbench.sandbox.sandbox` (the cell
-lifecycle), and `harnessbench.sandbox.project` (the `/project` stage). If this
+The authoritative modules are `benchspec.sandbox.backend` (preflight,
+fingerprint, snapshot build, mounts), `benchspec.sandbox.sandbox` (the cell
+lifecycle), and `benchspec.sandbox.project` (the `/project` stage). If this
 page and those modules ever disagree, the modules are right.

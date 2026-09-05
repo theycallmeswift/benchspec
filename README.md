@@ -1,21 +1,21 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/harnessbench-wordmark-dark.svg">
-  <img alt="harnessbench" src="docs/assets/harnessbench-wordmark-light.svg" width="228" height="48">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchspec-wordmark-dark.svg">
+  <img alt="benchspec" src="docs/assets/benchspec-wordmark-light.svg" width="188" height="48">
 </picture>
 
 **Benchmark what your agent does, not what it says.**
 
-[![CI](https://github.com/theycallmeswift/harnessbench/actions/workflows/ci.yml/badge.svg)](https://github.com/theycallmeswift/harnessbench/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/harnessbench)](https://pypi.org/project/harnessbench/)
-[![Python](https://img.shields.io/pypi/pyversions/harnessbench)](https://pypi.org/project/harnessbench/)
+[![CI](https://github.com/theycallmeswift/benchspec/actions/workflows/ci.yml/badge.svg)](https://github.com/theycallmeswift/benchspec/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/benchspec)](https://pypi.org/project/benchspec/)
+[![Python](https://img.shields.io/pypi/pyversions/benchspec)](https://pypi.org/project/benchspec/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-harnessbench runs an agent (Claude Code, Codex, or OpenCode) against a task
+benchspec runs an agent (Claude Code, Codex, or OpenCode) against a task
 in a fresh microVM, checks what it actually did in the workspace, and reports the
 result as a comparison: with your skill versus without, one model versus another,
 one harness versus another.
 
-<img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: harnessbench run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
+<img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: benchspec run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
 
 *End-of-run summary for a two-arm run of the in-repo [`hello`](evals/e2e/hello/)
 suite (illustrative numbers).* Rows are evals, columns are arms (`baseline` ran
@@ -25,14 +25,14 @@ points. The same matrix lands in `benchmark.md`, with machine-readable artifacts
 alongside.
 
 Teams pick harnesses, models, and prompts by anecdote: run it once, eyeball the
-transcript, trust the vibe. harnessbench turns that guess into a measurement.
+transcript, trust the vibe. benchspec turns that guess into a measurement.
 Write the goal once, run it across the configurations you care about, and read
 off — in percentage points — how good each one actually is at accomplishing it.
 
 ## Getting Started
 
 ```bash
-pip install "harnessbench[microsandbox]"
+pip install "benchspec[microsandbox]"
 ```
 
 > **Pre-1.0.** The eval format and the artifact schemas are the surfaces most
@@ -63,10 +63,10 @@ The benchmark is a block in `pyproject.toml`. Arms are the report columns; the
 baseline is what the others are measured against:
 
 ```toml
-[tool.harnessbench]
+[tool.benchspec]
 default-set = "default"
 
-[tool.harnessbench.sets.default]
+[tool.benchspec.sets.default]
 harness  = "claude-code"
 model    = "sonnet"
 baseline = "baseline"
@@ -79,9 +79,9 @@ arms = [
 Then:
 
 ```bash
-harnessbench lint      # static checks on the assertions
-harnessbench analyze   # which assertions grade deterministically, which go to the judge
-harnessbench run       # every (eval × arm) in its own microVM, graded, reported
+benchspec lint      # static checks on the assertions
+benchspec analyze   # which assertions grade deterministically, which go to the judge
+benchspec run       # every (eval × arm) in its own microVM, graded, reported
 ```
 
 ## What you need
@@ -115,10 +115,10 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
 1. **Boots a microVM** from a cached snapshot with the agent CLI already
    installed. The first run builds the snapshot (a few minutes); later runs
-   reuse it, or pay the cost up front with `harnessbench sandbox:build`.
+   reuse it, or pay the cost up front with `benchspec sandbox:build`.
 2. **Seeds the clean room** — the eval's optional `workspace/` files land in a
    fresh directory mounted at `/workspace`, the agent's working directory.
-3. **Runs `setup.sh`**, where arms diverge: it sees `$HARNESSBENCH_ARM`, so the
+3. **Runs `setup.sh`**, where arms diverge: it sees `$BENCHSPEC_ARM`, so the
    baseline branch exits early and the trial branch copies the skill into place.
 4. **Invokes the agent** on the eval's prompt.
 5. **Collects the facts** — file tree, contents, SHA-256s, the final message,
@@ -134,13 +134,13 @@ copy of your repo at `/project` (what a `git clone` would contain — never
 injected at the network boundary, never as readable environment variables in
 the guest.
 
-`harnessbench run` is pytest underneath, and everything after `--` goes to
-pytest verbatim: `harnessbench run -- -k greets-by-name` (equivalently
+`benchspec run` is pytest underneath, and everything after `--` goes to
+pytest verbatim: `benchspec run -- -k greets-by-name` (equivalently
 `pytest -k greets-by-name`) runs one eval, `-n 8` fans cells across eight
 microVMs, and `--count 5` samples each cell five times so the report can flag a
 delta that sits within noise.
 
-## Why harnessbench
+## Why benchspec
 
 - **Comparison is first-class.** A single pass rate is a number without a
   reference point. Arms and a baseline make the headline a delta; skip the
@@ -169,7 +169,7 @@ delta that sits within noise.
 ## Contributing
 
 Issues and pull requests are welcome at
-[github.com/theycallmeswift/harnessbench](https://github.com/theycallmeswift/harnessbench).
+[github.com/theycallmeswift/benchspec](https://github.com/theycallmeswift/benchspec).
 Until `CONTRIBUTING.md` lands, [`docs/style/development.md`](docs/style/development.md)
 is the code style, and `make test` plus `make lint` are the bar.
 

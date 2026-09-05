@@ -36,7 +36,7 @@ jobs:
         with:
           filters: |
             binder:
-              - src/harnessbench/grading/binder.py
+              - src/benchspec/grading/binder.py
               - evals/binder/**
               - .github/workflows/evals.yml
 

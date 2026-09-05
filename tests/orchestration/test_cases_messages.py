@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from harnessbench.orchestration.cases import _errored_message
-from harnessbench.orchestration.execution import ArmOutcome
+from benchspec.orchestration.cases import _errored_message
+from benchspec.orchestration.execution import ArmOutcome
 
 
 def _outcome(assertions: list[dict]) -> ArmOutcome:
