@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from harnessbench.specs import mdformat, schema
+from benchspec.specs import mdformat, schema
 
 
 def _write_eval_file(tmp_path: object, group: object, filename: object, body: object) -> object:

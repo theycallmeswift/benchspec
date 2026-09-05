@@ -112,5 +112,5 @@ jobs:
         run: |
           uv venv --python 3.13 /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
-          /tmp/smoke/bin/harnessbench --help
-          /tmp/smoke/bin/harnessbench lint .
+          /tmp/smoke/bin/benchspec --help
+          /tmp/smoke/bin/benchspec lint .

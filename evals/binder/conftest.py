@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from harnessbench.grading import binder
+from benchspec.grading import binder
 
 _SUMMARY = pytest.StashKey[list]()
 _RAN = pytest.StashKey[bool]()
@@ -54,7 +54,7 @@ def record(request: object) -> object:
 
 
 def pytest_configure(config: object) -> None:
-    """Configure pytest state for harnessbench collection."""
+    """Configure pytest state for benchspec collection."""
     # Wipe a prior run's records before workers append. Controller-only and binder-only, so an
     # unrelated `make test` never deletes a live run's data. Runs before workers spawn.
     if not (_is_controller(config) and _binder_selected(config)):
@@ -79,7 +79,7 @@ def _rate(rows: object, hit: object) -> object:
 def _recording_call_model(sink: list) -> object:
     """Build a call_model that delegates to _call_gemini and records every reply.
 
-    Reads HARNESSBENCH_BINDER_MODEL here, not in _call_gemini — the override is a
+    Reads BENCHSPEC_BINDER_MODEL here, not in _call_gemini — the override is a
     corpus-suite knob and the production transport takes no env input. Exceptions
     propagate unchanged and only successful replies land in `sink`, so per-draw
     `attempts` is tracked by _bind_resilient's retry loop instead: `len(sink)`
@@ -91,7 +91,7 @@ def _recording_call_model(sink: list) -> object:
     Returns:
         A call_model callable suitable for `bind(..., call_model=...)`.
     """
-    model = os.environ.get("HARNESSBENCH_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
+    model = os.environ.get("BENCHSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
 
     def call(prompt: str, *, timeout: int = 60) -> object:
         """Call the Gemini binder model and record the reply in sink."""

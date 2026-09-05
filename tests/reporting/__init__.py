@@ -1,3 +1,3 @@
-"""Tests for harnessbench.reporting."""
+"""Tests for benchspec.reporting."""
 
 from __future__ import annotations

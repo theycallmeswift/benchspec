@@ -1,4 +1,4 @@
-"""Tests for harnessbench.reporting.manifest.
+"""Tests for benchspec.reporting.manifest.
 
 Manifest assembly and observed-arm aggregation by value.
 """
@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import json
 
-from harnessbench.orchestration import workspace
-from harnessbench.reporting import manifest
-from harnessbench.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from benchspec.orchestration import workspace
+from benchspec.reporting import manifest
+from benchspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
 

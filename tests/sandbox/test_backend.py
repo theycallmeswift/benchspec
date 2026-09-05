@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from harnessbench.agents.claude import ClaudeCodeAgent
-from harnessbench.sandbox import backend
-from harnessbench.specs.discovery import EnvConfig
-from harnessbench.specs.schema import SchemaError
+from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.sandbox import backend
+from benchspec.specs.discovery import EnvConfig
+from benchspec.specs.schema import SchemaError
 
 
 def _agent() -> object:
@@ -135,7 +135,7 @@ def test_image_identity_available_on_successful_digest_read(monkeypatch: object)
     monkeypatch.setattr(microsandbox_backend, "_image_manifest_digest_async", _fake_digest)
 
     identity = microsandbox_backend.image_identity(
-        "harnessbench-microsandbox-claude-code-latest-ab12cd34"
+        "benchspec-microsandbox-claude-code-latest-ab12cd34"
     )
 
     assert identity.image_digest == "sha256:abc123"
@@ -233,7 +233,7 @@ def test_microsandbox_snapshot_exists_false_when_dir_absent(
     """snapshot_exists is False when ~/.microsandbox/snapshots/<name> is absent."""
     monkeypatch.setattr(backend.Path, "home", lambda: tmp_path)
     microsandbox_backend = backend.resolve_sandbox("microsandbox")
-    name = "harnessbench-microsandbox-claude-code-1.2.3-abcd1234"
+    name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
 
     assert microsandbox_backend.snapshot_exists(name) is False
 
@@ -244,7 +244,7 @@ def test_microsandbox_snapshot_exists_true_when_dir_present(
     """snapshot_exists is True when ~/.microsandbox/snapshots/<name> exists on disk."""
     monkeypatch.setattr(backend.Path, "home", lambda: tmp_path)
     microsandbox_backend = backend.resolve_sandbox("microsandbox")
-    name = "harnessbench-microsandbox-claude-code-1.2.3-abcd1234"
+    name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
     (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
 
     assert microsandbox_backend.snapshot_exists(name) is True
@@ -269,7 +269,7 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
         "codex.py",
         "opencode.py",
     }
-    src = Path("src/harnessbench")
+    src = Path("src/benchspec")
     pattern = re.compile(r"^\s*(import microsandbox|from microsandbox)", re.MULTILINE)
     offenders: list[str] = []
     for path in src.rglob("*.py"):

@@ -1,4 +1,4 @@
-.PHONY: help install test e2e evals lint lint\:ruff lint\:houserules clean
+.PHONY: help install test e2e evals assets lint lint\:ruff lint\:houserules clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -10,13 +10,16 @@ install:  ## Create the venv and install dev dependencies
 test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
-e2e:  ## Run harnessbench's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
-	uv run harnessbench run --set e2e
+e2e:  ## Run benchspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
+	uv run benchspec run --set e2e
 
 # Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
 BINDER_WORKERS ?= 6
 evals:  ## Run the binder corpus (binder quality, not framework function). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
 	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/binder $(EVAL_ARGS)
+
+assets:  ## Re-render the raster brand assets in docs/assets (terminal mock PNG/GIF, social card)
+	uv run scripts/render_assets.py
 
 lint:  ## Lint with Ruff and houserules
 	$(MAKE) lint:ruff

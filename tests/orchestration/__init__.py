@@ -1,3 +1,3 @@
-"""Tests for harnessbench.orchestration."""
+"""Tests for benchspec.orchestration."""
 
 from __future__ import annotations

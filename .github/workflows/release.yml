@@ -28,9 +28,9 @@ jobs:
       - name: Check the tag matches the package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          version="$(uv run --frozen python -c 'import harnessbench; print(harnessbench.__version__)')"
+          version="$(uv run --frozen python -c 'import benchspec; print(benchspec.__version__)')"
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match harnessbench.__version__ ${version}"
+            echo "::error::tag ${GITHUB_REF_NAME} does not match benchspec.__version__ ${version}"
             exit 1
           fi
 

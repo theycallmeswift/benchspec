@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from harnessbench.agents.claude import ClaudeCodeAgent
-from harnessbench.orchestration.results import parse_run_json
+from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.orchestration.results import parse_run_json
 from tests.support import FakeExecOutput, FakeSandbox
 
 
@@ -494,7 +494,7 @@ def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
     """Verify from env falls back to api key."""
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
-    monkeypatch.setenv("HARNESSBENCH_CLAUDE_VERSION", "9.9")
+    monkeypatch.setenv("BENCHSPEC_CLAUDE_VERSION", "9.9")
     agent = ClaudeCodeAgent.from_env()
     assert agent._auth_env == "ANTHROPIC_API_KEY"
     assert agent.version() == "9.9"
@@ -558,7 +558,7 @@ def test_claude_skill_load_dir() -> None:
 
 def test_claude_bridge_script_symlinks_fixed_home() -> None:
     """Verify claude bridge script symlinks fixed home."""
-    from harnessbench.agents.base import FIXED_SKILLS_HOME
+    from benchspec.agents.base import FIXED_SKILLS_HOME
 
     s = ClaudeCodeAgent().bridge_skills_home_script()
 
@@ -567,14 +567,14 @@ def test_claude_bridge_script_symlinks_fixed_home() -> None:
     assert "ln -s" in s
 
 
-def test_claude_cell_env_carries_harnessbench_vars() -> None:
-    """Verify claude cell env carries harnessbench vars."""
+def test_claude_cell_env_carries_benchspec_vars() -> None:
+    """Verify claude cell env carries benchspec vars."""
     env = ClaudeCodeAgent().cell_env(arm="trial", model="opus", eval_set="popular-harnesses")
 
-    assert env["HARNESSBENCH_ARM"] == "trial"
-    assert env["HARNESSBENCH_MODEL"] == "opus"
-    assert env["HARNESSBENCH_HARNESS"] == "claude-code"
-    assert env["HARNESSBENCH_SET"] == "popular-harnesses"
+    assert env["BENCHSPEC_ARM"] == "trial"
+    assert env["BENCHSPEC_MODEL"] == "opus"
+    assert env["BENCHSPEC_HARNESS"] == "claude-code"
+    assert env["BENCHSPEC_SET"] == "popular-harnesses"
     assert env["HOME"] == "/root"  # guest_env merged in
 
 

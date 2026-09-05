@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from harnessbench.orchestration.results import (
+from benchspec.orchestration.results import (
     parse_run_json,
     parse_stream_run,
     substitute_assertions,

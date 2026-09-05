@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from harnessbench.specs.mdformat import parse_eval_md
+from benchspec.specs.mdformat import parse_eval_md
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 

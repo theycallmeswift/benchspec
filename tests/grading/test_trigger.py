@@ -1,8 +1,8 @@
-"""Tests for the retained skill-activation detection primitives in harnessbench.grading.trigger."""
+"""Tests for the retained skill-activation detection primitives in benchspec.grading.trigger."""
 
 import json
 
-from harnessbench.grading.trigger import (
+from benchspec.grading.trigger import (
     RoutingError,
     detect_skill_fired,
     dispatches_skill,

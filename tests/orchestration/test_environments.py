@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from harnessbench.orchestration.environments import Host, ProcResult
+from benchspec.orchestration.environments import Host, ProcResult
 
 
 def _run_host(monkeypatch: object, *, exit_code: int, stdout: str = "", stderr: str = "") -> dict:

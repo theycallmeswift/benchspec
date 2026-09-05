@@ -100,7 +100,7 @@ agent to "Greet Alice by name" and asserts that `./Greetings/Alice.md` contains
 
 A named benchmark declared in `pyproject.toml`: its arms, the defaults they
 inherit, and an optional baseline. One run resolves exactly one set. Example:
-`[tool.harnessbench.sets.default]` with arms `baseline` and `trial`. Reference:
+`[tool.benchspec.sets.default]` with arms `baseline` and `trial`. Reference:
 [configuration.md](configuration.md#eval-sets).
 
 ## Group
@@ -132,7 +132,7 @@ The LLM that grades every punted assertion, from evidence only: the workspace
 tree, file contents and SHA-256s, the agent's final message, and the tools and
 skills it invoked. The judge runs on the host through one of the same harness
 adapters, is configured once per run, and is independent of the arms. Example:
-`[tool.harnessbench.judge] harness = "codex"`. Reference:
+`[tool.benchspec.judge] harness = "codex"`. Reference:
 [configuration.md](configuration.md#the-judge).
 
 ## `/project`
@@ -147,7 +147,7 @@ too, so keep prompts pointed at `./`. Details:
 
 One execution of a cell. A plain run takes one sample per cell (`sample-0/`);
 `--count N` takes N, so the report can show flakiness and a noise band on each
-delta. Example: `harnessbench run -- --count 5`. See
+delta. Example: `benchspec run -- --count 5`. See
 [results.md](results.md#noise-samples-and-flakiness).
 
 ## Sandbox and snapshot
@@ -161,7 +161,7 @@ configuration and are cached; cells boot from them in seconds. Reference:
 ## `setup.sh`
 
 An optional script beside the eval file that runs inside the microVM before the
-prompt, with `HARNESSBENCH_ARM` set to the arm's name. It is the one place arms
+prompt, with `BENCHSPEC_ARM` set to the arm's name. It is the one place arms
 diverge: the canonical script installs a skill on `trial` and exits early on
 `baseline`. Reference:
 [writing-evals.md](writing-evals.md#setupsh-what-differs-per-arm).
@@ -170,5 +170,5 @@ diverge: the canonical script installs a skill on `trial` and exits early on
 
 An instruction file (`SKILL.md`) an agent can load and dispatch; in the common
 "capability lift" benchmark, the skill is the thing under test. Skills install to
-the fixed guest path `/home/harnessbench/skills`, which every harness's native
+the fixed guest path `/home/benchspec/skills`, which every harness's native
 skill directory links to. Example assertion: `` - [ ] Skill `hello` invoked ``.
