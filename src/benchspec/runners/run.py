@@ -13,8 +13,13 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
 
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
+from benchspec.orchestration import cases
 from benchspec.specs import discovery
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
@@ -37,6 +42,69 @@ _SCALAR_OPTIONS = {
 _APPEND_OPTIONS = {
     "env": "--benchspec-env",
 }
+
+# pytest spellings of "collect, don't run": nothing paid happens, so the environment
+# preflight is skipped exactly as the plugin skips it (fixtures never set up).
+_COLLECT_ONLY_FLAGS = frozenset({"--collect-only", "--co"})
+
+
+@dataclass(frozen=True)
+class PluginOptions:
+    """Present the parsed `run` flags the way the plugin's resolvers read pytest's config.
+
+    `config.sets` and `orchestration.cases` resolve the set, judge, and sandbox from a
+    pytest `config` via `getoption(<plugin option>)` and `rootpath`. This adapter feeds
+    them the CLI namespace instead, so the CLI preflight runs the plugin's own resolvers
+    rather than a second copy of the config layering.
+
+    Only the curated `run` flags are mapped. Any other plugin option — today the
+    passthrough-only judge timeout/env/harness-arg, tomorrow whatever the plugin grows —
+    reads as unset, exactly as when the user omits it, so a new plugin option never
+    needs a matching line here to keep the preflight working.
+    """
+
+    values: dict[str, object]
+    rootpath: Path
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> PluginOptions:
+        """Build the adapter from a parsed `run` namespace with `root` resolved."""
+        root = args.root.resolve()
+        values: dict[str, object] = {"benchspec_repo_root": str(root)}
+
+        for dest in _SCALAR_OPTIONS:
+            values[f"benchspec_{dest}"] = getattr(args, dest, None)
+
+        for dest in _APPEND_OPTIONS:
+            values[f"benchspec_{dest}"] = list(getattr(args, dest, None) or [])
+
+        return cls(values=values, rootpath=root)
+
+    def getoption(self: PluginOptions, name: str) -> object:
+        """Return the plugin option `name`, or None for any option `run` does not curate."""
+        return self.values.get(name)
+
+
+def preflight_run(args: argparse.Namespace) -> None:
+    """Refuse a run, before pytest spawns, on anything the plugin would refuse later.
+
+    Drives the plugin's own preflights through `PluginOptions`: grading first (Gemini
+    credential, judge config, judge binary), then the resolved set's sandbox (set
+    resolution, host readiness, agent credential). Nothing is duplicated — a run that
+    passes here passes the same checks again inside pytest as a backstop for raw
+    `pytest -p benchspec.runners.pytest` invocations.
+
+    Args:
+        args: The parsed `run` namespace, with `root` a `Path`.
+
+    Raises:
+        RuntimeError: a missing credential, an absent binary, or an unready host.
+        pytest.UsageError: a malformed or unknown set, or a malformed judge config.
+        SchemaError: an unsupported sandbox backend or a malformed eval.
+    """
+    options = PluginOptions.from_args(args)
+    cases.preflight_grading(options)
+    cases.preflight_session_sandbox(options)
 
 
 def translate_run_flags(args: argparse.Namespace) -> list[str]:
@@ -73,14 +141,18 @@ def run(
     args: argparse.Namespace,
     *,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    preflight: Callable[[argparse.Namespace], None] = preflight_run,
 ) -> int:
     """Run the eval suite by spawning a pytest subprocess, mapping its status to an exit code.
 
     Emptiness is detected up front by reusing the plugin's own discovery: with no evals
     under `root`, pytest would still self-register `cases.py` and report SUCCESS on an
     empty parametrization, so relying on its status is impossible. When discovery finds
-    nothing, the runner is never spawned. Otherwise the child inherits the environment
-    with `PYTEST_DISABLE_PLUGIN_AUTOLOAD` scrubbed so the entry-point plugin loads exactly
+    nothing, the runner is never spawned. A populated root is then preflighted in full
+    (credentials, binaries, host, set, judge) so a missing piece is one `error:` line and
+    exit 2 instead of a pytest error per cell; a collect-only passthrough skips that, as
+    nothing paid follows. Otherwise the child inherits the environment with
+    `PYTEST_DISABLE_PLUGIN_AUTOLOAD` scrubbed so the entry-point plugin loads exactly
     once (no `-p benchspec.runners.pytest`, which would double-register it), and the
     child's return code maps through the shared exit-code contract.
 
@@ -89,10 +161,12 @@ def run(
             flags, and `passthrough` (verbatim pytest args after `--`).
         runner: Injectable process launcher with `subprocess.run`'s contract; called as
             `runner(argv, env=child_env)` and expected to expose `.returncode`.
+        preflight: Injectable preflight with `preflight_run`'s contract.
 
     Returns:
-        `ExitCode.NOTHING_TO_DO` when no evals are discovered, otherwise the child pytest
-        status mapped through `exit_code_for_pytest_status`.
+        `ExitCode.NOTHING_TO_DO` when no evals are discovered, `ExitCode.USAGE` on a
+        preflight failure, otherwise the child pytest status mapped through
+        `exit_code_for_pytest_status`.
     """
     root = args.root.resolve()
 
@@ -102,6 +176,13 @@ def run(
     if not discovery.discover_eval_cases(root, eval_paths):
         print(f"no evals discovered under {root}")
         return ExitCode.NOTHING_TO_DO
+
+    if not _COLLECT_ONLY_FLAGS.intersection(args.passthrough):
+        try:
+            preflight(args)
+        except (RuntimeError, pytest.UsageError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return ExitCode.USAGE
 
     child_env = {**os.environ}
     child_env.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)

@@ -111,8 +111,9 @@ model   = "gpt-5.5"
 > different model family than the arms, as this repo's own `e2e` set does with a
 > Codex judge over Claude arms.
 
-The judge harness's CLI must be installed on the host with valid credentials; the
-binary is preflighted when tests actually execute, not at collection.
+The judge harness's CLI must be installed on the host with valid credentials. The
+`run` command preflights the binary before spawning pytest; inside pytest it is
+checked again when tests actually execute, not at collection.
 
 ## Top-level `[tool.benchspec]` keys
 
@@ -132,6 +133,13 @@ binary is preflighted when tests actually execute, not at collection.
 exit-code contract below; `lint` and `analyze` never exit `5`: an empty root just
 reports zero findings or classifications and exits `0`. `sandbox:clean` only
 exits `0` (nothing to prune is success) or `2` on a malformed invocation.
+
+Every subcommand preflights what it needs before spending anything: `analyze`
+the binder credential; `sandbox:build` the host and agent credential; `run` all
+of those plus the judge binary and the resolved set, before pytest spawns. A
+failed preflight is a single `error: ...` line on stderr and exit `2`.
+Forwarding `--collect-only` to `run` skips the environment preflight, since
+nothing paid follows.
 
 ```bash
 benchspec lint [root]            # static assertion checks — no credentials, no sandbox
@@ -197,7 +205,7 @@ computable delta are exempt.
 |---|---|
 | `0` | Success. |
 | `1` | A finding: lint warnings, a failed cell, a tripped `--fail-under` gate, or a sandbox build failure. |
-| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, or a failed host preflight. |
+| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, or a failed preflight: an unready host, a missing agent credential, a missing judge binary, a missing or empty `GEMINI_API_KEY`, or (`analyze` only) a rejected key or binder transport failure. Printed as a single `error: ...` line on stderr. |
 | `5` | Nothing to do: no evals discovered under `root` (`run` only; `lint`/`analyze` exit `0` on an empty root). |
 
 > **Edge case:** `run` checks for emptiness *first*. With no evals discovered it

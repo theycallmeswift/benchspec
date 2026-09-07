@@ -89,17 +89,40 @@ def eval_set_name(request: object) -> str:
     return request.config.getoption("benchspec_set") or ""
 
 
+def preflight_grading(config: object) -> JudgeConfig:
+    """Preflight everything grading needs and return the run's judge config.
+
+    Environment-dependent, in the order that fails cheapest and most specifically:
+    the binder's Gemini credential (an env read), the judge config (structural), then
+    the judge binary on PATH. Shared by the `judge_config` fixture and the `run` CLI,
+    so what the CLI refuses before spawning pytest is exactly what pytest would refuse
+    at grading time.
+
+    Args:
+        config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
+
+    Returns:
+        The resolved `JudgeConfig`.
+
+    Raises:
+        RuntimeError: `GEMINI_API_KEY` missing or empty, or the judge binary absent.
+        pytest.UsageError: a structural defect in the judge config.
+    """
+    binder.preflight_gemini_key()
+
+    judge = resolved_judge_config(config)
+    preflight_judge_binary(judge)
+
+    return judge
+
+
 @pytest.fixture
 def judge_config(request: object) -> JudgeConfig:
     """Resolve the run's judge and preflight its binary and the binder's Gemini credential."""
-    # Only test_eval requests this fixture, so both preflights (environment-dependent,
-    # unlike resolved_judge_config's structural checks already run at collection) fire
+    # Only test_eval requests this fixture, so the environment-dependent preflights fire
     # exactly when a run will grade. Fixture setup is skipped under --collect-only, so
     # this stays collection-safe without an autouse gate.
-    binder.preflight_gemini_key()
-    config = resolved_judge_config(request.config)
-    preflight_judge_binary(config)
-    return config
+    return preflight_grading(request.config)
 
 
 @pytest.fixture

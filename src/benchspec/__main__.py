@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
 from benchspec.exit_codes import ExitCode
+from benchspec.grading.binder import BinderAuthError
 from benchspec.reporting import analyze
 from benchspec.runners import run
 from benchspec.sandbox import sandbox
@@ -69,48 +71,86 @@ def _split_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv[:separator], argv[separator + 1 :]
 
 
+def _fail(error: Exception, code: ExitCode) -> ExitCode:
+    """Print `error` as the user-facing `error:` line and hand back the exit code to return."""
+    print(f"error: {error}", file=sys.stderr)
+    return code
+
+
+def _no_finding_types() -> tuple[type[Exception], ...]:
+    """The default `finding` resolver: this command has no exit-1 failure class."""
+    return ()
+
+
+def _at_boundary(
+    action: Callable[[], int],
+    *,
+    usage: tuple[type[Exception], ...] = (),
+    finding: Callable[[], tuple[type[Exception], ...]] = _no_finding_types,
+) -> int:
+    """Run `action` at the CLI boundary, mapping known failures to `error:` plus an exit code.
+
+    The one place internals' exceptions become the documented exit contract:
+
+    - `SchemaError` (a malformed eval or config, an unsupported backend) is a usage error
+      for every command → USAGE (2).
+    - `usage`: the command's own preflight/credential failures → USAGE (2).
+    - `finding`: the command's genuine failure class → FINDING (1). Resolved lazily, and
+      only once an exception outside `usage` arrives, so a handler can name an error type
+      from a package that its preflight guarantees importable — the microsandbox error
+      type must never be imported on the preflight-failed path.
+
+    Anything else propagates as the traceback it is.
+
+    Args:
+        action: The zero-argument command body, returning its exit code.
+        usage: Exception types that map to `ExitCode.USAGE`.
+        finding: Resolver for the exception types that map to `ExitCode.FINDING`.
+
+    Returns:
+        `action()`'s exit code, or the mapped code for a known failure.
+    """
+    try:
+        return action()
+    except SchemaError as error:
+        return _fail(error, ExitCode.USAGE)
+    except usage as error:
+        return _fail(error, ExitCode.USAGE)
+    except Exception as error:
+        if isinstance(error, finding()):
+            return _fail(error, ExitCode.FINDING)
+        raise
+
+
+def _microsandbox_error_types() -> tuple[type[Exception], ...]:
+    """Resolve microsandbox's failure type, safe only after its host preflight passed."""
+    from microsandbox.errors import MicrosandboxError
+
+    return (MicrosandboxError,)
+
+
 def _run_sandbox_build(args: argparse.Namespace) -> int:
-    """Build the agent-ready snapshot for `root`, mapping host and build errors to exit codes.
+    """Build the agent-ready snapshot for `root`.
 
-    `cli_build` resolves the selected set's backend first, then preflights exactly that backend
-    once — so selected-backend diagnostics are not hidden behind a default-microsandbox preflight,
-    and a future backend can build independently. Error mapping:
-
-    - `SchemaError` (bad config, or a `docker`/unsupported set): propagates to the `main` boundary
-      → USAGE (2). Config error, not a build failure.
-    - `RuntimeError` (host preflight, including microsandbox-not-installed): USAGE (2), surfaced
-      before any provisioning. This branch imports no microsandbox, so a host without the package
-      still exits 2 cleanly rather than raising `ModuleNotFoundError`.
-    - `MicrosandboxError` (a genuine build/provision failure): FINDING (1). Only reachable after
-      preflight passed, which guarantees `import microsandbox` works, so importing the error type
-      here is safe.
+    `cli_build` resolves the selected set's backend first, then preflights exactly that
+    backend once — so selected-backend diagnostics are not hidden behind a
+    default-microsandbox preflight. Host preflight failures (`RuntimeError`, including
+    microsandbox-not-installed) are usage errors; a genuine build/provision failure
+    (`MicrosandboxError`) is a finding.
 
     Args:
         args: The parsed `sandbox:build` namespace, with `root` a `Path`.
 
     Returns:
-        `ExitCode.SUCCESS` on a built or already-present snapshot, `ExitCode.USAGE` on a
-        preflight or config-schema failure, `ExitCode.FINDING` on a build failure.
+        `ExitCode.SUCCESS` on a built or already-present snapshot, else the mapped code.
     """
-    root = args.root.resolve()
 
-    try:
-        sandbox.cli_build(root, set_name=args.set, config=args.config)
-    except RuntimeError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return ExitCode.USAGE
-    except SchemaError:
-        raise  # a bad config / unsupported backend is a usage error; let `main` map it to 2
-    except Exception as error:
-        # Reached only after preflight passed, so microsandbox is importable here.
-        from microsandbox.errors import MicrosandboxError
+    def build() -> int:
+        """Build or reuse the snapshot and report success."""
+        sandbox.cli_build(args.root.resolve(), set_name=args.set, config=args.config)
+        return ExitCode.SUCCESS
 
-        if isinstance(error, MicrosandboxError):
-            print(f"error: {error}", file=sys.stderr)
-            return ExitCode.FINDING
-        raise
-
-    return ExitCode.SUCCESS
+    return _at_boundary(build, usage=(RuntimeError,), finding=_microsandbox_error_types)
 
 
 def _run_sandbox_clean(args: argparse.Namespace) -> int:
@@ -132,6 +172,36 @@ def _run_sandbox_clean(args: argparse.Namespace) -> int:
     sandbox.cli_clean(root)
 
     return ExitCode.SUCCESS
+
+
+def _run_analyze(args: argparse.Namespace) -> int:
+    """Classify the suite under `root`.
+
+    `analyze` is the only subcommand that talks to the Gemini binder directly, so the
+    binder's failure taxonomy surfaces here rather than through pytest's status mapping.
+    A missing key (preflight), a transport failure mid-classification (the same
+    `RuntimeError` type), and a rejected credential (`BinderAuthError`) all mean no
+    classification was produced and the fix is environmental, so all are usage errors.
+
+    Args:
+        args: The parsed `analyze` namespace, with `root` a `Path`.
+
+    Returns:
+        `ExitCode.SUCCESS` once the suite is classified, else the mapped code.
+    """
+    return _at_boundary(
+        lambda: analyze.run(args.root.resolve()), usage=(RuntimeError, BinderAuthError)
+    )
+
+
+def _run_lint(args: argparse.Namespace) -> int:
+    """Lint the suite under `root`; a malformed eval is the only mapped failure."""
+    return _at_boundary(lambda: lint.run(args.root.resolve()))
+
+
+def _run_run(args: argparse.Namespace) -> int:
+    """Run the suite; `run.run` maps its own preflight, so only `SchemaError` is mapped here."""
+    return _at_boundary(lambda: run.run(args))
 
 
 def _load_repo_dotenv() -> None:
@@ -192,17 +262,13 @@ def main(argv: list[str] | None = None) -> int:
     args.passthrough = passthrough
 
     dispatch = {
-        "lint": lambda parsed: lint.run(parsed.root.resolve()),
-        "analyze": lambda parsed: analyze.run(parsed.root.resolve()),
-        "run": run.run,
+        "lint": _run_lint,
+        "analyze": _run_analyze,
+        "run": _run_run,
         "sandbox:build": _run_sandbox_build,
         "sandbox:clean": _run_sandbox_clean,
     }
-    try:
-        return dispatch[args.command](args)
-    except SchemaError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return ExitCode.USAGE
+    return dispatch[args.command](args)
 
 
 if __name__ == "__main__":

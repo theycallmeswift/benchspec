@@ -14,6 +14,7 @@ from textwrap import dedent
 import pytest
 
 from benchspec import __main__
+from benchspec.grading.binder import BinderAuthError
 from benchspec.specs.schema import SchemaError
 
 
@@ -302,6 +303,40 @@ def test_analyze_command_maps_schema_error_to_usage(
     exit_code = __main__.main(["analyze", str(tmp_path)])
 
     assert exit_code == 2
+
+
+def test_analyze_command_maps_preflight_error_to_usage(
+    monkeypatch: object, capsys: object
+) -> None:
+    """Verify a binder-preflight RuntimeError from analyze.run maps to a clean exit 2."""
+
+    def failing_run(root: Path) -> int:
+        """Reject the environment the way `binder.preflight_gemini_key` does."""
+        raise RuntimeError("GEMINI_API_KEY is required")
+
+    monkeypatch.setattr(__main__.analyze, "run", failing_run)
+
+    exit_code = __main__.main(["analyze", "some/dir"])
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == "error: GEMINI_API_KEY is required\n"
+
+
+def test_analyze_command_maps_binder_auth_error_to_usage(
+    monkeypatch: object, capsys: object
+) -> None:
+    """Verify a rejected Gemini credential from analyze.run maps to a clean exit 2."""
+
+    def failing_run(root: Path) -> int:
+        """Reject the credential the way the binder does on a 401/403."""
+        raise BinderAuthError("Gemini API rejected GEMINI_API_KEY")
+
+    monkeypatch.setattr(__main__.analyze, "run", failing_run)
+
+    exit_code = __main__.main(["analyze", "some/dir"])
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == "error: Gemini API rejected GEMINI_API_KEY\n"
 
 
 def test_lint_command_maps_schema_error_to_usage(tmp_path: Path) -> None:
