@@ -173,16 +173,16 @@ def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None
     assert seen == {"set_name": None, "config": None}
 
 
-def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object) -> None:
-    """A set whose sandbox is `docker` fails fast at exit 2 before any build."""
+def test_sandbox_build_unknown_sandbox_exits_two(monkeypatch: object, capsys: object) -> None:
+    """A set naming a sandbox no backend implements fails fast at exit 2 before any build."""
 
     def failing_cli_build(
         repo_root: object, *, set_name: object = None, config: object = None
     ) -> None:
-        """Raise the SchemaError a docker set produces at resolution."""
+        """Raise the SchemaError an unknown sandbox name produces at resolution."""
         raise SchemaError(
-            "[tool.benchspec.sets.dock]: unsupported sandbox `docker` "
-            "(supported: ['microsandbox']). Docker is not implemented."
+            "[tool.benchspec.sets.dock]: unsupported sandbox `qemu` "
+            "(supported: ['docker', 'microsandbox'])"
         )
 
     monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
@@ -190,7 +190,7 @@ def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object)
     exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
 
     assert exit_code == 2
-    assert "docker" in capsys.readouterr().err
+    assert "qemu" in capsys.readouterr().err
 
 
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:

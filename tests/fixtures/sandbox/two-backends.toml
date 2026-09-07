@@ -1,13 +1,10 @@
 # tests/fixtures/sandbox/two-backends.toml
-# Fail-fast fixture. This file contains an unsupported `sandbox = "docker"` set, and
-# validation is eager in parse_sets, so LOADING OR SELECTING ANY set in this file exits 2:
-#   benchspec run              --config tests/fixtures/sandbox/two-backends.toml   -> exit 2
-#   benchspec run --set micro  --config tests/fixtures/sandbox/two-backends.toml   -> exit 2 (still)
-# `resolved_run_set` calls `parse_sets` on the whole sets table before any set is
-# selected, so the docker set's SchemaError fails the file even when only `micro` is
-# requested; pytest maps it to a UsageError, i.e. exit 2.
-# `benchspec sandbox:build --config tests/fixtures/sandbox/two-backends.toml`
-# also exits 2 selecting either set, for the same eager-validation reason.
+# Accept fixture. Both backends are implemented, so the whole file parses and each set
+# resolves to its own backend: `micro` -> microsandbox, `dock` -> docker.
+#   benchspec run --set micro --config tests/fixtures/sandbox/two-backends.toml
+#   benchspec run --set dock  --config tests/fixtures/sandbox/two-backends.toml
+# Selecting `dock` reaches the Docker host preflight, which the end-to-end tests point at
+# a nonexistent binary through BENCHSPEC_DOCKER_PATH so no test touches a real daemon.
 [tool.benchspec]
 default-set = "micro"
 

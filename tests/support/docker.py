@@ -6,8 +6,11 @@ or exit nonzero — and can read back the exact argv the code under test rendere
 without a Docker daemon anywhere near the suite. The knobs:
 
 - `BENCHSPEC_DOCKER_COMMAND_LOG`: file the shim appends one line of argv to per call.
+- `BENCHSPEC_SHIM_INFO_EXIT`: exit status of `info` (default 0, i.e. a live daemon).
 - `BENCHSPEC_SHIM_INSPECT_EXIT`: exit status of `image inspect` without `--format`
   (default 1, i.e. the image is absent).
+- `BENCHSPEC_SHIM_INSPECT_FORMAT_EXIT`: exit status of `image inspect --format`
+  (default 0, printing `sha256:deadbeef`; nonzero prints a daemon-style error instead).
 - `BENCHSPEC_SHIM_CONTAINERS`: newline-separated names `ps` prints.
 - `BENCHSPEC_SHIM_IMAGES`: newline-separated references `images` prints.
 - `BENCHSPEC_SHIM_EXEC`: the shell command `exec` runs in the "guest" (default `true`).
@@ -34,6 +37,11 @@ _SHIM_SCRIPT = dedent("""\
 
     case "$subcommand" in
         info)
+            info_exit="${BENCHSPEC_SHIM_INFO_EXIT:-0}"
+            if [ "$info_exit" -ne 0 ]; then
+                printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\\n' >&2
+                exit "$info_exit"
+            fi
             exit 0
             ;;
         image)
@@ -43,6 +51,11 @@ _SHIM_SCRIPT = dedent("""\
             for argument in "$@"; do
                 case "$argument" in
                     --format*)
+                        format_exit="${BENCHSPEC_SHIM_INSPECT_FORMAT_EXIT:-0}"
+                        if [ "$format_exit" -ne 0 ]; then
+                            printf 'Error: No such image\\n' >&2
+                            exit "$format_exit"
+                        fi
                         printf 'sha256:deadbeef\\n'
                         exit 0
                         ;;

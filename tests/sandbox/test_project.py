@@ -12,6 +12,7 @@ import pytest
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import backend as backend_mod
 from benchspec.sandbox import project, sandbox
+from benchspec.sandbox.docker import DockerBackend
 from benchspec.testing import FakeSandbox
 
 
@@ -301,13 +302,12 @@ def test_route_in_sandbox_mounts_a_staged_copy(
         create_kwargs.update(kwargs)
         return FakeTriggerSandbox()
 
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
     monkeypatch.setattr(
         sandbox, "make_agent", lambda *args: ClaudeCodeAgent(auth_value="t", version="v")
     )
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "create_trigger_sandbox", fake_create_trigger
-    )
+    monkeypatch.setattr(DockerBackend, "create_trigger_sandbox", fake_create_trigger)
 
     with pytest.raises(sandbox.RoutingError):
         sandbox.route_in_sandbox("query", repo_root, "sonnet", 20, skill_name="archive")

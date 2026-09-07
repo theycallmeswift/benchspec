@@ -407,7 +407,7 @@ def run_eval_arm(
     # missing snapshot itself calls asyncio.run, which can't nest inside a running loop.
     # The agent is selected per arm so a multi-harness set runs each column on its own
     # harness. `sandbox_name` is the resolved set's backend threaded in by the caller;
-    # it defaults to "microsandbox" (the only implemented backend) for other callers.
+    # it defaults to DEFAULT_SANDBOX for other callers.
     agent = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
     # Resolve the host environment config ONCE and thread the same value into both snapshot

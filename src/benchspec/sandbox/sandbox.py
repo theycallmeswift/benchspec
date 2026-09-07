@@ -1,4 +1,4 @@
-"""Manage microsandbox snapshots and per-arm eval sessions."""
+"""Manage sandbox snapshots and per-arm eval sessions through the resolved backend."""
 
 from __future__ import annotations
 
@@ -54,9 +54,9 @@ def snapshot_name(
 def preflight(backend: SandboxBackend | None = None) -> None:
     """Fail fast if the host can't run sandboxed evals.
 
-    Host-readiness checks come from the resolved backend (default: microsandbox); the
-    credential check is shared across backends. Raises RuntimeError (the exit-2 signal)
-    listing every failure.
+    Host-readiness checks come from the resolved backend (the default one when none is
+    passed); the credential check is shared across backends. Raises RuntimeError (the
+    exit-2 signal) listing every failure.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errs: list[str] = list(backend.preflight())
@@ -138,7 +138,7 @@ def _worker_tag() -> str:
 
 
 def _sandbox_run_name(eval_id: str, config: str) -> str:
-    """Build a stable microsandbox run name for a snapshot or cell."""
+    """Build a stable guest run name for a snapshot or cell."""
     return f"{NAME_PREFIX}eval-{eval_id}-{config}-{_worker_tag()}"
 
 
@@ -204,9 +204,9 @@ async def run_setup_sh(
 
 
 class SandboxSession:
-    """Async context manager holding one microVM open across an arm's turns.
+    """Async context manager holding one guest open across an arm's turns.
 
-    `__aenter__` boots the VM and returns a per-turn async `run`; `__aexit__` tears it
+    `__aenter__` boots the guest and returns a per-turn async `run`; `__aexit__` tears it
     down.
 
     The whole lifecycle (create → turns → stop) runs inside a single `asyncio.run`.
@@ -544,11 +544,11 @@ def cli_build(
     """Build the agent-ready snapshot(s) (loud on error).
 
     With neither `--set` nor `--config`, preserves the Phase-5 bare-build path: a single
-    `make_agent()`, env from the repo root, and the default microsandbox backend — NO sets
-    table required. With `--set`/`--config`, layers config over pyproject, resolves the set,
-    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2),
-    building one snapshot per DISTINCT harness in the set (two arms sharing a harness build
-    once) via `make_agent(harness)`.
+    `make_agent()`, env from the repo root, and the default backend — NO sets table required.
+    With `--set`/`--config`, layers config over pyproject, resolves the set, and drives the
+    resolved set's sandbox backend (an unimplemented `sandbox` value raises SchemaError →
+    exit 2), building one snapshot per DISTINCT harness in the set (two arms sharing a
+    harness build once) via `make_agent(harness)`.
 
     Args:
         repo_root: Repo root whose pyproject + environment config drive the build.

@@ -7,9 +7,10 @@ backend and never import a concrete runtime package themselves. `SandboxError` (
 in `benchspec.sandbox.errors` and re-exported here) is the one runtime-failure type
 every backend speaks, so a torn-down guest is classified without naming a runtime.
 
-microsandbox is the only implementation today. Docker is a registered-but-unimplemented
-name so `sandbox = "docker"` fails fast with a readable diagnostic instead of silently
-defaulting. Adding a real second backend is additive: implement the protocol, register it.
+Two backends are implemented: Docker (the default — a container per arm, driven through
+the `docker` CLI) and microsandbox (the microVM opt-in, selected with
+`sandbox = "microsandbox"`). Adding a third is additive: implement the protocol and
+register it; nothing outside `registered_backends()` names a concrete runtime.
 
 IMPORTANT: importing this module must NOT import the `microsandbox` package. Every
 `import microsandbox` stays inside a method body so `lint`/`analyze` keep working on a
@@ -52,10 +53,11 @@ def host_mount_path(path: object) -> str:
 
 
 BASE_IMAGE = "ubuntu:latest"
-# The only implemented backend today; the single source other modules default to.
-DEFAULT_SANDBOX = "microsandbox"
-# Every VM and snapshot benchspec creates under ~/.microsandbox carries this prefix, so
-# `cli_clean` selects them with one match and leaves other tools' sandboxes alone.
+# The default every unpinned set, the bare build, and trigger routing inherit; microsandbox
+# is the microVM opt-in a set asks for by name.
+DEFAULT_SANDBOX = "docker"
+# Every guest and snapshot benchspec creates — microVM, container, or image — carries this
+# prefix, so pruning selects them with one match and leaves other tools' sandboxes alone.
 NAME_PREFIX = "benchspec-"
 # Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
@@ -144,6 +146,120 @@ class SandboxBackend(Protocol):
     async def kill_quietly(self: object, handle: object) -> None:
         """Best-effort kill of a streaming exec handle."""
         ...
+
+    def prune(self: object) -> None:
+        """Remove every `benchspec-*` artifact this backend owns."""
+        ...
+
+
+def fingerprint_inputs_for(
+    backend_id: str, agent: CodingAgent, env: EnvConfig
+) -> FingerprintInputs:
+    """Return the structured inputs and digest behind one backend's snapshot fingerprint.
+
+    Folds in: the backend id, the DECLARED base-image reference (the tag/ref as
+    configured — benchspec does not resolve it to a digest; a floating tag is therefore
+    not reproducible across time/machines, and the backend records the actual pulled
+    digest in Phase-8 artifacts), the agent install fingerprint (installer inputs beyond
+    `version()`), and the raw environment script bytes. `snapshot_name()` and provenance
+    capture both reach this through the backend instead of re-hashing or parsing the
+    snapshot name. The backend id leads, so one agent+env never shares a snapshot across
+    two backends.
+
+    Args:
+        backend_id: The resolving backend's `id`.
+        agent: The agent whose installer inputs the snapshot bakes in.
+        env: The host environment config folded into the snapshot.
+
+    Returns:
+        The raw ingredients and the digest hashed from them.
+    """
+    base_image_ref = env.base_image or BASE_IMAGE
+    install_fingerprint = agent.install_fingerprint()
+    env_script_sha256 = hashlib.sha256(env.script).hexdigest()
+    payload = b"\0".join(
+        (
+            backend_id.encode(),
+            base_image_ref.encode(),
+            install_fingerprint.encode(),
+            env.script,
+        )
+    )
+    digest = hashlib.sha256(payload).hexdigest()[:8]
+
+    return FingerprintInputs(
+        backend_id=backend_id,
+        base_image_ref=base_image_ref,
+        install_fingerprint=install_fingerprint,
+        env_script_sha256=env_script_sha256,
+        digest=digest,
+    )
+
+
+async def bridge_skills_home(sandbox: object, agent: object) -> None:
+    """Link the agent skill directory to the fixed skills-home path.
+
+    Args:
+        sandbox: The live guest, mid-build.
+        agent: The agent supplying the bridge script and guest environment.
+
+    Raises:
+        RuntimeError: If the bridge script exits nonzero.
+    """
+    result = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"skills-home bridge failed (exit {result.exit_code}): {result.stderr_text[-2000:]}"
+        )
+
+
+async def run_environment_script(sandbox: object, agent: object, env: EnvConfig) -> None:
+    """Run the host's environment script after provisioning, before sealing.
+
+    Args:
+        sandbox: The live guest, mid-build.
+        agent: The agent supplying the guest environment.
+        env: The host environment config; an empty script is a no-op.
+
+    Raises:
+        RuntimeError: If the environment script exits nonzero.
+    """
+    if not env.script:
+        return
+
+    script = b"set -e\n" + env.script
+    result = await sandbox.shell(script.decode(), env=agent.guest_env())
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"environment_script failed (exit {result.exit_code}): {result.stderr_text[-2000:]}"
+        )
+
+
+class SharedBackendBehavior:
+    """The backend methods whose bodies are runtime-independent.
+
+    `guest_shell`, `stop_quietly`, and `kill_quietly` speak only the guest surface every
+    backend exposes and the neutral `SandboxError` every backend raises, so both
+    implementations inherit one copy instead of keeping byte-identical twins in step.
+    """
+
+    async def guest_shell(self: object, sandbox: object, agent: object, script: str) -> str | None:
+        """Run `script` in the guest, returning stdout on success or None on any failure."""
+        try:
+            result = await sandbox.shell(script, env=agent.guest_env())
+        except (TimeoutError, SandboxError, OSError):
+            return None
+        return result.stdout_text if result.exit_code == 0 else None
+
+    async def stop_quietly(self: object, sandbox: object) -> None:
+        """Best-effort guest teardown that never masks the real flow."""
+        with contextlib.suppress(SandboxError, TimeoutError, OSError):
+            await sandbox.stop()
+
+    async def kill_quietly(self: object, handle: object) -> None:
+        """Best-effort kill of a streaming exec handle (routing timeout path)."""
+        with contextlib.suppress(SandboxError, TimeoutError, OSError):
+            await handle.kill()
 
 
 def microsandbox_secrets(agent: object) -> list:
@@ -258,10 +374,10 @@ class MicrosandboxExecHandle:
             await self._native_handle.kill()
 
 
-class MicrosandboxBackend:
-    """The microsandbox implementation of `SandboxBackend`."""
+class MicrosandboxBackend(SharedBackendBehavior):
+    """The microsandbox implementation of `SandboxBackend`: one microVM per guest."""
 
-    id = DEFAULT_SANDBOX
+    id = "microsandbox"
 
     def installed(self: object) -> bool:
         """Return whether the `msb` runtime the SDK resolves is present on disk."""
@@ -296,34 +412,8 @@ class MicrosandboxBackend:
         return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
     def fingerprint_inputs(self: object, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
-        """Return the structured inputs and digest behind the snapshot cache fingerprint.
-
-        Folds in: the backend id, the DECLARED base-image reference (the tag/ref as
-        configured — benchspec does not resolve it to a digest; a floating tag is therefore
-        not reproducible across time/machines, and the backend records the actual pulled
-        digest in Phase-8 artifacts), the agent install fingerprint (installer inputs beyond
-        `version()`), and the raw environment script bytes. `snapshot_name()` and provenance
-        capture both call this instead of re-hashing or parsing the snapshot name.
-        """
-        base_image_ref = env.base_image or BASE_IMAGE
-        install_fingerprint = agent.install_fingerprint()
-        env_script_sha256 = hashlib.sha256(env.script).hexdigest()
-        payload = b"\0".join(
-            (
-                self.id.encode(),
-                base_image_ref.encode(),
-                install_fingerprint.encode(),
-                env.script,
-            )
-        )
-        digest = hashlib.sha256(payload).hexdigest()[:8]
-        return FingerprintInputs(
-            backend_id=self.id,
-            base_image_ref=base_image_ref,
-            install_fingerprint=install_fingerprint,
-            env_script_sha256=env_script_sha256,
-            digest=digest,
-        )
+        """Return the structured inputs and digest behind the snapshot cache fingerprint."""
+        return fingerprint_inputs_for(self.id, agent, env)
 
     def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the snapshot cache fingerprint for this backend, agent, and env."""
@@ -350,23 +440,8 @@ class MicrosandboxBackend:
         handle = await Snapshot.open(snapshot)
         return handle.image_manifest_digest
 
-    async def guest_shell(self: object, sandbox: object, agent: object, script: str) -> str | None:
-        """Run `script` in the guest, returning stdout on success or None on any failure."""
-        try:
-            result = await sandbox.shell(script, env=agent.guest_env())
-        except (TimeoutError, SandboxError, OSError):
-            return None
-        return result.stdout_text if result.exit_code == 0 else None
-
-    async def stop_quietly(self: object, sandbox: object) -> None:
-        """Best-effort VM teardown that never masks the real flow."""
-        with contextlib.suppress(SandboxError, asyncio.TimeoutError, OSError):
-            await sandbox.stop()
-
-    async def kill_quietly(self: object, handle: object) -> None:
-        """Best-effort kill of a streaming exec handle (routing timeout path)."""
-        with contextlib.suppress(SandboxError, OSError):
-            await handle.kill()
+    def prune(self: object) -> None:
+        """Remove every `benchspec-*` microsandbox artifact (arrives with `sandbox:clean`)."""
 
     def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
         """Provision and seal the reusable microsandbox snapshot."""
@@ -385,8 +460,8 @@ class MicrosandboxBackend:
         sandbox = MicrosandboxGuest(native)
         try:
             await agent.provision(sandbox)
-            await self._bridge_skills_home(sandbox, agent)
-            await self._run_environment_script(sandbox, agent, env)
+            await bridge_skills_home(sandbox, agent)
+            await run_environment_script(sandbox, agent, env)
             await sandbox.stop()  # snapshots require a stopped sandbox
             async with _translate_runtime_errors():
                 await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
@@ -394,29 +469,6 @@ class MicrosandboxBackend:
             with contextlib.suppress(SandboxError, OSError):
                 async with _translate_runtime_errors():
                     await Sandbox.remove(build_name)
-
-    async def _bridge_skills_home(self: object, sandbox: object, agent: object) -> None:
-        """Link the agent skill directory to the fixed skills-home path."""
-        result = await sandbox.shell(agent.bridge_skills_home_script(), env=agent.guest_env())
-        if result.exit_code != 0:
-            raise RuntimeError(
-                f"skills-home bridge failed (exit {result.exit_code}): "
-                f"{result.stderr_text[-2000:]}"
-            )
-
-    async def _run_environment_script(
-        self: object, sandbox: object, agent: object, env: EnvConfig
-    ) -> None:
-        """Run the host's environment script after provisioning, before sealing."""
-        if not env.script:
-            return
-        script = b"set -e\n" + env.script
-        result = await sandbox.shell(script.decode(), env=agent.guest_env())
-        if result.exit_code != 0:
-            raise RuntimeError(
-                f"environment_script failed (exit {result.exit_code}): "
-                f"{result.stderr_text[-2000:]}"
-            )
 
     async def create_sandbox(
         self: object,
@@ -482,26 +534,23 @@ class MicrosandboxBackend:
         return sandbox
 
 
-_REGISTRY: dict[str, type] = {DEFAULT_SANDBOX: MicrosandboxBackend}
+def registered_backends() -> dict[str, type]:
+    """Return every implemented backend keyed by its `sandbox` value."""
+    # docker.py imports this module for the seam, so the registry imports it lazily
+    # to keep the dependency one-directional at import time.
+    from benchspec.sandbox.docker import DockerBackend
 
-# Known-but-unimplemented backends: named so the fail-fast message can be specific.
-_NOT_IMPLEMENTED = {"docker": "Docker is not implemented"}
+    return {"microsandbox": MicrosandboxBackend, "docker": DockerBackend}
 
 
 def resolve_sandbox(name: str) -> SandboxBackend:
     """Return the backend for a set's `sandbox` value, or fail fast.
 
-    Returns a FRESH backend instance each call. An implemented name returns its backend.
-    A known-but-unimplemented name (`docker`) raises naming it as not implemented. Any
-    other name raises listing the supported values. The raised `SchemaError` maps to
-    exit 2 through the CLI/plugin.
+    Returns a FRESH backend instance each call. An unregistered name raises listing the
+    supported values; the raised `SchemaError` maps to exit 2 through the CLI/plugin.
     """
-    if name in _REGISTRY:
-        return _REGISTRY[name]()
-    supported = sorted(_REGISTRY)
-    if name in _NOT_IMPLEMENTED:
-        raise SchemaError(
-            f"unsupported sandbox `{name}` (supported: {supported}). "
-            f"{_NOT_IMPLEMENTED[name]}."
-        )
-    raise SchemaError(f"unsupported sandbox `{name}` (supported: {supported})")
+    backends = registered_backends()
+    if name in backends:
+        return backends[name]()
+
+    raise SchemaError(f"unsupported sandbox `{name}` (supported: {sorted(backends)})")

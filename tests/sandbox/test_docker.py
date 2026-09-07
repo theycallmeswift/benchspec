@@ -1,7 +1,9 @@
-"""Tests for the Docker guest surface: argv rendering and the real subprocess behavior.
+"""Tests for the Docker guest surface and the backend lifecycle built on top of it.
 
 Every test that touches a process drives the `docker` shim from `tests.support.docker`,
-so the suite exercises real `asyncio` subprocess plumbing without a Docker daemon.
+so the suite exercises real `asyncio` subprocess plumbing without a Docker daemon. Every
+test that builds a `DockerBackend` sets `BENCHSPEC_DOCKER_PATH`, so no test can reach a
+real daemon even on a developer machine that has one running.
 """
 
 from __future__ import annotations
@@ -12,8 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import docker
 from benchspec.sandbox.errors import SandboxError
+from benchspec.sandbox.sandbox import _agent_extra_volumes
+from benchspec.specs.discovery import EnvConfig
 from tests.support.docker import write_docker_shim
 
 
@@ -217,3 +222,289 @@ def test_stop_removes_the_container_ignoring_a_failing_remove(
     asyncio.run(sandbox.stop())
 
     assert command_log.read_text(encoding="utf-8").strip() == "rm -f benchspec-eval-x-y-main"
+
+
+def _docker_backend(tmp_path: Path, monkeypatch: object) -> docker.DockerBackend:
+    """Build a `DockerBackend` whose `docker` CLI is the shim written under `tmp_path/bin`."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(write_docker_shim(tmp_path / "bin")))
+    return docker.DockerBackend()
+
+
+class _ProbeAgent:
+    """A minimal agent whose provisioning is a single guest shell command."""
+
+    id = "probe"
+
+    def guest_env(self) -> dict:
+        """Return no guest environment variables."""
+        return {}
+
+    def bridge_skills_home_script(self) -> str:
+        """Return a no-op skills-home bridge script."""
+        return "true"
+
+    async def provision(self, sandbox: object) -> None:
+        """Install the probe by running one command in the guest."""
+        result = await sandbox.shell("echo provisioned")
+        if result.exit_code != 0:
+            raise RuntimeError(f"probe provision failed (exit {result.exit_code})")
+
+
+def test_run_argv_renders_resource_flags_mounts_env_then_the_idle_command() -> None:
+    """Verify `run -d` carries the resource flags, every mount, every env, then `sleep infinity`."""
+    argv = docker.run_argv(
+        "benchspec-eval-hello-trial-main",
+        "benchspec-snapshot:snap",
+        mounts={
+            "/workspace": docker.DockerVolume.bind("/tmp/room"),
+            "/project": docker.DockerVolume.bind("/tmp/stage", readonly=True),
+        },
+        env={"ANTHROPIC_API_KEY": "test-token"},
+    )
+
+    assert argv == [
+        "run", "-d", "--name", "benchspec-eval-hello-trial-main",
+        "--cpus", "2", "--memory", "2048m",
+        "-v", "/tmp/room:/workspace",
+        "-v", "/tmp/stage:/project:ro",
+        "-e", "ANTHROPIC_API_KEY=test-token",
+        "benchspec-snapshot:snap", "sleep", "infinity",
+    ]
+
+
+def test_image_ref_tags_the_snapshot_under_the_benchspec_repository() -> None:
+    """Verify a snapshot name becomes a tag under the single benchspec image repository."""
+    assert docker.image_ref("benchspec-docker-claude-code-1.2.3-ab12cd34") == (
+        "benchspec-snapshot:benchspec-docker-claude-code-1.2.3-ab12cd34"
+    )
+
+
+def test_preflight_reports_the_remedy_when_the_docker_cli_is_missing(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a `BENCHSPEC_DOCKER_PATH` pointing at nothing yields the install remedy."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
+    backend = docker.DockerBackend()
+
+    errors = backend.preflight()
+
+    assert errors == [
+        "docker CLI not found — install Docker Engine or Docker Desktop, "
+        "or set BENCHSPEC_DOCKER_PATH to the binary"
+    ]
+
+
+def test_preflight_reports_an_unreachable_daemon_when_docker_info_fails(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a failing `docker info` yields the daemon remedy carrying the CLI's own stderr."""
+    monkeypatch.setenv("BENCHSPEC_SHIM_INFO_EXIT", "1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    errors = backend.preflight()
+
+    assert len(errors) == 1
+    assert "docker info" in errors[0]
+    assert "Cannot connect to the Docker daemon" in errors[0]
+    assert errors[0].endswith("start Docker Desktop or the docker service")
+
+
+def test_preflight_is_clean_when_the_daemon_answers(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a healthy daemon yields no preflight errors and no platform gate."""
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    assert backend.preflight() == []
+
+
+def test_snapshot_exists_true_when_image_inspect_succeeds(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a snapshot whose image the daemon knows reports as present."""
+    monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "0")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    assert backend.snapshot_exists("benchspec-docker-claude-code-1.2.3-ab12cd34") is True
+
+
+def test_snapshot_exists_false_when_image_inspect_fails(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a snapshot the daemon has no image for reports as absent."""
+    monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    assert backend.snapshot_exists("benchspec-docker-claude-code-1.2.3-ab12cd34") is False
+
+
+def test_snapshot_exists_false_when_the_docker_cli_is_missing(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a host with no docker CLI reports every snapshot as absent instead of raising."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
+    backend = docker.DockerBackend()
+
+    assert backend.snapshot_exists("benchspec-docker-claude-code-1.2.3-ab12cd34") is False
+
+
+def test_image_identity_reads_the_image_id_from_inspect(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify the image id `docker image inspect --format` prints becomes the digest."""
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    identity = backend.image_identity("benchspec-docker-claude-code-1.2.3-ab12cd34")
+
+    assert identity.image_digest == "sha256:deadbeef"
+    assert identity.image_digest_status == "available"
+
+
+def test_image_identity_unavailable_when_inspect_fails(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a failing inspect explains itself instead of raising or reporting a null digest."""
+    monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "1")
+    monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_FORMAT_EXIT", "1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    identity = backend.image_identity("missing-snapshot")
+
+    assert identity.image_digest is None
+    assert identity.image_digest_status == "unavailable"
+    assert "No such image" in identity.image_digest_error
+
+
+def test_build_snapshot_provisions_the_build_container_then_commits_and_removes_it(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a build replaces the build container, provisions it, commits it, then removes it."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    backend.build_snapshot(_ProbeAgent(), "snap", EnvConfig())
+
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "rm -f benchspec-build-probe",
+        "run -d --name benchspec-build-probe --cpus 2 --memory 2048m "
+        "ubuntu:latest sleep infinity",
+        "exec benchspec-build-probe bash -c echo provisioned",
+        "exec benchspec-build-probe bash -c true",
+        "commit benchspec-build-probe benchspec-snapshot:snap",
+        "rm -f benchspec-build-probe",
+    ]
+
+
+def test_build_snapshot_removes_the_build_container_when_provisioning_fails(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a failed provision still tears the build container down instead of leaking it."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exit 1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    with pytest.raises(RuntimeError, match="probe provision failed"):
+        backend.build_snapshot(_ProbeAgent(), "snap", EnvConfig())
+
+    logged = command_log.read_text(encoding="utf-8").splitlines()
+    assert logged[-1] == "rm -f benchspec-build-probe"
+    assert "commit benchspec-build-probe benchspec-snapshot:snap" not in logged
+
+
+def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credential(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify an arm container binds the room rw, the project ro, and carries the credential."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    room = tmp_path / "room"
+    room.mkdir()
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    created = asyncio.run(
+        backend.create_sandbox(
+            agent=ClaudeCodeAgent(auth_value="test-token", version="1.2.3"),
+            snapshot="snap",
+            name="benchspec-eval-hello-trial-main",
+            host_workdir=room,
+            host_repo_root=stage,
+            extra_volumes=_agent_extra_volumes,
+        )
+    )
+
+    assert created.name == "benchspec-eval-hello-trial-main"
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "rm -f benchspec-eval-hello-trial-main",
+        "run -d --name benchspec-eval-hello-trial-main --cpus 2 --memory 2048m "
+        f"-v {room.resolve()}:/workspace -v {stage.resolve()}:/project:ro "
+        "-e ANTHROPIC_API_KEY=test-token benchspec-snapshot:snap sleep infinity",
+    ]
+
+
+def test_create_trigger_sandbox_mounts_only_the_project_and_stages_assets(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a trigger container binds only /project read-only and stages the agent's assets."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    staged_into: list[str] = []
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    class _StagingAgent(_ProbeAgent):
+        """A probe agent that records where its project assets were staged from."""
+
+        def secrets(self) -> list:
+            """Return no credentials."""
+            return []
+
+        async def stage_project_assets(self, sandbox: object, project_mount: str) -> None:
+            """Record the mount the assets were staged from."""
+            staged_into.append(project_mount)
+
+    created = asyncio.run(
+        backend.create_trigger_sandbox(
+            agent=_StagingAgent(),
+            snapshot="snap",
+            name="benchspec-trigger-main",
+            host_repo_root=stage,
+            extra_volumes=_agent_extra_volumes,
+        )
+    )
+
+    assert created.name == "benchspec-trigger-main"
+    assert staged_into == ["/project"]
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "rm -f benchspec-trigger-main",
+        "run -d --name benchspec-trigger-main --cpus 2 --memory 2048m "
+        f"-v {stage.resolve()}:/project:ro benchspec-snapshot:snap sleep infinity",
+    ]
+
+
+def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a payload larger than a pipe buffer streams through instead of deadlocking.
+
+    The stdout pump must already be running while stdin is written: a guest command that
+    echoes back more than one pipe buffer would otherwise block on its own stdout while
+    benchspec blocks writing stdin.
+    """
+    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "cat")
+    sandbox = _docker_sandbox(tmp_path)
+    payload = b"x" * (1024 * 1024)
+
+    async def _echo_back() -> bytes:
+        """Stream the payload through the guest and collect everything it echoes."""
+        handle = await sandbox.exec_stream("cat", stdin=payload)
+        chunks = [event.data async for event in handle if event.event_type == "stdout"]
+        return b"".join(chunks)
+
+    echoed = asyncio.run(asyncio.wait_for(_echo_back(), timeout=30))
+
+    assert echoed == payload

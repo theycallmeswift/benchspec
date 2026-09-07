@@ -168,13 +168,13 @@ def test_session_run_set_resolves_when_cases_exist(
     tmp_path: object, monkeypatch: object
 ) -> None:
     """Verify session_run_set resolves the set (with its sandbox) when a run has cases."""
-    _write_sets_pyproject(tmp_path)  # sandbox default = microsandbox
+    _write_sets_pyproject(tmp_path)  # sandbox default = docker
     monkeypatch.setattr(sets, "discover_eval_cases", lambda root, paths: [object()])
 
     run_set = sets.session_run_set(_FakeConfig(tmp_path))
 
     assert run_set is not None
-    assert run_set.sandbox == "microsandbox"  # feeds the session sandbox preflight
+    assert run_set.sandbox == "docker"  # feeds the session sandbox preflight
 
 
 def test_session_run_set_none_for_trigger_only(

@@ -290,7 +290,7 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     from benchspec.orchestration import cases
     from benchspec.sandbox import sandbox
 
-    _make_project(pytester)  # set with sandbox default = microsandbox
+    _make_project(pytester)  # set with sandbox default = docker
     captured: list = []
 
     def capture(*args: object, **kwargs: object) -> object:
@@ -316,7 +316,7 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
 
     assert result.ret == 0
     assert captured  # the parametrized body actually ran
-    assert set(captured) == {"microsandbox"}  # every arm got the resolved set's sandbox
+    assert set(captured) == {"docker"}  # every arm got the resolved set's sandbox
 
 
 def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object) -> None:

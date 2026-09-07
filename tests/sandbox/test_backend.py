@@ -26,16 +26,64 @@ def test_resolve_sandbox_returns_microsandbox_backend() -> None:
     assert resolved.id == "microsandbox"
 
 
-def test_resolve_sandbox_docker_fails_naming_not_implemented() -> None:
-    """`docker` is a known-but-unimplemented backend: fail fast naming Docker."""
-    with pytest.raises(SchemaError, match="docker.*not implemented"):
-        backend.resolve_sandbox("docker")
+def test_resolve_sandbox_returns_docker_backend() -> None:
+    """`docker` resolves to a backend whose id is `docker`."""
+    resolved = backend.resolve_sandbox("docker")
+    assert resolved.id == "docker"
 
 
-def test_resolve_sandbox_unknown_fails() -> None:
-    """An unknown backend name fails fast listing the supported values."""
-    with pytest.raises(SchemaError, match="microsandbox"):
+def test_resolve_sandbox_unknown_fails_listing_both_backends() -> None:
+    """An unknown backend name fails fast listing every supported value."""
+    with pytest.raises(SchemaError, match=r"unsupported sandbox `qemu`") as exc_info:
         backend.resolve_sandbox("qemu")
+
+    message = str(exc_info.value)
+    assert "docker" in message
+    assert "microsandbox" in message
+
+
+def test_default_sandbox_is_docker() -> None:
+    """Docker is the default every unpinned set and the bare build inherit."""
+    assert backend.DEFAULT_SANDBOX == "docker"
+
+
+def test_docker_fingerprint_folds_in_its_own_backend_id(monkeypatch: object) -> None:
+    """The Docker fingerprint records `docker` as the backend that produced it."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
+    docker_backend = backend.resolve_sandbox("docker")
+
+    inputs = docker_backend.fingerprint_inputs(_agent(), EnvConfig())
+
+    assert inputs.backend_id == "docker"
+
+
+def test_docker_and_microsandbox_fingerprints_differ_for_one_agent_and_env(
+    monkeypatch: object,
+) -> None:
+    """Two backends over the same agent+env never share a snapshot cache fingerprint."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
+    env = EnvConfig(script=b"echo one\n", script_path="s.sh")
+
+    docker_fingerprint = backend.resolve_sandbox("docker").cache_fingerprint(_agent(), env)
+    microsandbox_fingerprint = backend.resolve_sandbox("microsandbox").cache_fingerprint(
+        _agent(), env
+    )
+
+    assert docker_fingerprint != microsandbox_fingerprint
+
+
+def test_snapshot_names_differ_across_the_two_backends(monkeypatch: object) -> None:
+    """A snapshot name is namespaced by backend, so the two never collide on disk."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
+    from benchspec.sandbox.sandbox import snapshot_name
+
+    docker_name = snapshot_name(_agent(), backend=backend.resolve_sandbox("docker"))
+    microsandbox_name = snapshot_name(
+        _agent(), backend=backend.resolve_sandbox("microsandbox")
+    )
+
+    assert docker_name.startswith("benchspec-docker-")
+    assert microsandbox_name.startswith("benchspec-microsandbox-")
 
 
 def test_cache_fingerprint_stable_when_nothing_changes() -> None:

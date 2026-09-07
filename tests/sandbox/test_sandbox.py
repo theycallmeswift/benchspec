@@ -14,6 +14,7 @@ from benchspec.agents.opencode import OpenCodeAgent
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox import backend as backend_mod
 from benchspec.sandbox import sandbox
+from benchspec.sandbox.docker import DockerBackend
 from benchspec.specs.discovery import EnvConfig
 from benchspec.testing import FakeExecOutput, FakeSandbox
 
@@ -103,9 +104,7 @@ def _route_via_fake_vm(
         """Fake create trigger (class-level: takes self)."""
         return FakeTriggerSandbox()
 
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "create_trigger_sandbox", fake_create_trigger
-    )
+    monkeypatch.setattr(DockerBackend, "create_trigger_sandbox", fake_create_trigger)
     return sandbox.route_in_sandbox(
         "query",
         tmp_path,
@@ -151,15 +150,17 @@ def test_snapshot_name_changes_when_script_bytes_change() -> None:
     assert base != changed
 
 
-def test_preflight_collects_backend_and_credential_failures(monkeypatch: object) -> None:
-    """Preflight surfaces both backend host errors and the shared credential error."""
-    monkeypatch.setattr(backend_mod.platform, "system", lambda: "Windows")
+def test_preflight_collects_backend_and_credential_failures(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Preflight surfaces both the default backend's host errors and the credential error."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     with pytest.raises(RuntimeError) as exc_info:
         sandbox.preflight()
     message = str(exc_info.value)
-    assert "unsupported platform" in message
+    assert "docker CLI not found" in message
     assert "credential" in message
 
 
@@ -177,7 +178,7 @@ def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> Non
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with pytest.raises(RuntimeError) as exc_info:
-        sandbox.preflight()
+        sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))
     assert "SENTINEL_HOST_ERR" in str(exc_info.value)
 
 
@@ -191,7 +192,7 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     with pytest.raises(RuntimeError) as exc_info:
-        sandbox.preflight()
+        sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))
     assert "credential" in str(exc_info.value)
 
 
@@ -202,7 +203,7 @@ def test_preflight_passes_on_supported(monkeypatch: object) -> None:
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setattr(backend_mod.MicrosandboxBackend, "installed", lambda self: True)
-    sandbox.preflight()  # no raise
+    sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))  # no raise
 
 
 def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
@@ -259,14 +260,11 @@ def test_cli_build_resolves_environment_from_repo_root(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Bare cli_build reads its environment config from the given repo_root, not cwd."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
-    )
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "build_snapshot", lambda self, agent, name, env: None
-    )
+    monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
+    monkeypatch.setattr(DockerBackend, "build_snapshot", lambda self, agent, name, env: None)
     resolved_roots: list = []
     monkeypatch.setattr(
         sandbox,
@@ -453,13 +451,12 @@ def test_cli_build_reports_image_identity_available(
     """Every built/reused snapshot's image-identity status is reported."""
     from benchspec.sandbox.provenance import ImageIdentity
 
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
-    )
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend,
+        DockerBackend,
         "image_identity",
         lambda self, name: ImageIdentity.available("sha256:deadbeef"),
     )
@@ -473,13 +470,12 @@ def test_cli_build_reports_image_identity_unavailable(
     """An unavailable image-identity lookup surfaces its error, never a bare null."""
     from benchspec.sandbox.provenance import ImageIdentity
 
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
+    monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
-    )
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend,
+        DockerBackend,
         "image_identity",
         lambda self, name: ImageIdentity.unavailable("snapshot manifest missing"),
     )
@@ -502,27 +498,28 @@ def test_cli_build_bare_path_requires_no_sets_table(
         make_agent_calls.append(harness)
         return _claude_agent()
 
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
-    monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: True
-    )
+    monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
 
     sandbox.cli_build(repo_root=tmp_path)  # no pyproject.toml at all
 
     assert make_agent_calls == [None]
 
 
-def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path: object) -> None:
-    """A docker set fails fast at resolution, never reaching preflight or the build."""
+def test_cli_build_unknown_sandbox_set_raises_schema_error(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """A set naming an unimplemented sandbox fails at resolution, before preflight or build."""
     from benchspec.specs.schema import SchemaError
 
     (tmp_path / "pyproject.toml").write_text(
         "[tool.benchspec]\n"
-        'default-set = "dock"\n'
-        "[tool.benchspec.sets.dock]\n"
+        'default-set = "virt"\n'
+        "[tool.benchspec.sets.virt]\n"
         'model = "sonnet"\n'
-        'sandbox = "docker"\n'
+        'sandbox = "qemu"\n'
         'baseline = "baseline"\n'
         'arms = [{ name = "baseline", harness = "claude-code" }]\n',
         encoding="utf-8",
@@ -533,7 +530,7 @@ def test_cli_build_docker_set_raises_schema_error(monkeypatch: object, tmp_path:
     )
 
     with pytest.raises(SchemaError):
-        sandbox.cli_build(repo_root=tmp_path, set_name="dock")
+        sandbox.cli_build(repo_root=tmp_path, set_name="virt")
 
     assert called_preflight == []
 
