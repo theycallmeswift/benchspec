@@ -595,3 +595,53 @@ git commit -m "docs: present Docker as the default sandbox and microsandbox as t
 - **Spec coverage:** registry/default flip (Task 3), Docker lifecycle (Tasks 2-3), `sandbox:clean` pruning (Task 4), seam repairs (Task 1), CLI e2e twins and daemon-gated case (Tasks 3-5), lazy-import invariant (Global Constraints + Task 2 stdlib-only + allowlist test), `observed_arms` backend id and image digest (Task 3 `image_identity` + unchanged provenance capture), docs (Task 6).
 - **Placeholder scan:** none. `prune` on `DockerBackend` in Task 3 is an explicit no-op placeholder that Task 4 replaces, stated as such.
 - **Type consistency:** `Credential(env_var, value, allow_hosts)`; `SandboxError` from `benchspec.sandbox.errors`; `DockerSandbox(name, *, binary)`; `DockerVolume.bind(path, *, readonly=False) -> DockerMount`; `run_argv(name, image, *, mounts, env)`; `registered_backends()`; `fingerprint_inputs_for(backend_id, agent, env)`; `write_docker_shim(shim_dir) -> Path` with knobs `BENCHSPEC_DOCKER_COMMAND_LOG`, `BENCHSPEC_SHIM_EXEC`, `BENCHSPEC_SHIM_INSPECT_EXIT`, `BENCHSPEC_SHIM_INSPECT_FORMAT_EXIT`, `BENCHSPEC_SHIM_INFO_EXIT`, `BENCHSPEC_SHIM_PS_EXIT`, `BENCHSPEC_SHIM_RM_EXIT`, `BENCHSPEC_SHIM_CONTAINERS`, `BENCHSPEC_SHIM_IMAGES`.
+
+---
+
+### Task 7: Split the seam from the concrete backends and the registry
+
+**Files:**
+- Create: `src/benchspec/sandbox/microsandbox.py`
+- Create: `src/benchspec/sandbox/registry.py`
+- Modify: `src/benchspec/sandbox/backend.py` (trim to the seam)
+- Modify: `src/benchspec/config/arms.py:19`, `src/benchspec/orchestration/execution.py:31`, `src/benchspec/orchestration/cases.py:36`, `src/benchspec/sandbox/sandbox.py:25-33` (import sites)
+- Modify: `docs/sandbox.md` (the closing "authoritative modules" sentence)
+- Test: `tests/sandbox/test_backend.py` (seam tests stay), `tests/sandbox/test_microsandbox.py` (new; microsandbox tests move here), `tests/sandbox/test_sandbox.py`, `tests/sandbox/test_docker_daemon.py`, `tests/orchestration/test_execution.py`, and any other test that references `backend.resolve_sandbox`, `backend.DEFAULT_SANDBOX`, `backend.registered_backends`, `backend.MicrosandboxBackend`, `backend.msb_binary`, `backend.microsandbox_secrets`, `backend.MicrosandboxGuest`, or monkeypatches `backend.platform` / `backend.Path`
+
+**Interfaces:**
+- Consumes: everything Tasks 1-6 produced. No behavior changes.
+- Produces (module layout after the split; every public name keeps its current signature):
+  ```python
+  # benchspec/sandbox/backend.py — the runtime-free seam, nothing else
+  GUEST_WORKDIR, PROJECT_MOUNT, host_mount_path, BASE_IMAGE, NAME_PREFIX, VM_CPUS, VM_MEMORY_MIB
+  FingerprintInputs, SandboxBackend, fingerprint_inputs_for, bridge_skills_home, run_environment_script, SharedBackendBehavior
+  SandboxError            # still re-exported from benchspec.sandbox.errors
+
+  # benchspec/sandbox/microsandbox.py — the microVM backend (mirrors docker.py)
+  msb_binary, microsandbox_secrets, MicrosandboxGuest, MicrosandboxExecHandle, MicrosandboxBackend
+  # plus the private error translator; every `import microsandbox` stays inside a method body
+
+  # benchspec/sandbox/registry.py — the one place that names concrete runtimes
+  DEFAULT_SANDBOX = "docker"
+  def registered_backends() -> dict[str, type]     # {"microsandbox": MicrosandboxBackend, "docker": DockerBackend}
+  def resolve_sandbox(name: str) -> SandboxBackend
+  ```
+- Dependency direction after the split, enforced by plain top-of-file imports: `registry → {docker, microsandbox} → backend → {errors, provenance, agents}`. No lazy import remains in `registry.py`; `docker.py` does not change.
+
+**Rules:**
+- Pure motion: no function body changes beyond import statements and docstrings. The suite must stay at 1024 passing with no test deleted; tests move, they do not disappear.
+- Module docstrings: `backend.py` describes the seam and points at the two backend modules and the registry; `microsandbox.py` carries the lazy-import invariant ("importing this module must NOT import the `microsandbox` package; every `import microsandbox` stays inside a method body") and notes that absolute imports keep its own name from shadowing the third-party package; `registry.py` says it is the only module that names a concrete runtime and that adding a backend means implementing the protocol and registering it here.
+- The microsandbox import allowlist test becomes `{"microsandbox.py"}`.
+- `docs/sandbox.md`'s closing paragraph names `benchspec.sandbox.backend` (the seam), `benchspec.sandbox.docker` and `benchspec.sandbox.microsandbox` (the backends), `benchspec.sandbox.registry` (backend selection), `benchspec.sandbox.sandbox` (the cell lifecycle), and `benchspec.sandbox.project` (the `/project` stage).
+- `grep -rn "lazily\|import DockerBackend" src/benchspec/sandbox/backend.py` returns nothing afterwards.
+
+- [ ] **Step 1: Create `microsandbox.py` and `registry.py` by moving code**, then trim `backend.py`.
+- [ ] **Step 2: Retarget every import site** listed above; `grep -rn "sandbox.backend import" src tests` shows only seam names imported from `backend`.
+- [ ] **Step 3: Move and retarget tests**; run `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester tests/sandbox tests/config tests/orchestration -q` while iterating.
+- [ ] **Step 4: `make test` (1024 passed) and `make lint:ruff`**; `make lint:houserules` if `GEMINI_API_KEY` is set.
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A src tests docs/sandbox.md
+git commit -m "refactor: split the sandbox seam from the concrete backends and the registry"
+```
