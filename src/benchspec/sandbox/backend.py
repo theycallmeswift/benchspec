@@ -3,7 +3,9 @@
 A `SandboxBackend` hides everything sandbox-runtime-specific behind one boundary:
 host preflight, snapshot existence, the cache fingerprint, snapshot build, and the
 per-arm / trigger session creation. `sandbox.py` and `execution.py` drive a resolved
-backend and never import a concrete runtime package themselves.
+backend and never import a concrete runtime package themselves. `SandboxError` (defined
+in `benchspec.sandbox.errors` and re-exported here) is the one runtime-failure type
+every backend speaks, so a torn-down guest is classified without naming a runtime.
 
 microsandbox is the only implementation today. Docker is a registered-but-unimplemented
 name so `sandbox = "docker"` fails fast with a readable diagnostic instead of silently
@@ -23,12 +25,16 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from benchspec.agents import CodingAgent
+from benchspec.sandbox.errors import SandboxError
 from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.specs.discovery import EnvConfig
 from benchspec.specs.schema import SchemaError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
@@ -140,6 +146,118 @@ class SandboxBackend(Protocol):
         ...
 
 
+def microsandbox_secrets(agent: object) -> list:
+    """Render an agent's backend-neutral credentials as microsandbox `Secret` entries.
+
+    Args:
+        agent: The `CodingAgent` whose `secrets()` yields `Credential`s.
+
+    Returns:
+        One `Secret.env(...)` entry per credential, scoped to its declared allow hosts.
+    """
+    from microsandbox import Secret
+
+    return [
+        Secret.env(
+            credential.env_var, value=credential.value, allow_hosts=list(credential.allow_hosts)
+        )
+        for credential in agent.secrets()
+    ]
+
+
+@contextlib.asynccontextmanager
+async def _translate_runtime_errors() -> AsyncIterator[None]:
+    """Translate a native `MicrosandboxError` into the backend-neutral `SandboxError`.
+
+    Every microsandbox call that can hit a torn-down VM (guest commands, sandbox
+    creation, snapshot sealing) runs under this so callers never need to know the
+    concrete runtime's exception type.
+    """
+    from microsandbox.errors import MicrosandboxError
+
+    try:
+        yield
+    except MicrosandboxError as error:
+        raise SandboxError(str(error)) from error
+
+
+class MicrosandboxGuest:
+    """Wrap a native microsandbox `Sandbox`, translating its errors to `SandboxError`.
+
+    Every agent and driver in benchspec talks to a live sandbox through this wrapper
+    (never the native `Sandbox` directly), so a torn-down VM surfaces the same
+    backend-neutral `SandboxError` a future backend would raise.
+    """
+
+    def __init__(self: object, native: object) -> None:
+        """Wrap a live native `Sandbox` instance."""
+        self._native = native
+
+    async def shell(
+        self: object, script: str, *, env: dict | None = None, cwd: str | None = None
+    ) -> object:
+        """Run a shell script in the guest, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            return await self._native.shell(script, env=env, cwd=cwd)
+
+    async def exec(
+        self: object,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: dict | None = None,
+        timeout: int | None = None,
+        stdin: object = None,
+    ) -> object:
+        """Run a command in the guest, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            return await self._native.exec(
+                cmd, args, cwd=cwd, env=env, timeout=timeout, stdin=stdin
+            )
+
+    async def exec_stream(
+        self: object,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: dict | None = None,
+        stdin: object = None,
+    ) -> MicrosandboxExecHandle:
+        """Start a streaming command in the guest, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            native_handle = await self._native.exec_stream(cmd, args, cwd=cwd, env=env, stdin=stdin)
+        return MicrosandboxExecHandle(native_handle)
+
+    async def stop(self: object) -> None:
+        """Stop the guest sandbox, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            await self._native.stop()
+
+
+class MicrosandboxExecHandle:
+    """Wrap a native microsandbox `ExecHandle`, translating its errors to `SandboxError`."""
+
+    def __init__(self: object, native_handle: object) -> None:
+        """Wrap a live native streaming-exec handle."""
+        self._native_handle = native_handle
+
+    def __aiter__(self: object) -> MicrosandboxExecHandle:
+        """Return self as the async iterator over streamed exec events."""
+        return self
+
+    async def __anext__(self: object) -> object:
+        """Return the next streamed exec event, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            return await self._native_handle.__anext__()
+
+    async def kill(self: object) -> None:
+        """Kill the underlying streaming exec, translating a torn-down VM's error."""
+        async with _translate_runtime_errors():
+            await self._native_handle.kill()
+
+
 class MicrosandboxBackend:
     """The microsandbox implementation of `SandboxBackend`."""
 
@@ -234,26 +352,20 @@ class MicrosandboxBackend:
 
     async def guest_shell(self: object, sandbox: object, agent: object, script: str) -> str | None:
         """Run `script` in the guest, returning stdout on success or None on any failure."""
-        from microsandbox.errors import MicrosandboxError
-
         try:
             result = await sandbox.shell(script, env=agent.guest_env())
-        except (TimeoutError, MicrosandboxError, OSError):
+        except (TimeoutError, SandboxError, OSError):
             return None
         return result.stdout_text if result.exit_code == 0 else None
 
     async def stop_quietly(self: object, sandbox: object) -> None:
         """Best-effort VM teardown that never masks the real flow."""
-        from microsandbox.errors import MicrosandboxError
-
-        with contextlib.suppress(MicrosandboxError, asyncio.TimeoutError, OSError):
+        with contextlib.suppress(SandboxError, asyncio.TimeoutError, OSError):
             await sandbox.stop()
 
     async def kill_quietly(self: object, handle: object) -> None:
         """Best-effort kill of a streaming exec handle (routing timeout path)."""
-        from microsandbox.errors import MicrosandboxError
-
-        with contextlib.suppress(MicrosandboxError, OSError):
+        with contextlib.suppress(SandboxError, OSError):
             await handle.kill()
 
     def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
@@ -266,20 +378,22 @@ class MicrosandboxBackend:
 
         base_image = env.base_image or BASE_IMAGE
         build_name = f"{NAME_PREFIX}build-{agent.id}"
-        sandbox = await Sandbox.create(
-            build_name, image=base_image, cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True
-        )
+        async with _translate_runtime_errors():
+            native = await Sandbox.create(
+                build_name, image=base_image, cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True
+            )
+        sandbox = MicrosandboxGuest(native)
         try:
             await agent.provision(sandbox)
             await self._bridge_skills_home(sandbox, agent)
             await self._run_environment_script(sandbox, agent, env)
             await sandbox.stop()  # snapshots require a stopped sandbox
-            await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
+            async with _translate_runtime_errors():
+                await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
         finally:
-            from microsandbox.errors import MicrosandboxError
-
-            with contextlib.suppress(MicrosandboxError, OSError):
-                await Sandbox.remove(build_name)
+            with contextlib.suppress(SandboxError, OSError):
+                async with _translate_runtime_errors():
+                    await Sandbox.remove(build_name)
 
     async def _bridge_skills_home(self: object, sandbox: object, agent: object) -> None:
         """Link the agent skill directory to the fixed skills-home path."""
@@ -323,15 +437,17 @@ class MicrosandboxBackend:
             # suite-specific skill without risking a write back into the host checkout.
             volumes[PROJECT_MOUNT] = Volume.bind(host_mount_path(host_repo_root), readonly=True)
         volumes.update(extra_volumes(agent, Volume))
-        return await Sandbox.create(
-            name,
-            from_snapshot=snapshot,
-            volumes=volumes,
-            secrets=agent.secrets(),
-            cpus=VM_CPUS,
-            memory=VM_MEMORY_MIB,
-            replace=True,
-        )
+        async with _translate_runtime_errors():
+            native = await Sandbox.create(
+                name,
+                from_snapshot=snapshot,
+                volumes=volumes,
+                secrets=microsandbox_secrets(agent),
+                cpus=VM_CPUS,
+                memory=VM_MEMORY_MIB,
+                replace=True,
+            )
+        return MicrosandboxGuest(native)
 
     async def create_trigger_sandbox(
         self: object,
@@ -347,15 +463,17 @@ class MicrosandboxBackend:
 
         volumes = {PROJECT_MOUNT: Volume.bind(host_mount_path(host_repo_root), readonly=True)}
         volumes.update(extra_volumes(agent, Volume))
-        sandbox = await Sandbox.create(
-            name,
-            from_snapshot=snapshot,
-            volumes=volumes,
-            secrets=agent.secrets(),
-            cpus=VM_CPUS,
-            memory=VM_MEMORY_MIB,
-            replace=True,
-        )
+        async with _translate_runtime_errors():
+            native = await Sandbox.create(
+                name,
+                from_snapshot=snapshot,
+                volumes=volumes,
+                secrets=microsandbox_secrets(agent),
+                cpus=VM_CPUS,
+                memory=VM_MEMORY_MIB,
+                replace=True,
+            )
+        sandbox = MicrosandboxGuest(native)
         try:
             await agent.stage_project_assets(sandbox, PROJECT_MOUNT)
         except BaseException:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import backend
+from benchspec.sandbox.errors import SandboxError
 from benchspec.specs.discovery import EnvConfig
 from benchspec.specs.schema import SchemaError
 
@@ -253,22 +255,16 @@ def test_microsandbox_snapshot_exists_true_when_dir_present(
 def test_microsandbox_imported_only_under_allowlist() -> None:
     """No source file outside the allowlist imports the microsandbox package.
 
-    The backend is the primary home for the concrete runtime; the CLI wrapper and the
-    three agent adapters keep their own legitimate lazy imports (exit-code split /
-    microsandbox.Secret). Everything else — notably sandbox.py and execution.py — must
-    drive a resolved SandboxBackend. This guards that boundary so a
-    future edit cannot reintroduce a scattered `import microsandbox` there.
+    `backend.py` is now the ONLY source file that imports microsandbox at all: agent
+    credentials are backend-neutral `Credential`s (rendered to a microsandbox `Secret`
+    only inside `microsandbox_secrets`), and every microsandbox error is translated to
+    the neutral `SandboxError` before it leaves the backend. This guards that boundary
+    so a future edit cannot reintroduce a scattered `import microsandbox` elsewhere.
     """
     import re
     from pathlib import Path
 
-    allowlist = {
-        "backend.py",
-        "__main__.py",
-        "claude.py",
-        "codex.py",
-        "opencode.py",
-    }
+    allowlist = {"backend.py"}
     src = Path("src/benchspec")
     pattern = re.compile(r"^\s*(import microsandbox|from microsandbox)", re.MULTILINE)
     offenders: list[str] = []
@@ -278,6 +274,34 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
         if pattern.search(path.read_text(encoding="utf-8")):
             offenders.append(str(path))
     assert offenders == [], f"microsandbox imported outside the allowlist: {offenders}"
+
+
+def test_microsandbox_secrets_render_scoped_secret_entries() -> None:
+    """One neutral credential renders as a microsandbox Secret scoped to its hosts."""
+    agent = _agent()
+
+    entries = backend.microsandbox_secrets(agent)
+
+    assert [(entry.env_var, entry.value, entry.allow_hosts) for entry in entries] == [
+        ("ANTHROPIC_API_KEY", "test-token", ("api.anthropic.com",))
+    ]
+
+
+def test_microsandbox_guest_translates_runtime_errors() -> None:
+    """A MicrosandboxError from the native sandbox surfaces as the neutral SandboxError."""
+    from microsandbox.errors import MicrosandboxError
+
+    class ExplodingSandbox:
+        """A native sandbox whose shell call fails the way a dead VM does."""
+
+        async def shell(self: object, script: str, **kwargs: object) -> object:
+            """Fail like a torn-down VM."""
+            raise MicrosandboxError("vm gone")
+
+    guest = backend.MicrosandboxGuest(ExplodingSandbox())
+
+    with pytest.raises(SandboxError, match="vm gone"):
+        asyncio.run(guest.shell("true"))
 
 
 def test_host_mount_path_resolves_symlinked_roots(tmp_path: Path) -> None:

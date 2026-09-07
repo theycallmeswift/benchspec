@@ -14,6 +14,7 @@ from benchspec.grading.binder import BinderAuthError
 from benchspec.reporting import analyze
 from benchspec.runners import run
 from benchspec.sandbox import sandbox
+from benchspec.sandbox.errors import SandboxError
 from benchspec.specs import lint
 from benchspec.specs.schema import SchemaError
 
@@ -95,10 +96,12 @@ def _at_boundary(
     - `SchemaError` (a malformed eval or config, an unsupported backend) is a usage error
       for every command → USAGE (2).
     - `usage`: the command's own preflight/credential failures → USAGE (2).
-    - `finding`: the command's genuine failure class → FINDING (1). Resolved lazily, and
-      only once an exception outside `usage` arrives, so a handler can name an error type
-      from a package that its preflight guarantees importable — the microsandbox error
-      type must never be imported on the preflight-failed path.
+    - `finding`: the command's genuine failure class → FINDING (1). Resolved lazily, only
+      once an exception arrives, so a handler can name an error type from a package that
+      its preflight guarantees importable.
+
+    `finding` is checked before `usage` because a finding type may subclass a usage type —
+    a build failure that is also a `RuntimeError` must still map to 1, not 2.
 
     Anything else propagates as the traceback it is.
 
@@ -114,19 +117,17 @@ def _at_boundary(
         return action()
     except SchemaError as error:
         return _fail(error, ExitCode.USAGE)
-    except usage as error:
-        return _fail(error, ExitCode.USAGE)
     except Exception as error:
         if isinstance(error, finding()):
             return _fail(error, ExitCode.FINDING)
+        if isinstance(error, usage):
+            return _fail(error, ExitCode.USAGE)
         raise
 
 
-def _microsandbox_error_types() -> tuple[type[Exception], ...]:
-    """Resolve microsandbox's failure type, safe only after its host preflight passed."""
-    from microsandbox.errors import MicrosandboxError
-
-    return (MicrosandboxError,)
+def _sandbox_error_types() -> tuple[type[Exception], ...]:
+    """Resolve the backend-neutral sandbox failure type every backend raises on a build failure."""
+    return (SandboxError,)
 
 
 def _run_sandbox_build(args: argparse.Namespace) -> int:
@@ -134,9 +135,12 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
 
     `cli_build` resolves the selected set's backend first, then preflights exactly that
     backend once — so selected-backend diagnostics are not hidden behind a
-    default-microsandbox preflight. Host preflight failures (`RuntimeError`, including
-    microsandbox-not-installed) are usage errors; a genuine build/provision failure
-    (`MicrosandboxError`) is a finding.
+    default-backend preflight, and a future backend can build independently. A malformed
+    config or an unsupported backend (`SchemaError`) and a host preflight failure
+    (`RuntimeError`, e.g. the backend's runtime not installed) are usage errors; a genuine
+    build/provision failure (`SandboxError`, the shape every backend raises) is a finding.
+    This handler names no backend-specific package, so a host missing one still exits 2
+    cleanly rather than raising an import error.
 
     Args:
         args: The parsed `sandbox:build` namespace, with `root` a `Path`.
@@ -150,7 +154,7 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
         sandbox.cli_build(args.root.resolve(), set_name=args.set, config=args.config)
         return ExitCode.SUCCESS
 
-    return _at_boundary(build, usage=(RuntimeError,), finding=_microsandbox_error_types)
+    return _at_boundary(build, usage=(RuntimeError,), finding=_sandbox_error_types)
 
 
 def _run_sandbox_clean(args: argparse.Namespace) -> int:

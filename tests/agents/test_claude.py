@@ -7,8 +7,10 @@ import json
 
 import pytest
 
+from benchspec.agents.base import Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.orchestration.results import parse_run_json
+from benchspec.sandbox.errors import SandboxError
 from tests.support import FakeExecOutput, FakeSandbox
 
 
@@ -431,30 +433,44 @@ def test_invoke_nonzero_exit_is_error() -> None:
     assert "bad" in res.result_text
 
 
-def test_secrets_uses_configured_auth_env(monkeypatch: object) -> None:
-    """Verify secrets uses configured auth env."""
-    captured = {}
+def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
+    """A SandboxError from the guest's exec is recorded as an is_error result, not raised."""
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
+    class DyingSandbox(FakeSandbox):
+        """A sandbox whose exec fails the way a torn-down VM does."""
 
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
+        async def exec(self: object, cmd: str, args: object = None, **kw: object) -> object:
+            """Fail like a torn-down VM."""
+            raise SandboxError("container gone")
 
-    import microsandbox
+    res = asyncio.run(
+        _agent().invoke(
+            DyingSandbox(),
+            "p",
+            eval_id="e1",
+            config="without_skill",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="sonnet",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
 
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
+    assert res.is_error is True
+    assert res.result_text.startswith("<sandbox-error>")
+
+
+def test_secrets_declares_the_configured_credential_scoped_to_anthropic() -> None:
+    """The configured credential name reaches the guest, scoped to the Anthropic API host."""
     agent = ClaudeCodeAgent(auth_value="tok-123", auth_env="CLAUDE_CODE_OAUTH_TOKEN")
-    secs = agent.secrets()
-    assert len(secs) == 1
-    # the configured credential name (not a hardcoded one) reaches the injected secret,
-    # scoped to the Anthropic API host
-    assert captured["env_var"] == "CLAUDE_CODE_OAUTH_TOKEN"
-    assert captured["value"] == "tok-123"
-    assert captured["allow_hosts"] == ["api.anthropic.com"]
+
+    credentials = agent.secrets()
+
+    assert credentials == [
+        Credential("CLAUDE_CODE_OAUTH_TOKEN", "tok-123", ("api.anthropic.com",))
+    ]
 
 
 def test_guest_env_carries_home_and_sandbox_flag() -> None:

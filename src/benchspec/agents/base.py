@@ -2,9 +2,9 @@
 
 A `CodingAgent` hides everything agent-specific behind one boundary: where its home
 lives in the guest, how to provision the CLI into a microVM (the cached step), which
-secrets it needs, how to stage local skills, how to build its headless command, and how
-to parse its output. `sandbox.py` drives a live sandbox through this interface and never
-names a concrete agent; adding a second agent is additive, not a refactor.
+credentials it needs, how to stage local skills, how to build its headless command, and
+how to parse its output. `sandbox.py` drives a live sandbox through this interface and
+never names a concrete agent; adding a second agent is additive, not a refactor.
 
 One adapter per harness, transport-blind: the adapter builds commands and parses
 output, and a `benchspec.orchestration.environments.ExecutionEnv` decides where the
@@ -178,6 +178,24 @@ class AgentCapabilities:
     token_split: bool  # reports input/output token split (enables cost estimates)
 
 
+@dataclass(frozen=True)
+class Credential:
+    """A provider credential an agent needs in the guest, declared backend-neutrally.
+
+    Every agent's `secrets()` returns these instead of a concrete runtime's own secret
+    type, so the sandbox seam (not the agent) decides how a credential reaches the guest.
+
+    Attributes:
+        env_var: The environment variable name the guest process reads.
+        value: The credential's secret value.
+        allow_hosts: The guest hostnames this credential may be sent to.
+    """
+
+    env_var: str
+    value: str
+    allow_hosts: tuple[str, ...]
+
+
 @runtime_checkable
 class CodingAgent(Protocol):
     """Define the agent interface."""
@@ -220,8 +238,8 @@ class CodingAgent(Protocol):
     #   the session snapshots them and merges the agent-authored files (diffed against the
     #   staged baseline) into the judge's facts. Each agent scaffolds skills differently, so
     #   each owns its answer; return [] for an agent that writes only to the workdir.
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
+    def secrets(self: object) -> list[Credential]:
+        """Return the provider credentials to inject into the guest."""
         ...
 
     def guest_env(self: object) -> dict:

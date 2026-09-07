@@ -23,17 +23,18 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent
+from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
 from benchspec.grading.trajectory import iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
+from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
 
-# Credentials OpenCode reads (host-side env var names), in preference order. The
-# runner injects whichever is set as a microsandbox secret, substituted only for
-# the matching provider host.
+# Credentials OpenCode reads (host-side env var names), in preference order. Whichever
+# is set becomes a scoped credential the backend injects, substituted only for the
+# matching provider host.
 AUTH_ENV_VARS = (
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -315,15 +316,11 @@ class OpenCodeAgent(BaseAgent):
             "BENCHSPEC_OPENCODE_VERSION": self._version,
         }
 
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
-        from microsandbox import Secret
-
+    def secrets(self: object) -> list[Credential]:
+        """Return the provider credentials to inject into the guest."""
         allow_host = _PROVIDER_HOSTS[self._auth_env]
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
-        return [
-            Secret.env(guest_env_name, value=self._auth_value, allow_hosts=[allow_host]),
-        ]
+        return [Credential(guest_env_name, self._auth_value, (allow_host,))]
 
     def build_command(
         self: object,
@@ -396,8 +393,6 @@ class OpenCodeAgent(BaseAgent):
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
-        from microsandbox.errors import MicrosandboxError
-
         cmd = self.build_command(
             prompt,
             plugin_dir=plugin_dir,
@@ -420,7 +415,7 @@ class OpenCodeAgent(BaseAgent):
                 # Force EOF on stdin so `opencode run` cannot block on an open pipe.
                 stdin=b"",
             )
-        except (TimeoutError, MicrosandboxError, OSError) as error:
+        except (TimeoutError, SandboxError, OSError) as error:
             return RunResult(
                 eval_id,
                 config,
