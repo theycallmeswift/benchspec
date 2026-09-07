@@ -720,7 +720,7 @@ def test_cli_clean_tolerates_missing_msb(monkeypatch: object, tmp_path: object) 
     import subprocess
 
     home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "eval-x").mkdir(parents=True)
+    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
     monkeypatch.setattr(sandbox.Path, "home", lambda: home)
     monkeypatch.chdir(tmp_path)
 
@@ -737,7 +737,7 @@ def test_cli_clean_runs_the_sdk_resolved_msb_binary(monkeypatch: object, tmp_pat
     import subprocess
 
     home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "eval-x").mkdir(parents=True)
+    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
     monkeypatch.setattr(sandbox.Path, "home", lambda: home)
     binary = tmp_path / "bundled" / "msb"
     monkeypatch.setattr(sandbox, "msb_binary", lambda: binary)
@@ -749,8 +749,8 @@ def test_cli_clean_runs_the_sdk_resolved_msb_binary(monkeypatch: object, tmp_pat
     sandbox.cli_clean(tmp_path)
 
     assert commands == [
-        [str(binary), "stop", "eval-x"],
-        [str(binary), "rm", "-f", "eval-x"],
+        [str(binary), "stop", "benchspec-eval-x"],
+        [str(binary), "rm", "-f", "benchspec-eval-x"],
     ]
 
 
@@ -761,7 +761,7 @@ def test_cli_clean_skips_msb_when_runtime_unavailable(
     import subprocess
 
     home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "eval-x").mkdir(parents=True)
+    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
     monkeypatch.setattr(sandbox.Path, "home", lambda: home)
     monkeypatch.setattr(sandbox, "msb_binary", lambda: None)
 

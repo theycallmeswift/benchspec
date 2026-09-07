@@ -48,6 +48,9 @@ def host_mount_path(path: object) -> str:
 BASE_IMAGE = "ubuntu:latest"
 # The only implemented backend today; the single source other modules default to.
 DEFAULT_SANDBOX = "microsandbox"
+# Every VM and snapshot benchspec creates under ~/.microsandbox carries this prefix, so
+# `cli_clean` selects them with one match and leaves other tools' sandboxes alone.
+NAME_PREFIX = "benchspec-"
 # Agent CLI installers and real eval work need this memory budget.
 VM_CPUS = 2
 VM_MEMORY_MIB = 2048
@@ -262,7 +265,7 @@ class MicrosandboxBackend:
         from microsandbox import Sandbox, Snapshot
 
         base_image = env.base_image or BASE_IMAGE
-        build_name = f"benchspec-build-{agent.id}"
+        build_name = f"{NAME_PREFIX}build-{agent.id}"
         sandbox = await Sandbox.create(
             build_name, image=base_image, cpus=VM_CPUS, memory=VM_MEMORY_MIB, replace=True
         )

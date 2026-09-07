@@ -128,15 +128,17 @@ binary is preflighted when tests actually execute, not at collection.
 
 ## The command line
 
-`benchspec` has four subcommands. `run` and `sandbox:build` follow the full
+`benchspec` has five subcommands. `run` and `sandbox:build` follow the full
 exit-code contract below; `lint` and `analyze` never exit `5`: an empty root just
-reports zero findings or classifications and exits `0`.
+reports zero findings or classifications and exits `0`. `sandbox:clean` only
+exits `0` (nothing to prune is success) or `2` on a malformed invocation.
 
 ```bash
 benchspec lint [root]            # static assertion checks — no credentials, no sandbox
 benchspec analyze [root]         # classify assertions deterministic / judge-backed
 benchspec run [root] [flags] [-- pytest-args]
 benchspec sandbox:build [--set S] [--config F] [root]
+benchspec sandbox:clean [root]   # prune eval sandboxes + snapshots; stops running ones
 ```
 
 ### `benchspec run`
