@@ -2,12 +2,12 @@
 
 import pytest
 
-from harnessbench.grading.judges.config import (
+from benchspec.grading.judges.config import (
     JudgeConfig,
     _validate_judge_table,
     resolve_judge_config,
 )
-from harnessbench.specs.schema import SchemaError
+from benchspec.specs.schema import SchemaError
 
 
 def test_judge_config_defaults() -> None:
@@ -23,7 +23,7 @@ def test_judge_config_defaults() -> None:
 
 def test_validate_judge_table_accepts_known_keys() -> None:
     """Verify validate judge table accepts known keys."""
-    validated = _validate_judge_table("[tool.harnessbench.judge]", {
+    validated = _validate_judge_table("[tool.benchspec.judge]", {
         "harness": "codex", "model": "gpt-5.5", "effort": "medium",
         "timeout": 300, "harness_args": ["--sandbox", "read-only"],
         "env": {"CODEX_HOME": "$CODEX_HOME"},
@@ -38,7 +38,7 @@ def test_validate_judge_table_accepts_known_keys() -> None:
 def test_validate_judge_table_rejects_unknown_key() -> None:
     """Verify validate judge table rejects unknown key."""
     with pytest.raises(SchemaError, match="unknown judge key"):
-        _validate_judge_table("[tool.harnessbench.judge]", {"harness": "codex", "bogus": 1})
+        _validate_judge_table("[tool.benchspec.judge]", {"harness": "codex", "bogus": 1})
 
 
 @pytest.mark.parametrize(("bad_table", "match"), [
@@ -56,7 +56,7 @@ def test_validate_judge_table_rejects_unknown_key() -> None:
 def test_validate_judge_table_rejects_bad_types(bad_table: object, match: object) -> None:
     """Verify validate judge table rejects bad types."""
     with pytest.raises(SchemaError, match=match):
-        _validate_judge_table("[tool.harnessbench.judge]", bad_table)
+        _validate_judge_table("[tool.benchspec.judge]", bad_table)
 
 
 def test_resolve_judge_config_defaults_with_no_layers() -> None:

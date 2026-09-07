@@ -2,7 +2,7 @@
 
 import json
 
-from harnessbench.grading.trajectory import (
+from benchspec.grading.trajectory import (
     extract_trajectory,
     render_process_facts,
     skills_dispatched,
@@ -191,7 +191,7 @@ def test_render_process_facts_empty_when_no_tool_activity() -> None:
 
 def test_split_session_recovers_per_turn_streams() -> None:
     """Verify split session recovers per turn streams."""
-    from harnessbench.grading.trajectory import split_session
+    from benchspec.grading.trajectory import split_session
 
     t1 = _assistant_tool_use("Skill", {"skill": "writing-prompts"}, tool_id="a")
     t2 = _assistant_tool_use("Bash", {"command": "ls"}, tool_id="b")
@@ -206,7 +206,7 @@ def test_split_session_recovers_per_turn_streams() -> None:
 
 def test_split_session_empty_and_no_delimiter() -> None:
     """Verify split session empty and no delimiter."""
-    from harnessbench.grading.trajectory import split_session
+    from benchspec.grading.trajectory import split_session
 
     assert split_session("") == []
     assert split_session('{"type":"result"}') == []  # no delimiter → nothing to split
@@ -214,7 +214,7 @@ def test_split_session_empty_and_no_delimiter() -> None:
 
 def test_trajectory_from_session_tags_events_with_turn() -> None:
     """Verify trajectory from session tags events with turn."""
-    from harnessbench.grading.trajectory import trajectory_from_session
+    from benchspec.grading.trajectory import trajectory_from_session
 
     t1 = _assistant_tool_use("Skill", {"skill": "writing-prompts"}, tool_id="a")
     t2 = _assistant_tool_use("Bash", {"command": "ls"}, tool_id="b")
@@ -244,7 +244,7 @@ def test_trajectory_from_session_regenerates_opencode_turns() -> None:
     # session.jsonl carries no agent marker, so trajectory_from_session must sniff
     # the OpenCode stream shape (tool uses nested under `part`) and route to the
     # OpenCode extractor — otherwise an OpenCode session regenerates to [].
-    from harnessbench.grading.trajectory import trajectory_from_session
+    from benchspec.grading.trajectory import trajectory_from_session
 
     oc = "\n".join(
         [
@@ -291,7 +291,7 @@ def test_trajectory_from_session_regenerates_opencode_turns() -> None:
 
 def test_iter_events_yields_only_dict_events_skipping_noise() -> None:
     """Verify iter events yields only dict events skipping noise."""
-    from harnessbench.grading.trajectory import iter_events
+    from benchspec.grading.trajectory import iter_events
 
     text = "\n".join(["", "  ", "not json", "[1,2]", '{"type":"assistant"}'])
     assert list(iter_events(text)) == [{"type": "assistant"}]

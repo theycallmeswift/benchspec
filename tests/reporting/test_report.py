@@ -2,7 +2,7 @@
 
 import pytest
 
-from harnessbench.reporting import report
+from benchspec.reporting import report
 from tests.support import seed_arm
 
 

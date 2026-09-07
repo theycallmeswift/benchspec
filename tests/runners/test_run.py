@@ -1,4 +1,4 @@
-"""The pure `run` flag translation into plugin `--harnessbench-*` option tokens.
+"""The pure `run` flag translation into plugin `--benchspec-*` option tokens.
 
 Each test builds a namespace inline and asserts the exact tokens `translate_run_flags`
 emits for it.
@@ -11,8 +11,8 @@ import sys
 import textwrap
 from pathlib import Path
 
-from harnessbench.runners import run
-from harnessbench.runners.run import translate_run_flags
+from benchspec.runners import run
+from benchspec.runners.run import translate_run_flags
 
 # The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
 # child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,
@@ -20,10 +20,10 @@ from harnessbench.runners.run import translate_run_flags
 
 _ARMS_TOML = textwrap.dedent(
     """\
-    [tool.harnessbench]
+    [tool.benchspec]
     default-set = "default"
 
-    [tool.harnessbench.sets.default]
+    [tool.benchspec.sets.default]
     harness = "claude-code"
     model = "sonnet"
     baseline = "baseline"
@@ -100,20 +100,20 @@ def _runner_returning(returncode: int, recorder: dict[str, object]) -> object:
     return fake_runner
 
 
-def test_translates_set_to_harnessbench_set() -> None:
-    """Verify --set becomes an --harnessbench-set token."""
+def test_translates_set_to_benchspec_set() -> None:
+    """Verify --set becomes an --benchspec-set token."""
     args = _run_namespace(Path("repo"), set="default")
 
     tokens = translate_run_flags(args)
 
-    assert "--harnessbench-set=default" in tokens
+    assert "--benchspec-set=default" in tokens
 
 
 def test_translates_config_model_harness_effort() -> None:
-    """Verify config/model/harness/effort each become their --harnessbench-* token."""
+    """Verify config/model/harness/effort each become their --benchspec-* token."""
     args = _run_namespace(
         Path("repo"),
-        config="harnessbench.toml",
+        config="benchspec.toml",
         model="opus",
         harness="claude-code",
         effort="high",
@@ -121,10 +121,10 @@ def test_translates_config_model_harness_effort() -> None:
 
     tokens = translate_run_flags(args)
 
-    assert "--harnessbench-config=harnessbench.toml" in tokens
-    assert "--harnessbench-model=opus" in tokens
-    assert "--harnessbench-harness=claude-code" in tokens
-    assert "--harnessbench-effort=high" in tokens
+    assert "--benchspec-config=benchspec.toml" in tokens
+    assert "--benchspec-model=opus" in tokens
+    assert "--benchspec-harness=claude-code" in tokens
+    assert "--benchspec-effort=high" in tokens
 
 
 def test_translates_models_and_eval_paths_and_fail_under() -> None:
@@ -138,13 +138,13 @@ def test_translates_models_and_eval_paths_and_fail_under() -> None:
 
     tokens = translate_run_flags(args)
 
-    assert "--harnessbench-models=opus,sonnet" in tokens
-    assert "--harnessbench-eval-paths=skills,evals" in tokens
-    assert "--harnessbench-fail-under=0.8" in tokens
+    assert "--benchspec-models=opus,sonnet" in tokens
+    assert "--benchspec-eval-paths=skills,evals" in tokens
+    assert "--benchspec-fail-under=0.8" in tokens
 
 
 def test_translates_common_judge_flags() -> None:
-    """Verify judge harness/model/effort each become their --harnessbench-judge-* token."""
+    """Verify judge harness/model/effort each become their --benchspec-judge-* token."""
     args = _run_namespace(
         Path("repo"),
         judge_harness="gemini",
@@ -154,28 +154,28 @@ def test_translates_common_judge_flags() -> None:
 
     tokens = translate_run_flags(args)
 
-    assert "--harnessbench-judge-harness=gemini" in tokens
-    assert "--harnessbench-judge-model=gemini-2.5-pro" in tokens
-    assert "--harnessbench-judge-effort=low" in tokens
+    assert "--benchspec-judge-harness=gemini" in tokens
+    assert "--benchspec-judge-model=gemini-2.5-pro" in tokens
+    assert "--benchspec-judge-effort=low" in tokens
 
 
 def test_repeatable_env_emits_one_token_per_value() -> None:
-    """Verify a repeatable --env emits one --harnessbench-env token per value."""
+    """Verify a repeatable --env emits one --benchspec-env token per value."""
     args = _run_namespace(Path("repo"), env=["A=1", "B=2"])
 
     tokens = translate_run_flags(args)
 
-    assert "--harnessbench-env=A=1" in tokens
-    assert "--harnessbench-env=B=2" in tokens
+    assert "--benchspec-env=A=1" in tokens
+    assert "--benchspec-env=B=2" in tokens
 
 
 def test_root_becomes_repo_root_token() -> None:
-    """Verify the root positional becomes a resolved --harnessbench-repo-root token."""
+    """Verify the root positional becomes a resolved --benchspec-repo-root token."""
     root = Path("some/dir")
 
     tokens = translate_run_flags(_run_namespace(root))
 
-    assert tokens[0] == f"--harnessbench-repo-root={root.resolve()}"
+    assert tokens[0] == f"--benchspec-repo-root={root.resolve()}"
 
 
 def test_absent_flags_add_nothing() -> None:
@@ -184,7 +184,7 @@ def test_absent_flags_add_nothing() -> None:
 
     tokens = translate_run_flags(_run_namespace(root))
 
-    assert tokens == [f"--harnessbench-repo-root={root.resolve()}"]
+    assert tokens == [f"--benchspec-repo-root={root.resolve()}"]
 
 
 def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None:
@@ -200,8 +200,8 @@ def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None
         sys.executable,
         "-m",
         "pytest",
-        f"--harnessbench-repo-root={Path('repo').resolve()}",
-        "--harnessbench-set=default",
+        f"--benchspec-repo-root={Path('repo').resolve()}",
+        "--benchspec-set=default",
     ]
 
 

@@ -1,6 +1,6 @@
 """Tests for room."""
 
-from harnessbench.orchestration.room import (
+from benchspec.orchestration.room import (
     changed_paths,
     gather_facts,
     merge_facts,
@@ -129,7 +129,7 @@ def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
     # the find-on-symlink interaction.
     import subprocess
 
-    real_home = tmp_path / "home" / "harnessbench" / "skills"
+    real_home = tmp_path / "home" / "benchspec" / "skills"
     (real_home / "authored" / "evals").mkdir(parents=True)
     (real_home / "authored" / "SKILL.md").write_text("agent wrote this\n")
     (real_home / "authored" / "evals" / "case.json").write_text("{}\n")

@@ -17,11 +17,11 @@ import pytest
 from conftest import _recording_call_model
 from test_corpus_integrity import CORPUS
 
-from harnessbench.grading.binder import _bind_bare_exists, bind
+from benchspec.grading.binder import _bind_bare_exists, bind
 
 pytestmark = pytest.mark.binder_corpus
 
-SAMPLES = int(os.environ.get("HARNESSBENCH_BINDER_SAMPLES", "5"))
+SAMPLES = int(os.environ.get("BENCHSPEC_BINDER_SAMPLES", "5"))
 
 # A bind that failed on infra (timeout/HTTP failure) even after a retry — distinct from a punt
 # (None) and a bind (dict). Excluded from every rate; counted by the infra-error guard.

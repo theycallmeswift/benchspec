@@ -1,7 +1,7 @@
 # Configuring benchmarks
 
-This is the configuration reference: the `[tool.harnessbench]` tables in
-`pyproject.toml` (eval sets, arms, the judge), the `harnessbench` command line,
+This is the configuration reference: the `[tool.benchspec]` tables in
+`pyproject.toml` (eval sets, arms, the judge), the `benchspec` command line,
 how the layers combine, exit codes, and environment variables. It is for someone
 who has run the [quickstart](quickstart.md) and wants to shape a benchmark; the
 terms (eval set, arm, baseline, judge, cell) are defined in
@@ -18,10 +18,10 @@ config.
 A minimal two-arm set:
 
 ```toml
-[tool.harnessbench]
+[tool.benchspec]
 default-set = "default"
 
-[tool.harnessbench.sets.default]
+[tool.benchspec.sets.default]
 harness  = "claude-code"
 model    = "sonnet"
 baseline = "baseline"
@@ -32,16 +32,16 @@ arms = [
 ```
 
 Set-level keys are defaults every arm inherits; an arm overrides only what
-differs. The full key set for `[tool.harnessbench.sets.<name>]`:
+differs. The full key set for `[tool.benchspec.sets.<name>]`:
 
 | Key | Type | Notes |
 |---|---|---|
 | `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `model` / `effort` / `env` / `harness_args`. |
 | `harness` | string | Default harness: `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
-| `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by harnessbench; a bad value fails loudly from the agent CLI. |
+| `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
 | `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for how each CLI receives it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
-| `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags harnessbench owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
+| `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags benchspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional: without it, arms report absolute rates and no delta. Must name a declared arm. |
 | `runner` | string | The test harness driving the set. `pytest` is the only supported value (and the default); anything else fails fast with exit `2`. |
 | `sandbox` | string | The sandbox backend. `microsandbox` is the only implementation (and the default); `docker` is recognized but fails fast as not implemented. |
@@ -53,7 +53,7 @@ differs. The full key set for `[tool.harnessbench.sets.<name>]`:
 Validation is structural and fail-fast: unknown harnesses, duplicate arm names, a
 `baseline` or `default-set` naming an undeclared thing, a non-table `env`. Each
 raises at config-read time (a pytest `UsageError` at collection, exit `2` from
-the CLI), never a silent no-op mid-run. What harnessbench deliberately does *not*
+the CLI), never a silent no-op mid-run. What benchspec deliberately does *not*
 validate is harness × model semantics; models change too fast for an allow-list,
 so a wrong model surfaces as a loud error from the agent CLI.
 
@@ -91,7 +91,7 @@ every punted assertion, deliberately independent of the task arms so the grader
 is constant across the matrix. Declare it top-level, never per set:
 
 ```toml
-[tool.harnessbench.judge]
+[tool.benchspec.judge]
 harness = "codex"
 model   = "gpt-5.5"
 ```
@@ -102,7 +102,7 @@ model   = "gpt-5.5"
 | `model` | string | `sonnet` | Harness-specific, like an arm's model. One structural check: an `opencode` judge needs a provider-qualified model (`anthropic/...`), enforced at collection. |
 | `effort` | string | `medium` | Passed to the judge harness the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, a `--variant` mapping for OpenCode. |
 | `timeout` | integer | `300` | Judge subprocess timeout, seconds. |
-| `harness_args` | array of strings | `[]` | Pass-through CLI tokens; harnessbench-owned flags are rejected per harness. |
+| `harness_args` | array of strings | `[]` | Pass-through CLI tokens; benchspec-owned flags are rejected per harness. |
 | `env` | table | `{}` | Judge-only env, `$VAR`-expanded at judge execution time by the same rule as arm env. |
 
 > **Best practice:** judge cross-family. An Anthropic judge grading Anthropic
@@ -114,7 +114,7 @@ model   = "gpt-5.5"
 The judge harness's CLI must be installed on the host with valid credentials; the
 binary is preflighted when tests actually execute, not at collection.
 
-## Top-level `[tool.harnessbench]` keys
+## Top-level `[tool.benchspec]` keys
 
 | Key | Type | Notes |
 |---|---|---|
@@ -124,54 +124,54 @@ binary is preflighted when tests actually execute, not at collection.
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
-| `opencode_version` | string | Default OpenCode version pin when `HARNESSBENCH_OPENCODE_VERSION` is unset. |
+| `opencode_version` | string | Default OpenCode version pin when `BENCHSPEC_OPENCODE_VERSION` is unset. |
 
 ## The command line
 
-`harnessbench` has four subcommands. `run` and `sandbox:build` follow the full
+`benchspec` has four subcommands. `run` and `sandbox:build` follow the full
 exit-code contract below; `lint` and `analyze` never exit `5`: an empty root just
 reports zero findings or classifications and exits `0`.
 
 ```bash
-harnessbench lint [root]            # static assertion checks — no credentials, no sandbox
-harnessbench analyze [root]         # classify assertions deterministic / judge-backed
-harnessbench run [root] [flags] [-- pytest-args]
-harnessbench sandbox:build [--set S] [--config F] [root]
+benchspec lint [root]            # static assertion checks — no credentials, no sandbox
+benchspec analyze [root]         # classify assertions deterministic / judge-backed
+benchspec run [root] [flags] [-- pytest-args]
+benchspec sandbox:build [--set S] [--config F] [root]
 ```
 
-### `harnessbench run`
+### `benchspec run`
 
 `run` resolves one set, runs its `(eval × arm)` cells as parametrized pytest
-tests, grades, and reports. Each flag forwards to a `--harnessbench-*` pytest
+tests, grades, and reports. Each flag forwards to a `--benchspec-*` pytest
 plugin option, so the same knobs work when driving pytest directly:
 
 | Flag | Forwards to | Effect |
 |---|---|---|
-| `--set NAME` | `--harnessbench-set` | Run this set instead of `default-set`. Unknown names fail fast. |
-| `--config FILE` | `--harnessbench-config` | Layer an untracked TOML's `[tool.harnessbench.sets.*]` (and `judge`) over pyproject: a scratch set for a one-off comparison. Same table shape as pyproject. |
-| `--model M` | `--harnessbench-model` | Override the set's `model` default. Arms that declared their own model keep it. |
-| `--models M1,M2` | `--harnessbench-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
-| `--harness H` | `--harnessbench-harness` | Override the set's `harness` default. |
-| `--effort E` | `--harnessbench-effort` | Override the set's `effort` default. |
-| `--env K=V` | `--harnessbench-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
-| `--eval-paths P1,P2` | `--harnessbench-eval-paths` | Override discovery search paths. |
-| `--fail-under PP` | `--harnessbench-fail-under` | CI gate (below). |
-| `--judge-harness` / `--judge-model` / `--judge-effort` | `--harnessbench-judge-*` | Per-run judge overrides. |
+| `--set NAME` | `--benchspec-set` | Run this set instead of `default-set`. Unknown names fail fast. |
+| `--config FILE` | `--benchspec-config` | Layer an untracked TOML's `[tool.benchspec.sets.*]` (and `judge`) over pyproject: a scratch set for a one-off comparison. Same table shape as pyproject. |
+| `--model M` | `--benchspec-model` | Override the set's `model` default. Arms that declared their own model keep it. |
+| `--models M1,M2` | `--benchspec-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
+| `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
+| `--effort E` | `--benchspec-effort` | Override the set's `effort` default. |
+| `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
+| `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
+| `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
+| `--judge-harness` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
 
 Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
-harnessbench run -- -k greets-by-name     # one eval (substring match on the test id)
-harnessbench run -- -n 8                  # fan cells across 8 microVMs (pytest-xdist)
-harnessbench run -- --count 5             # 5 samples per cell (pytest-repeat)
-harnessbench run -- --collect-only -q     # list the cells without running
+benchspec run -- -k greets-by-name     # one eval (substring match on the test id)
+benchspec run -- -n 8                  # fan cells across 8 microVMs (pytest-xdist)
+benchspec run -- --count 5             # 5 samples per cell (pytest-repeat)
+benchspec run -- --collect-only -q     # list the cells without running
 ```
 
 A few plugin options have no curated `run` flag and are reached the same way:
-`--harnessbench-judge-timeout`, `--harnessbench-judge-env K=V`,
-`--harnessbench-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
+`--benchspec-judge-timeout`, `--benchspec-judge-env K=V`,
+`--benchspec-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
 *replaces* the configured judge `harness_args` when given), and
-`--harnessbench-repo-root`.
+`--benchspec-repo-root`.
 
 ### The `--fail-under` gate
 
@@ -207,7 +207,7 @@ CLI flag  >  environment variable  >  pyproject.toml  >  built-in default
 ```
 
 Judge knobs insert the scratch file into that chain: CLI flag > `--config` file's
-`[tool.harnessbench.judge]` > pyproject's > built-in default. Not every knob has
+`[tool.benchspec.judge]` > pyproject's > built-in default. Not every knob has
 every channel: `eval_paths` has no env var, and `--fail-under` is flag-only by
 design (it is a CI decision, made where CI is configured).
 
@@ -224,14 +224,14 @@ guest (see [`sandbox.md`](sandbox.md#credentials)).
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude Code credential (OAuth token preferred; from `claude setup-token`). |
 | `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order; see [`harnesses.md`](harnesses.md). |
 | `OPENROUTER_API_KEY` | OpenCode's preferred provider credential (falls back to `ANTHROPIC_API_KEY`, then `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`). |
-| `HARNESSBENCH_CLAUDE_VERSION` / `HARNESSBENCH_CODEX_VERSION` / `HARNESSBENCH_OPENCODE_VERSION` | Select a harness CLI version instead of `latest`; each value keys its own sandbox snapshot. Codex and OpenCode install exactly that version; the Claude Code installer always fetches the latest release, so its value only names the snapshot (the version that ran is recorded in `meta.json`). |
-| `PROJECT_ROOT` | Repo-root override (below `--harnessbench-repo-root`, above the pytest rootdir). |
+| `BENCHSPEC_CLAUDE_VERSION` / `BENCHSPEC_CODEX_VERSION` / `BENCHSPEC_OPENCODE_VERSION` | Select a harness CLI version instead of `latest`; each value keys its own sandbox snapshot. Codex and OpenCode install exactly that version; the Claude Code installer always fetches the latest release, so its value only names the snapshot (the version that ran is recorded in `meta.json`). |
+| `PROJECT_ROOT` | Repo-root override (below `--benchspec-repo-root`, above the pytest rootdir). |
 
-Inside the sandbox, each cell's `setup.sh` additionally sees `HARNESSBENCH_ARM`,
-`HARNESSBENCH_MODEL`, `HARNESSBENCH_HARNESS`, and `HARNESSBENCH_SET`, described in
+Inside the sandbox, each cell's `setup.sh` additionally sees `BENCHSPEC_ARM`,
+`BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, and `BENCHSPEC_SET`, described in
 [`writing-evals.md`](writing-evals.md#setupsh-what-differs-per-arm).
 
-The authoritative parsers are `harnessbench.config.arms` (sets and arms),
-`harnessbench.grading.judges.config` (the judge), `harnessbench.runners.pytest`
-(plugin options), and `harnessbench.exit_codes`. If this page and those modules
+The authoritative parsers are `benchspec.config.arms` (sets and arms),
+`benchspec.grading.judges.config` (the judge), `benchspec.runners.pytest`
+(plugin options), and `benchspec.exit_codes`. If this page and those modules
 ever disagree, the modules are right.

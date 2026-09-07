@@ -1,4 +1,4 @@
-"""Tests for harnessbench.sandbox.project — staging the guest's view of the host repo."""
+"""Tests for benchspec.sandbox.project — staging the guest's view of the host repo."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from harnessbench.agents.claude import ClaudeCodeAgent
-from harnessbench.sandbox import backend as backend_mod
-from harnessbench.sandbox import project, sandbox
-from harnessbench.testing import FakeSandbox
+from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.sandbox import backend as backend_mod
+from benchspec.sandbox import project, sandbox
+from benchspec.testing import FakeSandbox
 
 
 def _git(repo_root: Path, *args: str) -> None:
@@ -48,7 +48,7 @@ def _git_repo_with_secrets(repo_root: Path) -> None:
     repo_root.mkdir(parents=True)
     _git(repo_root, "init", "-q")
     _write(repo_root / ".gitignore", ".env\ntmp/\n.venv/\n")
-    _write(repo_root / "pyproject.toml", "[tool.harnessbench]\n")
+    _write(repo_root / "pyproject.toml", "[tool.benchspec]\n")
     _write(repo_root / "skills" / "hello" / "SKILL.md", "# hello\n")
     _write(repo_root / "skills" / "hello" / "evals" / "hello" / "setup.sh", "exit 0\n")
     _write(repo_root / ".claude" / "skills" / "local" / "SKILL.md", "# local\n")
@@ -157,7 +157,7 @@ def test_stage_project_refuses_a_stage_that_still_holds_a_dotenv_file(
     with pytest.raises(RuntimeError, match=r"dotenv file\(s\) would be visible.*\.env"):
         project.stage_project(repo_root, staging_parent=tmp_path)
 
-    assert list(tmp_path.glob("harnessbench-project-*")) == []
+    assert list(tmp_path.glob("benchspec-project-*")) == []
 
 
 def test_discard_stage_tolerates_none_and_missing_dirs(tmp_path: Path) -> None:

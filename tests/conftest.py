@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 # Re-export so existing test imports keep working. New code (and external
-# CodingAgent implementers) should import from `harnessbench.testing` directly.
-from harnessbench.testing import FakeExecOutput, FakeSandbox
+# CodingAgent implementers) should import from `benchspec.testing` directly.
+from benchspec.testing import FakeExecOutput, FakeSandbox
 
 __all__ = ["FakeExecOutput", "FakeSandbox", "seed_arm"]
 

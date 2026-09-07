@@ -13,14 +13,14 @@ from textwrap import dedent
 
 import pytest
 
-from harnessbench.config.arms import Arm
-from harnessbench.grading.binder import _bind_bare_exists
-from harnessbench.orchestration import workspace
-from harnessbench.orchestration.execution import run_eval_arm
-from harnessbench.orchestration.results import RunResult
-from harnessbench.reporting import analyze
-from harnessbench.specs import discovery
-from harnessbench.specs.schema import SchemaError
+from benchspec.config.arms import Arm
+from benchspec.grading.binder import _bind_bare_exists
+from benchspec.orchestration import workspace
+from benchspec.orchestration.execution import run_eval_arm
+from benchspec.orchestration.results import RunResult
+from benchspec.reporting import analyze
+from benchspec.specs import discovery
+from benchspec.specs.schema import SchemaError
 
 _ACTIVATION_FIXTURE = Path(__file__).parent.parent / "fixtures" / "activation"
 
@@ -214,10 +214,10 @@ def test_activation_fixture_grades_both_polarities_end_to_end(
     """
     workspace.set_current_iteration("iteration_01")
     monkeypatch.setattr(
-        "harnessbench.orchestration.execution.make_agent", lambda harness=None: None
+        "benchspec.orchestration.execution.make_agent", lambda harness=None: None
     )
     monkeypatch.setattr(
-        "harnessbench.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"
+        "benchspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"
     )
     eval_case = discovery.discover_eval_cases(_ACTIVATION_FIXTURE)[0]
     trajectory = [
