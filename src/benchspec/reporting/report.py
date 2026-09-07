@@ -399,7 +399,7 @@ def _matrix_table(benchmark: dict) -> list[str]:
 
 _GREEN, _YELLOW, _RED, _RESET = "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[0m"
 
-_CELL_RE = re.compile(r"(?P<rate>\d+%)(?P<delta> \((?P<pp>[+-]\d+)pp\))?$")
+_TOKEN_RE = re.compile(r"(?:(?P<rate>\d+%)|(?P<pp>[+-]\d+)pp)$")
 
 
 def _rate_ansi(rate_token: str) -> str:
@@ -425,28 +425,40 @@ def _delta_ansi(pp_token: str) -> str:
 
 
 def _colorize_cell(padded_cell: str) -> str:
-    """Wrap a padded cell's rate and delta in ANSI colors; a — cell passes through.
+    """Wrap a padded cell's rate or delta token in an ANSI color; — and blank pass through.
 
     Runs on the already-padded text so alignment is computed on visible characters;
     the escape codes add zero display width.
     """
-    match = _CELL_RE.search(padded_cell)
+    match = _TOKEN_RE.search(padded_cell)
     if match is None:
         return padded_cell
 
-    colored = _rate_ansi(match["rate"]) + match["rate"] + _RESET
-    if match["delta"]:
-        colored += _delta_ansi(match["pp"]) + match["delta"] + _RESET
+    token = match.group(0)
+    color = _rate_ansi(match["rate"]) if match["rate"] else _delta_ansi(match["pp"])
 
-    return padded_cell[: match.start()] + colored
+    return padded_cell[: match.start()] + color + token + _RESET
+
+
+def _split_cell(cell: str) -> tuple[str, str]:
+    """Split a matrix cell into its rate and delta tokens: `33% (+5pp)` → (`33%`, `+5pp`).
+
+    `_rate_cell` emits exactly three shapes — `—`, `N%`, `N% (+Mpp)` — so the first
+    space separates rate from delta, and a cell without a delta yields an empty one.
+    """
+    rate, _separator, decorated_delta = cell.partition(" ")
+    return rate, decorated_delta.strip("()")
 
 
 def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) -> list[str]:
     """Render the matrix as width-aligned plain text for the pytest terminal summary.
 
-    Same rows and cells as the Markdown matrix. The eval column is left-aligned and every
-    arm column right-aligned so rates line up; a rule separates the eval rows from the
-    `All evals` footer; the last line points at the written report.
+    Same rows and rates as the Markdown matrix, but every cell is a bare rate so each
+    column shares one right edge; the per-eval deltas stay in `benchmark.md`. The eval
+    column is left-aligned and every arm column right-aligned; a rule separates the eval
+    rows from the `All evals` footer; when a baseline arm exists, a `vs baseline` line
+    under the footer carries each other arm's pooled delta as `+Npp`; the last line
+    points at the written report.
 
     Args:
         benchmark: A built benchmark (see `build_benchmark`).
@@ -462,9 +474,15 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
     if not names:
         return [f"Report: {report_path}"]
 
-    label_width = max(len("Eval"), *(len(label) for label, _cells in rows))
+    table_rows = [(label, [_split_cell(cell)[0] for cell in cells]) for label, cells in rows]
+    _footer_label, footer_cells = rows[-1]
+    pooled_deltas = [_split_cell(cell)[1] for cell in footer_cells]
+    if any(pooled_deltas):
+        table_rows.append(("vs baseline", pooled_deltas))
+
+    label_width = max(len("Eval"), *(len(label) for label, _cells in table_rows))
     column_widths = [
-        max(len(name), *(len(cells[column]) for _label, cells in rows))
+        max(len(name), *(len(cells[column]) for _label, cells in table_rows))
         for column, name in enumerate(names)
     ]
 
@@ -480,7 +498,7 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
     table_width = label_width + sum(column_widths) + 2 * len(column_widths)
 
     lines = [aligned("Eval", names)]
-    for label, cells in rows:
+    for label, cells in table_rows:
         # `_matrix_cells` puts the pooled footer last; rule it off from the eval rows.
         if label == "All evals":
             lines.append("-" * table_width)
