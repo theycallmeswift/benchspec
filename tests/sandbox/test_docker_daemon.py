@@ -122,6 +122,25 @@ def _docker_command(*argv: str) -> None:
     )
 
 
+def _remove_quietly(*argv: str) -> None:
+    """Run one teardown `docker` command, swallowing a hang as well as a failure.
+
+    Teardown must attempt every removal it owns and must never let one command's
+    trouble stand in for the test's own failure: `_docker_command` already treats a
+    nonzero exit as fine, but a wedged daemon raises `TimeoutExpired` (or, for a
+    missing/unexecutable binary, `OSError`) instead of returning. Left uncaught inside
+    a `finally` block, that exception would replace whatever the `try` block was
+    raising and would stop the remaining teardown commands from running at all.
+
+    Args:
+        *argv: The arguments to pass the `docker` CLI.
+    """
+    try:
+        _docker_command(*argv)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def _container_names(name: str) -> str:
     """Return the daemon's own listing of containers matching `name`, however they exit."""
     binary = docker_binary()
@@ -199,6 +218,6 @@ def test_docker_backend_builds_boots_and_tears_down_a_cell(tmp_path: Path) -> No
         asyncio.run(_drive_cell(backend, agent, snapshot, cell, room, stage))
         assert _container_names(cell) == ""
     finally:
-        _docker_command("rm", "-f", cell)
-        _docker_command("rm", "-f", f"{NAME_PREFIX}build-{agent.id}")
-        _docker_command("rmi", "-f", image_ref(snapshot))
+        _remove_quietly("rm", "-f", cell)
+        _remove_quietly("rm", "-f", f"{NAME_PREFIX}build-{agent.id}")
+        _remove_quietly("rmi", "-f", image_ref(snapshot))
