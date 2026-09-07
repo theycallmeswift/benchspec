@@ -15,7 +15,7 @@ BINDER_TIMEOUT_SECONDS ?= 15
 BINDER_MAX_FAILURES ?= 3
 
 evals:
-	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) \
+	uv run pytest -m binder_corpus -n $(WORKERS) \
 		--maxfail=$(BINDER_MAX_FAILURES) evals/binder $(EVAL_ARGS)
 ```
 

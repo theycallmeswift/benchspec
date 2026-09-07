@@ -10,13 +10,15 @@ install:  ## Create the venv and install dev dependencies
 test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
-e2e:  ## Run benchspec's own end-to-end suite (real microVMs; needs claude+codex CLIs and provider credentials)
-	uv run benchspec run --set e2e
+# Shared by e2e and evals. Keep it a fixed, modest number rather than `auto`:
+# each e2e cell reserves a 2 GB microVM, and binder fan-out past ~12 trips the
+# Gemini call's ~60s timeout.
+WORKERS ?= 6
+e2e:  ## Run the end-to-end suite across WORKERS microVMs (default 6, 2 GB each; needs claude+codex CLIs and credentials); EVAL_ARGS appends pytest args
+	uv run benchspec run --set e2e -- -n $(WORKERS) $(EVAL_ARGS)
 
-# Keep modest: high fan-out trips the Gemini call's ~60s timeout (12-way -> throttling).
-BINDER_WORKERS ?= 6
-evals:  ## Run the binder corpus (binder quality, not framework function). Pass EVAL_ARGS="--collect-only -q" to dry-run collection.
-	uv run pytest -m binder_corpus -n $(BINDER_WORKERS) evals/binder $(EVAL_ARGS)
+evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection
+	uv run pytest -m binder_corpus -n $(WORKERS) evals/binder $(EVAL_ARGS)
 
 assets:  ## Re-render the raster brand assets in docs/assets (terminal mock PNG/GIF, social card)
 	uv run scripts/render_assets.py
