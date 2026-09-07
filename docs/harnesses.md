@@ -8,7 +8,7 @@ judge, snapshot) are defined in [concepts.md](concepts.md).
 
 A **harness** is the agent CLI an arm drives: the thing under test.
 benchspec keeps everything harness-specific (how to install the CLI into a
-microVM, which credentials it needs, how to build its headless command, how to
+sandbox, which credentials it needs, how to build its headless command, how to
 parse its stream) behind one interface, the `CodingAgent` protocol, so the
 sandbox lifecycle, grading, and reporting never name a concrete agent. Three
 harnesses ship in-tree; adding another is one adapter file plus a registry entry.
@@ -56,9 +56,13 @@ Notes that matter in practice:
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.
-- **Credentials ride as scoped secrets.** Each adapter injects its credential at
-  the sandbox's network boundary, scoped to the provider's hosts; the value is
-  never a readable environment variable in the guest. OpenCode's quirk: a host
+- **Credentials ride differently per backend.** Under microsandbox, each
+  adapter injects its credential at the sandbox's network boundary, scoped to
+  the provider's hosts; the value is never a readable environment variable in
+  the guest. Under Docker, the same credential is injected as a plain
+  container environment variable, readable by the agent and by `setup.sh`,
+  with no host scoping. Either way, `CODEX_AUTH_JSON_PATH` is a read-only
+  mount of the `auth.json`, not an env var. OpenCode's quirk: a host
   `GEMINI_API_KEY` is injected under the SDK's expected
   `GOOGLE_GENERATIVE_AI_API_KEY` name.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends

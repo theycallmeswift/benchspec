@@ -8,8 +8,10 @@ baseline, binder, judge, cell) are defined in [concepts.md](concepts.md).
 
 ## Prerequisites
 
-- **An Apple Silicon Mac or Linux with `/dev/kvm`.** Evals run in microsandbox
-  microVMs; x86_64 macOS is unsupported.
+- **A running Docker daemon.** Evals run in Docker containers by default; any
+  host — no platform check — works as long as `docker info` succeeds. (For
+  stronger isolation, an Apple Silicon Mac or Linux with `/dev/kvm` can opt
+  into microsandbox microVMs instead — see [`sandbox.md`](sandbox.md).)
 - **Python 3.11+.**
 - **Claude Code on `$PATH`** with a credential: run `claude setup-token` (sets
   `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. This walkthrough
@@ -22,14 +24,14 @@ doing anything else, and variables you export win over `.env` values. Whatever
 is in `.env` stays on the host: it is never copied
 into the guest, and the staged repo the guest sees has every dotenv file
 removed. If anything is missing, preflight fails with a remediation message
-before any VM boots or any paid call is made.
+before any sandbox boots or any paid call is made.
 
 ## Step 1 — Create the project
 
 ```bash
 mkdir hello-evals && cd hello-evals
 python3 -m venv .venv
-.venv/bin/pip install "benchspec[microsandbox]"
+.venv/bin/pip install benchspec
 ```
 
 ## Step 2 — Write a skill and a benchmark
@@ -94,12 +96,12 @@ The empty `---`/`---` frontmatter is required even when the eval has no
 on paths so they read as workspace facts (the linter warns otherwise).
 
 > **Key concept:** the agent runs with its working directory set to `/workspace`,
-> the clean room mounted into the microVM. It writes there; the host grades the
+> the clean room mounted into the sandbox. It writes there; the host grades the
 > same directory afterward. Everything in the eval, prompt and assertions alike,
 > speaks in `./`-relative paths.
 
 The skill reaches the trial arm through the eval's own setup script, which runs
-inside the VM before the prompt with `$BENCHSPEC_ARM` set to the arm's name.
+inside the sandbox before the prompt with `$BENCHSPEC_ARM` set to the arm's name.
 Create `skills/hello/evals/hello/setup.sh`:
 
 ```bash
@@ -179,7 +181,7 @@ shows a delta rather than a lone score.
 - `lint` is free: no credentials, no network.
 - `analyze` makes one Gemini call per assertion, except bare existence lines
   ("./x exists"), which bind locally for free.
-- `run` boots one microVM per cell (two here), makes the agent's model calls
+- `run` boots one sandbox per cell (two here), makes the agent's model calls
   through the agent's provider (Anthropic here), one Gemini call per
   non-trivial assertion for the binder, and one judge call per cell that has at
   least one punted assertion, through the judge's provider (the default judge is
@@ -220,10 +222,10 @@ each arm ran on. Alongside it:
 
 ## Common first-run failures
 
-- **Preflight: x86_64 macOS is unsupported.** microsandbox needs Apple Silicon or
-  Linux with KVM.
-- **Preflight: microsandbox runtime not installed.** Install the sandbox extra,
-  `pip install "benchspec[microsandbox]"`, into the environment you run from.
+- **Preflight: `docker CLI not found`.** Install Docker Engine or Docker
+  Desktop, or set `BENCHSPEC_DOCKER_PATH` to the binary.
+- **Preflight: `Docker daemon unreachable`.** Start Docker Desktop or the
+  docker service.
 - **Preflight: no Claude credential.** Run `claude setup-token` or export
   `ANTHROPIC_API_KEY`; a repo-root `.env` works too.
 - **`GEMINI_API_KEY is required`.** The binder classifies every assertion via the
@@ -232,12 +234,20 @@ each arm ran on. Alongside it:
   the agent hand-rolled the task instead of dispatching it: a real routing
   finding, not an infra error. Sharpen the skill's `description` or the prompt.
 
+Using the microsandbox opt-in (`sandbox = "microsandbox"`) instead of the
+Docker default surfaces two more of its own:
+
+- **Preflight: x86_64 macOS is unsupported.** microsandbox needs Apple Silicon or
+  Linux with KVM.
+- **Preflight: microsandbox runtime not installed.** Install the sandbox extra,
+  `pip install "benchspec[microsandbox]"`, into the environment you run from.
+
 ## Where to go next
 
 - The in-repo [`evals/e2e/hello/`](../evals/e2e/hello/) suite is this walkthrough
   as living code: two evals, three arms, authored `history:`, and a seeded
   `workspace/`. It runs with `make e2e`, which fans the cells across six
-  microVMs by default (`WORKERS=N` to change).
+  sandboxes by default (`WORKERS=N` to change).
 - [`writing-evals.md`](writing-evals.md): the full eval format and grading model.
 - [`configuration.md`](configuration.md): multi-harness sets, model sweeps, the
   judge, and every flag.

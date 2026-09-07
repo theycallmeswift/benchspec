@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 benchspec runs an agent (Claude Code, Codex, or OpenCode) against a task
-in a fresh microVM, checks what it actually did in the workspace, and reports the
+in a fresh sandbox, checks what it actually did in the workspace, and reports the
 result as a comparison: with your skill versus without, one model versus another,
 one harness versus another.
 
@@ -32,12 +32,18 @@ off — in percentage points — how good each one actually is at accomplishing 
 ## Getting Started
 
 ```bash
+pip install benchspec
+```
+
+For the microsandbox isolation opt-in, add its extra:
+
+```bash
 pip install "benchspec[microsandbox]"
 ```
 
 > **Pre-1.0.** The eval format and the artifact schemas are the surfaces most
-> likely to change. microsandbox is the only sandbox backend today; `docker` is
-> recognized in config but fails fast as not implemented.
+> likely to change. Docker is the default sandbox backend; microsandbox is
+> the opt-in for stronger isolation (`sandbox = "microsandbox"` on the set).
 
 An eval is one Markdown file: a prompt, then a checklist of plain-prose claims
 about the workspace after the agent is done. There is no checker syntax to learn;
@@ -81,29 +87,29 @@ Then:
 ```bash
 benchspec lint      # static checks on the assertions
 benchspec analyze   # which assertions grade deterministically, which go to the judge
-benchspec run       # every (eval × arm) in its own microVM, graded, reported
+benchspec run       # every (eval × arm) in its own sandbox, graded, reported
 ```
 
 ## What you need
 
 | | |
 |---|---|
-| Platform | Apple Silicon Mac, or Linux with `/dev/kvm`. Python 3.11+. |
+| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in. Python 3.11+. |
 | Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
 | `GEMINI_API_KEY` | The binder: a fixed Gemini call that classifies each assertion. Required for every `analyze` and `run`. |
 | Judge credential | The judge runs on the host through an agent CLI; the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |
 
 Credentials can live in a repo-root `.env`. A graded run can touch up to three
 vendors: the agent's, Gemini for the binder, and the judge's. `lint` is free;
-`analyze` and `run` spend API calls, and `run` also boots VMs. Preflight lists
-every missing piece and exits before anything is spent.
+`analyze` and `run` spend API calls, and `run` also boots sandboxes. Preflight
+lists every missing piece and exits before anything is spent.
 
 ## How a run works
 
 ```mermaid
 flowchart LR
-    E["greets-by-name.eval.md<br/>prompt + assertions"] --> A1["arm: baseline<br/>fresh microVM,<br/>setup.sh installs nothing"]
-    E --> A2["arm: trial<br/>fresh microVM,<br/>setup.sh installs the hello skill"]
+    E["greets-by-name.eval.md<br/>prompt + assertions"] --> A1["arm: baseline<br/>fresh sandbox,<br/>setup.sh installs nothing"]
+    E --> A2["arm: trial<br/>fresh sandbox,<br/>setup.sh installs the hello skill"]
     A1 --> F1["facts: files, SHAs,<br/>final message, tool calls"]
     A2 --> F2["facts"]
     F1 --> G["binder: deterministic checkers<br/>everything else: LLM judge"]
@@ -113,7 +119,8 @@ flowchart LR
 
 Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
-1. **Boots a microVM** from a cached snapshot with the agent CLI already
+1. **Boots a sandbox** — a Docker container by default, or a microsandbox
+   microVM for the opt-in — from a cached snapshot with the agent CLI already
    installed. The first run builds the snapshot (a few minutes); later runs
    reuse it, or pay the cost up front with `benchspec sandbox:build`; reclaim
    the disk from leftover sandboxes and snapshots with `benchspec sandbox:clean`.
@@ -128,17 +135,20 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
    it can do so without risk; the judge grades everything else from the
    collected evidence alone.
 
-Two guarantees hold throughout. Nothing in the guest can write back to your
-checkout: `setup.sh` reaches the skill under test through a read-only staged
-copy of your repo at `/project` (what a `git clone` would contain — never
-`.env`, `.git`, or earlier runs' artifacts). And provider credentials are
-injected at the network boundary, never as readable environment variables in
-the guest.
+One guarantee holds throughout, on either backend: nothing in the guest can
+write back to your checkout. `setup.sh` reaches the skill under test through a
+read-only staged copy of your repo at `/project` (what a `git clone` would
+contain — never `.env`, `.git`, or earlier runs' artifacts). Credential
+exposure differs by backend: microsandbox injects each provider credential at
+the network boundary, never as a readable environment variable in the guest;
+Docker injects it as a plain container environment variable, readable by the
+agent and by `setup.sh`. See [`sandbox.md`](docs/sandbox.md) for the full
+tradeoff.
 
 `benchspec run` is pytest underneath, and everything after `--` goes to
 pytest verbatim: `benchspec run -- -k greets-by-name` (equivalently
 `pytest -k greets-by-name`) runs one eval, `-n 8` fans cells across eight
-microVMs, and `--count 5` samples each cell five times so the report can flag a
+sandboxes, and `--count 5` samples each cell five times so the report can flag a
 delta that sits within noise. The repo's own `make e2e` defaults to six
 workers through the `WORKERS` variable; `make e2e WORKERS=1` runs the cells
 sequentially.
