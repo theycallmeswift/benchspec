@@ -542,6 +542,37 @@ def test_prune_is_a_no_op_when_the_docker_cli_is_missing(
     assert not command_log.exists()
 
 
+def test_prune_finishes_every_removal_when_one_wedges(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a removal that outlives its budget neither raises nor skips the rest.
+
+    `sandbox:clean` always exits 0, so a daemon that hangs partway through the loop must
+    still cost the caller only the wedged resource.
+    """
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    monkeypatch.setenv(
+        "BENCHSPEC_SHIM_CONTAINERS", "benchspec-eval-first\nbenchspec-eval-second"
+    )
+    monkeypatch.setenv(
+        "BENCHSPEC_SHIM_IMAGES", "benchspec-snapshot:benchspec-docker-claude-code-latest-c30e39d4"
+    )
+    monkeypatch.setenv("BENCHSPEC_SHIM_RM_SLEEP", "30")
+    monkeypatch.setattr(docker, "DOCKER_REMOVE_TIMEOUT_SECONDS", 0.3)
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    backend.prune()
+
+    assert sorted(command_log.read_text(encoding="utf-8").splitlines()) == [
+        "images benchspec-snapshot --format {{.Repository}}:{{.Tag}}",
+        "ps -a --filter name=benchspec- --format {{.Names}}",
+        "rm -f benchspec-eval-first",
+        "rm -f benchspec-eval-second",
+        "rmi -f benchspec-snapshot:benchspec-docker-claude-code-latest-c30e39d4",
+    ]
+
+
 def test_prune_stops_after_a_failing_ps_without_raising(
     monkeypatch: object, tmp_path: Path
 ) -> None:
@@ -580,3 +611,25 @@ def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
     echoed = asyncio.run(asyncio.wait_for(_echo_back(), timeout=30))
 
     assert echoed == payload
+
+
+def test_exec_stream_survives_a_guest_that_never_reads_its_stdin(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify a payload written to an already-exited command neither raises nor stalls.
+
+    The command's answer is the terminal event, so a broken stdin pipe must not become
+    the caller's exception.
+    """
+    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exit 0")
+    sandbox = _docker_sandbox(tmp_path)
+    payload = b"x" * (1024 * 1024)
+
+    async def _feed_then_drain() -> list[docker.DockerExecEvent]:
+        """Feed the payload to a command that ignores it and drain to the terminal event."""
+        handle = await sandbox.exec_stream("ignore", stdin=payload)
+        return [event async for event in handle]
+
+    events = asyncio.run(asyncio.wait_for(_feed_then_drain(), timeout=30))
+
+    assert (events[-1].event_type, events[-1].code) == ("exited", 0)

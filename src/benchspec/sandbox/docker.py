@@ -73,6 +73,10 @@ DOCKER_COMMAND_TIMEOUT_SECONDS = 60
 # Preflight's own, shorter budget: an unreachable daemon should be reported promptly.
 DOCKER_INFO_TIMEOUT_SECONDS = 30
 
+# Prune's own budget per removal. A removal is best-effort, so a wedged daemon should
+# cost `sandbox:clean` a few seconds per resource rather than the full query budget.
+DOCKER_REMOVE_TIMEOUT_SECONDS = 15
+
 _DOCKER_CLI_NOT_FOUND = (
     "docker CLI not found — install Docker Engine or Docker Desktop, "
     "or set BENCHSPEC_DOCKER_PATH to the binary"
@@ -272,9 +276,9 @@ def exec_argv(
 def ps_argv() -> list[str]:
     """Render the `docker ps` arguments that list every benchspec-named container.
 
-    Docker's `--filter name=...` is a substring match, so a caller must still filter
-    the printed names by `startswith(NAME_PREFIX)` — this only narrows the daemon's own
-    listing before that stricter check.
+    Docker's `--filter name=...` matches the name as a regular expression, unanchored, so
+    a caller must still filter the printed names by `startswith(NAME_PREFIX)` — this only
+    narrows the daemon's own listing before that stricter check.
 
     Returns:
         The argument list, starting at `ps`.
@@ -410,11 +414,15 @@ class DockerExecHandle:
         stderr_chunks: list[bytes] = []
         exit_code: int | None = None
         try:
-            await asyncio.gather(
-                self._pump_stream(self._process.stdout, "stdout", None),
-                self._pump_stream(self._process.stderr, "stderr", stderr_chunks),
-            )
-            exit_code = await self._process.wait()
+            # A read error already reaches the caller as the `failed` event below; left on
+            # this task it would only resurface as an unretrieved-exception warning when
+            # the task is collected. A cancellation is a `BaseException` and still escapes.
+            with contextlib.suppress(Exception):
+                await asyncio.gather(
+                    self._pump_stream(self._process.stdout, "stdout", None),
+                    self._pump_stream(self._process.stderr, "stderr", stderr_chunks),
+                )
+                exit_code = await self._process.wait()
         finally:
             stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace")
             failed = exit_code is None or _carries_runtime_failure(stderr_text)
@@ -554,9 +562,13 @@ class DockerSandbox:
         # stdout, and neither side would ever move.
         handle = DockerExecHandle(process)
         if stdin is not None:
-            process.stdin.write(stdin)
-            await process.stdin.drain()
-            process.stdin.close()
+            # A guest command that exits without reading its input breaks the pipe
+            # mid-write; the caller's answer is the terminal event the pump queues, not a
+            # write error from a command that has already had its say.
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                process.stdin.write(stdin)
+                await process.stdin.drain()
+                process.stdin.close()
 
         return handle
 
@@ -712,8 +724,8 @@ class DockerBackend(SharedBackendBehavior):
         Containers go first, then images: an image cannot be removed while a container
         still uses it. A missing CLI, an unreachable daemon (`docker ps` exiting
         nonzero, or raising `OSError`/`TimeoutExpired`), and individual `rm -f`/`rmi -f`
-        failures are all tolerated — this never raises, because `sandbox:clean` always
-        exits 0.
+        removals that fail, wedge, or cannot be run at all are tolerated — this never
+        raises, because `sandbox:clean` always exits 0.
         """
         binary = _resolved_docker_binary()
         if binary is None:
@@ -728,7 +740,7 @@ class DockerBackend(SharedBackendBehavior):
 
         for name in ps_result.stdout.splitlines():
             if name.startswith(NAME_PREFIX):
-                self._docker_sync(["rm", "-f", name])
+                self._remove_quietly(["rm", "-f", name])
 
         try:
             images_result = self._docker_sync(images_argv())
@@ -740,7 +752,19 @@ class DockerBackend(SharedBackendBehavior):
         for line in images_result.stdout.splitlines():
             _, _, tag = line.rpartition(":")
             if tag.startswith(NAME_PREFIX):
-                self._docker_sync(["rmi", "-f", line])
+                self._remove_quietly(["rmi", "-f", line])
+
+    def _remove_quietly(self, argv: list[str]) -> None:
+        """Run one prune removal, swallowing a daemon that wedges or a CLI that vanishes.
+
+        One resource that will not go away must not cost the caller every removal queued
+        behind it, nor turn `sandbox:clean` into a nonzero exit.
+
+        Args:
+            argv: The removal arguments, starting with `rm` or `rmi`.
+        """
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired, RuntimeError):
+            self._docker_sync(argv, timeout=DOCKER_REMOVE_TIMEOUT_SECONDS)
 
     def _binary(self) -> Path:
         """Return the `docker` CLI to drive.

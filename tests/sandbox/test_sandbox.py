@@ -97,6 +97,7 @@ def _route_via_fake_vm(
             """Stop."""
             return None
 
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
     monkeypatch.setattr(sandbox, "make_agent", agent_factory)
 

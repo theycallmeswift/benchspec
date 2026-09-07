@@ -15,6 +15,9 @@ without a Docker daemon anywhere near the suite. The knobs:
 - `BENCHSPEC_SHIM_IMAGES`: newline-separated references `images` prints.
 - `BENCHSPEC_SHIM_EXEC`: the shell command `exec` runs in the "guest" (default `true`).
 - `BENCHSPEC_SHIM_RM_EXIT`: exit status of `rm` (default 0).
+- `BENCHSPEC_SHIM_RM_SLEEP`: seconds `rm` hangs instead of exiting (default 0), for the
+  wedged-daemon path — the argv line is logged before the hang, so a caller that gives
+  up on the call can still prove it made it.
 - `BENCHSPEC_SHIM_PS_EXIT`: exit status of `ps` (default 0, i.e. a reachable daemon).
 """
 
@@ -85,6 +88,10 @@ _SHIM_SCRIPT = dedent("""\
             exec sh -c "${BENCHSPEC_SHIM_EXEC:-true}"
             ;;
         rm)
+            rm_sleep="${BENCHSPEC_SHIM_RM_SLEEP:-0}"
+            if [ "$rm_sleep" != "0" ]; then
+                exec sleep "$rm_sleep"
+            fi
             exit "${BENCHSPEC_SHIM_RM_EXIT:-0}"
             ;;
         *)
