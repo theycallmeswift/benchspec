@@ -92,9 +92,11 @@ To reclaim the disk those snapshots and any leftover sandboxes hold:
 benchspec sandbox:clean
 ```
 
-`sandbox:clean` stops and removes `eval-*`, `benchspec-build-*`, and
-`trigger-*` sandboxes, removes `benchspec-*` snapshots, and deletes the repo's
-`tmp/.benchspec-snapshot-*.lock` files. It stops *running* sandboxes too, so
+`sandbox:clean` stops and removes every `benchspec-*` sandbox (leaked
+`benchspec-eval-*` cells, `benchspec-trigger-*` probes, `benchspec-build-*`
+build VMs), removes every `benchspec-*` snapshot, and deletes the repo's
+`tmp/.benchspec-snapshot-*.lock` files. Sandboxes other tools keep under
+`~/.microsandbox` are left alone. It stops *running* sandboxes too, so
 do not run it during a live `benchspec run`. Snapshots rebuild lazily on the
 next run, or explicitly via `sandbox:build`. It always exits `0` (nothing to
 prune is success); `2` only on a bad invocation.

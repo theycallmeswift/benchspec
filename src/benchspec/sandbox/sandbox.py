@@ -25,6 +25,7 @@ from benchspec.orchestration.room import (
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
     DEFAULT_SANDBOX,
+    NAME_PREFIX,
     SandboxBackend,
     host_mount_path,
     msb_binary,
@@ -47,7 +48,7 @@ def snapshot_name(
     and the backend owns the fingerprint (base-image digest, install inputs, env bytes).
     """
     fingerprint = backend.cache_fingerprint(agent, env or EnvConfig())
-    return f"benchspec-{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
+    return f"{NAME_PREFIX}{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
 
 
 def preflight(backend: SandboxBackend | None = None) -> None:
@@ -138,7 +139,7 @@ def _worker_tag() -> str:
 
 def _sandbox_run_name(eval_id: str, config: str) -> str:
     """Build a stable microsandbox run name for a snapshot or cell."""
-    return f"eval-{eval_id}-{config}-{_worker_tag()}"
+    return f"{NAME_PREFIX}eval-{eval_id}-{config}-{_worker_tag()}"
 
 
 DEFAULT_PROJECT_MARKER = ".claude-plugin/plugin.json"
@@ -402,7 +403,7 @@ async def _route_in_sandbox_async(
         sandbox = await backend.create_trigger_sandbox(
             agent=agent,
             snapshot=snapshot,
-            name=f"trigger-{_worker_tag()}",
+            name=f"{NAME_PREFIX}trigger-{_worker_tag()}",
             host_repo_root=staged_project,
             extra_volumes=_agent_extra_volumes,
         )
@@ -601,9 +602,11 @@ def _display_base_image(env: EnvConfig) -> str:
 
 
 def cli_clean(repo_root: Path) -> None:
-    """Remove benchspec sandboxes and snapshots via the msb CLI.
+    """Remove every `benchspec-*` sandbox and snapshot via the msb CLI.
 
-    Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
+    One prefix selects leaked cells, trigger probes, build VMs, and snapshots alike;
+    anything another tool put under `~/.microsandbox` is left alone. Also removes the
+    per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `benchspec sandbox:build`.
     """
@@ -621,19 +624,17 @@ def cli_clean(repo_root: Path) -> None:
             pass
 
     home = Path.home() / ".microsandbox"
-    for sub, prefixes in (
-        ("sandboxes", ("eval-", "benchspec-build-", "trigger-")),
-        ("snapshots", ("benchspec-",)),
-    ):
+    for sub in ("sandboxes", "snapshots"):
         target_dir = home / sub
         if not target_dir.is_dir():
             continue
         for entry in target_dir.iterdir():
-            if entry.name.startswith(prefixes):
-                if sub == "sandboxes":
-                    _msb("stop", entry.name)
-                    _msb("rm", "-f", entry.name)
-                else:
-                    _msb("snapshot", "rm", "--force", entry.name)
+            if not entry.name.startswith(NAME_PREFIX):
+                continue
+            if sub == "sandboxes":
+                _msb("stop", entry.name)
+                _msb("rm", "-f", entry.name)
+            else:
+                _msb("snapshot", "rm", "--force", entry.name)
     for lock in workspace.workspace_parent(repo_root).glob(".benchspec-snapshot-*.lock"):
         lock.unlink(missing_ok=True)

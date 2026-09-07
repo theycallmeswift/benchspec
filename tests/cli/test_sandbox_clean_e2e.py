@@ -51,13 +51,18 @@ def _run_sandbox_clean(tmp_path: Path, home: Path, repo_root: Path) -> subproces
 
 
 def test_sandbox_clean_removes_leaked_sandboxes_snapshots_and_locks(tmp_path: Path) -> None:
-    """Verify the real command prunes matching entries from disk and leaves the rest alone."""
+    """Verify the real command prunes every `benchspec-*` entry and leaves the rest alone."""
     home = tmp_path / "home"
     sandboxes = home / ".microsandbox" / "sandboxes"
     snapshots = home / ".microsandbox" / "snapshots"
-    for leaked_sandbox in ("eval-hello-trial-gw0", "benchspec-build-abc", "trigger-hello-gw1"):
+    for leaked_sandbox in (
+        "benchspec-eval-hello-trial-gw0",
+        "benchspec-build-abc",
+        "benchspec-trigger-hello-gw1",
+    ):
         (sandboxes / leaked_sandbox).mkdir(parents=True)
     (sandboxes / "unrelated-sandbox").mkdir()
+    (sandboxes / "eval-from-another-tool").mkdir()
     (snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4").mkdir(parents=True)
     (snapshots / "unrelated-snapshot").mkdir()
     repo_root = tmp_path / "repo"
@@ -68,18 +73,21 @@ def test_sandbox_clean_removes_leaked_sandboxes_snapshots_and_locks(tmp_path: Pa
     result = _run_sandbox_clean(tmp_path, home, repo_root)
 
     assert result.returncode == 0, result.stderr
-    assert sorted(entry.name for entry in sandboxes.iterdir()) == ["unrelated-sandbox"]
+    assert sorted(entry.name for entry in sandboxes.iterdir()) == [
+        "eval-from-another-tool",
+        "unrelated-sandbox",
+    ]
     assert sorted(entry.name for entry in snapshots.iterdir()) == ["unrelated-snapshot"]
     assert not lock_file.exists()
     commands = sorted((tmp_path / "commands.log").read_text().splitlines())
     assert commands == [
         "rm -f benchspec-build-abc",
-        "rm -f eval-hello-trial-gw0",
-        "rm -f trigger-hello-gw1",
+        "rm -f benchspec-eval-hello-trial-gw0",
+        "rm -f benchspec-trigger-hello-gw1",
         "snapshot rm --force benchspec-microsandbox-claude-code-latest-c30e39d4",
         "stop benchspec-build-abc",
-        "stop eval-hello-trial-gw0",
-        "stop trigger-hello-gw1",
+        "stop benchspec-eval-hello-trial-gw0",
+        "stop benchspec-trigger-hello-gw1",
     ]
 
 
