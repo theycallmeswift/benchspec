@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from benchspec.agents import known_harnesses
-from benchspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.specs.schema import SchemaError
 
 

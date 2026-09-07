@@ -24,14 +24,12 @@ from benchspec.orchestration.room import (
 )
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
-    DEFAULT_SANDBOX,
     NAME_PREFIX,
     SandboxBackend,
     host_mount_path,
-    registered_backends,
-    resolve_sandbox,
 )
 from benchspec.sandbox.project import discard_stage, stage_project
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, registered_backends, resolve_sandbox
 from benchspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from benchspec.specs.schema import SchemaError
 

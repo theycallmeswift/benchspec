@@ -13,7 +13,8 @@ from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox import backend as backend_mod
-from benchspec.sandbox import sandbox
+from benchspec.sandbox import microsandbox as microsandbox_mod
+from benchspec.sandbox import registry, sandbox
 from benchspec.sandbox.docker import DockerBackend
 from benchspec.specs.discovery import EnvConfig
 from benchspec.testing import FakeExecOutput, FakeSandbox
@@ -119,7 +120,7 @@ def _route_via_fake_vm(
 def test_snapshot_name_carries_backend_id() -> None:
     """The snapshot name is prefixed with the backend id."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     name = sandbox.snapshot_name(agent, EnvConfig(), backend=microsandbox_backend)
     assert name.startswith("benchspec-microsandbox-claude-code-1.2.3-")
 
@@ -127,7 +128,7 @@ def test_snapshot_name_carries_backend_id() -> None:
 def test_snapshot_name_changes_when_base_image_changes() -> None:
     """A different base image changes the snapshot name."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     base = sandbox.snapshot_name(
         agent, EnvConfig(base_image="python:3.12-slim"), backend=microsandbox_backend
     )
@@ -141,7 +142,7 @@ def test_snapshot_name_changes_when_base_image_changes() -> None:
 def test_snapshot_name_changes_when_script_bytes_change() -> None:
     """Different environment script bytes change the snapshot name."""
     agent = ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     base = sandbox.snapshot_name(
         agent, EnvConfig(script=b"echo one\n", script_path="s.sh"), backend=microsandbox_backend
     )
@@ -174,12 +175,12 @@ def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> Non
     plausible-looking message text but never touch this sentinel, so it would fail here.
     """
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "preflight", lambda self: ["SENTINEL_HOST_ERR"]
+        microsandbox_mod.MicrosandboxBackend, "preflight", lambda self: ["SENTINEL_HOST_ERR"]
     )
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with pytest.raises(RuntimeError) as exc_info:
-        sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))
+        sandbox.preflight(registry.resolve_sandbox("microsandbox"))
     assert "SENTINEL_HOST_ERR" in str(exc_info.value)
 
 
@@ -189,27 +190,27 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch:
     (dispatch AND the shared credential check are both wired, independently of each
     other).
     """
-    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "preflight", lambda self: [])
+    monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "preflight", lambda self: [])
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     with pytest.raises(RuntimeError) as exc_info:
-        sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))
+        sandbox.preflight(registry.resolve_sandbox("microsandbox"))
     assert "credential" in str(exc_info.value)
 
 
 def test_preflight_passes_on_supported(monkeypatch: object) -> None:
     """A supported host with a credential set passes without raising."""
-    monkeypatch.setattr(backend_mod.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(backend_mod.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(microsandbox_mod.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(microsandbox_mod.platform, "machine", lambda: "arm64")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "installed", lambda self: True)
-    sandbox.preflight(backend_mod.resolve_sandbox("microsandbox"))  # no raise
+    monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "installed", lambda self: True)
+    sandbox.preflight(registry.resolve_sandbox("microsandbox"))  # no raise
 
 
 def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
     """A present snapshot is returned without a build."""
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: True)
     built: list = []
     monkeypatch.setattr(microsandbox_backend, "build_snapshot", lambda *a, **k: built.append(a))
@@ -221,7 +222,7 @@ def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path:
 
 def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: object) -> None:
     """A missing snapshot is built exactly once under the lock."""
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     states = iter([False, False])  # missing before lock, still missing inside
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: next(states))
     built: list = []
@@ -239,7 +240,7 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.benchspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: False)
     captured: dict = {}
     monkeypatch.setattr(
@@ -295,11 +296,11 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+        microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
     built: list = []
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend,
+        microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
         lambda self, agent, name, env: built.append(name),
     )
@@ -344,11 +345,11 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
 
     monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+        microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
     built: list = []
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend,
+        microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
         lambda self, agent, name, env: built.append(name),
     )
@@ -388,11 +389,11 @@ def test_cli_build_with_set_dedupes_shared_harness(
 
     monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+        microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
     built: list = []
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend,
+        microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
         lambda self, agent, name, env: built.append(name),
     )
@@ -428,7 +429,7 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _agent_for_harness)
     monkeypatch.setattr(
-        backend_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
+        microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
     built: list = []
 
@@ -438,7 +439,7 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
             raise RuntimeError("snapshot build failed")
         built.append(name)
 
-    monkeypatch.setattr(backend_mod.MicrosandboxBackend, "build_snapshot", failing_build)
+    monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "build_snapshot", failing_build)
 
     with pytest.raises(RuntimeError, match="snapshot build failed"):
         sandbox.cli_build(repo_root=tmp_path, set_name="mixed")
@@ -596,7 +597,7 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         fake.create_kwargs = kwargs
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -628,7 +629,7 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
         """Boom."""
         raise RuntimeError("boot failed")
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", boom)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -883,7 +884,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -914,7 +915,7 @@ def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
     """Verify snapshot artifact shas returns none on shell failure."""
     # Failed snapshots return None, while genuinely empty successful snapshots return {}.
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     failing = FakeSandbox(shell_output=FakeExecOutput(exit_code=1))
@@ -951,7 +952,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1142,7 +1143,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1199,7 +1200,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1245,7 +1246,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1293,7 +1294,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1329,7 +1330,7 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
         """Fake create."""
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -1363,7 +1364,7 @@ def test_build_runs_skills_home_bridge_after_provision(monkeypatch: object) -> N
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(
         agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
@@ -1384,7 +1385,7 @@ def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision (first shell) succeeds; the bridge (second shell) fails.
     outputs = iter([FakeExecOutput(0), FakeExecOutput(exit_code=1, stderr_text="ln failed")])
@@ -1460,7 +1461,7 @@ def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
 
@@ -1477,7 +1478,7 @@ def test_build_uses_the_declared_image_the_fingerprint_hashed(monkeypatch: objec
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     env = EnvConfig(base_image="python:3.12-slim")
     microsandbox_backend.cache_fingerprint(agent, env)
@@ -1491,7 +1492,7 @@ def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> Non
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
 
@@ -1503,7 +1504,7 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(
         agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
@@ -1528,7 +1529,7 @@ def test_build_runs_base_image_and_environment_script_together(
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(
         agent,
@@ -1551,7 +1552,7 @@ def test_build_no_environment_script_runs_only_provision(monkeypatch: object) ->
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
     shells = [call for call in fake.calls if call[0] == "shell"]
@@ -1563,7 +1564,7 @@ def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision + bridge (first two shells) succeed; the environment script (third shell)
     # fails. Queue distinct outputs so the fail lands on the script, not provision/bridge.

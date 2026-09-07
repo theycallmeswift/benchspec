@@ -242,8 +242,10 @@ runtimes). Per-eval and per-arm setup belongs in the eval's own `setup.sh`
 instead, which runs per cell and can branch on `BENCHSPEC_ARM` and
 `BENCHSPEC_SET`.
 
-The authoritative modules are `benchspec.sandbox.backend` (the seam, preflight,
-fingerprint, snapshot build, mounts, microsandbox), `benchspec.sandbox.docker`
-(the Docker implementation), `benchspec.sandbox.sandbox` (the cell lifecycle),
-and `benchspec.sandbox.project` (the `/project` stage). If this page and those
-modules ever disagree, the modules are right.
+The authoritative modules are `benchspec.sandbox.backend` (the seam: the
+protocol, the shared constants, the fingerprint, the shared build steps),
+`benchspec.sandbox.docker` and `benchspec.sandbox.microsandbox` (the two backend
+implementations), `benchspec.sandbox.registry` (backend selection),
+`benchspec.sandbox.sandbox` (the cell lifecycle), and `benchspec.sandbox.project`
+(the `/project` stage). If this page and those modules ever disagree, the modules
+are right.

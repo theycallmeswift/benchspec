@@ -6,8 +6,8 @@ interaction is a `docker` subprocess: `run -d` to start an idle container, `exec
 commands, `exec bash -c` for scripts, `commit` to seal a snapshot, `rm -f` for teardown.
 There is no Docker client package and no daemon socket handling here — beyond benchspec's
 own modules the imports are stdlib, so `lint` and `analyze` keep working on a host with no
-Docker installed at all, the same invariant `backend.py` holds for microsandbox by keeping
-its imports inside method bodies.
+Docker installed at all, the same invariant `microsandbox.py` holds for microsandbox by
+keeping its imports inside method bodies.
 
 Isolation caveat: a container shares the host kernel and cannot scope a credential to
 the hosts an agent may reach, so a Docker run trades microsandbox's VM boundary and

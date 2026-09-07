@@ -10,8 +10,7 @@ from pathlib import Path
 import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
-from benchspec.sandbox import backend as backend_mod
-from benchspec.sandbox import project, sandbox
+from benchspec.sandbox import project, registry, sandbox
 from benchspec.sandbox.docker import DockerBackend
 from benchspec.testing import FakeSandbox
 
@@ -187,7 +186,7 @@ def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
         create_kwargs.update(kwargs)
         return fake
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
@@ -229,7 +228,7 @@ def test_arm_session_removes_the_stage_when_boot_fails(
         create_kwargs.update(kwargs)
         raise RuntimeError("boot failed")
 
-    microsandbox_backend = backend_mod.resolve_sandbox("microsandbox")
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", boom)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 

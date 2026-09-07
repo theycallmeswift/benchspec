@@ -28,8 +28,8 @@ from benchspec.grading.trajectory import TURN_DELIM, render_process_facts, skill
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import substitute_assertions, substitute_prompt
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
-from benchspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.sandbox.sandbox import (
     DEFAULT_PROJECT_MARKER,
     SandboxSession,
