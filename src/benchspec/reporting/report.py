@@ -486,18 +486,26 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
         for column, name in enumerate(names)
     ]
 
-    def aligned(label: str, cells: list[str]) -> str:
-        """Join one row's label and cells into a padded line."""
+    def aligned(label: str, cells: list[str], *, colorize: bool = True) -> str:
+        """Join one row's label and cells into a padded line.
+
+        Args:
+            label: The row label to left-align in the first column.
+            cells: The already-formatted cell text for each arm column.
+            colorize: Whether to run cells through `_colorize_cell` when `color`
+                is enabled. Set to `False` for the header row so an arm name that
+                happens to look like a rate or delta is never painted.
+        """
         padded_cells = [
             cell.rjust(width) for cell, width in zip(cells, column_widths, strict=True)
         ]
-        if color:
+        if color and colorize:
             padded_cells = [_colorize_cell(cell) for cell in padded_cells]
         return "  ".join([label.ljust(label_width), *padded_cells])
 
     table_width = label_width + sum(column_widths) + 2 * len(column_widths)
 
-    lines = [aligned("Eval", names)]
+    lines = [aligned("Eval", names, colorize=False)]
     for label, cells in table_rows:
         # `_matrix_cells` puts the pooled footer last; rule it off from the eval rows.
         if label == "All evals":

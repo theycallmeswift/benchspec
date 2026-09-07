@@ -523,6 +523,27 @@ def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: obj
     assert versus[:baseline_edge].strip() == "vs baseline"
 
 
+def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: object) -> None:
+    """Verify the `vs baseline` line carries one delta per non-baseline arm."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%, +50pp
+    seed_arm(tmp_path / "archive", "alpha", "trial-overrides", passes=0, total=2)  # 0%, -50pp
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert lines == [
+        "Eval           baseline  trial  trial-overrides",
+        "archive/alpha       50%   100%               0%",
+        "-----------------------------------------------",
+        "All evals           50%   100%               0%",
+        "vs baseline              +50pp            -50pp",
+        f"Report: {tmp_path / 'benchmark.md'}",
+    ]
+
+
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
     """Verify multi sample stable zero stdev."""
     skills_root = tmp_path / "iteration-1"
@@ -1005,3 +1026,19 @@ def test_terminal_matrix_color_adds_no_width(tmp_path: object) -> None:
 
     ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
     assert [ansi_escape.sub("", line) for line in colored] == plain
+
+
+def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: object) -> None:
+    """Verify an arm name that looks like a rate or delta never gets colorized in the header."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "run-3pp", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
+
+    header = lines[0]
+    eval_row = next(line for line in lines if line.startswith("archive/alpha"))
+    assert "\x1b" not in header
+    assert "\x1b" in eval_row

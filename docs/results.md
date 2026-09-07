@@ -94,7 +94,7 @@ While cells run, pytest's progress line names the authored eval file each cell
 came from — `evals/e2e/hello/evals/hello/greets-by-name.eval.md ...` — rather
 than the internal test module, and each cell's id keeps its
 `test_eval[<group>-<eval_id>-<arm>]` tail for `-k` and `-v`. When the session
-ends, the run prints the same matrix `benchmark.md` holds, as a width-aligned
+ends, the run prints the same rows and rates `benchmark.md` holds, as a width-aligned
 plain-text table under a `benchspec benchmark` banner:
 
 ```
