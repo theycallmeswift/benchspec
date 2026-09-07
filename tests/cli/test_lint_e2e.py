@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.cli.support import run_benchspec, write_eval
+from tests.support.cli import run_benchspec, write_eval
 
 
 def test_lint_reports_unjudgeable_assertions_and_exits_one(tmp_path: Path) -> None:

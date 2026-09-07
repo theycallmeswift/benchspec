@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.cli.support import SANDBOX_FIXTURES, run_benchspec
+from tests.support.cli import SANDBOX_FIXTURES, run_benchspec
 
 _CLAUDE_CREDENTIALS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 

@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 from textwrap import dedent
 
-from tests.cli.support import run_benchspec
+from tests.support.cli import run_benchspec
 
 
 def _write_msb_shim(shim_dir: Path) -> Path:

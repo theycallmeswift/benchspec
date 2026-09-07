@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-from tests.cli.support import run_benchspec, write_eval
+from tests.support.cli import run_benchspec, write_eval
 
 _TWO_ARM_PYPROJECT = dedent("""\
     [tool.benchspec]

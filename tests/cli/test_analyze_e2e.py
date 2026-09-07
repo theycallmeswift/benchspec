@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.cli.support import run_benchspec, write_eval
+from tests.support.cli import run_benchspec, write_eval
 
 
 def test_analyze_classifies_existence_assertions_as_deterministic(tmp_path: Path) -> None:

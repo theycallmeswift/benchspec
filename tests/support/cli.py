@@ -1,4 +1,4 @@
-"""Plumbing shared by the CLI end-to-end tests.
+"""Plumbing shared by the CLI end-to-end tests under `tests/cli/`.
 
 Every test in this package spawns the real `python -m benchspec` entry point against a
 throwaway repo under `tmp_path`, so argparse, dispatch, and each subcommand's body all
