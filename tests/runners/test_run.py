@@ -11,8 +11,10 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from benchspec.runners import run
-from benchspec.runners.run import translate_run_flags
+from benchspec.runners.run import PluginOptions, translate_run_flags
 
 # The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
 # child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,
@@ -86,6 +88,15 @@ class _FakeCompleted:
     def __init__(self: object, returncode: int) -> None:
         """Record the return code the fake runner should report."""
         self.returncode = returncode
+
+
+def _no_preflight(args: argparse.Namespace) -> None:
+    """Skip the environment preflight so a fake-runner test never touches the host."""
+
+
+def _runner_that_must_not_run(argv: list[str], env: dict[str, str] | None = None) -> object:
+    """Fail loudly if the subprocess is spawned when the run should have stopped first."""
+    raise AssertionError("runner must not be called")
 
 
 def _runner_returning(returncode: int, recorder: dict[str, object]) -> object:
@@ -193,7 +204,7 @@ def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None
     args = _run_namespace(Path("repo"), set="default")
     recorder: dict[str, object] = {}
 
-    exit_code = run.run(args, runner=_runner_returning(0, recorder))
+    exit_code = run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
     assert exit_code == 0
     assert recorder["argv"] == [
@@ -211,7 +222,7 @@ def test_run_forwards_passthrough_verbatim(monkeypatch: object) -> None:
     args = _run_namespace(Path("repo"), passthrough=["-k", "hello", "-x"])
     recorder: dict[str, object] = {}
 
-    run.run(args, runner=_runner_returning(0, recorder))
+    run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
     assert recorder["argv"][-3:] == ["-k", "hello", "-x"]
 
@@ -223,7 +234,7 @@ def test_run_child_env_enables_plugin_autoload(monkeypatch: object) -> None:
     args = _run_namespace(Path("repo"))
     recorder: dict[str, object] = {}
 
-    run.run(args, runner=_runner_returning(0, recorder))
+    run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
     assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in recorder["env"]
 
@@ -233,7 +244,7 @@ def test_run_maps_gate_failure_to_one(monkeypatch: object) -> None:
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(1, {}))
+    exit_code = run.run(args, runner=_runner_returning(1, {}), preflight=_no_preflight)
 
     assert exit_code == 1
 
@@ -243,7 +254,7 @@ def test_run_maps_pytest_collection_usage_status_to_two(monkeypatch: object) -> 
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(2, {}))
+    exit_code = run.run(args, runner=_runner_returning(2, {}), preflight=_no_preflight)
 
     assert exit_code == 2
 
@@ -253,7 +264,7 @@ def test_run_maps_pytest_usage_error_status_to_two(monkeypatch: object) -> None:
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(4, {}))
+    exit_code = run.run(args, runner=_runner_returning(4, {}), preflight=_no_preflight)
 
     assert exit_code == 2
 
@@ -293,3 +304,105 @@ def test_run_subprocess_unknown_set_exits_two(tmp_path: Path) -> None:
     exit_code = run.run(args)
 
     assert exit_code == 2
+
+
+def test_plugin_options_present_curated_flags_under_plugin_option_names(tmp_path: Path) -> None:
+    """Verify the adapter answers `getoption` with the plugin names the resolvers read."""
+    args = _run_namespace(
+        tmp_path, set="micro", judge_harness="codex", env=["A=1", "B=2"], eval_paths="x,y"
+    )
+
+    options = PluginOptions.from_args(args)
+
+    assert options.rootpath == tmp_path.resolve()
+    assert options.getoption("benchspec_repo_root") == str(tmp_path.resolve())
+    assert options.getoption("benchspec_set") == "micro"
+    assert options.getoption("benchspec_judge_harness") == "codex"
+    assert options.getoption("benchspec_env") == ["A=1", "B=2"]
+    assert options.getoption("benchspec_eval_paths") == "x,y"
+    assert options.getoption("benchspec_model") is None
+
+
+def test_plugin_options_answer_none_for_any_uncurated_option(tmp_path: Path) -> None:
+    """A plugin option `run` does not curate reads as unset, so new options need no mapping."""
+    options = PluginOptions.from_args(_run_namespace(tmp_path))
+
+    assert options.getoption("benchspec_judge_timeout") is None
+    assert options.getoption("benchspec_option_added_next_year") is None
+
+
+def test_preflight_run_drives_grading_then_sandbox_through_the_adapter(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify preflight_run runs the plugin's grading and sandbox preflights, in that order."""
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        run.cases, "preflight_grading", lambda options: calls.append(("grading", options))
+    )
+    monkeypatch.setattr(
+        run.cases,
+        "preflight_session_sandbox",
+        lambda options: calls.append(("sandbox", options)),
+    )
+    args = _run_namespace(tmp_path, set="micro")
+
+    run.preflight_run(args)
+
+    assert [name for name, _ in calls] == ["grading", "sandbox"]
+    assert all(options.getoption("benchspec_set") == "micro" for _, options in calls)
+
+
+def test_run_preflight_runtime_error_exits_two_without_spawning(
+    monkeypatch: object, capsys: object
+) -> None:
+    """A missing credential is one `error:` line and exit 2; pytest never spawns."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+
+    def failing_preflight(args: argparse.Namespace) -> None:
+        """Reject the environment the way the binder preflight does."""
+        raise RuntimeError("GEMINI_API_KEY is required")
+
+    args = _run_namespace(Path("repo"))
+
+    exit_code = run.run(args, runner=_runner_that_must_not_run, preflight=failing_preflight)
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == "error: GEMINI_API_KEY is required\n"
+
+
+def test_run_preflight_usage_error_exits_two_without_spawning(
+    monkeypatch: object, capsys: object
+) -> None:
+    """An unknown set caught by the CLI preflight is one `error:` line and exit 2."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+
+    def failing_preflight(args: argparse.Namespace) -> None:
+        """Reject the set the way the plugin's resolver does at collection."""
+        raise pytest.UsageError("unknown eval set `nope`")
+
+    args = _run_namespace(Path("repo"), set="nope")
+
+    exit_code = run.run(args, runner=_runner_that_must_not_run, preflight=failing_preflight)
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == "error: unknown eval set `nope`\n"
+
+
+@pytest.mark.parametrize("collect_flag", ["--collect-only", "--co"])
+def test_run_collect_only_passthrough_skips_preflight(
+    monkeypatch: object, collect_flag: str
+) -> None:
+    """A collect-only passthrough spends nothing, so the environment preflight is skipped."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+
+    def preflight_that_must_not_run(args: argparse.Namespace) -> None:
+        """Fail loudly if a collect-only run preflights the environment."""
+        raise AssertionError("preflight must not run under collect-only")
+
+    args = _run_namespace(Path("repo"), passthrough=[collect_flag, "-q"])
+
+    exit_code = run.run(
+        args, runner=_runner_returning(0, {}), preflight=preflight_that_must_not_run
+    )
+
+    assert exit_code == 0

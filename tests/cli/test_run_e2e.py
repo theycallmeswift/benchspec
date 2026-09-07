@@ -65,3 +65,18 @@ def test_run_unknown_set_is_a_usage_error(tmp_path: Path) -> None:
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "no eval set named `nope` (declared: ['demo'])" in result.stdout
+
+
+def test_run_without_gemini_key_exits_two_before_spawning_pytest(tmp_path: Path) -> None:
+    """A missing `GEMINI_API_KEY` is one `error:` line and exit 2, not a pytest error per cell."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec("run", str(repo_root), cwd=tmp_path, drop=("GEMINI_API_KEY",))
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("error:")
+    assert "GEMINI_API_KEY" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "test session starts" not in result.stdout
