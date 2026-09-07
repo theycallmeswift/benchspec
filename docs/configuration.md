@@ -197,7 +197,7 @@ computable delta are exempt.
 |---|---|
 | `0` | Success. |
 | `1` | A finding: lint warnings, a failed cell, a tripped `--fail-under` gate, or a sandbox build failure. |
-| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, or a failed host preflight. |
+| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, a failed host preflight, or (`analyze`) a missing, empty, or rejected `GEMINI_API_KEY` and any binder transport failure. Printed as a single `error: ...` line on stderr. |
 | `5` | Nothing to do: no evals discovered under `root` (`run` only; `lint`/`analyze` exit `0` on an empty root). |
 
 > **Edge case:** `run` checks for emptiness *first*. With no evals discovered it

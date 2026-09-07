@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
 from benchspec.exit_codes import ExitCode
+from benchspec.grading.binder import BinderAuthError
 from benchspec.reporting import analyze
 from benchspec.runners import run
 from benchspec.sandbox import sandbox
@@ -134,6 +135,34 @@ def _run_sandbox_clean(args: argparse.Namespace) -> int:
     return ExitCode.SUCCESS
 
 
+def _run_analyze(args: argparse.Namespace) -> int:
+    """Classify the suite under `root`, mapping binder failures to a clean exit code.
+
+    `analyze` is the only subcommand that talks to the Gemini binder directly, so the
+    binder's failure taxonomy surfaces here rather than through pytest's status mapping:
+
+    - `RuntimeError` (preflight: `GEMINI_API_KEY` missing or empty; or a transport failure
+      mid-classification): USAGE (2). Both share one type, and both mean the same thing to
+      the author — no classification was produced and the fix is environmental — so they
+      share one mapping instead of one leaking as a traceback.
+    - `BinderAuthError` (Gemini rejected the credential): USAGE (2). A rejected key is the
+      closest cousin to a missing one and gets the same clean `error:` line.
+    - `SchemaError` (malformed eval): propagates to the `main` boundary → USAGE (2).
+
+    Args:
+        args: The parsed `analyze` namespace, with `root` a `Path`.
+
+    Returns:
+        `ExitCode.SUCCESS` once the suite is classified, `ExitCode.USAGE` on a preflight,
+        credential, or transport failure.
+    """
+    try:
+        return analyze.run(args.root.resolve())
+    except (RuntimeError, BinderAuthError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return ExitCode.USAGE
+
+
 def _load_repo_dotenv() -> None:
     """Load a repo-root `.env` into the environment before any subcommand runs.
 
@@ -193,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dispatch = {
         "lint": lambda parsed: lint.run(parsed.root.resolve()),
-        "analyze": lambda parsed: analyze.run(parsed.root.resolve()),
+        "analyze": _run_analyze,
         "run": run.run,
         "sandbox:build": _run_sandbox_build,
         "sandbox:clean": _run_sandbox_clean,
