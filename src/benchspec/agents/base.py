@@ -1,7 +1,7 @@
 """The agent interface.
 
 A `CodingAgent` hides everything agent-specific behind one boundary: where its home
-lives in the guest, how to provision the CLI into a microVM (the cached step), which
+lives in the guest, how to provision the CLI into a sandbox (the cached step), which
 credentials it needs, how to stage local skills, how to build its headless command, and
 how to parse its output. `sandbox.py` drives a live sandbox through this interface and
 never names a concrete agent; adding a second agent is additive, not a refactor.

@@ -5,7 +5,7 @@ graded prompt. Both arms grade identically — there is no with-skill invocation
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
 the arm's dispatched-skills set, not a harness assert. `session_factory`, `grade`, and `bind`
-are injectable so the loop is unit-testable without spawning a microVM or calling the host.
+are injectable so the loop is unit-testable without spawning a sandbox or calling the host.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class ArmOutcome:
 
 @dataclass
 class _ArmRun:
-    """Everything accumulated from running an arm in one VM session."""
+    """Everything accumulated from running an arm in one sandbox session."""
 
     tree: str = ""
     contents: dict = field(default_factory=dict)
@@ -247,8 +247,8 @@ async def _run_arm_turns(
     harness_args: object = None,
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm."""
-    # The whole VM lifecycle (boot → run → teardown) runs in ONE asyncio.run: the microVM
-    # is bound to the loop it was created in. Grading runs afterward, on the host.
+    # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
+    # guest is bound to the loop it was created in. Grading runs afterward, on the host.
     run_acc = _ArmRun()
 
     async with session_factory(

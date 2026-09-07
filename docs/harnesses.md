@@ -129,7 +129,7 @@ The steps:
    name becomes a legal `harness` value everywhere at once.
 3. Test against `benchspec.testing.FakeSandbox`, a recording sandbox double, so
    command construction, secret injection, and stream parsing are unit-tested
-   without booting a VM. Mirror an existing suite under `tests/agents/`.
+   without booting a sandbox. Mirror an existing suite under `tests/agents/`.
 4. Verify with `make test` and `make lint`, then prove an end-to-end boot by
    running a real set with an arm on the new harness.
 

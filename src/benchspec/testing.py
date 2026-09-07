@@ -2,7 +2,7 @@
 
 `FakeSandbox` records calls and returns canned outputs, letting agent unit tests assert
 command-building, secret-injection, and result-parsing behavior without spawning a
-microVM. Public so external `CodingAgent` implementers don't have to copy-paste a
+sandbox. Public so external `CodingAgent` implementers don't have to copy-paste a
 sandbox stub. See `docs/harnesses.md`.
 """
 

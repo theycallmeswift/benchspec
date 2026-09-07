@@ -83,7 +83,7 @@ def _file_lock(path: Path) -> object:
 async def _snapshot_artifact_shas(
     sandbox: object, agent: object, backend: SandboxBackend
 ) -> dict | None:
-    """Snapshot agent artifact paths to SHA-256 digests inside the VM."""
+    """Snapshot agent artifact paths to SHA-256 digests inside the guest."""
     dirs = agent.artifact_dirs()
     if not dirs:
         return {}

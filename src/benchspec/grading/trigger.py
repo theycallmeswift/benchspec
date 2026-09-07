@@ -1,6 +1,6 @@
 """Skill-activation detection primitives for the sandbox routing path.
 
-Routing runs inside a microVM (`sandbox.route_in_sandbox`); this module holds the pure
+Routing runs inside a sandbox (`sandbox.route_in_sandbox`); this module holds the pure
 detection logic it feeds. `_tool_uses` yields the tool_use blocks in one stream-json
 line; `detect_skill_fired` decides whether a given skill fired anywhere in a stream;
 `dispatches_skill` spots the first skill dispatch in a single line (the sandbox router

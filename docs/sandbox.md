@@ -38,8 +38,12 @@ boundary, and under Docker that boundary is the container, not a VM.
 Credentials under Docker are container environment variables — injected as
 `-e KEY=VALUE` — readable by the agent and by `setup.sh`, with no host
 scoping; microsandbox scopes each credential to its provider host at the
-network boundary instead (see [Credentials](#credentials)). Pick microsandbox
-when that isolation gap matters for what you are testing.
+network boundary instead (see [Credentials](#credentials)). The value is also
+visible outside the guest: anyone with access to the daemon socket can read it
+back with `docker inspect <container>` for as long as the container exists, and
+it appears briefly in the host process list as part of the `docker run … -e`
+argv. Pick microsandbox when that isolation gap matters for what you are
+testing.
 
 Otherwise Docker behaves like any backend on this page: same mounts, same
 staging rules, same snapshot lifecycle. The backend-specific facts are the
@@ -167,6 +171,11 @@ container) and tears it down after the turn. A cell, in order:
 5. Gathers facts: file tree, contents, SHA-256s, the final message, the
    tool-call stream.
 6. Tears down and removes the stage.
+
+Under Docker, a guest command that times out or is killed ends the `docker exec`
+client on the host, not the process it started inside the container: that
+process keeps running until the container itself is removed at teardown, which
+is what actually reclaims it.
 
 The guest sees three paths:
 

@@ -1,7 +1,7 @@
 """Claude Code implementation of the `CodingAgent` interface.
 
-Provisions the Claude Code CLI into a microVM (the cached snapshot step), injects the
-Anthropic credential as a host-substituted secret, builds the headless `claude -p`
+Provisions the Claude Code CLI into a sandbox (the cached snapshot step), declares the
+Anthropic credential for the backend to inject, builds the headless `claude -p`
 command, and parses its output through the shared helpers in `results.py`.
 """
 
@@ -159,9 +159,11 @@ class ClaudeCodeAgent(BaseAgent):
     def guest_env(self: object) -> dict:
         """Return environment variables passed to guest agent commands."""
         # IS_SANDBOX=1 lets claude run bypassPermissions as root (the guest is root); the
-        # microVM is the real containment boundary. The credential rides as the scoped
-        # credential the backend injects (see secrets()), never entering the guest as a
-        # plain value. TZ=UTC pins the guest clock to the zone the host computes {TODAY}
+        # sandbox is the real containment boundary. The credential rides as the backend's
+        # injection of secrets() — microsandbox scopes it to the provider host at the
+        # network boundary, Docker passes it as a container environment variable, so how
+        # exposed it is inside the guest is the backend's answer, not this adapter's.
+        # TZ=UTC pins the guest clock to the zone the host computes {TODAY}
         # in, so a dated path the agent writes matches the date the assertions were
         # substituted with.
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
@@ -184,7 +186,7 @@ class ClaudeCodeAgent(BaseAgent):
         """Build the guest command used to invoke the agent."""
         # Always stream-json so both arms capture a trajectory (the baseline too); detect_skill
         # gates fired-detection downstream, not the format.
-        # bypassPermissions (not acceptEdits): the microVM is the containment boundary,
+        # bypassPermissions (not acceptEdits): the sandbox is the containment boundary,
         # so the agent runs with full autonomy — no host-side --allowedTools workaround needed.
         _validate_plugin_dir_sources(plugin_dir, harness_args)
         cmd = [
