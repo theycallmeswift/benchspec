@@ -10,11 +10,11 @@ microVM runtime and never touches the developer's own `~/.microsandbox`.
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 from pathlib import Path
 from textwrap import dedent
+
+from tests.cli.support import run_benchspec
 
 
 def _write_msb_shim(shim_dir: Path) -> Path:
@@ -38,18 +38,15 @@ def _run_sandbox_clean(tmp_path: Path, home: Path, repo_root: Path) -> subproces
     shim_dir.mkdir(exist_ok=True)
     shim = _write_msb_shim(shim_dir)
 
-    return subprocess.run(
-        [sys.executable, "-m", "benchspec", "sandbox:clean", str(repo_root)],
+    return run_benchspec(
+        "sandbox:clean",
+        str(repo_root),
         cwd=tmp_path,
         env={
-            **os.environ,
             "HOME": str(home),
             "MSB_PATH": str(shim),
             "BENCHSPEC_COMMAND_LOG": str(tmp_path / "commands.log"),
         },
-        capture_output=True,
-        text=True,
-        check=False,
     )
 
 
