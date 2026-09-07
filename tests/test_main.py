@@ -235,6 +235,63 @@ def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object
     assert "error: snapshot build failed" in capsys.readouterr().err
 
 
+def test_sandbox_clean_resolves_root_into_cli_clean(monkeypatch: object) -> None:
+    """Verify `sandbox:clean <dir>` prunes from the resolved root, exit 0."""
+    cleaned_roots: list[Path] = []
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_clean", lambda repo_root: cleaned_roots.append(repo_root)
+    )
+
+    exit_code = __main__.main(["sandbox:clean", "some/dir"])
+
+    assert exit_code == 0
+    assert cleaned_roots == [Path("some/dir").resolve()]
+
+
+def test_sandbox_clean_bare_uses_cwd(monkeypatch: object) -> None:
+    """Bare `sandbox:clean` prunes from the resolved cwd, exit 0."""
+    cleaned_roots: list[Path] = []
+    monkeypatch.setattr(
+        __main__.sandbox, "cli_clean", lambda repo_root: cleaned_roots.append(repo_root)
+    )
+
+    exit_code = __main__.main(["sandbox:clean"])
+
+    assert exit_code == 0
+    assert cleaned_roots == [Path(".").resolve()]
+
+
+def test_sandbox_clean_help_names_the_running_sandbox_hazard(
+    monkeypatch: object, capsys: object
+) -> None:
+    """Verify `sandbox:clean --help` exits 0 and warns that it stops running sandboxes."""
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "cli_clean",
+        lambda repo_root: pytest.fail("cli_clean ran during --help"),
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        __main__.main(["sandbox:clean", "--help"])
+
+    assert raised.value.code == 0
+    assert "stops running" in capsys.readouterr().out
+
+
+def test_sandbox_clean_rejects_unknown_flag_with_usage_exit(monkeypatch: object) -> None:
+    """Verify `sandbox:clean --bogus` is an argparse usage error, exit 2."""
+    monkeypatch.setattr(
+        __main__.sandbox,
+        "cli_clean",
+        lambda repo_root: pytest.fail("cli_clean ran on a malformed invocation"),
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        __main__.main(["sandbox:clean", "--bogus"])
+
+    assert raised.value.code == 2
+
+
 def test_analyze_command_maps_schema_error_to_usage(
     tmp_path: Path, monkeypatch: object
 ) -> None:
@@ -256,7 +313,9 @@ def test_lint_command_maps_schema_error_to_usage(tmp_path: Path) -> None:
     assert exit_code == 2
 
 
-@pytest.mark.parametrize("command", ["lint", "analyze", "sandbox:build", "run"])
+@pytest.mark.parametrize(
+    "command", ["lint", "analyze", "sandbox:build", "sandbox:clean", "run"]
+)
 def test_subcommand_registered(monkeypatch: object, command: str) -> None:
     """Verify each subcommand is registered and accepts a root positional."""
     monkeypatch.setattr(__main__.lint, "run", lambda root: 0)
@@ -265,6 +324,7 @@ def test_subcommand_registered(monkeypatch: object, command: str) -> None:
     monkeypatch.setattr(
         __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
     )
+    monkeypatch.setattr(__main__.sandbox, "cli_clean", lambda repo_root: None)
 
     assert __main__.main([command, "some/dir"]) == 0
 

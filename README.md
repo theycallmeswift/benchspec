@@ -115,7 +115,8 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
 1. **Boots a microVM** from a cached snapshot with the agent CLI already
    installed. The first run builds the snapshot (a few minutes); later runs
-   reuse it, or pay the cost up front with `benchspec sandbox:build`.
+   reuse it, or pay the cost up front with `benchspec sandbox:build`; reclaim
+   the disk from leftover sandboxes and snapshots with `benchspec sandbox:clean`.
 2. **Seeds the clean room** — the eval's optional `workspace/` files land in a
    fresh directory mounted at `/workspace`, the agent's working directory.
 3. **Runs `setup.sh`**, where arms diverge: it sees `$BENCHSPEC_ARM`, so the

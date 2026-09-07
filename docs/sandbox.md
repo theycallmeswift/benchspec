@@ -86,6 +86,19 @@ benchspec sandbox:build --config x.toml # with a scratch config layered over pyp
 `sandbox:build` exits `0` on a built or already-present snapshot, `2` on a
 config or host-preflight problem, and `1` on a genuine build failure.
 
+To reclaim the disk those snapshots and any leftover sandboxes hold:
+
+```bash
+benchspec sandbox:clean
+```
+
+`sandbox:clean` stops and removes `eval-*`, `benchspec-build-*`, and
+`trigger-*` sandboxes, removes `benchspec-*` snapshots, and deletes the repo's
+`tmp/.benchspec-snapshot-*.lock` files. It stops *running* sandboxes too, so
+do not run it during a live `benchspec run`. Snapshots rebuild lazily on the
+next run, or explicitly via `sandbox:build`. It always exits `0` (nothing to
+prune is success); `2` only on a bad invocation.
+
 ## Inside a running cell
 
 Each `(eval × arm × sample)` boots its own VM from the snapshot (for

@@ -113,12 +113,33 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
     return ExitCode.SUCCESS
 
 
+def _run_sandbox_clean(args: argparse.Namespace) -> int:
+    """Prune benchspec sandboxes and snapshots for `root`, always exiting 0 once parsed.
+
+    `cli_clean` tolerates a missing microsandbox runtime (nothing to prune) and `msb` failures
+    on individual entries, so there is no error mapping here: the only exits are 0 (success,
+    including a host with nothing to prune) and 2 (an argparse usage error, raised by `main`
+    before this handler runs).
+
+    Args:
+        args: The parsed `sandbox:clean` namespace, with `root` a `Path`.
+
+    Returns:
+        `ExitCode.SUCCESS`.
+    """
+    root = args.root.resolve()
+
+    sandbox.cli_clean(root)
+
+    return ExitCode.SUCCESS
+
+
 def _load_repo_dotenv() -> None:
     """Load a repo-root `.env` into the environment before any subcommand runs.
 
     `usecwd=True` walks up from the invocation directory — the same rule the pytest
-    plugin applies — so `lint`, `analyze`, `sandbox:build`, and `run` all see the same
-    credentials. Variables already exported win over `.env` values.
+    plugin applies — so `lint`, `analyze`, `sandbox:build`, `sandbox:clean`, and `run` all
+    see the same credentials. Variables already exported win over `.env` values.
     """
     dotenv_path = find_dotenv(usecwd=True)
     if dotenv_path:
@@ -154,6 +175,15 @@ def main(argv: list[str] | None = None) -> int:
     sandbox_build_parser.add_argument(
         "--config", help="config file layered over pyproject for set resolution"
     )
+    sandbox_clean_help = (
+        "prune benchspec sandboxes and snapshots; stops running eval sandboxes, "
+        "so do not use mid-run"
+    )
+    _add_root_argument(
+        sub.add_parser(
+            "sandbox:clean", help=sandbox_clean_help, description=sandbox_clean_help
+        )
+    )
 
     if argv is None:
         argv = sys.argv[1:]
@@ -166,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         "analyze": lambda parsed: analyze.run(parsed.root.resolve()),
         "run": run.run,
         "sandbox:build": _run_sandbox_build,
+        "sandbox:clean": _run_sandbox_clean,
     }
     try:
         return dispatch[args.command](args)
