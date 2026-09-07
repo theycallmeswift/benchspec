@@ -26,8 +26,9 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-# `exec` replaces the shim process with the payload so a killed handle kills the real
-# command: a grandchild would survive the shim's death and outlive the test.
+# A payload the test will kill or time out must `exec` its long-running command: `/bin/sh`
+# is dash on Linux, which forks rather than exec-optimizing, and an orphaned grandchild
+# would keep the pipes open past the shim's own death.
 _SHIM_SCRIPT = dedent("""\
     #!/bin/sh
     if [ -n "$BENCHSPEC_DOCKER_COMMAND_LOG" ]; then

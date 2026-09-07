@@ -124,7 +124,7 @@ def test_exec_raises_timeout_error_when_the_command_outlives_the_budget(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Verify a command that runs past `timeout` is killed and reported as a timeout."""
-    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "sleep 5")
+    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exec sleep 5")
     sandbox = _docker_sandbox(tmp_path)
 
     with pytest.raises(TimeoutError, match=r"docker exec of sleep timed out after 0\.2s"):
@@ -191,7 +191,7 @@ def test_exec_stream_kill_ends_a_long_running_command(
     monkeypatch: object, tmp_path: object
 ) -> None:
     """Verify kill tears down a command that would otherwise run for seconds."""
-    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "sleep 5")
+    monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exec sleep 5")
     sandbox = _docker_sandbox(tmp_path)
 
     async def _kill_then_drain() -> list[docker.DockerExecEvent]:
