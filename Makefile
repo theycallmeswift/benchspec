@@ -28,7 +28,7 @@ lint:  ## Lint with Ruff and houserules
 lint\:ruff:  ## Lint with Ruff
 	uv run ruff check .
 
-LINT_BASE ?= origin/dev
+LINT_BASE ?= origin/main
 lint\:houserules:  ## Lint changed and new Python files with houserules (needs GEMINI_API_KEY)
 	uv run houserules --base "$$(git merge-base $(LINT_BASE) HEAD)" --verbose .
 	@untracked_python_files="$$(git ls-files --others --exclude-standard -- '*.py')"; \
