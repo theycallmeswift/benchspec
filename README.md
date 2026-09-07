@@ -138,7 +138,9 @@ the guest.
 pytest verbatim: `benchspec run -- -k greets-by-name` (equivalently
 `pytest -k greets-by-name`) runs one eval, `-n 8` fans cells across eight
 microVMs, and `--count 5` samples each cell five times so the report can flag a
-delta that sits within noise.
+delta that sits within noise. The repo's own `make e2e` defaults to six
+workers through the `WORKERS` variable; `make e2e WORKERS=1` runs the cells
+sequentially.
 
 ## Why benchspec
 

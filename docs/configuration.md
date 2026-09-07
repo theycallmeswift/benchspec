@@ -167,6 +167,11 @@ benchspec run -- --count 5             # 5 samples per cell (pytest-repeat)
 benchspec run -- --collect-only -q     # list the cells without running
 ```
 
+The in-repo `make e2e` and `make evals` targets pass `-n $(WORKERS)` (default
+6; each e2e worker reserves a 2 GB microVM), and `EVAL_ARGS` appends further
+pytest arguments after it, so `make e2e WORKERS=1` or `EVAL_ARGS="-n 1"`
+restores a sequential run.
+
 A few plugin options have no curated `run` flag and are reached the same way:
 `--benchspec-judge-timeout`, `--benchspec-judge-env K=V`,
 `--benchspec-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
