@@ -160,10 +160,10 @@ def _run_sandbox_build(args: argparse.Namespace) -> int:
 def _run_sandbox_clean(args: argparse.Namespace) -> int:
     """Prune benchspec sandboxes and snapshots for `root`, always exiting 0 once parsed.
 
-    `cli_clean` tolerates a missing microsandbox runtime (nothing to prune) and `msb` failures
-    on individual entries, so there is no error mapping here: the only exits are 0 (success,
-    including a host with nothing to prune) and 2 (an argparse usage error, raised by `main`
-    before this handler runs).
+    `cli_clean` tolerates a missing runtime per backend (nothing to prune) and individual
+    command failures on either side, so there is no error mapping here: the only exits are
+    0 (success, including a host with nothing to prune) and 2 (an argparse usage error,
+    raised by `main` before this handler runs).
 
     Args:
         args: The parsed `sandbox:clean` namespace, with `root` a `Path`.

@@ -28,7 +28,7 @@ from benchspec.sandbox.backend import (
     NAME_PREFIX,
     SandboxBackend,
     host_mount_path,
-    msb_binary,
+    registered_backends,
     resolve_sandbox,
 )
 from benchspec.sandbox.project import discard_stage, stage_project
@@ -602,39 +602,17 @@ def _display_base_image(env: EnvConfig) -> str:
 
 
 def cli_clean(repo_root: Path) -> None:
-    """Remove every `benchspec-*` sandbox and snapshot via the msb CLI.
+    """Prune every registered backend's `benchspec-*` sandboxes and snapshots.
 
-    One prefix selects leaked cells, trigger probes, build VMs, and snapshots alike;
-    anything another tool put under `~/.microsandbox` is left alone. Also removes the
-    per-repo snapshot lock files under `<repo_root>/tmp/`.
+    Each backend owns its own resources: microsandbox prunes sandboxes and snapshots
+    under `~/.microsandbox`; Docker prunes `benchspec-*` containers and
+    `benchspec-snapshot` images. A backend with no runtime installed tolerates that and
+    prunes nothing. Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `benchspec sandbox:build`.
     """
-    import subprocess
+    for backend_class in registered_backends().values():
+        backend_class().prune()
 
-    binary = msb_binary()
-
-    def _msb(*args: object) -> None:
-        """Run the SDK-resolved msb binary; a missing runtime means nothing to prune."""
-        if binary is None:
-            return
-        try:
-            subprocess.run([str(binary), *args], check=False)
-        except FileNotFoundError:
-            pass
-
-    home = Path.home() / ".microsandbox"
-    for sub in ("sandboxes", "snapshots"):
-        target_dir = home / sub
-        if not target_dir.is_dir():
-            continue
-        for entry in target_dir.iterdir():
-            if not entry.name.startswith(NAME_PREFIX):
-                continue
-            if sub == "sandboxes":
-                _msb("stop", entry.name)
-                _msb("rm", "-f", entry.name)
-            else:
-                _msb("snapshot", "rm", "--force", entry.name)
     for lock in workspace.workspace_parent(repo_root).glob(".benchspec-snapshot-*.lock"):
         lock.unlink(missing_ok=True)

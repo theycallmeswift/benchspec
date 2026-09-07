@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -298,6 +299,60 @@ def test_microsandbox_snapshot_exists_true_when_dir_present(
     (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
 
     assert microsandbox_backend.snapshot_exists(name) is True
+
+
+def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """Verify prune walks ~/.microsandbox and removes only benchspec-prefixed entries."""
+    home = tmp_path
+    sandboxes = home / ".microsandbox" / "sandboxes"
+    snapshots = home / ".microsandbox" / "snapshots"
+    (sandboxes / "benchspec-eval-hello-trial-gw0").mkdir(parents=True)
+    (sandboxes / "unrelated-sandbox").mkdir()
+    (snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4").mkdir(parents=True)
+    (snapshots / "unrelated-snapshot").mkdir()
+    monkeypatch.setattr(backend.Path, "home", lambda: home)
+    shim = home / "msb"
+    shim.write_text(dedent("""\
+        #!/bin/sh
+        printf "%s\\n" "$*" >> "$BENCHSPEC_COMMAND_LOG"
+        case "$1 $2" in
+          "rm -f") rm -rf "$HOME/.microsandbox/sandboxes/$3" ;;
+          "snapshot rm") rm -rf "$HOME/.microsandbox/snapshots/$4" ;;
+        esac
+    """))
+    shim.chmod(0o755)
+    monkeypatch.setenv("MSB_PATH", str(shim))
+    monkeypatch.setenv("HOME", str(home))
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_COMMAND_LOG", str(command_log))
+    microsandbox_backend = backend.MicrosandboxBackend()
+
+    microsandbox_backend.prune()
+
+    assert sorted(entry.name for entry in sandboxes.iterdir()) == ["unrelated-sandbox"]
+    assert sorted(entry.name for entry in snapshots.iterdir()) == ["unrelated-snapshot"]
+    assert sorted(command_log.read_text(encoding="utf-8").splitlines()) == [
+        "rm -f benchspec-eval-hello-trial-gw0",
+        "snapshot rm --force benchspec-microsandbox-claude-code-latest-c30e39d4",
+        "stop benchspec-eval-hello-trial-gw0",
+    ]
+
+
+def test_microsandbox_prune_tolerates_a_missing_runtime(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """Verify prune is a no-op when the SDK resolves no msb runtime at all."""
+    home = tmp_path
+    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
+    monkeypatch.setattr(backend.Path, "home", lambda: home)
+    monkeypatch.setenv("MSB_PATH", str(tmp_path / "missing-msb"))
+    microsandbox_backend = backend.MicrosandboxBackend()
+
+    microsandbox_backend.prune()  # must not raise
+
+    assert (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").is_dir()
 
 
 def test_microsandbox_imported_only_under_allowlist() -> None:

@@ -269,6 +269,32 @@ def exec_argv(
     return [*argv, container, command, *args]
 
 
+def ps_argv() -> list[str]:
+    """Render the `docker ps` arguments that list every benchspec-named container.
+
+    Docker's `--filter name=...` is a substring match, so a caller must still filter
+    the printed names by `startswith(NAME_PREFIX)` — this only narrows the daemon's own
+    listing before that stricter check.
+
+    Returns:
+        The argument list, starting at `ps`.
+    """
+    return ["ps", "-a", "--filter", f"name={NAME_PREFIX}", "--format", "{{.Names}}"]
+
+
+def images_argv() -> list[str]:
+    """Render the `docker images` arguments that list every benchspec snapshot image.
+
+    Every snapshot is a tag under `SNAPSHOT_REPOSITORY`, so scoping to that one
+    repository is already an exact match — no further filtering is needed on the
+    repository half, only on the tag half of each printed `repository:tag` line.
+
+    Returns:
+        The argument list, starting at `images`.
+    """
+    return ["images", SNAPSHOT_REPOSITORY, "--format", "{{.Repository}}:{{.Tag}}"]
+
+
 def shell_argv(
     container: str, script: str, *, cwd: str | None, env: dict[str, str] | None
 ) -> list[str]:
@@ -556,8 +582,9 @@ class DockerBackend(SharedBackendBehavior):
 
     The `docker` CLI is resolved on every call rather than cached at construction, so a
     host that gains (or loses) Docker mid-process is picked up without a fresh backend.
-    Only `preflight`, `snapshot_exists`, and `prune` tolerate its absence; every other
-    entry point fails loudly, because silently doing nothing would look like a clean run.
+    Only `preflight`, `snapshot_exists`, `image_identity`, and `prune` tolerate its
+    absence; every other entry point fails loudly, because silently doing nothing would
+    look like a clean run.
     """
 
     id = "docker"
@@ -586,11 +613,21 @@ class DockerBackend(SharedBackendBehavior):
         return []
 
     def snapshot_exists(self, name: str) -> bool:
-        """Return whether the daemon holds the image a named snapshot was committed to."""
+        """Return whether the daemon holds the image a named snapshot was committed to.
+
+        An unreachable daemon (`OSError`, `subprocess.TimeoutExpired`) reads the same
+        as an absent snapshot rather than raising: existence checks must never abort a
+        caller that is only deciding whether to build.
+        """
         if _resolved_docker_binary() is None:
             return False
 
-        return self._docker_sync(["image", "inspect", image_ref(name)]).returncode == 0
+        try:
+            completed = self._docker_sync(["image", "inspect", image_ref(name)])
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+        return completed.returncode == 0
 
     def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
         """Return the structured inputs and digest behind the snapshot cache fingerprint."""
@@ -670,7 +707,40 @@ class DockerBackend(SharedBackendBehavior):
         return sandbox
 
     def prune(self) -> None:
-        """Remove every `benchspec-*` container and image (arrives with `sandbox:clean`)."""
+        """Remove every `benchspec-*` container and `benchspec-snapshot` image.
+
+        Containers go first, then images: an image cannot be removed while a container
+        still uses it. A missing CLI, an unreachable daemon (`docker ps` exiting
+        nonzero, or raising `OSError`/`TimeoutExpired`), and individual `rm -f`/`rmi -f`
+        failures are all tolerated — this never raises, because `sandbox:clean` always
+        exits 0.
+        """
+        binary = _resolved_docker_binary()
+        if binary is None:
+            return
+
+        try:
+            ps_result = self._docker_sync(ps_argv())
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if ps_result.returncode != 0:
+            return
+
+        for name in ps_result.stdout.splitlines():
+            if name.startswith(NAME_PREFIX):
+                self._docker_sync(["rm", "-f", name])
+
+        try:
+            images_result = self._docker_sync(images_argv())
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if images_result.returncode != 0:
+            return
+
+        for line in images_result.stdout.splitlines():
+            _, _, tag = line.rpartition(":")
+            if tag.startswith(NAME_PREFIX):
+                self._docker_sync(["rmi", "-f", line])
 
     def _binary(self) -> Path:
         """Return the `docker` CLI to drive.

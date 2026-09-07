@@ -24,6 +24,7 @@ import contextlib
 import hashlib
 import os
 import platform
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -441,7 +442,37 @@ class MicrosandboxBackend(SharedBackendBehavior):
         return handle.image_manifest_digest
 
     def prune(self: object) -> None:
-        """Remove every `benchspec-*` microsandbox artifact (arrives with `sandbox:clean`)."""
+        """Remove every `benchspec-*` sandbox and snapshot under `~/.microsandbox`.
+
+        One prefix selects leaked cells, trigger probes, and build VMs alike; anything
+        another tool put under `~/.microsandbox` is left alone. A missing SDK-resolved
+        runtime means nothing to prune; a runtime that resolves but is not actually on
+        disk raises `FileNotFoundError` per invocation, which is tolerated the same way.
+        """
+        binary = msb_binary()
+
+        def _msb(*args: object) -> None:
+            """Run the SDK-resolved msb binary; a missing runtime means nothing to prune."""
+            if binary is None:
+                return
+            try:
+                subprocess.run([str(binary), *args], check=False)
+            except FileNotFoundError:
+                pass
+
+        home = Path.home() / ".microsandbox"
+        for sub in ("sandboxes", "snapshots"):
+            target_dir = home / sub
+            if not target_dir.is_dir():
+                continue
+            for entry in target_dir.iterdir():
+                if not entry.name.startswith(NAME_PREFIX):
+                    continue
+                if sub == "sandboxes":
+                    _msb("stop", entry.name)
+                    _msb("rm", "-f", entry.name)
+                else:
+                    _msb("snapshot", "rm", "--force", entry.name)
 
     def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
         """Provision and seal the reusable microsandbox snapshot."""

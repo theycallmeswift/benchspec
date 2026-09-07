@@ -486,6 +486,78 @@ def test_create_trigger_sandbox_mounts_only_the_project_and_stages_assets(
     ]
 
 
+def test_ps_argv_filters_by_name_prefix_and_prints_names() -> None:
+    """Verify ps_argv lists every container whose name carries the benchspec prefix."""
+    assert docker.ps_argv() == [
+        "ps", "-a", "--filter", "name=benchspec-", "--format", "{{.Names}}",
+    ]
+
+
+def test_images_argv_filters_the_snapshot_repository_and_prints_repo_and_tag() -> None:
+    """Verify images_argv scopes the listing to the one benchspec snapshot repository."""
+    assert docker.images_argv() == [
+        "images", "benchspec-snapshot", "--format", "{{.Repository}}:{{.Tag}}",
+    ]
+
+
+def test_prune_removes_only_benchspec_containers_and_snapshot_images(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify prune removes benchspec-prefixed containers and snapshot-tagged images only."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    monkeypatch.setenv(
+        "BENCHSPEC_SHIM_CONTAINERS",
+        "benchspec-eval-hello-trial-gw0\nbenchspec-build-abc\nother-benchspec-thing",
+    )
+    monkeypatch.setenv(
+        "BENCHSPEC_SHIM_IMAGES",
+        "benchspec-snapshot:benchspec-docker-claude-code-latest-c30e39d4\n"
+        "benchspec-snapshot:other-tag",
+    )
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    backend.prune()
+
+    assert sorted(command_log.read_text(encoding="utf-8").splitlines()) == [
+        "images benchspec-snapshot --format {{.Repository}}:{{.Tag}}",
+        "ps -a --filter name=benchspec- --format {{.Names}}",
+        "rm -f benchspec-build-abc",
+        "rm -f benchspec-eval-hello-trial-gw0",
+        "rmi -f benchspec-snapshot:benchspec-docker-claude-code-latest-c30e39d4",
+    ]
+
+
+def test_prune_is_a_no_op_when_the_docker_cli_is_missing(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify prune logs nothing and does not raise when there is no docker CLI at all."""
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    backend = docker.DockerBackend()
+
+    backend.prune()
+
+    assert not command_log.exists()
+
+
+def test_prune_stops_after_a_failing_ps_without_raising(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    """Verify an unreachable daemon during `ps` prunes nothing and never raises."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    monkeypatch.setenv("BENCHSPEC_SHIM_PS_EXIT", "1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    backend.prune()
+
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "ps -a --filter name=benchspec- --format {{.Names}}",
+    ]
+
+
 def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
     monkeypatch: object, tmp_path: Path
 ) -> None:

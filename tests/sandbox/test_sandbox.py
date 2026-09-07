@@ -712,63 +712,48 @@ def test_route_passes_empty_stdin_to_exec_stream(monkeypatch: object, tmp_path: 
     assert captured.get("stdin") == b""
 
 
-def test_cli_clean_tolerates_missing_msb(monkeypatch: object, tmp_path: object) -> None:
-    """Verify cli clean tolerates missing msb."""
-    import subprocess
+class _RecordingBackend:
+    """A fake backend whose `prune` records that it ran, for `cli_clean` fan-out tests."""
 
-    home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
-    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
-    monkeypatch.chdir(tmp_path)
+    def __init__(self: object, calls: list[str], label: str) -> None:
+        """Bind the shared call log and this instance's label."""
+        self._calls = calls
+        self._label = label
 
-    def boom(*args: object, **kwargs: object) -> NoReturn:
-        """Boom."""
-        raise FileNotFoundError("msb")
-
-    monkeypatch.setattr(subprocess, "run", boom)
-    sandbox.cli_clean(tmp_path)  # must not raise
+    def prune(self: object) -> None:
+        """Record that this backend's prune ran."""
+        self._calls.append(self._label)
 
 
-def test_cli_clean_runs_the_sdk_resolved_msb_binary(monkeypatch: object, tmp_path: object) -> None:
-    """Pruning drives the runtime the SDK resolves, never a bare `msb` from $PATH."""
-    import subprocess
-
-    home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
-    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
-    binary = tmp_path / "bundled" / "msb"
-    monkeypatch.setattr(sandbox, "msb_binary", lambda: binary)
-    commands = []
+def test_cli_clean_invokes_prune_on_every_registered_backend(
+    monkeypatch: object, tmp_path: object
+) -> None:
+    """Verify cli_clean prunes every backend `registered_backends` returns, not just one."""
+    calls: list[str] = []
     monkeypatch.setattr(
-        subprocess, "run", lambda command, **kwargs: commands.append(command)
+        sandbox,
+        "registered_backends",
+        lambda: {
+            "alpha": lambda: _RecordingBackend(calls, "alpha"),
+            "beta": lambda: _RecordingBackend(calls, "beta"),
+        },
     )
 
     sandbox.cli_clean(tmp_path)
 
-    assert commands == [
-        [str(binary), "stop", "benchspec-eval-x"],
-        [str(binary), "rm", "-f", "benchspec-eval-x"],
-    ]
+    assert sorted(calls) == ["alpha", "beta"]
 
 
-def test_cli_clean_skips_msb_when_runtime_unavailable(
-    monkeypatch: object, tmp_path: object
-) -> None:
-    """Without a resolvable runtime there is nothing to prune through msb."""
-    import subprocess
+def test_cli_clean_removes_repo_snapshot_lock_files(monkeypatch: object, tmp_path: object) -> None:
+    """Verify cli_clean unlinks every per-repo snapshot lock file regardless of backends."""
+    monkeypatch.setattr(sandbox, "registered_backends", lambda: {})
+    lock_file = tmp_path / "tmp" / ".benchspec-snapshot-claude-code.lock"
+    lock_file.parent.mkdir(parents=True)
+    lock_file.touch()
 
-    home = tmp_path / "home"
-    (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").mkdir(parents=True)
-    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
-    monkeypatch.setattr(sandbox, "msb_binary", lambda: None)
+    sandbox.cli_clean(tmp_path)
 
-    def boom(*args: object, **kwargs: object) -> NoReturn:
-        """Fail loudly if msb is invoked at all."""
-        raise AssertionError("subprocess.run should not be called")
-
-    monkeypatch.setattr(subprocess, "run", boom)
-
-    sandbox.cli_clean(tmp_path)  # must not raise
+    assert not lock_file.exists()
 
 
 def _opencode_agent() -> object:

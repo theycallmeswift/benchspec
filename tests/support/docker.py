@@ -15,6 +15,7 @@ without a Docker daemon anywhere near the suite. The knobs:
 - `BENCHSPEC_SHIM_IMAGES`: newline-separated references `images` prints.
 - `BENCHSPEC_SHIM_EXEC`: the shell command `exec` runs in the "guest" (default `true`).
 - `BENCHSPEC_SHIM_RM_EXIT`: exit status of `rm` (default 0).
+- `BENCHSPEC_SHIM_PS_EXIT`: exit status of `ps` (default 0, i.e. a reachable daemon).
 """
 
 from __future__ import annotations
@@ -64,6 +65,11 @@ _SHIM_SCRIPT = dedent("""\
             exit "${BENCHSPEC_SHIM_INSPECT_EXIT:-1}"
             ;;
         ps)
+            ps_exit="${BENCHSPEC_SHIM_PS_EXIT:-0}"
+            if [ "$ps_exit" -ne 0 ]; then
+                printf 'Cannot connect to the Docker daemon\\n' >&2
+                exit "$ps_exit"
+            fi
             if [ -n "$BENCHSPEC_SHIM_CONTAINERS" ]; then
                 printf '%s\\n' "$BENCHSPEC_SHIM_CONTAINERS"
             fi
