@@ -16,6 +16,7 @@ from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.sandbox.sandbox import ensure_snapshot
 from benchspec.specs.discovery import EnvConfig, EvalCase
 from benchspec.specs.schema import SchemaError
+from benchspec.testing import FakeSandbox
 
 TRIAL = Arm("trial", "claude-code", "opus")
 BASELINE = Arm("baseline", "claude-code", "opus")
@@ -1949,7 +1950,7 @@ def test_provenance_json_written_with_arm_and_guest_version(
     run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
         today="2099-01-01", repo_root=tmp_path, sample=0,
-        session_factory=_live_sandbox_session_factory(object(), result),
+        session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
         grade=_grade_all_pass, bind=_punt_all,
     )
 
@@ -1979,7 +1980,7 @@ def test_guest_probe_uses_live_sandbox_seam_not_host(
 
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
-    live_sandbox = object()
+    live_sandbox = FakeSandbox()
     monkeypatch.setattr(
         "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
     )
@@ -2028,7 +2029,7 @@ def test_image_identity_failure_is_unavailable_but_run_completes(
     outcome = run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
         today="2099-01-01", repo_root=tmp_path, sample=0,
-        session_factory=_live_sandbox_session_factory(object(), result),
+        session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
         grade=_grade_all_pass, bind=_punt_all,
     )
 
@@ -2077,7 +2078,7 @@ def test_capture_error_on_real_arm_raises_loudly(
         run_eval_arm(
             eval_case, TRIAL, workdir, {}, tmp_path,
             today="2099-01-01", repo_root=tmp_path, sample=0,
-            session_factory=_live_sandbox_session_factory(object(), result),
+            session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
             grade=_grade_all_pass, bind=_punt_all,
         )
 
@@ -2113,7 +2114,7 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
         run_eval_arm(
             eval_case, TRIAL, workdir, {}, tmp_path,
             today="2099-01-01", repo_root=tmp_path, sample=0,
-            session_factory=_live_sandbox_session_factory(object(), result),
+            session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
             grade=_grade_all_pass, bind=bind,
         )
 
@@ -2191,7 +2192,7 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
     run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
         today="2099-01-01", repo_root=tmp_path, sample=0,
-        session_factory=_live_sandbox_session_factory(object(), result),
+        session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
         grade=_grade_all_pass, bind=_punt_all,
     )
 

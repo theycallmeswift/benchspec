@@ -11,7 +11,9 @@ from __future__ import annotations
 import datetime
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from typing import overload
 
 from benchspec.grading.trajectory import extract_trajectory
 from benchspec.grading.trigger import detect_skill_fired
@@ -40,9 +42,8 @@ class RunResult:
     fired: bool = False  # did the skill-under-test get invoked? (graded per arm, symmetric)
     # Full raw stdout when the parser had a stream; "" when there is none.
     raw: str = ""
-    trajectory: list = field(
-        default_factory=list
-    )  # structured tool_call/tool_result events (Claude stream); [] otherwise
+    # structured tool_call/tool_result events (Claude stream); [] otherwise
+    trajectory: list[dict] = field(default_factory=list)
     cache_read_tokens: int = 0  # usage.cache_read_input_tokens (Claude prompt-cache hit)
     cache_creation_tokens: int = 0  # usage.cache_creation_input_tokens
     input_tokens: int = 0  # usage.input_tokens — uncached input only
@@ -50,7 +51,7 @@ class RunResult:
     # CLI result event subtype such as "success" or "error_max_turns".
     result_subtype: str = ""
     # {display-path: content} for authored skill files outside the workdir mount.
-    artifacts: dict = field(default_factory=dict)
+    artifacts: dict[str, str] = field(default_factory=dict)
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:
@@ -79,10 +80,22 @@ def substitute_prompt(prompt: str, today: str | None = None) -> str:
     return result
 
 
-def substitute_assertions(assertions: list, today: str) -> list:
-    """Apply date placeholders to assertions and reject unknown placeholders."""
+@overload
+def substitute_assertions(assertions: Sequence[str], today: str) -> list[str]: ...
 
-    def substitute_assertion(assertion: object) -> object:
+
+@overload
+def substitute_assertions(assertions: Sequence[str | dict], today: str) -> list[str | dict]: ...
+
+
+def substitute_assertions(assertions: Sequence[str | dict], today: str) -> Sequence[str | dict]:
+    """Apply date placeholders to assertions and reject unknown placeholders.
+
+    Assertions are prose strings; a typed checker object is substituted field by field
+    so a dated `path` resolves the same way a dated prose assertion does.
+    """
+
+    def substitute_assertion(assertion: str | dict) -> str | dict:
         """Replace placeholders inside one assertion value."""
         if isinstance(assertion, str):
             return assertion.replace("{TODAY}", today)

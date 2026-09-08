@@ -14,11 +14,12 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from benchspec.agents import make_agent
+from benchspec.agents import CodingAgent, make_agent
 from benchspec.agents.base import probe_guest_version
 from benchspec.config.arms import Arm, expand_env
 from benchspec.grading import binder, checkers
@@ -26,22 +27,31 @@ from benchspec.grading.judge import grade_run
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 from benchspec.orchestration import workspace
-from benchspec.orchestration.results import substitute_assertions, substitute_prompt
+from benchspec.orchestration.results import RunResult, substitute_assertions, substitute_prompt
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
+from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
 from benchspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.sandbox.sandbox import (
     DEFAULT_PROJECT_MARKER,
-    SandboxSession,
+    TurnRunner,
     arm_session,
     ensure_snapshot,
 )
-from benchspec.specs.discovery import EvalCase, resolve_environment_config
+from benchspec.specs.discovery import EnvConfig, EvalCase, resolve_environment_config
 
 # The judge is a run-level concern, independent of the task arm's own harness/model
 # (which can be a provider-qualified name like `google/gemini-3.5-flash` for OpenCode).
 # The default judge is JudgeConfig() (harness=claude-code, model=sonnet); callers pass
 # a resolved JudgeConfig (see benchspec.grading.judges.config.resolve_judge_config) to override.
+
+# Opens the VM for one arm and yields its per-turn runner. `arm_session` in production;
+# a unit test injects an async context manager around a canned `RunResult`.
+SessionFactory = Callable[..., AbstractAsyncContextManager[TurnRunner]]
+# Judge-grades a batch of assertions with `grade_run`'s positional/keyword contract.
+Grader = Callable[..., dict]
+# Binds one prose assertion to a checker spec, or None to punt it to the judge.
+Binder = Callable[[str], "dict | None"]
 
 
 @dataclass
@@ -59,10 +69,10 @@ class _ArmRun:
     """Everything accumulated from running an arm in one sandbox session."""
 
     tree: str = ""
-    contents: dict = field(default_factory=dict)
-    shas: dict = field(default_factory=dict)
+    contents: dict[str, str] = field(default_factory=dict)
+    shas: dict[str, str] = field(default_factory=dict)
     result_text: str = ""
-    trajectory: list = field(default_factory=list)
+    trajectory: list[dict] = field(default_factory=list)
     transcript: list[dict] = field(default_factory=list)
     raw: str = ""
     errored: bool = False
@@ -79,7 +89,7 @@ class _ArmRun:
     guest_version_error: str | None = "guest task-harness version not probed"
 
 
-def _turn_transcript(*, prompt: str, result: object, tree: str) -> dict:
+def _turn_transcript(*, prompt: str, result: RunResult, tree: str) -> dict:
     """Render seeded turns and the prompt into an agent transcript."""
     record = {
         "turn": 1,
@@ -104,18 +114,18 @@ def _turn_transcript(*, prompt: str, result: object, tree: str) -> dict:
 
 def _grade_via_judge(
     *,
-    assertions: object,
-    tree: object,
-    contents: object,
-    shas: object,
-    result_text: object,
-    grade: Callable[..., dict],
-    judge_config: object,
-    eval_id: object,
-    arm_name: object,
-    pre_run_shas: object,
-    process_facts: object = "",
-) -> object:
+    assertions: list[str],
+    tree: str,
+    contents: dict[str, str],
+    shas: dict[str, str],
+    result_text: str,
+    grade: Grader,
+    judge_config: JudgeConfig,
+    eval_id: str,
+    arm_name: str,
+    pre_run_shas: dict[str, str],
+    process_facts: str = "",
+) -> tuple[dict, int, bool]:
     """Judge-grade assertions; return (graded, judge_ms, judge_errored)."""
     t0 = time.perf_counter()
     judge_errored = False
@@ -149,9 +159,7 @@ def _grade_via_judge(
     return graded, int((time.perf_counter() - t0) * 1000), judge_errored
 
 
-def _bind_all(
-    assertions: list, bind: Callable[[str], dict | None]
-) -> tuple[list, int]:
+def _bind_all(assertions: Sequence[str], bind: Binder) -> tuple[list[dict | None], int]:
     """Bind every assertion once, returning one spec-or-None per assertion plus a degrade count.
 
     A transient binder infra failure (RuntimeError) degrades that assertion to judge
@@ -161,7 +169,7 @@ def _bind_all(
     """
     cache: dict[str, dict | None] = {}
     binder_degraded = 0
-    specs: list = []
+    specs: list[dict | None] = []
     for text in assertions:
         if text not in cache:
             try:
@@ -175,27 +183,27 @@ def _bind_all(
 
 def _grade_mixed(
     *,
-    assertions: object,
-    specs: object,
-    tree: object,
-    contents: object,
-    shas: object,
-    result_text: object,
-    grade: Callable[..., dict],
-    workdir: object,
-    grade_context: object,
-    judge_config: object,
-    eval_id: object,
-    arm_name: object,
-    pre_run_shas: object,
-    process_facts: object = "",
-) -> object:
+    assertions: list[str],
+    specs: list[dict | None],
+    tree: str,
+    contents: dict[str, str],
+    shas: dict[str, str],
+    result_text: str,
+    grade: Grader,
+    workdir: Path,
+    grade_context: checkers.GradeContext,
+    judge_config: JudgeConfig,
+    eval_id: str,
+    arm_name: str,
+    pre_run_shas: dict[str, str],
+    process_facts: str = "",
+) -> tuple[list[dict], int, bool]:
     """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
     `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Returns
     (results, judge_ms, judge_errored).
     """
-    results: list = [None] * len(assertions)
+    results: list[dict] = [{} for _ in assertions]
     judge_idx: list[int] = []
     for assertion_index, spec in enumerate(specs):
         if spec is not None:
@@ -228,23 +236,23 @@ def _grade_mixed(
 
 
 async def _run_arm_turns(
-    session_factory: Callable[..., SandboxSession],
+    session_factory: SessionFactory,
     *,
-    agent: object,
-    snapshot: object,
-    eval_id: object,
-    arm_name: object,
-    workdir: object,
-    project: object,
-    model: object,
-    effort: object,
-    prompt: object,
-    project_marker: object,
-    setup_reldir: object,
-    backend: object,
-    arm_env: object = None,
-    eval_set: object = "",
-    harness_args: object = None,
+    agent: CodingAgent | None,
+    snapshot: str,
+    eval_id: str,
+    arm_name: str,
+    workdir: Path,
+    project: Path | None,
+    model: str,
+    effort: str,
+    prompt: str,
+    project_marker: str,
+    setup_reldir: str | None,
+    backend: SandboxBackend,
+    arm_env: dict[str, str] | None = None,
+    eval_set: str = "",
+    harness_args: list[str] | None = None,
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm."""
     # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
@@ -274,7 +282,7 @@ async def _run_arm_turns(
         # is the session and `._sandbox` the live guest; a plain-closure fake `run` (unit
         # tests) has no `__self__`, so the probe is skipped rather than crashing.
         live_sandbox = getattr(getattr(run, "__self__", None), "_sandbox", None)
-        if live_sandbox is not None:
+        if isinstance(live_sandbox, LiveSandbox) and agent is not None:
             version, version_error = await probe_guest_version(backend, live_sandbox, agent)
             run_acc.guest_version = version
             run_acc.guest_version_error = version_error
@@ -313,7 +321,7 @@ async def _run_arm_turns(
 
 
 def _capture_sandbox_provenance(
-    agent: object, backend: object, snapshot: str, env: object
+    agent: CodingAgent | None, backend: SandboxBackend, snapshot: str, env: EnvConfig
 ) -> SandboxProvenance | None:
     """Assemble the arm's static sandbox identity, or None when there is no sandbox.
 
@@ -377,7 +385,7 @@ def run_eval_arm(
     eval_case: EvalCase,
     arm: Arm,
     workdir: Path,
-    pre_run_shas: dict,
+    pre_run_shas: dict[str, str],
     project: Path | None,
     *,
     today: str,
@@ -387,9 +395,9 @@ def run_eval_arm(
     sandbox_name: str = DEFAULT_SANDBOX,
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
-    session_factory: Callable[..., SandboxSession] = arm_session,
-    grade: Callable[..., dict] = grade_run,
-    bind: Callable[[str], dict | None] = binder.bind,
+    session_factory: SessionFactory = arm_session,
+    grade: Grader = grade_run,
+    bind: Binder = binder.bind,
 ) -> ArmOutcome:
     """Run all cases for one eval arm and write result artifacts."""
     judge_config = judge_config or JudgeConfig()
@@ -408,7 +416,8 @@ def run_eval_arm(
     # The agent is selected per arm so a multi-harness set runs each column on its own
     # harness. `sandbox_name` is the resolved set's backend threaded in by the caller;
     # it defaults to DEFAULT_SANDBOX for other callers.
-    agent = make_agent(arm.harness)
+    # Unit tests stub `make_agent` to None: the no-sandbox path every later step honors.
+    agent: CodingAgent | None = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
     # Resolve the host environment config ONCE and thread the same value into both snapshot
     # selection and provenance capture — a second read could drift and record inputs for a

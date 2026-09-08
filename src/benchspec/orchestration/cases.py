@@ -15,11 +15,13 @@ recorded measurement, not a gate.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from benchspec.config.arms import Arm
+from benchspec.config.options import RunOptions, option_str
 from benchspec.config.sets import (
     resolved_judge_config,
     resolved_run_set,
@@ -30,7 +32,7 @@ from benchspec.grading import binder
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.judges.registry import preflight_judge_binary
 from benchspec.orchestration import results
-from benchspec.orchestration.execution import run_eval_arm
+from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
 from benchspec.sandbox import sandbox
 from benchspec.sandbox.registry import resolve_sandbox
@@ -42,7 +44,7 @@ from benchspec.specs.discovery import (
 )
 
 
-def eval_arm_params(config: object) -> tuple[list[tuple[EvalCase, Arm]], list[str]]:
+def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], list[str]]:
     """The (case × arm) pairs and ids that parametrize the eval_arm fixture."""
     # One eval set per run — uniform columns across every skill (resolved once, not
     # per skill). Parametrize the single `eval_arm` fixture over `(case, arm)` pairs.
@@ -57,8 +59,8 @@ def eval_arm_params(config: object) -> tuple[list[tuple[EvalCase, Arm]], list[st
         # pytest.UsageError at collection on a bad config; binary-on-PATH is
         # checked separately, later, only when tests actually execute.
         resolved_judge_config(config)
-    pairs = []
-    ids = []
+    pairs: list[tuple[EvalCase, Arm]] = []
+    ids: list[str] = []
     for case in cases:
         for arm in arms:
             pairs.append((case, arm))
@@ -67,29 +69,29 @@ def eval_arm_params(config: object) -> tuple[list[tuple[EvalCase, Arm]], list[st
 
 
 @pytest.fixture
-def repo_root(request: object) -> Path:
+def repo_root(request: pytest.FixtureRequest) -> Path:
     """Return the repository root selected for this pytest run."""
     return resolve_repo_root(request.config)
 
 
 @pytest.fixture
-def model(request: object) -> str:
+def model(request: pytest.FixtureRequest) -> str:
     """Return the default model selected for eval arms."""
     # `--benchspec-model` defaults to None; `or "sonnet"` keeps arms on a concrete model
     # when the flag is unset, never `model=None`.
-    return request.config.getoption("benchspec_model") or "sonnet"
+    return option_str(request.config, "benchspec_model") or "sonnet"
 
 
 @pytest.fixture
-def eval_set_name(request: object) -> str:
+def eval_set_name(request: pytest.FixtureRequest) -> str:
     """Return the configured eval set name for this run."""
     # The raw `--benchspec-set` / `make evals SET=` value (empty on a default-set run, which
     # never sets the flag). Stamped into BENCHSPEC_SET for setup.sh branching — it does NOT
     # carry the resolved default-set name.
-    return request.config.getoption("benchspec_set") or ""
+    return option_str(request.config, "benchspec_set") or ""
 
 
-def preflight_grading(config: object) -> JudgeConfig:
+def preflight_grading(config: RunOptions) -> JudgeConfig:
     """Preflight everything grading needs and return the run's judge config.
 
     Environment-dependent, in the order that fails cheapest and most specifically:
@@ -117,7 +119,7 @@ def preflight_grading(config: object) -> JudgeConfig:
 
 
 @pytest.fixture
-def judge_config(request: object) -> JudgeConfig:
+def judge_config(request: pytest.FixtureRequest) -> JudgeConfig:
     """Resolve the run's judge and preflight its binary and the binder's Gemini credential."""
     # Only test_eval requests this fixture, so the environment-dependent preflights fire
     # exactly when a run will grade. Fixture setup is skipped under --collect-only, so
@@ -126,9 +128,9 @@ def judge_config(request: object) -> JudgeConfig:
 
 
 @pytest.fixture
-def project_marker(request: object) -> str:
-    """Return the pytest marker assigned to project eval cases."""
-    return request.config.getoption("benchspec_project_marker")
+def project_marker(request: pytest.FixtureRequest) -> str:
+    """Return the repo-relative path marking a host plugin worth mounting."""
+    return option_str(request.config, "benchspec_project_marker") or sandbox.DEFAULT_PROJECT_MARKER
 
 
 @pytest.fixture
@@ -138,7 +140,7 @@ def today() -> str:
 
 
 @pytest.fixture
-def clean_room() -> object:
+def clean_room() -> Iterator[Path]:
     """Return the seeded clean-room workdir for a test case."""
     # tempfile defaults under the OS temp root — outside the project, so the baseline arm
     # cannot reach the project's docs/, skills/, or plugin.
@@ -147,7 +149,9 @@ def clean_room() -> object:
 
 
 @pytest.fixture
-def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> object:
+def seeded_workdir(
+    clean_room: Path, eval_arm: tuple[EvalCase, Arm], today: str
+) -> tuple[Path, dict[str, str]]:
     """Return the workdir prepared from the eval's workspace."""
     eval_case, _arm = eval_arm
     workdir = clean_room / "workdir"
@@ -155,7 +159,7 @@ def seeded_workdir(clean_room: object, eval_arm: object, today: object) -> objec
     return workdir, pre_run_shas
 
 
-def preflight_session_sandbox(config: object) -> None:
+def preflight_session_sandbox(config: RunOptions) -> None:
     """Preflight the resolved eval set's sandbox backend before any arm runs.
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
@@ -168,7 +172,7 @@ def preflight_session_sandbox(config: object) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _sandbox_preflight(request: object) -> None:
+def _sandbox_preflight(request: pytest.FixtureRequest) -> None:
     """Preflight the resolved set's sandbox once per session before eval arms run.
 
     Session-scoped, so it resolves the set from `request.config` directly rather than
@@ -178,7 +182,7 @@ def _sandbox_preflight(request: object) -> None:
 
 
 @pytest.fixture
-def eval_sandbox(request: object) -> str:
+def eval_sandbox(request: pytest.FixtureRequest) -> str:
     """Return the sandbox backend name resolved for this run's eval set.
 
     test_eval only runs when the set resolved (its `eval_arm` params came from that set),
@@ -187,7 +191,7 @@ def eval_sandbox(request: object) -> str:
     return resolved_run_set(request.config).sandbox
 
 
-def _errored_message(arm_name: str, outcome: object) -> str:
+def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
     The failure lives in the arm's `grading.json` (the judge/agent evidence), not the
@@ -208,15 +212,15 @@ def _errored_message(arm_name: str, outcome: object) -> str:
 
 @pytest.mark.benchspec
 def test_eval(
-    eval_arm: object,
-    seeded_workdir: object,
-    repo_root: object,
-    today: object,
-    eval_set_name: object,
-    project_marker: object,
-    judge_config: object,
-    sample_index: object,
-    eval_sandbox: object,
+    eval_arm: tuple[EvalCase, Arm],
+    seeded_workdir: tuple[Path, dict[str, str]],
+    repo_root: Path,
+    today: str,
+    eval_set_name: str,
+    project_marker: str,
+    judge_config: JudgeConfig,
+    sample_index: int,
+    eval_sandbox: str,
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either

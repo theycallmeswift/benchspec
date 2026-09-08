@@ -10,12 +10,16 @@ from __future__ import annotations
 import datetime
 import json
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 from dotenv import find_dotenv, load_dotenv
 
 from benchspec.agents import resolve_agent_name
+from benchspec.config.arms import Arm
+from benchspec.config.options import option_float, option_str
 from benchspec.config.sets import (
     has_configured_set,
     resolved_judge_config,
@@ -25,12 +29,12 @@ from benchspec.grading.binder import binder_identity
 from benchspec.grading.judges import JudgeConfig
 from benchspec.orchestration import cases, workspace
 from benchspec.reporting import manifest, report
-from benchspec.specs.discovery import pyproject_table, resolve_repo_root
+from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_root
 
 _CASES = Path(cases.__file__)
 
 _STARTED_AT = pytest.StashKey[str]()
-_SUMMARY_LINES = pytest.StashKey[list]()
+_SUMMARY_LINES = pytest.StashKey[list[str]]()
 
 
 def _help(*parts: str) -> str:
@@ -40,7 +44,7 @@ def _help(*parts: str) -> str:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_load_initial_conftests(
-    early_config: object, parser: object, args: object
+    early_config: pytest.Config, parser: pytest.Parser, args: list[str]
 ) -> None:
     """Load the repo-root `.env` before any conftest is imported or configured.
 
@@ -59,7 +63,7 @@ def pytest_load_initial_conftests(
         load_dotenv(dotenv_path)
 
 
-def pytest_addoption(parser: object) -> None:
+def pytest_addoption(parser: pytest.Parser) -> None:
     """Register benchspec command-line options with pytest."""
     group = parser.getgroup("benchspec", "skill-eval runner")
     group.addoption(
@@ -203,19 +207,27 @@ def pytest_addoption(parser: object) -> None:
 
 
 @pytest.fixture
-def sample_index(request: object) -> int:
+def sample_index(request: pytest.FixtureRequest) -> int:
     """Return the current repeated-sample index for pytest-xdist."""
     # pytest-repeat parametrizes each test with a hidden `__pytest_repeat_step_number`
     # param (0..N-1). Without --count, the param is absent — default to 0 so single-sample
     # runs still shard cleanly under sample-0/. Lives on the plugin (not cases.py) so user
     # test bodies under pytester can resolve it the same way real eval cases do.
-    callspec = getattr(request.node, "callspec", None)
-    if callspec is None:
-        return 0
-    return callspec.params.get("__pytest_repeat_step_number", 0)
+    params = _callspec_params(request.node)
+    step = params.get("__pytest_repeat_step_number", 0)
+
+    return step if isinstance(step, int) else 0
 
 
-def pytest_configure(config: object) -> None:
+def _callspec_params(node: object) -> dict[str, object]:
+    """The parametrize values behind a collected item, or `{}` for an unparametrized one."""
+    if not isinstance(node, pytest.Function) or not hasattr(node, "callspec"):
+        return {}
+
+    return node.callspec.params
+
+
+def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest state for benchspec collection."""
     config.addinivalue_line(
         "markers", "benchspec: skill-eval cases run via `benchspec run` (not `make test`)"
@@ -223,7 +235,7 @@ def pytest_configure(config: object) -> None:
     repo_root = resolve_repo_root(config)
     try:
         agent_name = resolve_agent_name(
-            config.getoption("benchspec_agent"),
+            option_str(config, "benchspec_agent"),
             pyproject_table(repo_root).get("agent"),
         )
     except RuntimeError as error:
@@ -235,11 +247,13 @@ def pytest_configure(config: object) -> None:
     # (+ `-k`/flags) — no `benchspec/cases.py` positional to fat-finger or to union with
     # a `-k`-style nodeid (which silently re-collected test_eval). Respect a user-given
     # target. `make test` never loads this plugin, so cases.py stays out of the unit run.
-    if getattr(config.args_source, "name", "") != "ARGS":
+    if config.args_source != pytest.Config.ArgsSource.ARGS:
         config.args = [str(_CASES)]
-    if hasattr(config, "workerinput"):
+
+    workerinput = _workerinput(config)
+    if workerinput is not None:
         # xdist worker: adopt the iteration name the controller chose.
-        workspace.set_current_iteration(config.workerinput["benchspec_iteration"])
+        workspace.set_current_iteration(str(workerinput["benchspec_iteration"]))
     else:
         # Controller / serial run: choose once.
         workspace.set_current_iteration(workspace.next_iteration_name(repo_root))
@@ -248,15 +262,31 @@ def pytest_configure(config: object) -> None:
         )
 
 
+def _workerinput(config: pytest.Config) -> MutableMapping[str, object] | None:
+    """The xdist-attached `workerinput` on a worker's config; None on the controller."""
+    workerinput = getattr(config, "workerinput", None)
+
+    return workerinput if isinstance(workerinput, MutableMapping) else None
+
+
+class _WorkerNode(Protocol):
+    """The xdist controller-side node whose `workerinput` is serialized to its worker."""
+
+    @property
+    def workerinput(self) -> MutableMapping[str, object]:
+        """The mapping execnet ships to the worker before its `pytest_configure`."""
+        ...
+
+
 @pytest.hookimpl(optionalhook=True)
-def pytest_configure_node(node: object) -> None:
+def pytest_configure_node(node: _WorkerNode) -> None:
     """Pass benchspec configuration into xdist worker nodes."""
     # xdist controller → worker: hand the chosen iteration name through workerinput,
     # which execnet serializes to the worker before its own pytest_configure runs.
     node.workerinput["benchspec_iteration"] = workspace.current_iteration()
 
 
-def pytest_sessionfinish(session: object, exitstatus: object) -> None:
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Aggregate binder corpus records after the pytest session."""
     # Controller-only, and only when a run actually produced artifacts (a
     # --collect-only run never creates skills_root). Runs before
@@ -264,7 +294,7 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     # wrapper), so the summary can read what this wrote and a CI gate can still
     # change session.exitstatus.
     config = session.config
-    if hasattr(config, "workerinput"):
+    if _workerinput(config) is not None:
         return
     iteration = workspace.current_iteration_or_none()
     if iteration is None:
@@ -296,9 +326,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
         observed_arms,
         started_at=config.stash.get(_STARTED_AT, None),
     )
-    lines = []
-    index_lines = []
-    fail_under = config.getoption("benchspec_fail_under")
+    lines: list[str] = []
+    index_lines: list[str] = []
+    fail_under = option_float(config, "benchspec_fail_under")
     # The baseline arm names the Δ reference; build_benchmark coerces it to None when the
     # baseline didn't land on disk, so the report scores arms absolutely (no Δ to gate on).
     # Per-arm metadata is joined onto the report by arm name so the matrix columns and
@@ -402,7 +432,9 @@ def pytest_sessionfinish(session: object, exitstatus: object) -> None:
     config.stash[_SUMMARY_LINES] = lines
 
 
-def pytest_terminal_summary(terminalreporter: object, exitstatus: object, config: object) -> None:
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, exitstatus: int, config: pytest.Config
+) -> None:
     """Print binder corpus summary lines in pytest output."""
     lines = config.stash.get(_SUMMARY_LINES, [])
     if not lines:
@@ -418,17 +450,33 @@ def _display_path(path: Path) -> Path:
     return path.relative_to(invocation_dir) if path.is_relative_to(invocation_dir) else path
 
 
-def _authored_reportinfo(eval_file: Path, item_name: str) -> object:
-    """Build a `reportinfo()` that places an item at its authored eval file."""
+_EVAL_FILE = pytest.StashKey[Path]()
 
-    def reportinfo() -> tuple[Path, None, str]:
+
+class _AuthoredCell(pytest.Function):
+    """A parametrized eval cell whose reported location is its authored eval file.
+
+    pytest mints every cell as a plain `Function` from the one `cases.test_eval`, and
+    `reportinfo` is the only seam it offers for an item's location, so a collected cell
+    is re-classed to this subclass with its eval file stashed.
+    """
+
+    def reportinfo(self) -> tuple[Path, None, str]:
         """Return `(path, lineno, domain)` pointing at the eval file, not the wrapper."""
-        return eval_file, None, item_name
-
-    return reportinfo
+        return self.stash[_EVAL_FILE], None, self.name
 
 
-def pytest_itemcollected(item: object) -> None:
+def _eval_arm_param(value: object) -> tuple[EvalCase, Arm]:
+    """The `(case, arm)` pair behind an `eval_arm` param; any other shape is a plugin bug."""
+    if isinstance(value, tuple) and len(value) == 2:
+        eval_case, arm = value
+        if isinstance(eval_case, EvalCase) and isinstance(arm, Arm):
+            return eval_case, arm
+
+    raise TypeError(f"eval_arm param must be an (EvalCase, Arm) pair, got {value!r}")
+
+
+def pytest_itemcollected(item: pytest.Item) -> None:
     """Attribute each eval cell to its authored `.eval.md` instead of the wrapper module.
 
     Every cell is the one parametrized `cases.test_eval`, so pytest would otherwise file
@@ -436,20 +484,24 @@ def pytest_itemcollected(item: object) -> None:
     `test_eval[<group>-<eval_id>-<arm>]` tail, so `-k`, `--collect-only`, and verbose
     lines still identify each eval × arm cell; only the path part moves.
     """
-    callspec = getattr(item, "callspec", None)
-    if callspec is None or "eval_arm" not in callspec.params:
+    params = _callspec_params(item)
+    if not isinstance(item, pytest.Function) or "eval_arm" not in params:
         return
-    eval_case, _arm = callspec.params["eval_arm"]
+
+    eval_case, _arm = _eval_arm_param(params["eval_arm"])
     eval_file = eval_case.eval_file
+
     # WARNING: must run before anything reads item.location — it is cached on first
     # access. pytest derives the progress path from the nodeid (not reportinfo), and
     # nodeid has no public setter; _nodeid is the same slot Node.__init__ fills.
     relative = os.path.relpath(eval_file, item.config.rootpath).replace(os.sep, "/")
     item._nodeid = f"{relative}::{item.name}"
-    item.reportinfo = _authored_reportinfo(eval_file, item.name)
+
+    item.stash[_EVAL_FILE] = eval_file
+    item.__class__ = _AuthoredCell
 
 
-def pytest_generate_tests(metafunc: object) -> None:
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize pytest items from discovered benchspec cases."""
     if "eval_arm" in metafunc.fixturenames:
         pairs, ids = cases.eval_arm_params(metafunc.config)

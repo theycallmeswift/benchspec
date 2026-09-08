@@ -81,9 +81,15 @@ def render_history(history: list[dict] | None, today: str | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
+# The judge's view of a workdir: the rendered tree, per-file contents, per-file SHA-256s.
+Facts = tuple[str, dict[str, str], dict[str, str]]
+
+
+def gather_facts(workdir: Path, max_bytes: int = 20000) -> Facts:
     """Collect clean-room file facts for grading evidence."""
-    tree_lines, contents, shas = [], {}, {}
+    tree_lines: list[str] = []
+    contents: dict[str, str] = {}
+    shas: dict[str, str] = {}
     for path in sorted(workdir.rglob("*")):
         relative_path = str(path.relative_to(workdir))
         if path.is_dir():
@@ -174,8 +180,12 @@ def to_display_paths(mapping: dict[str, str], guest_home: str) -> dict[str, str]
 
 
 def merge_facts(
-    tree: str, contents: dict, shas: dict, extra: dict[str, str], max_bytes: int = 20000
-) -> object:
+    tree: str,
+    contents: dict[str, str],
+    shas: dict[str, str],
+    extra: dict[str, str],
+    max_bytes: int = 20000,
+) -> Facts:
     """Append captured artifact facts to a `gather_facts` triple."""
     tree_lines = [ln for ln in tree.split("\n") if ln] if tree else []
     contents, shas = dict(contents), dict(shas)
