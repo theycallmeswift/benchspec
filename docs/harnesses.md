@@ -56,13 +56,12 @@ Notes that matter in practice:
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.
-- **Credentials ride differently per backend.** Under microsandbox, each
-  adapter injects its credential at the sandbox's network boundary, scoped to
-  the provider's hosts; the value is never a readable environment variable in
-  the guest. Under Docker, the same credential is injected as a plain
-  container environment variable, readable by the agent and by `setup.sh`,
-  with no host scoping. Either way, `CODEX_AUTH_JSON_PATH` is a read-only
-  mount of the `auth.json`, not an env var. OpenCode's quirk: a host
+- **Credentials ride differently per backend.** microsandbox injects each
+  credential at the sandbox's network boundary, scoped to the provider's hosts
+  and never readable in the guest; Docker injects it as a plain container
+  environment variable the agent and `setup.sh` can read (see
+  [`sandbox.md`](sandbox.md#credentials)). Either way, `CODEX_AUTH_JSON_PATH` is
+  a read-only mount of the `auth.json`, not an env var. OpenCode's quirk: a host
   `GEMINI_API_KEY` is injected under the SDK's expected
   `GOOGLE_GENERATIVE_AI_API_KEY` name.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends

@@ -8,10 +8,9 @@ baseline, binder, judge, cell) are defined in [concepts.md](concepts.md).
 
 ## Prerequisites
 
-- **A running Docker daemon.** Evals run in Docker containers by default; any
-  host — no platform check — works as long as `docker info` succeeds. (For
-  stronger isolation, an Apple Silicon Mac or Linux with `/dev/kvm` can opt
-  into microsandbox microVMs instead — see [`sandbox.md`](sandbox.md).)
+- **A running Docker daemon.** Any host works as long as `docker info` succeeds.
+  (For stronger isolation, an Apple Silicon Mac or Linux with `/dev/kvm` can opt
+  into microsandbox microVMs — see [`sandbox.md`](sandbox.md).)
 - **Python 3.11+.**
 - **Claude Code on `$PATH`** with a credential: run `claude setup-token` (sets
   `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. This walkthrough
@@ -19,12 +18,11 @@ baseline, binder, judge, cell) are defined in [concepts.md](concepts.md).
 - **`GEMINI_API_KEY`**, the binder's credential. It is required for every graded
   run and is unrelated to the agent credential above.
 
-Credentials can live in a repo-root `.env`; every subcommand loads it before
-doing anything else, and variables you export win over `.env` values. Whatever
-is in `.env` stays on the host: it is never copied
-into the guest, and the staged repo the guest sees has every dotenv file
-removed. If anything is missing, preflight fails with a remediation message
-before any sandbox boots or any paid call is made.
+Credentials can live in a repo-root `.env`; every subcommand loads it first, and
+exported variables win over `.env` values. Nothing in `.env` reaches the guest —
+the staged repo the guest sees has every dotenv file removed. If anything is
+missing, preflight fails with a remediation message before any sandbox boots or
+any paid call is made.
 
 ## Step 1 — Create the project
 
@@ -234,12 +232,11 @@ each arm ran on. Alongside it:
   the agent hand-rolled the task instead of dispatching it: a real routing
   finding, not an infra error. Sharpen the skill's `description` or the prompt.
 
-Using the microsandbox opt-in (`sandbox = "microsandbox"`) instead of the
-Docker default surfaces two more of its own:
+The microsandbox opt-in (`sandbox = "microsandbox"`) adds two of its own:
 
 - **Preflight: x86_64 macOS is unsupported.** microsandbox needs Apple Silicon or
   Linux with KVM.
-- **Preflight: microsandbox runtime not installed.** Install the sandbox extra,
+- **Preflight: microsandbox runtime not installed.** Install the extra,
   `pip install "benchspec[microsandbox]"`, into the environment you run from.
 
 ## Where to go next

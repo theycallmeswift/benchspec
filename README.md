@@ -42,8 +42,7 @@ pip install "benchspec[microsandbox]"
 ```
 
 > **Pre-1.0.** The eval format and the artifact schemas are the surfaces most
-> likely to change. Docker is the default sandbox backend; microsandbox is
-> the opt-in for stronger isolation (`sandbox = "microsandbox"` on the set).
+> likely to change.
 
 An eval is one Markdown file: a prompt, then a checklist of plain-prose claims
 about the workspace after the agent is done. There is no checker syntax to learn;
@@ -122,8 +121,8 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 1. **Boots a sandbox** — a Docker container by default, or a microsandbox
    microVM for the opt-in — from a cached snapshot with the agent CLI already
    installed. The first run builds the snapshot (a few minutes); later runs
-   reuse it, or pay the cost up front with `benchspec sandbox:build`; reclaim
-   the disk from leftover sandboxes and snapshots with `benchspec sandbox:clean`.
+   reuse it. `benchspec sandbox:build` pays that cost up front,
+   `benchspec sandbox:clean` reclaims the disk.
 2. **Seeds the clean room** — the eval's optional `workspace/` files land in a
    fresh directory mounted at `/workspace`, the agent's working directory.
 3. **Runs `setup.sh`**, where arms diverge: it sees `$BENCHSPEC_ARM`, so the
@@ -135,15 +134,12 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
    it can do so without risk; the judge grades everything else from the
    collected evidence alone.
 
-One guarantee holds throughout, on either backend: nothing in the guest can
-write back to your checkout. `setup.sh` reaches the skill under test through a
-read-only staged copy of your repo at `/project` (what a `git clone` would
-contain — never `.env`, `.git`, or earlier runs' artifacts). Credential
-exposure differs by backend: microsandbox injects each provider credential at
-the network boundary, never as a readable environment variable in the guest;
-Docker injects it as a plain container environment variable, readable by the
-agent and by `setup.sh`. See [`sandbox.md`](docs/sandbox.md) for the full
-tradeoff.
+On either backend, nothing in the guest can write back to your checkout:
+`setup.sh` reaches the skill under test through a read-only staged copy of your
+repo at `/project` (what a `git clone` would contain — never `.env`, `.git`, or
+earlier runs' artifacts). Credential exposure differs — microsandbox injects each
+credential at the network boundary, Docker as a plain container environment
+variable the agent can read. [`sandbox.md`](docs/sandbox.md) has the tradeoff.
 
 `benchspec run` is pytest underneath, and everything after `--` goes to
 pytest verbatim: `benchspec run -- -k greets-by-name` (equivalently
