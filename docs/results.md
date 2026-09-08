@@ -94,28 +94,33 @@ While cells run, pytest's progress line names the authored eval file each cell
 came from — `evals/e2e/hello/evals/hello/greets-by-name.eval.md ...` — rather
 than the internal test module, and each cell's id keeps its
 `test_eval[<group>-<eval_id>-<arm>]` tail for `-k` and `-v`. When the session
-ends, the run prints the same matrix `benchmark.md` holds, as a width-aligned
+ends, the run prints the same rows and rates `benchmark.md` holds, as a width-aligned
 plain-text table under a `benchspec benchmark` banner:
 
 ```
 ============================ benchspec benchmark ============================
-Eval                             baseline        trial  trial-overrides
-hello/greets-by-name                  17%  67% (+50pp)      83% (+66pp)
-hello-file/writes-greeting-file       17%  83% (+66pp)     100% (+83pp)
------------------------------------------------------------------------
-All evals                             17%  75% (+58pp)     100% (+83pp)
+Eval                             baseline  trial  trial-overrides
+hello/greets-by-name                  17%    67%              83%
+hello-file/writes-greeting-file       17%    83%             100%
+-----------------------------------------------------------------
+All evals                             17%    75%             100%
+vs baseline                                +58pp            +83pp
 Report: tmp/evals/iteration_02/benchmark.md
 ```
 
-Rows, columns, and cells follow the Markdown matrix exactly — roster rows
-(including all-errored evals as `—`), baseline column first, `rate (+Npp)` for
-every other arm, and the pooled `All evals` footer. The terminal table carries no
-harness labels or noise bands; `Report:` points at the `benchmark.md` that does.
+Rows and rates follow the Markdown matrix: roster rows (including all-errored evals
+as `—`), baseline column first, and the pooled `All evals` footer. Every cell is a
+bare rate so each column lines up on one right edge; the per-eval `(+Npp)` deltas
+live only in `benchmark.md`. When a baseline arm exists, a `vs baseline` line under
+the footer carries each other arm's pooled delta as `+Npp` (blank under the baseline
+column); without a baseline the table ends at `All evals`. The terminal table carries
+no harness labels or noise bands; `Report:` points at the `benchmark.md` that does.
 A rule separates the eval rows from the pooled footer, and on a terminal that
 supports color, rates are color-coded by band (green from 80%, yellow from 50%,
-red below) and deltas by sign (green up, red down, yellow zero); files and pipes
-always get plain text. The table is presentation only: `benchmark.json` and
-`benchmark.md` are the artifacts, and the terminal never changes their contents.
+red below) and the `vs baseline` deltas by sign (green up, red down, yellow zero);
+files and pipes always get plain text. The table is presentation only:
+`benchmark.json` and `benchmark.md` are the artifacts, and the terminal never
+changes their contents.
 
 Two other visibility lines can follow the table: `FAIL fail-under: …` when the
 gate trips, and `WARN binder: N assertion(s) degraded to judge grading` when a

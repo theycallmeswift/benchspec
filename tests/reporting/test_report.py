@@ -1,5 +1,7 @@
 """Tests for report."""
 
+import re
+
 import pytest
 
 from benchspec.reporting import report
@@ -400,17 +402,22 @@ def test_terminal_matrix_aligns_columns(tmp_path: object) -> None:
         "ingest/long-eval-name",
         "-" * len(header),
         "All evals",
+        "vs baseline",
     ]
     # Right-aligned arm cells end where the header does, so every table line is the
     # same width and the eval column is padded to its longest label.
     assert {len(line) for line in (header, *rows)} == {len(header)}
     assert rows[0].startswith("archive/alpha".ljust(len("ingest/long-eval-name")) + "  ")
-    assert rows[0].endswith("100% (+50pp)")
+    assert rows[0].endswith("100%")
     assert pointer == f"Report: {tmp_path / 'benchmark.md'}"
 
 
-def test_terminal_matrix_cells_match_markdown_matrix(tmp_path: object) -> None:
-    """Verify the terminal cells are the persisted matrix's cells, row for row."""
+def test_terminal_matrix_rates_match_markdown_matrix(tmp_path: object) -> None:
+    """Verify each terminal rate is the persisted matrix cell's rate token, row for row.
+
+    The Markdown cells keep their `rate (+Npp)` shape; the terminal shows only the rate
+    token of each and carries the footer's deltas on its own `vs baseline` line.
+    """
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
     seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100%
@@ -427,13 +434,23 @@ def test_terminal_matrix_cells_match_markdown_matrix(tmp_path: object) -> None:
     for line in matrix_section.splitlines():
         if line.startswith("| ") and not line.startswith("| Eval"):
             label, *cells = [cell.strip() for cell in line.strip("|").split("|")]
-            markdown_rows[label] = " ".join(cells)
-    assert _terminal_rows(lines) == {
-        "archive/alpha": "50% 100% (+50pp)",
-        "archive/beta": "100% 0% (-100pp)",
-        "All evals": "75% 50% (-25pp)",
+            markdown_rows[label] = cells
+    assert markdown_rows == {
+        "archive/alpha": ["50%", "100% (+50pp)"],
+        "archive/beta": ["100%", "0% (-100pp)"],
+        "All evals": ["75%", "50% (-25pp)"],
     }
-    assert _terminal_rows(lines) == markdown_rows
+    terminal_rows = _terminal_rows(lines)
+    assert terminal_rows == {
+        "archive/alpha": "50% 100%",
+        "archive/beta": "100% 0%",
+        "All evals": "75% 50%",
+        "vs baseline": "-25pp",
+    }
+    for label, cells in markdown_rows.items():
+        assert terminal_rows[label] == " ".join(cell.split(" ")[0] for cell in cells)
+    footer_deltas = [cell.split(" ")[1].strip("()") for cell in markdown_rows["All evals"][1:]]
+    assert terminal_rows["vs baseline"] == " ".join(footer_deltas)
 
 
 def test_terminal_matrix_missing_rates_render_dash(tmp_path: object) -> None:
@@ -455,6 +472,7 @@ def test_terminal_matrix_missing_rates_render_dash(tmp_path: object) -> None:
         "archive/ghost": "— —",
         "All evals": "50% —",
     }
+    assert "vs baseline" not in _terminal_rows(lines)
 
 
 def test_terminal_matrix_absolute_without_baseline(tmp_path: object) -> None:
@@ -470,6 +488,60 @@ def test_terminal_matrix_absolute_without_baseline(tmp_path: object) -> None:
     assert lines[0].split() == ["Eval", "trial-opus", "trial-sonnet"]
     assert _terminal_rows(lines) == {"archive/alpha": "100% 50%", "All evals": "100% 50%"}
     assert not any("pp" in line for line in lines[1:-1])
+
+
+def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: object) -> None:
+    """Verify mixed-width deltas leave the terminal: rates share a right edge per column.
+
+    Per-eval deltas of +67pp and +100pp differ in width; the rates must still end on
+    the same column, and only the pooled delta appears, on the `vs baseline` line.
+    """
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=3)  # 33%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=3, total=3)  # 100%, +67pp
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=0, total=2)  # 0%
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=2, total=2)  # 100%, +100pp
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert lines == [
+        "Eval           baseline  trial",
+        "archive/alpha       33%   100%",
+        "archive/beta         0%   100%",
+        "------------------------------",
+        "All evals           17%   100%",
+        "vs baseline              +83pp",
+        f"Report: {tmp_path / 'benchmark.md'}",
+    ]
+    header, alpha, beta, _rule, footer, versus, _pointer = lines
+    assert not any("pp" in line for line in (alpha, beta, footer))
+    baseline_edge = header.index("baseline") + len("baseline")
+    assert all(line[baseline_edge - 1] == "%" for line in (alpha, beta, footer))
+    assert all(line[-1] == "%" for line in (alpha, beta, footer))
+    assert versus[:baseline_edge].strip() == "vs baseline"
+
+
+def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: object) -> None:
+    """Verify the `vs baseline` line carries one delta per non-baseline arm."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%, +50pp
+    seed_arm(tmp_path / "archive", "alpha", "trial-overrides", passes=0, total=2)  # 0%, -50pp
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert lines == [
+        "Eval           baseline  trial  trial-overrides",
+        "archive/alpha       50%   100%               0%",
+        "-----------------------------------------------",
+        "All evals           50%   100%               0%",
+        "vs baseline              +50pp            -50pp",
+        f"Report: {tmp_path / 'benchmark.md'}",
+    ]
 
 
 def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
@@ -903,11 +975,11 @@ def test_terminal_matrix_rules_off_the_footer(tmp_path: object) -> None:
 def test_terminal_matrix_color_codes_rates_by_band_and_deltas_by_sign(
     tmp_path: object,
 ) -> None:
-    """Verify color mode wraps rates green/yellow/red by band and deltas by sign."""
+    """Verify color mode wraps rates green/yellow/red by band and footer deltas by sign."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50% yellow
-    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100% green, +50 green
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100% green
     seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100% green
-    seed_arm(tmp_path / "archive", "beta", "trial", passes=0, total=2)  # 0% red, -100 red
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=0, total=2)  # 0% red, pooled -25 red
     bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
     )
@@ -916,13 +988,15 @@ def test_terminal_matrix_color_codes_rates_by_band_and_deltas_by_sign(
 
     alpha = next(line for line in lines if line.startswith("archive/alpha"))
     beta = next(line for line in lines if line.startswith("archive/beta"))
+    versus = next(line for line in lines if line.startswith("vs baseline"))
     assert "\x1b[33m50%\x1b[0m" in alpha
-    assert "\x1b[32m100%\x1b[0m\x1b[32m (+50pp)\x1b[0m" in alpha
-    assert "\x1b[31m0%\x1b[0m\x1b[31m (-100pp)\x1b[0m" in beta
+    assert "\x1b[32m100%\x1b[0m" in alpha
+    assert "\x1b[31m0%\x1b[0m" in beta
+    assert "\x1b[31m-25pp\x1b[0m" in versus
 
 
 def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: object) -> None:
-    """Verify a zero delta colors yellow and the default render carries no escapes."""
+    """Verify a zero pooled delta colors yellow and the default render carries no escapes."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
     bench = report.build_benchmark(
@@ -932,6 +1006,39 @@ def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: obj
     colored = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
     plain = report.terminal_matrix(bench, tmp_path / "benchmark.md")
 
-    alpha = next(line for line in colored if line.startswith("archive/alpha"))
-    assert "\x1b[33m (+0pp)\x1b[0m" in alpha
+    versus = next(line for line in colored if line.startswith("vs baseline"))
+    assert "\x1b[33m+0pp\x1b[0m" in versus
     assert not any("\x1b" in line for line in plain)
+
+
+def test_terminal_matrix_color_adds_no_width(tmp_path: object) -> None:
+    """Verify stripping ANSI codes from the color render yields the plain render exactly."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=3)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=3, total=3)
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    colored = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
+    plain = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    assert [ansi_escape.sub("", line) for line in colored] == plain
+
+
+def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: object) -> None:
+    """Verify an arm name that looks like a rate or delta never gets colorized in the header."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "run-3pp", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md", color=True)
+
+    header = lines[0]
+    eval_row = next(line for line in lines if line.startswith("archive/alpha"))
+    assert "\x1b" not in header
+    assert "\x1b" in eval_row

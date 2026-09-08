@@ -523,11 +523,12 @@ def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -
     _, terminal_reporter = _finish_and_summarize(tmp_path)
 
     assert ("separator", "benchspec benchmark") in terminal_reporter.events
-    header, eval_row, rule, footer, pointer = terminal_reporter.lines
+    header, eval_row, rule, footer, versus, pointer = terminal_reporter.lines
     assert header.split() == ["Eval", "baseline", "trial"]
-    assert eval_row.split() == ["archive/alpha", "0%", "100%", "(+100pp)"]
+    assert eval_row.split() == ["archive/alpha", "0%", "100%"]
     assert rule == "-" * len(header)
-    assert footer.split() == ["All", "evals", "0%", "100%", "(+100pp)"]
+    assert footer.split() == ["All", "evals", "0%", "100%"]
+    assert versus.split() == ["vs", "baseline", "+100pp"]
     benchmark_md = skill_results_dir.parent.parent / "benchmark.md"
     assert pointer == f"Report: {benchmark_md}"
     assert benchmark_md.is_file()
@@ -561,6 +562,7 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
         "ingest/beta",
         "-" * len(table[0]),
         "All evals",
+        "vs baseline",
     ]
     assert pointer.startswith("Report: ")
 
