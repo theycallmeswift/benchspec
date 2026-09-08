@@ -1,4 +1,4 @@
-.PHONY: help install test e2e evals assets lint lint\:ruff lint\:houserules clean
+.PHONY: help install test e2e evals assets lint lint\:ruff lint\:ty lint\:houserules clean
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
@@ -23,12 +23,16 @@ evals:  ## Run the binder corpus (binder quality, not framework function) on WOR
 assets:  ## Re-render the raster brand assets in docs/assets (terminal mock PNG/GIF, social card)
 	uv run scripts/render_assets.py
 
-lint:  ## Lint with Ruff and houserules
+lint:  ## Lint with Ruff, type-check with ty, then houserules
 	$(MAKE) lint:ruff
+	$(MAKE) lint:ty
 	$(MAKE) lint:houserules
 
 lint\:ruff:  ## Lint with Ruff
 	uv run ruff check .
+
+lint\:ty:  ## Type-check with ty
+	uv run ty check
 
 LINT_BASE ?= origin/main
 lint\:houserules:  ## Lint changed and new Python files with houserules (needs GEMINI_API_KEY)

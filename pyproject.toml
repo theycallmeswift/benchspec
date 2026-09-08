@@ -44,6 +44,7 @@ dev = [
     "pytest-repeat>=0.9,<1",
     "ruff>=0.16",
     "microsandbox>=0.6.16,<0.7",
+    "ty>=0.0.79,<0.1",
 ]
 
 [project.urls]
@@ -104,6 +105,11 @@ select = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ty.src]
+# The brand-asset script declares its own PEP 723 dependencies (pillow), which never
+# install into the project venv; ty checks it only when it is named on the command line.
+exclude-scripts = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "evals"]
