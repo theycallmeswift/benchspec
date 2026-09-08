@@ -1,21 +1,27 @@
 """Tests for workspace."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
 from benchspec.orchestration import workspace
 
 
-def test_next_iteration_name_global_under_evals(tmp_path: object) -> None:
+def test_next_iteration_name_global_under_evals(tmp_path: Path) -> None:
     """Verify next iteration name global under evals."""
     (tmp_path / "tmp" / "evals" / "iteration_02").mkdir(parents=True)
     (tmp_path / "tmp" / "evals" / "iteration_05").mkdir(parents=True)
     assert workspace.next_iteration_name(tmp_path) == "iteration_06"
 
 
-def test_next_iteration_name_empty_starts_at_one(tmp_path: object) -> None:
+def test_next_iteration_name_empty_starts_at_one(tmp_path: Path) -> None:
     """Verify next iteration name empty starts at one."""
     assert workspace.next_iteration_name(tmp_path) == "iteration_01"
 
 
-def test_next_iteration_name_ignores_non_iteration_dirs(tmp_path: object) -> None:
+def test_next_iteration_name_ignores_non_iteration_dirs(tmp_path: Path) -> None:
     """Verify next iteration name ignores non iteration dirs."""
     root = tmp_path / "tmp" / "evals"
     root.mkdir(parents=True)
@@ -28,7 +34,7 @@ def test_next_iteration_name_ignores_non_iteration_dirs(tmp_path: object) -> Non
 
 
 def test_next_iteration_name_widens_past_pad_and_skips_non_decimal(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify next iteration name widens past pad and skips non decimal."""
     root = tmp_path / "tmp" / "evals"
@@ -39,7 +45,7 @@ def test_next_iteration_name_widens_past_pad_and_skips_non_decimal(
     assert workspace.next_iteration_name(tmp_path) == "iteration_100"
 
 
-def test_set_and_arm_dir(tmp_path: object) -> None:
+def test_set_and_arm_dir(tmp_path: Path) -> None:
     """Verify set and arm dir."""
     workspace.set_current_iteration("iteration_07")
     assert workspace.current_iteration() == "iteration_07"
@@ -59,7 +65,7 @@ def test_set_and_arm_dir(tmp_path: object) -> None:
     )
 
 
-def test_skill_dir_groups_skills_under_iteration(tmp_path: object) -> None:
+def test_skill_dir_groups_skills_under_iteration(tmp_path: Path) -> None:
     """Verify skill dir groups skills under iteration."""
     workspace.set_current_iteration("iteration_07")
 
@@ -71,7 +77,7 @@ def test_skill_dir_groups_skills_under_iteration(tmp_path: object) -> None:
     assert a.parent.parent.name == "iteration_07"
 
 
-def test_arm_dir_shards_per_sample(tmp_path: object) -> None:
+def test_arm_dir_shards_per_sample(tmp_path: Path) -> None:
     """Verify arm dir shards per sample."""
     workspace.set_current_iteration("iteration_01")
 
@@ -84,13 +90,13 @@ def test_arm_dir_shards_per_sample(tmp_path: object) -> None:
     assert d0.parent == d1.parent
 
 
-def test_current_iteration_or_none_unset(monkeypatch: object) -> None:
+def test_current_iteration_or_none_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify current iteration or none unset."""
     monkeypatch.delenv("BENCHSPEC_ITERATION", raising=False)
     assert workspace.current_iteration_or_none() is None
 
 
-def test_current_iteration_or_none_set(monkeypatch: object) -> None:
+def test_current_iteration_or_none_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify current iteration or none set."""
     monkeypatch.setenv("BENCHSPEC_ITERATION", "iteration_07")
     assert workspace.current_iteration_or_none() == "iteration_07"

@@ -14,8 +14,10 @@ from uuid import uuid4
 
 import pytest
 
-from benchspec.sandbox.backend import NAME_PREFIX
-from benchspec.sandbox.docker import DockerBackend, docker_binary, image_ref
+from benchspec.agents.base import Credential
+from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.sandbox.backend import NAME_PREFIX, LiveSandbox
+from benchspec.sandbox.docker import DockerBackend, DockerExecEvent, docker_binary, image_ref
 from benchspec.sandbox.sandbox import _agent_extra_volumes
 from benchspec.specs.discovery import EnvConfig
 
@@ -54,14 +56,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-class _ProbeAgent:
-    """A minimal agent that provisions by writing one marker file into the guest.
+class _ProbeAgent(ClaudeCodeAgent):
+    """A real agent whose provisioning is one marker file written into the guest.
 
-    Deliberately needs no agent CLI and no provider credential: the point of the daemon
-    test is the backend's container lifecycle, not any real harness's installer.
+    Deliberately installs no agent CLI, hands the container no credential, and sets no
+    guest environment: the point of the daemon test is the backend's container
+    lifecycle, not any real harness's installer.
     """
-
-    guest_home = "/root"
 
     def __init__(self, suffix: str) -> None:
         """Give the agent an id unique to one test run.
@@ -70,13 +71,14 @@ class _ProbeAgent:
             suffix: The run's unique suffix, so the build container this agent's id names
                 cannot collide with another run's.
         """
+        super().__init__()
         self.id = f"probe-{suffix}"
 
-    def guest_env(self) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return no guest environment variables."""
         return {}
 
-    def secrets(self) -> list:
+    def secrets(self) -> list[Credential]:
         """Return no credentials to hand the container."""
         return []
 
@@ -84,7 +86,7 @@ class _ProbeAgent:
         """Return a no-op skills-home bridge script."""
         return "true"
 
-    async def provision(self, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Write the provisioning marker into the guest.
 
         Args:
@@ -97,7 +99,7 @@ class _ProbeAgent:
         if result.exit_code != 0:
             raise RuntimeError(f"probe provision failed (exit {result.exit_code})")
 
-    async def stage_project_assets(self, sandbox: object, project_mount: str) -> None:
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
         """Stage nothing: the probe has no project assets to copy into the guest."""
 
 
@@ -154,6 +156,16 @@ def _container_names(name: str) -> str:
     return completed.stdout.strip()
 
 
+def _streamed_stdout(events: list[DockerExecEvent]) -> bytes:
+    """Join the chunks of every `stdout` event in `events`, in order."""
+    chunks: list[bytes] = []
+    for event in events:
+        if event.event_type == "stdout":
+            assert event.data is not None
+            chunks.append(event.data)
+    return b"".join(chunks)
+
+
 async def _drive_cell(
     backend: DockerBackend, agent: _ProbeAgent, snapshot: str, cell: str, room: Path, stage: Path
 ) -> None:
@@ -186,8 +198,7 @@ async def _drive_cell(
 
     handle = await sandbox.exec_stream("printf", ["a\nb\n"])
     events = [event async for event in handle]
-    stdout = b"".join(event.data for event in events if event.event_type == "stdout")
-    assert stdout == b"a\nb\n"
+    assert _streamed_stdout(events) == b"a\nb\n"
     assert events[-1].event_type == "exited"
     assert events[-1].code == 0
 
@@ -214,7 +225,9 @@ def test_docker_backend_builds_boots_and_tears_down_a_cell(tmp_path: Path) -> No
         backend.build_snapshot(agent, snapshot, EnvConfig(base_image="ubuntu:latest"))
 
         assert backend.snapshot_exists(snapshot)
-        assert backend.image_identity(snapshot).image_digest.startswith("sha256:")
+        identity = backend.image_identity(snapshot)
+        assert identity.image_digest is not None
+        assert identity.image_digest.startswith("sha256:")
         asyncio.run(_drive_cell(backend, agent, snapshot, cell, room, stage))
         assert _container_names(cell) == ""
     finally:

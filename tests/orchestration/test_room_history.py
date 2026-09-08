@@ -1,5 +1,9 @@
 """Tests for room history."""
 
+from __future__ import annotations
+
+import json
+
 import pytest
 
 from benchspec.orchestration.room import render_history
@@ -50,8 +54,12 @@ def test_render_history_non_string_rejected() -> None:
 
 def test_render_history_non_dict_turn_rejected() -> None:
     """Verify render history non dict turn rejected."""
+    # Parsed from JSON so the bare-string turn reaches the validator untyped, as it would
+    # from a hand-written eval file.
+    history = json.loads('["set up my vault"]')
+
     with pytest.raises(ValueError, match="mapping"):
-        render_history(["set up my vault"])
+        render_history(history)
 
 
 def test_render_history_stray_placeholder_rejected() -> None:

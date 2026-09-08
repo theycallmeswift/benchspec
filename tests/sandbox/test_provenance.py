@@ -8,6 +8,7 @@ from benchspec.sandbox.provenance import (
     ImageIdentity,
     RuntimeProvenance,
     SandboxProvenance,
+    Status,
     aggregate_observed,
 )
 
@@ -16,7 +17,7 @@ def _sandbox(
     *,
     snapshot: str = "benchspec-microsandbox-claude-code-latest-ab12cd34",
     image_digest: str | None = "sha256:aaaa",
-    image_digest_status: str = "available",
+    image_digest_status: Status = "available",
     image_digest_error: str | None = None,
 ) -> SandboxProvenance:
     """Build a sandbox-provenance fixture with sensible defaults."""
@@ -37,7 +38,7 @@ def _runtime(
     *,
     arm: str = "opus",
     actual_version: str | None = "1.2.3",
-    actual_version_status: str = "available",
+    actual_version_status: Status = "available",
     actual_version_error: str | None = None,
     sandbox: SandboxProvenance | None = None,
 ) -> RuntimeProvenance:

@@ -1,19 +1,29 @@
 """Tests for execution."""
 
+from __future__ import annotations
+
 import contextlib
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
 
+from benchspec.agents import CodingAgent
+from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.config.arms import Arm
+from benchspec.grading.binder import BinderAuthError
+from benchspec.grading.judges import JudgeConfig
+from benchspec.grading.trajectory import trajectory_from_session
 from benchspec.orchestration import workspace
-from benchspec.orchestration.execution import run_eval_arm
+from benchspec.orchestration.execution import SessionFactory, run_eval_arm
 from benchspec.orchestration.results import RunResult
-from benchspec.sandbox.backend import FingerprintInputs
+from benchspec.orchestration.room import Facts
+from benchspec.sandbox.backend import FingerprintInputs, LiveSandbox
 from benchspec.sandbox.provenance import ImageIdentity
-from benchspec.sandbox.sandbox import ensure_snapshot
+from benchspec.sandbox.sandbox import TurnRunner, ensure_snapshot
 from benchspec.specs.discovery import EnvConfig, EvalCase
 from benchspec.specs.schema import SchemaError
 from benchspec.testing import FakeSandbox
@@ -23,7 +33,7 @@ BASELINE = Arm("baseline", "claude-code", "opus")
 
 
 @pytest.fixture(autouse=True)
-def _no_real_vm(monkeypatch: object) -> None:
+def _no_real_vm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Build the no real vm test fixture."""
     # run_eval_arm resolves a real agent + snapshot (which would build a live guest). Stub
     # both so unit tests never touch a sandbox runtime, and point the default backend's
@@ -39,18 +49,18 @@ def _no_real_vm(monkeypatch: object) -> None:
 
 
 def _grade_all_pass(
-    assertions: object,
-    tree: object,
-    contents: object,
-    shas: object,
-    final: object,
-    eval_id: object,
-    config: object,
+    assertions: list[str],
+    tree: str,
+    contents: dict[str, str],
+    shas: dict[str, str],
+    final: str,
+    eval_id: str,
+    config: str,
     *,
-    judge_config: object = None,
-    original_shas: object = None,
-    process_facts: object = "",
-) -> object:
+    judge_config: JudgeConfig | None = None,
+    original_shas: dict[str, str] | None = None,
+    process_facts: str = "",
+) -> dict:
     """Build the grade all pass test fixture."""
     return {
         "eval_id": eval_id,
@@ -61,12 +71,12 @@ def _grade_all_pass(
     }
 
 
-def _punt_all(text: object) -> None:
+def _punt_all(text: str) -> None:
     """Build the punt all test fixture."""
     return None  # never bind — send every assertion to the judge
 
 
-def _case(tmp_path: object, eval_obj: object, skill: object = "myskill") -> object:
+def _case(tmp_path: Path, eval_obj: dict, skill: str = "myskill") -> EvalCase:
     """Build the case test fixture — eval_obj is {id, prompt, assertions, history?}."""
     eval_dir = tmp_path / "skills" / skill / "evals" / eval_obj["id"]
     eval_dir.mkdir(parents=True, exist_ok=True)
@@ -75,30 +85,37 @@ def _case(tmp_path: object, eval_obj: object, skill: object = "myskill") -> obje
     )
 
 
-def fake_session_factory(result: object) -> object:
-    """Single-turn: one RunResult returned for the arm's one run."""
-    calls = []
+class _RecordedSession:
+    """Single-turn session double: one canned `RunResult` per arm, recording what it saw.
+
+    An instance is a `SessionFactory`: `run_eval_arm` calls it with the session kwargs and
+    enters the returned context. `calls` keeps each kwargs set; `prompts` and `detects`
+    keep what every turn was asked to run.
+    """
+
+    def __init__(self, result: RunResult) -> None:
+        """Hold the one result every turn returns and start with empty records."""
+        self._result = result
+        self.calls: list[dict[str, object]] = []
+        self.prompts: list[str] = []
+        self.detects: list[str | None] = []
 
     @contextlib.asynccontextmanager
-    async def factory(**kwargs: object) -> object:
-        """Factory."""
-        calls.append(kwargs)
+    async def __call__(self, **kwargs: object) -> AsyncIterator[TurnRunner]:
+        """Open the fake session, recording its kwargs and yielding the per-turn runner."""
+        self.calls.append(kwargs)
+        yield self._run
 
-        async def run(prompt: object, *, resume_session_id: object, detect_skill: object) -> object:
-            """Run."""
-            factory.prompts.append(prompt)
-            factory.detects.append(detect_skill)
-            return result
-
-        yield run
-
-    factory.calls = calls
-    factory.prompts = []
-    factory.detects = []
-    return factory
+    async def _run(
+        self, prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+    ) -> RunResult:
+        """Record the turn and return the canned result."""
+        self.prompts.append(prompt)
+        self.detects.append(detect_skill)
+        return self._result
 
 
-def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -> None:
+def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: Path) -> None:
     """Verify single turn writes artifacts and substitutes prompt."""
     workspace.set_current_iteration("iteration_01")
 
@@ -110,7 +127,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
         tmp_path,
         {"id": "alpha", "prompt": "work in ./vault", "assertions": ["a1", "a2"]},
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
     )
 
@@ -145,7 +162,7 @@ def test_single_turn_writes_artifacts_and_substitutes_prompt(tmp_path: object) -
     assert transcript[0]["prompt"] == "work in ./vault"
 
 
-def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> None:
+def test_today_substituted_in_assertions_before_grading(tmp_path: Path) -> None:
     """Verify today substituted in assertions before grading."""
     workspace.set_current_iteration("iteration_01")
 
@@ -160,7 +177,7 @@ def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> Non
             "assertions": ["file at ./9. Archive/Sources/{TODAY}/x.md"],
         },
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
     )
 
@@ -183,7 +200,7 @@ def test_today_substituted_in_assertions_before_grading(tmp_path: object) -> Non
     assert "2099-01-01" in graded_text
 
 
-def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
+def test_bound_checker_keeps_original_assertion_prose(tmp_path: Path) -> None:
     """Verify bound checker keeps original assertion prose."""
     # A bound checker's grading entry must carry the author's prose, not the spec-derived
     # text() (e.g. "the file ./gone.md does not exist"), so grading.json stays faithful.
@@ -195,7 +212,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     prose = "the inbox capture is gone"
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": [prose]})
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         return {
             "checker": "not_file_exists",
@@ -203,7 +220,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
             "type": "deterministic",
         }
 
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
     )
 
@@ -226,7 +243,7 @@ def test_bound_checker_keeps_original_assertion_prose(tmp_path: object) -> None:
     assert entry["text"] == prose
 
 
-def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: object) -> None:
+def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: Path) -> None:
     """Verify a binder infra RuntimeError punts to judge not errors."""
     # A transient binder infra failure must degrade to a judge punt, not crash the cell.
     workspace.set_current_iteration("iteration_01")
@@ -236,11 +253,11 @@ def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: object) -> Non
 
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a1"]})
 
-    def bind(text: object) -> NoReturn:
+    def bind(text: str) -> NoReturn:
         """Bind."""
         raise RuntimeError("gemini transient failure")
 
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 100, 50, False, session_id="s1", fired=True),
     )
     outcome = run_eval_arm(
@@ -262,12 +279,12 @@ def test_binder_runtime_error_punts_to_judge_not_errors(tmp_path: object) -> Non
 
 
 def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify run eval arm trial grades activation true and judges semantic."""
     workspace.set_current_iteration("iteration_01")
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         if text == "Skill `ingest` invoked":
             return {
@@ -278,9 +295,9 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
         return None
 
     assertions = ["Skill `ingest` invoked", "the summary reflects the facts"]
-    judged = []
+    judged: list[list[str]] = []
 
-    def grade(texts: object, *args: object, **kwargs: object) -> object:
+    def grade(texts: list[str], *args: object, **kwargs: object) -> dict:
         """Grade."""
         judged.append(list(texts))
         return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
@@ -310,7 +327,7 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "single",
                 "trial",
@@ -336,12 +353,12 @@ def test_run_eval_arm_trial_grades_activation_true_and_judges_semantic(
 
 
 def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify run eval arm baseline grades activation false and judges semantic."""
     workspace.set_current_iteration("iteration_01")
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         if text == "Skill `ingest` invoked":
             return {
@@ -352,9 +369,9 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
         return None
 
     assertions = ["Skill `ingest` invoked", "the summary reflects the facts"]
-    judged = []
+    judged: list[list[str]] = []
 
-    def grade(texts: object, *args: object, **kwargs: object) -> object:
+    def grade(texts: list[str], *args: object, **kwargs: object) -> dict:
         """Grade."""
         judged.append(list(texts))
         return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
@@ -376,7 +393,7 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "single",
                 "baseline",
@@ -401,7 +418,7 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     assert "gated" not in baseline.grading
 
 
-def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
+def test_run_eval_arm_no_fired_gate(tmp_path: Path) -> None:
     """Verify run eval arm no fired gate."""
     # Missing skill activation grades false.
     workspace.set_current_iteration("iteration_01")
@@ -415,7 +432,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
         skill="ingest",
     )
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
@@ -428,7 +445,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "miss",
                 "trial",
@@ -451,7 +468,7 @@ def test_run_eval_arm_no_fired_gate(tmp_path: object) -> None:
     assert entry["type"] == "deterministic"
 
 
-def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
+def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: Path) -> None:
     """Verify baseline arm fired skills empty not errored."""
     # Empty dispatched-skill context grades the activation assertion false.
     workspace.set_current_iteration("iteration_01")
@@ -465,7 +482,7 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
         skill="ingest",
     )
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
 
@@ -478,7 +495,7 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "base",
                 "baseline",
@@ -501,7 +518,7 @@ def test_baseline_arm_fired_skills_empty_not_errored(tmp_path: object) -> None:
     assert "not among fired []" in entry["evidence"]
 
 
-def _bind_ingest_activation(text: object) -> object:
+def _bind_ingest_activation(text: str) -> dict | None:
     """Bind the `ingest` activation line to a skill_invoked spec; punt everything else."""
     if text == "Skill `ingest` invoked":
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
@@ -509,7 +526,7 @@ def _bind_ingest_activation(text: object) -> object:
 
 
 def test_activation_grades_fallback_fire_when_group_differs_from_asserted_skill(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify a fallback-shape fire grades True even when the group differs from the skill."""
     # The hard decoupling case: group ("writing") differs from the asserted skill ("ingest"),
@@ -537,7 +554,7 @@ def test_activation_grades_fallback_fire_when_group_differs_from_asserted_skill(
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "single", "trial", "out", 1, 1, False,
                 session_id="s1", fired=True, trajectory=trajectory,
@@ -550,7 +567,7 @@ def test_activation_grades_fallback_fire_when_group_differs_from_asserted_skill(
     assert outcome.grading["assertions"][0]["passed"] is True
 
 
-def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: object) -> None:
+def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: Path) -> None:
     """Verify a Skill-tool fire with a namespaced value grades the plain-name assertion True."""
     workspace.set_current_iteration("iteration_01")
 
@@ -574,7 +591,7 @@ def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: object)
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "single", "trial", "out", 1, 1, False,
                 session_id="s1", fired=True, trajectory=trajectory,
@@ -587,15 +604,17 @@ def test_activation_grades_true_on_namespaced_skill_tool_value(tmp_path: object)
     assert outcome.grading["assertions"][0]["passed"] is True
 
 
-def _record_session_model(seen: object, name: object) -> object:
-    """Build the record session model test fixture."""
+def _record_session_model(seen: dict[str, object], name: str) -> SessionFactory:
+    """Build a session factory that records the model it was opened with under `name`."""
 
     @contextlib.asynccontextmanager
-    async def factory(**kwargs: object) -> object:
+    async def factory(**kwargs: object) -> AsyncIterator[TurnRunner]:
         """Factory."""
         seen[name] = kwargs["model"]
 
-        async def run(prompt: object, *, resume_session_id: object, detect_skill: object) -> object:
+        async def run(
+            prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+        ) -> RunResult:
             """Run."""
             return RunResult("m", name, "out", 1, 1, False, session_id="session-alpha", fired=True)
 
@@ -604,13 +623,13 @@ def _record_session_model(seen: object, name: object) -> object:
     return factory
 
 
-def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
+def test_run_eval_arm_routes_opus_arm_model(tmp_path: Path) -> None:
     """Verify run eval arm routes opus arm model."""
     # The session model comes from the eval_arm configuration.
     workspace.set_current_iteration("iteration_01")
 
     eval_case = _case(tmp_path, {"id": "m", "prompt": "perform the task", "assertions": ["a"]})
-    seen = {}
+    seen: dict[str, object] = {}
     wd_o = tmp_path / "o"
     wd_o.mkdir()
 
@@ -631,12 +650,12 @@ def test_run_eval_arm_routes_opus_arm_model(tmp_path: object) -> None:
     assert seen == {"trial-opus": "opus"}
 
 
-def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
+def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: Path) -> None:
     """Verify run eval arm routes sonnet arm model."""
     workspace.set_current_iteration("iteration_01")
 
     eval_case = _case(tmp_path, {"id": "m", "prompt": "perform the task", "assertions": ["a"]})
-    seen = {}
+    seen: dict[str, object] = {}
     wd_s = tmp_path / "s"
     wd_s.mkdir()
 
@@ -657,14 +676,16 @@ def test_run_eval_arm_routes_sonnet_arm_model(tmp_path: object) -> None:
     assert seen == {"trial-sonnet": "sonnet"}
 
 
-def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch: object) -> None:
+def test_run_eval_arm_selects_agent_by_arm_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify run eval arm selects agent by arm harness."""
     # The agent is built from eval_arm.harness.
     workspace.set_current_iteration("iteration_01")
 
-    captured = {}
+    captured: dict[str, str | None] = {}
 
-    def fake_make_agent(harness: object = None) -> None:
+    def fake_make_agent(harness: str | None = None) -> None:
         """Fake make agent."""
         captured["harness"] = harness
         return None
@@ -687,7 +708,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=_grade_all_pass,
@@ -698,7 +719,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(tmp_path: object, monkeypatch
 
 
 def test_run_eval_arm_threads_arm_effort_and_expanded_env(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify run eval arm threads arm effort and expanded env."""
     # Effort, env, and eval-set name reach the session from the eval_arm context.
@@ -719,7 +740,7 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
         "high",
         {"TOK": "$SECRET", "LIT": "plain"},
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
     )
 
@@ -747,7 +768,7 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     assert call_kwargs["eval_set"] == "trial-set"
 
 
-def test_run_eval_arm_threads_setup_reldir(tmp_path: object) -> None:
+def test_run_eval_arm_threads_setup_reldir(tmp_path: Path) -> None:
     """Verify run_eval_arm passes the eval-dir-relative path as setup_reldir."""
     # setup.sh lives in the eval folder; the sandbox locates it by its path relative to
     # the mounted project root (here, repo_root == project == tmp_path).
@@ -759,7 +780,7 @@ def test_run_eval_arm_threads_setup_reldir(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True),
     )
 
@@ -780,7 +801,7 @@ def test_run_eval_arm_threads_setup_reldir(tmp_path: object) -> None:
     assert session_factory.calls[0]["setup_reldir"] == "skills/myskill/evals/alpha"
 
 
-def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
+def test_run_eval_arm_threads_harness_args(tmp_path: Path) -> None:
     """Verify run eval arm threads harness args."""
     workspace.set_current_iteration("iteration_01")
 
@@ -791,7 +812,7 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
         tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
     eval_arm = Arm("plugin", "claude-code", "opus", harness_args=["--plugin-dir", "/project"])
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "plugin", "done", 1, 1, False, session_id="session-alpha", fired=True),
     )
 
@@ -813,15 +834,15 @@ def test_run_eval_arm_threads_harness_args(tmp_path: object) -> None:
 
 
 def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify the caller's sandbox_name (not a hardcoded default) drives resolve_sandbox."""
     # cases.test_eval threads the resolved set's `.sandbox` here; execution must resolve
     # exactly that name, never silently fall back to DEFAULT_SANDBOX.
     workspace.set_current_iteration("iteration_01")
-    captured = {}
+    captured: dict[str, str] = {}
 
-    def fake_resolve(name: object) -> object:
+    def fake_resolve(name: str) -> object:
         """Fake resolve."""
         captured["name"] = name
         return object()
@@ -842,7 +863,7 @@ def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
         repo_root=tmp_path,
         sample=0,
         sandbox_name="custombackend",
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
         ),
         grade=_grade_all_pass,
@@ -852,7 +873,7 @@ def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
     assert captured["name"] == "custombackend"
 
 
-def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
+def test_artifact_dir_uses_arm_name_string(tmp_path: Path) -> None:
     """Verify artifact dir uses eval_arm name string."""
     # Artifact paths use the eval_arm name string.
     workspace.set_current_iteration("iteration_01")
@@ -873,7 +894,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=_grade_all_pass,
@@ -887,7 +908,7 @@ def test_artifact_dir_uses_arm_name_string(tmp_path: object) -> None:
     assert persisted["arm"] == "trial"
 
 
-def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
+def test_seed_block_prepended_to_graded_prompt(tmp_path: Path) -> None:
     """Verify seed block prepended to graded prompt."""
     # History turns are prepended to the graded prompt.
     workspace.set_current_iteration("iteration_01")
@@ -907,7 +928,7 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
             "assertions": ["a"],
         },
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("seeded", "trial", "out", 1, 1, False, session_id="session-alpha", fired=True),
     )
 
@@ -932,7 +953,7 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: object) -> None:
     assert sent.index("<transcript>") < sent.index("the deeper question")
 
 
-def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
+def test_empty_seed_leaves_prompt_unchanged(tmp_path: Path) -> None:
     """Verify empty seed leaves prompt unchanged."""
     workspace.set_current_iteration("iteration_01")
 
@@ -942,7 +963,7 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path, {"id": "noseed", "prompt": "just the prompt", "assertions": ["a"]}
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("noseed", "trial", "out", 1, 1, False, session_id="session-alpha", fired=True),
     )
 
@@ -963,7 +984,7 @@ def test_empty_seed_leaves_prompt_unchanged(tmp_path: object) -> None:
     assert session_factory.prompts[0] == "just the prompt"
 
 
-def test_ordinary_execution_passes_no_group_skill_to_detection(tmp_path: object) -> None:
+def test_ordinary_execution_passes_no_group_skill_to_detection(tmp_path: Path) -> None:
     """Verify ordinary execution never feeds the group name to skill detection."""
     # The adapter keeps the detect_skill parameter for the __route__ path, but ordinary
     # eval execution passes None so detection stays decoupled from the group name.
@@ -977,7 +998,7 @@ def test_ordinary_execution_passes_no_group_skill_to_detection(tmp_path: object)
         {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]},
         skill="ingest",
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("alpha", "baseline", "out", 1, 1, False, session_id="session-alpha", fired=False),
     )
 
@@ -998,7 +1019,7 @@ def test_ordinary_execution_passes_no_group_skill_to_detection(tmp_path: object)
     assert session_factory.detects == [None]
 
 
-def test_errored_run_flags_outcome(tmp_path: object) -> None:
+def test_errored_run_flags_outcome(tmp_path: Path) -> None:
     """Verify errored run flags outcome."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1008,11 +1029,11 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path, {"id": "gamma", "prompt": "perform the task", "assertions": ["a"]}
     )
-    session_factory = fake_session_factory(
+    session_factory = _RecordedSession(
         RunResult("gamma", "baseline", "<timeout>", 0, 0, True),
     )
 
-    def grade_fail(assertions: object, *args: object, **kwargs: object) -> object:
+    def grade_fail(assertions: list[str], *args: object, **kwargs: object) -> dict:
         """Grade fail."""
         return {
             "assertions": [
@@ -1037,7 +1058,7 @@ def test_errored_run_flags_outcome(tmp_path: object) -> None:
     assert outcome.errored is True
 
 
-def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
+def test_failed_assertions_do_not_error_the_arm(tmp_path: Path) -> None:
     """Verify failed assertions do not error the eval_arm."""
     # Failed assertions do not mark the eval_arm as an infrastructure error.
     workspace.set_current_iteration("iteration_01")
@@ -1049,7 +1070,7 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
         tmp_path, {"id": "fail", "prompt": "perform the task", "assertions": ["a1", "a2"]}
     )
 
-    def grade_fail(assertions: object, *args: object, **kwargs: object) -> object:
+    def grade_fail(assertions: list[str], *args: object, **kwargs: object) -> dict:
         """Grade fail."""
         return {
             "assertions": [
@@ -1066,7 +1087,7 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "fail", "baseline", "out", 1, 1, False, session_id="session-alpha", fired=False
             )
@@ -1079,22 +1100,22 @@ def test_failed_assertions_do_not_error_the_arm(tmp_path: object) -> None:
     assert [assertion["passed"] for assertion in outcome.grading["assertions"]] == [False, False]
 
 
-def test_default_judge_config_used_by_default(tmp_path: object) -> None:
+def test_default_judge_config_used_by_default(tmp_path: Path) -> None:
     """Verify the default JudgeConfig grades when no judge config is passed."""
     # The judge is independent of the task eval_arm: the eval_arm can run any harness/model
     # (here opencode/gemini) while the judge still grades with the default JudgeConfig
     # (claude-code/sonnet) — grading never calls the task arm as judge.
-    from benchspec.grading.judges import JudgeConfig
-
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
     eval_case = _case(tmp_path, {"id": "mu", "prompt": "perform the task", "assertions": ["a"]})
-    seen_configs = []
+    seen_configs: list[JudgeConfig] = []
 
-    def grade(assertions: object, *args: object, judge_config: object, **kwargs: object) -> object:
+    def grade(
+        assertions: list[str], *args: object, judge_config: JudgeConfig, **kwargs: object
+    ) -> dict:
         """Grade."""
         seen_configs.append(judge_config)
         return {
@@ -1112,7 +1133,7 @@ def test_default_judge_config_used_by_default(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("mu", "trial", "did it", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=grade,
@@ -1122,19 +1143,19 @@ def test_default_judge_config_used_by_default(tmp_path: object) -> None:
     assert seen_configs == [JudgeConfig()]
 
 
-def test_judge_config_param_overrides_default(tmp_path: object) -> None:
+def test_judge_config_param_overrides_default(tmp_path: Path) -> None:
     """Verify a passed judge_config overrides the default."""
-    from benchspec.grading.judges import JudgeConfig
-
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
     workdir.mkdir()
 
     eval_case = _case(tmp_path, {"id": "nu", "prompt": "perform the task", "assertions": ["a"]})
-    seen_configs = []
+    seen_configs: list[JudgeConfig] = []
 
-    def grade(assertions: object, *args: object, judge_config: object, **kwargs: object) -> object:
+    def grade(
+        assertions: list[str], *args: object, judge_config: JudgeConfig, **kwargs: object
+    ) -> dict:
         """Grade."""
         seen_configs.append(judge_config)
         return {
@@ -1154,7 +1175,7 @@ def test_judge_config_param_overrides_default(tmp_path: object) -> None:
         repo_root=tmp_path,
         sample=0,
         judge_config=custom,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("nu", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=grade,
@@ -1164,7 +1185,7 @@ def test_judge_config_param_overrides_default(tmp_path: object) -> None:
     assert seen_configs == [custom]
 
 
-def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
+def test_judge_runtimeerror_marks_arm_errored(tmp_path: Path) -> None:
     """Verify judge runtimeerror marks arm errored."""
     # Judge infrastructure failures mark the arm errored.
     workspace.set_current_iteration("iteration_01")
@@ -1189,7 +1210,7 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "kappa",
                 "trial",
@@ -1215,11 +1236,11 @@ def test_judge_runtimeerror_marks_arm_errored(tmp_path: object) -> None:
     assert persisted["errored"] is True
 
 
-def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: object) -> None:
+def test_missing_judge_binary_marks_arm_errored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify missing judge binary marks arm errored."""
     # Missing judge binary marks the arm errored.
-    from benchspec.agents.claude import ClaudeCodeAgent
-
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -1248,7 +1269,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "lam", "trial", "did the thing", 1, 1, False, session_id="session-alpha", fired=True
             )
@@ -1264,7 +1285,7 @@ def test_missing_judge_binary_marks_arm_errored(tmp_path: object, monkeypatch: o
     assert json.loads((run_dir / "grading.json").read_text())["errored"] is True
 
 
-def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
+def test_artifacts_land_under_sample_dir(tmp_path: Path) -> None:
     """Verify artifacts land under sample dir."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1284,7 +1305,7 @@ def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=2,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=_grade_all_pass,
@@ -1298,7 +1319,7 @@ def test_artifacts_land_under_sample_dir(tmp_path: object) -> None:
     assert (run_dir / "transcript.json").is_file()
 
 
-def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> None:
+def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: Path) -> None:
     """Verify session jsonl consolidated with turn delimiter."""
     # The consolidated session file uses explicit turn delimiters.
     workspace.set_current_iteration("iteration_01")
@@ -1334,7 +1355,7 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "alpha",
                 "trial",
@@ -1367,8 +1388,6 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
     transcript = json.loads((run_dir / "transcript.json").read_text())
     assert transcript[0]["skills_dispatched"] == ["writing-prompts"]
     assert transcript[0]["tool_call_count"] == 1
-    from benchspec.grading.trajectory import trajectory_from_session
-
     eval_cases = trajectory_from_session(text)
     assert {
         "turn": 1,
@@ -1379,7 +1398,7 @@ def test_session_jsonl_consolidated_with_turn_delimiter(tmp_path: object) -> Non
     } in eval_cases
 
 
-def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
+def test_no_session_jsonl_when_no_raw(tmp_path: Path) -> None:
     """Verify no session jsonl when no raw."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1397,7 +1416,7 @@ def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("beta", "baseline", "out", 1, 1, False, session_id="session-alpha")
         ),  # raw ""
         grade=_grade_all_pass,
@@ -1411,7 +1430,7 @@ def test_no_session_jsonl_when_no_raw(tmp_path: object) -> None:
     assert "skills_dispatched" not in transcript[0]
 
 
-def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
+def test_run_result_artifacts_merge_into_graded_facts(tmp_path: Path) -> None:
     """Verify run result artifacts merge into graded facts."""
     # RunResult artifacts are merged into judge facts.
     workspace.set_current_iteration("iteration_01")
@@ -1423,19 +1442,19 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
-    seen = {}
+    seen_facts: list[Facts] = []
 
     def grade(
-        assertions: object,
-        tree: object,
-        contents: object,
-        shas: object,
-        result_text: object,
+        assertions: list[str],
+        tree: str,
+        contents: dict[str, str],
+        shas: dict[str, str],
+        result_text: str,
         *args: object,
         **kwargs: object,
-    ) -> object:
+    ) -> dict:
         """Grade."""
-        seen["tree"], seen["contents"] = tree, contents
+        seen_facts.append((tree, contents, shas))
         return {
             "assertions": [
                 {"text": assertion, "passed": True, "evidence": "ok"} for assertion in assertions
@@ -1451,7 +1470,7 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "alpha",
                 "trial",
@@ -1468,15 +1487,16 @@ def test_run_result_artifacts_merge_into_graded_facts(tmp_path: object) -> None:
         bind=_punt_all,
     )
 
-    assert "~/.claude/skills/commit/SKILL.md" in seen["tree"]
-    assert "note.md" in seen["tree"]
-    assert seen["contents"]["~/.claude/skills/commit/SKILL.md"] == "---\nname: commit\n---\n"
+    tree, contents, _ = seen_facts[0]
+    assert "~/.claude/skills/commit/SKILL.md" in tree
+    assert "note.md" in tree
+    assert contents["~/.claude/skills/commit/SKILL.md"] == "---\nname: commit\n---\n"
     run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
     transcript = json.loads((run_dir / "transcript.json").read_text())
     assert "~/.claude/skills/commit/SKILL.md" in transcript[0]["workdir_tree"]
 
 
-def test_process_facts_reach_the_judge(tmp_path: object) -> None:
+def test_process_facts_reach_the_judge(tmp_path: Path) -> None:
     """Verify process facts reach the judge."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1495,23 +1515,23 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
             "arguments": {"skill": "writing-prompts"},
         }
     ]
-    seen = {}
+    seen_process_facts: list[str] = []
 
     def grade(
-        assertions: object,
-        tree: object,
-        contents: object,
-        shas: object,
-        result_text: object,
-        eval_id: object,
-        config: object,
+        assertions: list[str],
+        tree: str,
+        contents: dict[str, str],
+        shas: dict[str, str],
+        result_text: str,
+        eval_id: str,
+        config: str,
         *,
-        judge_config: object = None,
-        original_shas: object = None,
-        process_facts: object = "",
-    ) -> object:
+        judge_config: JudgeConfig | None = None,
+        original_shas: dict[str, str] | None = None,
+        process_facts: str = "",
+    ) -> dict:
         """Grade."""
-        seen["process_facts"] = process_facts
+        seen_process_facts.append(process_facts)
         return {
             "assertions": [
                 {"text": assertion, "passed": True, "evidence": "ok"} for assertion in assertions
@@ -1527,7 +1547,7 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "alpha",
                 "trial",
@@ -1544,10 +1564,10 @@ def test_process_facts_reach_the_judge(tmp_path: object) -> None:
         grade=grade,
         bind=_punt_all,
     )
-    assert "Skill(writing-prompts)" in seen["process_facts"]
+    assert "Skill(writing-prompts)" in seen_process_facts[0]
 
 
-def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
+def test_bind_failure_punts_to_judge_not_error(tmp_path: Path) -> None:
     """Verify bind failure punts to judge not error."""
     # Bind failures degrade to semantic grading.
     workspace.set_current_iteration("iteration_01")
@@ -1558,13 +1578,13 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
     eval_case = _case(
         tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a1"]}
     )
-    judged = []
+    judged: list[list[str]] = []
 
-    def bind_raises(text: object) -> NoReturn:
+    def bind_raises(text: str) -> NoReturn:
         """Bind raises."""
         raise RuntimeError("host claude hiccup")
 
-    def grade(assertions: object, *args: object, **kwargs: object) -> object:
+    def grade(assertions: list[str], *args: object, **kwargs: object) -> dict:
         """Grade."""
         judged.append(list(assertions))
         return {
@@ -1582,7 +1602,7 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=grade,
@@ -1596,7 +1616,7 @@ def test_bind_failure_punts_to_judge_not_error(tmp_path: object) -> None:
 
 
 def test_binder_degraded_counts_once_per_bind_cache_miss_not_per_assertion(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify binder_degraded counts distinct bind_cache misses, not assertions."""
     workspace.set_current_iteration("iteration_01")
@@ -1605,16 +1625,16 @@ def test_binder_degraded_counts_once_per_bind_cache_miss_not_per_assertion(
     eval_case = _case(
         tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["dup", "dup"]}
     )
-    calls = []
+    calls: list[str] = []
 
-    def bind(text: object) -> NoReturn:
+    def bind(text: str) -> NoReturn:
         calls.append(text)
         raise RuntimeError("gemini transient failure")
 
     outcome = run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
         today="2099-01-01", repo_root=tmp_path, sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
         ),
         grade=_grade_all_pass,
@@ -1625,7 +1645,7 @@ def test_binder_degraded_counts_once_per_bind_cache_miss_not_per_assertion(
     assert outcome.grading["binder_degraded"] == 1
 
 
-def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
+def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: Path) -> None:
     """Verify an ordinary punt (bind returns None) is not a degradation."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
@@ -1635,7 +1655,7 @@ def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
     outcome = run_eval_arm(
         eval_case, TRIAL, workdir, {}, tmp_path,
         today="2099-01-01", repo_root=tmp_path, sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
         ),
         grade=_grade_all_pass,
@@ -1645,23 +1665,21 @@ def test_bind_punt_does_not_count_as_binder_degraded(tmp_path: object) -> None:
     assert outcome.grading["binder_degraded"] == 0
 
 
-def test_run_eval_arm_propagates_binder_auth_error(tmp_path: object) -> None:
+def test_run_eval_arm_propagates_binder_auth_error(tmp_path: Path) -> None:
     """Verify a BinderAuthError is never caught or counted — it fails the run."""
-    from benchspec.grading.binder import BinderAuthError
-
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a1"]})
 
-    def bind(text: object) -> NoReturn:
+    def bind(text: str) -> NoReturn:
         raise BinderAuthError("gemini api key rejected")
 
     with pytest.raises(BinderAuthError):
         run_eval_arm(
             eval_case, TRIAL, workdir, {}, tmp_path,
             today="2099-01-01", repo_root=tmp_path, sample=0,
-            session_factory=fake_session_factory(
+            session_factory=_RecordedSession(
                 RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
             ),
             grade=_grade_all_pass,
@@ -1669,7 +1687,7 @@ def test_run_eval_arm_propagates_binder_auth_error(tmp_path: object) -> None:
         )
 
 
-def test_bind_caches_distinct_strings(tmp_path: object) -> None:
+def test_bind_caches_distinct_strings(tmp_path: Path) -> None:
     """Verify bind caches distinct strings."""
     # Repeated assertions bind once.
     workspace.set_current_iteration("iteration_01")
@@ -1686,9 +1704,9 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
             "assertions": ["the file out.md exists", "the file out.md exists"],
         },
     )
-    bind_calls = []
+    bind_calls: list[str] = []
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         bind_calls.append(text)
         return {"type": "deterministic", "checker": "file_exists", "path": "out.md"}
@@ -1702,7 +1720,7 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=_grade_all_pass,
@@ -1712,7 +1730,7 @@ def test_bind_caches_distinct_strings(tmp_path: object) -> None:
     assert bind_calls == ["the file out.md exists"]  # bound once, not twice
 
 
-def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
+def test_bound_file_exists_check_runs_on_workdir(tmp_path: Path) -> None:
     """Verify bound file exists check runs on workdir."""
     # A bound file_exists spec is checked on the host workdir; no judge call for it.
     workspace.set_current_iteration("iteration_01")
@@ -1729,13 +1747,13 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
             "assertions": ["the file report.md exists"],
         },
     )
-    judged = []
+    judged: list[list[str]] = []
 
-    def bind(text: object) -> object:
+    def bind(text: str) -> dict | None:
         """Bind."""
         return {"type": "deterministic", "checker": "file_exists", "path": "report.md"}
 
-    def grade(assertions: object, *args: object, **kwargs: object) -> object:
+    def grade(assertions: list[str], *args: object, **kwargs: object) -> dict:
         """Grade."""
         judged.append(list(assertions))
         return {"assertions": []}
@@ -1749,7 +1767,7 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("alpha", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=grade,
@@ -1763,7 +1781,7 @@ def test_bound_file_exists_check_runs_on_workdir(tmp_path: object) -> None:
     assert entry["evidence"].startswith("CHECK file_exists:")
 
 
-def test_timing_json_contains_token_split(tmp_path: object) -> None:
+def test_timing_json_contains_token_split(tmp_path: Path) -> None:
     """Verify timing json contains token split."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1783,7 +1801,7 @@ def test_timing_json_contains_token_split(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult(
                 "alpha",
                 "trial",
@@ -1807,7 +1825,7 @@ def test_timing_json_contains_token_split(tmp_path: object) -> None:
     assert timing["output_tokens"] == 40
 
 
-def test_grading_is_self_describing(tmp_path: object) -> None:
+def test_grading_is_self_describing(tmp_path: Path) -> None:
     """Verify grading is self describing."""
     workspace.set_current_iteration("iteration_01")
 
@@ -1825,7 +1843,7 @@ def test_grading_is_self_describing(tmp_path: object) -> None:
         today="2099-01-01",
         repo_root=tmp_path,
         sample=3,
-        session_factory=fake_session_factory(
+        session_factory=_RecordedSession(
             RunResult("rho", "trial", "done", 1, 1, False, session_id="session-alpha", fired=True)
         ),
         grade=_grade_all_pass,
@@ -1860,17 +1878,19 @@ class _FakeBackend:
     image: ImageIdentity
     id: str = "microsandbox"
     guest_output: str | None = "claude 1.2.3"
-    guest_shell_calls: list = field(default_factory=list)
+    guest_shell_calls: list[tuple[LiveSandbox, CodingAgent, str]] = field(default_factory=list)
 
-    def fingerprint_inputs(self, agent: object, env: object) -> FingerprintInputs:
+    def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
         """Return the canned fingerprint inputs (ignores agent/env)."""
         return _CANNED_FINGERPRINT
 
-    def image_identity(self, snapshot: object) -> ImageIdentity:
+    def image_identity(self, snapshot: str) -> ImageIdentity:
         """Return the canned image identity (available or unavailable)."""
         return self.image
 
-    async def guest_shell(self, sandbox: object, agent: object, script: str) -> str | None:
+    async def guest_shell(
+        self, sandbox: LiveSandbox, agent: CodingAgent, script: str
+    ) -> str | None:
         """Record the guest command and return the canned version output."""
         self.guest_shell_calls.append((sandbox, agent, script))
         return self.guest_output
@@ -1884,7 +1904,7 @@ class _FakeAgent:
         self.agent_bin = "claude"
         self.for_host_called = False
 
-    def for_host(self) -> object:
+    def for_host(self) -> _FakeAgent:
         """Trip a flag if the (wrong) host-binding path is ever taken by the probe."""
         self.for_host_called = True
         return self
@@ -1897,12 +1917,12 @@ class _FakeArmSession:
     guest — the exact path the guest version probe uses.
     """
 
-    def __init__(self, sandbox: object, result: object) -> None:
+    def __init__(self, sandbox: FakeSandbox, result: RunResult) -> None:
         """Hold the live sandbox and the single canned turn result."""
         self._sandbox = sandbox
         self._result = result
 
-    async def __aenter__(self) -> object:
+    async def __aenter__(self) -> TurnRunner:
         """Enter the session, exposing the bound per-turn run method."""
         return self._run
 
@@ -1911,13 +1931,13 @@ class _FakeArmSession:
         return None
 
     async def _run(
-        self, prompt: object, *, resume_session_id: object, detect_skill: object
-    ) -> object:
+        self, prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+    ) -> RunResult:
         """Return the canned RunResult for the arm's one turn."""
         return self._result
 
 
-def _live_sandbox_session_factory(sandbox: object, result: object) -> object:
+def _live_sandbox_session_factory(sandbox: FakeSandbox, result: RunResult) -> SessionFactory:
     """Build a session factory whose session exposes a live `_sandbox` for probing."""
 
     def factory(**kwargs: object) -> _FakeArmSession:
@@ -1928,7 +1948,7 @@ def _live_sandbox_session_factory(sandbox: object, result: object) -> object:
 
 
 def test_provenance_json_written_with_arm_and_guest_version(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A completed sample writes provenance.json with arm, fingerprint, and guest version."""
     workspace.set_current_iteration("iteration_01")
@@ -1971,7 +1991,7 @@ def test_provenance_json_written_with_arm_and_guest_version(
 
 
 def test_guest_probe_uses_live_sandbox_seam_not_host(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The version probe runs through the live-sandbox guest seam, never for_host()."""
     workspace.set_current_iteration("iteration_01")
@@ -2007,7 +2027,7 @@ def test_guest_probe_uses_live_sandbox_seam_not_host(
 
 
 def test_image_identity_failure_is_unavailable_but_run_completes(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unavailable image digest is recorded explained, and other artifacts still write."""
     workspace.set_current_iteration("iteration_01")
@@ -2045,7 +2065,7 @@ def test_image_identity_failure_is_unavailable_but_run_completes(
 
 
 def test_capture_error_on_real_arm_raises_loudly(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A genuine capture failure fails the arm loudly, not by silently dropping provenance."""
     # Capture runs before the agent/grading, so there is no completed result to shield: a
@@ -2063,7 +2083,7 @@ def test_capture_error_on_real_arm_raises_loudly(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
     )
 
-    def _raise_config(repo_root: object) -> NoReturn:
+    def _raise_config(repo_root: Path) -> NoReturn:
         """Stand in for a real config defect surfaced at capture time."""
         raise SchemaError("[tool.benchspec] base_image must be a non-empty string")
 
@@ -2087,11 +2107,9 @@ def test_capture_error_on_real_arm_raises_loudly(
 
 
 def test_provenance_json_survives_binder_failure_after_sandbox_use(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A sandbox that ran remains observed when later binding aborts the arm."""
-    from benchspec.grading.binder import BinderAuthError
-
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -2106,7 +2124,7 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
     result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
 
-    def bind(text: object) -> NoReturn:
+    def bind(text: str) -> NoReturn:
         """Simulate an authentication failure after the sandbox task completed."""
         raise BinderAuthError("gemini api key rejected")
 
@@ -2125,7 +2143,7 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
 
 
 def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Recorded fingerprint inputs match the environment used for snapshot selection."""
     workspace.set_current_iteration("iteration_01")
@@ -2145,7 +2163,7 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
     class EnvironmentBackend(_FakeBackend):
         """Backend double whose snapshot fingerprint reflects its environment input."""
 
-        def cache_fingerprint(self, agent: object, env: EnvConfig) -> str:
+        def cache_fingerprint(self, agent: CodingAgent, env: EnvConfig) -> str:
             """Use the base image as an observable snapshot cache identity."""
             return str(env.base_image)
 
@@ -2153,7 +2171,7 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
             """Treat every computed snapshot as already built."""
             return True
 
-        def fingerprint_inputs(self, agent: object, env: EnvConfig) -> FingerprintInputs:
+        def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
             """Expose the environment used when provenance is captured."""
             return FingerprintInputs(
                 backend_id=self.id,
@@ -2169,7 +2187,7 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
         [EnvConfig(base_image="snapshot-image"), EnvConfig(base_image="changed-image")]
     )
 
-    def resolve_environment(repo_root: object) -> EnvConfig:
+    def resolve_environment(repo_root: Path) -> EnvConfig:
         """Return a changed config if production resolves the environment twice."""
         return next(environments)
 

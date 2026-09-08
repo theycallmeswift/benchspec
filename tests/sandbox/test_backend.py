@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
+
+import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import backend, registry
+from benchspec.sandbox.sandbox import snapshot_name
 from benchspec.specs.discovery import EnvConfig
 
 
-def _agent() -> object:
+def _agent() -> ClaudeCodeAgent:
     """Build a claude agent test fixture."""
     return ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
 
 
-def test_docker_fingerprint_folds_in_its_own_backend_id(monkeypatch: object) -> None:
+def test_docker_fingerprint_folds_in_its_own_backend_id(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Docker fingerprint records `docker` as the backend that produced it."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
     docker_backend = registry.resolve_sandbox("docker")
@@ -26,7 +30,7 @@ def test_docker_fingerprint_folds_in_its_own_backend_id(monkeypatch: object) -> 
 
 
 def test_docker_and_microsandbox_fingerprints_differ_for_one_agent_and_env(
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two backends over the same agent+env never share a snapshot cache fingerprint."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
@@ -40,10 +44,9 @@ def test_docker_and_microsandbox_fingerprints_differ_for_one_agent_and_env(
     assert docker_fingerprint != microsandbox_fingerprint
 
 
-def test_snapshot_names_differ_across_the_two_backends(monkeypatch: object) -> None:
+def test_snapshot_names_differ_across_the_two_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """A snapshot name is namespaced by backend, so the two never collide on disk."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/docker")
-    from benchspec.sandbox.sandbox import snapshot_name
 
     docker_name = snapshot_name(_agent(), backend=registry.resolve_sandbox("docker"))
     microsandbox_name = snapshot_name(_agent(), backend=registry.resolve_sandbox("microsandbox"))
@@ -71,7 +74,9 @@ def test_cache_fingerprint_changes_with_base_image() -> None:
     assert first != second
 
 
-def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object) -> None:
+def test_cache_fingerprint_changes_with_install_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A changed agent install fingerprint changes the cache fingerprint."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     env = EnvConfig(script=b"echo one\n", script_path="s.sh")
@@ -84,7 +89,9 @@ def test_cache_fingerprint_changes_with_install_fingerprint(monkeypatch: object)
     ) != microsandbox_backend.cache_fingerprint(agent_b, env)
 
 
-def test_install_fingerprint_changes_with_provision_script(monkeypatch: object) -> None:
+def test_install_fingerprint_changes_with_provision_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Changing the resolved provision script invalidates the agent install fingerprint."""
     agent = _agent()
     original = agent.install_fingerprint()
@@ -149,9 +156,6 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
     the neutral `SandboxError` before it leaves the backend. This guards that boundary
     so a future edit cannot reintroduce a scattered `import microsandbox` elsewhere.
     """
-    import re
-    from pathlib import Path
-
     allowlist = {"microsandbox.py"}
     src = Path("src/benchspec")
     pattern = re.compile(r"^\s*(import microsandbox|from microsandbox)", re.MULTILINE)

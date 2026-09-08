@@ -14,8 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.agents.base import Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import docker
+from benchspec.sandbox.backend import LiveSandbox
 from benchspec.sandbox.errors import SandboxError
 from benchspec.sandbox.sandbox import _agent_extra_volumes
 from benchspec.specs.discovery import EnvConfig
@@ -35,6 +37,16 @@ async def _stream_events(
     """Start a streaming exec and drain every event it yields."""
     handle = await sandbox.exec_stream(cmd, args)
     return [event async for event in handle]
+
+
+def _streamed_stdout(events: list[docker.DockerExecEvent]) -> bytes:
+    """Join the chunks of every `stdout` event in `events`, in order."""
+    chunks: list[bytes] = []
+    for event in events:
+        if event.event_type == "stdout":
+            assert event.data is not None
+            chunks.append(event.data)
+    return b"".join(chunks)
 
 
 def test_exec_argv_renders_workdir_env_and_interactive_flags() -> None:
@@ -69,7 +81,9 @@ def test_docker_mount_flag_marks_readonly() -> None:
     assert docker.DockerVolume.bind("/tmp/room").flag("/workspace") == "/tmp/room:/workspace"
 
 
-def test_docker_binary_prefers_the_env_override(monkeypatch: object, tmp_path: object) -> None:
+def test_docker_binary_prefers_the_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify BENCHSPEC_DOCKER_PATH wins over PATH lookup."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "docker"))
 
@@ -77,7 +91,7 @@ def test_docker_binary_prefers_the_env_override(monkeypatch: object, tmp_path: o
 
 
 def test_exec_returns_the_exit_code_stdout_and_stderr(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify exec reports the guest command's exit code and both of its streams."""
     monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "printf out; printf err >&2; exit 3")
@@ -91,7 +105,7 @@ def test_exec_returns_the_exit_code_stdout_and_stderr(
 
 
 def test_exec_feeds_stdin_bytes_and_closes_the_pipe(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify stdin bytes reach the command, which sees EOF, and that -i is rendered."""
     command_log = tmp_path / "commands.log"
@@ -106,7 +120,7 @@ def test_exec_feeds_stdin_bytes_and_closes_the_pipe(
 
 
 def test_exec_without_stdin_renders_no_interactive_flag(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a command with no stdin runs without -i."""
     command_log = tmp_path / "commands.log"
@@ -121,7 +135,7 @@ def test_exec_without_stdin_renders_no_interactive_flag(
 
 
 def test_exec_raises_timeout_error_when_the_command_outlives_the_budget(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a command that runs past `timeout` is killed and reported as a timeout."""
     monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exec sleep 5")
@@ -132,7 +146,7 @@ def test_exec_raises_timeout_error_when_the_command_outlives_the_budget(
 
 
 def test_exec_raises_sandbox_error_on_a_daemon_failure_marker(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a daemon-side failure on stderr becomes a SandboxError, not a plain result."""
     monkeypatch.setenv(
@@ -145,7 +159,9 @@ def test_exec_raises_sandbox_error_on_a_daemon_failure_marker(
         asyncio.run(sandbox.exec("greet"))
 
 
-def test_shell_runs_the_script_under_bash(monkeypatch: object, tmp_path: object) -> None:
+def test_shell_runs_the_script_under_bash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify shell wraps the script in `bash -c` and returns its output."""
     command_log = tmp_path / "commands.log"
     monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
@@ -159,7 +175,7 @@ def test_shell_runs_the_script_under_bash(monkeypatch: object, tmp_path: object)
 
 
 def test_exec_stream_yields_stdout_chunks_then_an_exited_event(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify streaming yields the command's stdout and a terminal exited event."""
     monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", 'printf "a\\nb\\n"; exit 0')
@@ -167,13 +183,12 @@ def test_exec_stream_yields_stdout_chunks_then_an_exited_event(
 
     events = asyncio.run(_stream_events(sandbox, "emit"))
 
-    streamed = b"".join(event.data for event in events if event.event_type == "stdout")
-    assert streamed == b"a\nb\n"
+    assert _streamed_stdout(events) == b"a\nb\n"
     assert (events[-1].event_type, events[-1].code) == ("exited", 0)
 
 
 def test_exec_stream_reports_failed_when_stderr_carries_a_daemon_marker(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a daemon-side failure ends the stream with a failed event, not exited."""
     monkeypatch.setenv(
@@ -188,7 +203,7 @@ def test_exec_stream_reports_failed_when_stderr_carries_a_daemon_marker(
 
 
 def test_exec_stream_kill_ends_a_long_running_command(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify kill tears down a command that would otherwise run for seconds."""
     monkeypatch.setenv("BENCHSPEC_SHIM_EXEC", "exec sleep 5")
@@ -211,7 +226,7 @@ def test_exec_stream_kill_ends_a_long_running_command(
 
 
 def test_stop_removes_the_container_ignoring_a_failing_remove(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify stop runs `rm -f <name>` and swallows a nonzero exit from it."""
     command_log = tmp_path / "commands.log"
@@ -224,30 +239,51 @@ def test_stop_removes_the_container_ignoring_a_failing_remove(
     assert command_log.read_text(encoding="utf-8").strip() == "rm -f benchspec-eval-x-y-main"
 
 
-def _docker_backend(tmp_path: Path, monkeypatch: object) -> docker.DockerBackend:
+def _docker_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> docker.DockerBackend:
     """Build a `DockerBackend` whose `docker` CLI is the shim written under `tmp_path/bin`."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(write_docker_shim(tmp_path / "bin")))
     return docker.DockerBackend()
 
 
-class _ProbeAgent:
-    """A minimal agent whose provisioning is a single guest shell command."""
+class _ProbeAgent(ClaudeCodeAgent):
+    """A real agent whose provisioning is a single guest shell command.
+
+    Installs no CLI, hands the container no credential, and sets no guest environment,
+    so the command log carries only the lifecycle the backend itself renders.
+    """
 
     id = "probe"
 
-    def guest_env(self) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return no guest environment variables."""
         return {}
+
+    def secrets(self) -> list[Credential]:
+        """Return no credentials."""
+        return []
 
     def bridge_skills_home_script(self) -> str:
         """Return a no-op skills-home bridge script."""
         return "true"
 
-    async def provision(self, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the probe by running one command in the guest."""
         result = await sandbox.shell("echo provisioned")
         if result.exit_code != 0:
             raise RuntimeError(f"probe provision failed (exit {result.exit_code})")
+
+
+class _StagingAgent(_ProbeAgent):
+    """A probe agent that records the mount its project assets were staged from."""
+
+    def __init__(self) -> None:
+        """Start with no staging recorded."""
+        super().__init__()
+        self.staged_into: list[str] = []
+
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
+        """Record the mount the assets were staged from."""
+        self.staged_into.append(project_mount)
 
 
 def test_run_argv_renders_resource_flags_mounts_env_then_the_idle_command() -> None:
@@ -280,7 +316,7 @@ def test_image_ref_tags_the_snapshot_under_the_benchspec_repository() -> None:
 
 
 def test_preflight_reports_the_remedy_when_the_docker_cli_is_missing(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a `BENCHSPEC_DOCKER_PATH` pointing at nothing yields the install remedy."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
@@ -295,7 +331,7 @@ def test_preflight_reports_the_remedy_when_the_docker_cli_is_missing(
 
 
 def test_preflight_reports_an_unreachable_daemon_when_docker_info_fails(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a failing `docker info` yields the daemon remedy carrying the CLI's own stderr."""
     monkeypatch.setenv("BENCHSPEC_SHIM_INFO_EXIT", "1")
@@ -310,7 +346,7 @@ def test_preflight_reports_an_unreachable_daemon_when_docker_info_fails(
 
 
 def test_preflight_is_clean_when_the_daemon_answers(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a healthy daemon yields no preflight errors and no platform gate."""
     backend = _docker_backend(tmp_path, monkeypatch)
@@ -319,7 +355,7 @@ def test_preflight_is_clean_when_the_daemon_answers(
 
 
 def test_snapshot_exists_true_when_image_inspect_succeeds(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a snapshot whose image the daemon knows reports as present."""
     monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "0")
@@ -329,7 +365,7 @@ def test_snapshot_exists_true_when_image_inspect_succeeds(
 
 
 def test_snapshot_exists_false_when_image_inspect_fails(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a snapshot the daemon has no image for reports as absent."""
     monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "1")
@@ -339,7 +375,7 @@ def test_snapshot_exists_false_when_image_inspect_fails(
 
 
 def test_snapshot_exists_false_when_the_docker_cli_is_missing(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a host with no docker CLI reports every snapshot as absent instead of raising."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
@@ -349,7 +385,7 @@ def test_snapshot_exists_false_when_the_docker_cli_is_missing(
 
 
 def test_image_identity_reads_the_image_id_from_inspect(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify the image id `docker image inspect --format` prints becomes the digest."""
     backend = _docker_backend(tmp_path, monkeypatch)
@@ -361,7 +397,7 @@ def test_image_identity_reads_the_image_id_from_inspect(
 
 
 def test_image_identity_unavailable_when_inspect_fails(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a failing inspect explains itself instead of raising or reporting a null digest."""
     monkeypatch.setenv("BENCHSPEC_SHIM_INSPECT_EXIT", "1")
@@ -372,11 +408,12 @@ def test_image_identity_unavailable_when_inspect_fails(
 
     assert identity.image_digest is None
     assert identity.image_digest_status == "unavailable"
+    assert identity.image_digest_error is not None
     assert "No such image" in identity.image_digest_error
 
 
 def test_build_snapshot_provisions_the_build_container_then_commits_and_removes_it(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a build replaces the build container, provisions it, commits it, then removes it."""
     command_log = tmp_path / "commands.log"
@@ -397,7 +434,7 @@ def test_build_snapshot_provisions_the_build_container_then_commits_and_removes_
 
 
 def test_build_snapshot_removes_the_build_container_when_provisioning_fails(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a failed provision still tears the build container down instead of leaking it."""
     command_log = tmp_path / "commands.log"
@@ -414,7 +451,7 @@ def test_build_snapshot_removes_the_build_container_when_provisioning_fails(
 
 
 def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credential(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify an arm container binds the room rw, the project ro, and carries the credential."""
     command_log = tmp_path / "commands.log"
@@ -446,30 +483,19 @@ def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credent
 
 
 def test_create_trigger_sandbox_mounts_only_the_project_and_stages_assets(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a trigger container binds only /project read-only and stages the agent's assets."""
     command_log = tmp_path / "commands.log"
     monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
     stage = tmp_path / "stage"
     stage.mkdir()
-    staged_into: list[str] = []
+    agent = _StagingAgent()
     backend = _docker_backend(tmp_path, monkeypatch)
-
-    class _StagingAgent(_ProbeAgent):
-        """A probe agent that records where its project assets were staged from."""
-
-        def secrets(self) -> list:
-            """Return no credentials."""
-            return []
-
-        async def stage_project_assets(self, sandbox: object, project_mount: str) -> None:
-            """Record the mount the assets were staged from."""
-            staged_into.append(project_mount)
 
     created = asyncio.run(
         backend.create_trigger_sandbox(
-            agent=_StagingAgent(),
+            agent=agent,
             snapshot="snap",
             name="benchspec-trigger-main",
             host_repo_root=stage,
@@ -478,7 +504,7 @@ def test_create_trigger_sandbox_mounts_only_the_project_and_stages_assets(
     )
 
     assert created.name == "benchspec-trigger-main"
-    assert staged_into == ["/project"]
+    assert agent.staged_into == ["/project"]
     assert command_log.read_text(encoding="utf-8").splitlines() == [
         "rm -f benchspec-trigger-main",
         "run -d --name benchspec-trigger-main --cpus 2 --memory 2048m "
@@ -501,7 +527,7 @@ def test_images_argv_filters_the_snapshot_repository_and_prints_repo_and_tag() -
 
 
 def test_prune_removes_only_benchspec_containers_and_snapshot_images(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify prune removes benchspec-prefixed containers and snapshot-tagged images only."""
     command_log = tmp_path / "commands.log"
@@ -529,7 +555,7 @@ def test_prune_removes_only_benchspec_containers_and_snapshot_images(
 
 
 def test_prune_is_a_no_op_when_the_docker_cli_is_missing(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify prune logs nothing and does not raise when there is no docker CLI at all."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
@@ -543,7 +569,7 @@ def test_prune_is_a_no_op_when_the_docker_cli_is_missing(
 
 
 def test_prune_finishes_every_removal_when_one_wedges(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a removal that outlives its budget neither raises nor skips the rest.
 
@@ -574,7 +600,7 @@ def test_prune_finishes_every_removal_when_one_wedges(
 
 
 def test_prune_stops_after_a_failing_ps_without_raising(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify an unreachable daemon during `ps` prunes nothing and never raises."""
     command_log = tmp_path / "commands.log"
@@ -590,7 +616,7 @@ def test_prune_stops_after_a_failing_ps_without_raising(
 
 
 def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a payload larger than a pipe buffer streams through instead of deadlocking.
 
@@ -605,8 +631,8 @@ def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
     async def _echo_back() -> bytes:
         """Stream the payload through the guest and collect everything it echoes."""
         handle = await sandbox.exec_stream("cat", stdin=payload)
-        chunks = [event.data async for event in handle if event.event_type == "stdout"]
-        return b"".join(chunks)
+        events = [event async for event in handle]
+        return _streamed_stdout(events)
 
     echoed = asyncio.run(asyncio.wait_for(_echo_back(), timeout=30))
 
@@ -614,7 +640,7 @@ def test_exec_stream_feeds_a_large_stdin_payload_without_deadlocking(
 
 
 def test_exec_stream_survives_a_guest_that_never_reads_its_stdin(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a payload written to an already-exited command neither raises nor stalls.
 

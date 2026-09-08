@@ -1,5 +1,9 @@
 """Tests for room."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 from benchspec.orchestration.room import (
     changed_paths,
     gather_facts,
@@ -13,7 +17,7 @@ from benchspec.orchestration.room import (
 )
 
 
-def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
+def test_seed_room_copies_fixture_and_records_shas(tmp_path: Path) -> None:
     """Verify seed room copies fixture and records shas."""
     fixture = tmp_path / "fixture"
     (fixture / "0. Inbox").mkdir(parents=True)
@@ -27,7 +31,7 @@ def test_seed_room_copies_fixture_and_records_shas(tmp_path: object) -> None:
     assert len(shas["0. Inbox/a.md"]) == 64  # sha256 hex
 
 
-def test_seed_room_no_fixture_creates_empty_vault(tmp_path: object) -> None:
+def test_seed_room_no_fixture_creates_empty_vault(tmp_path: Path) -> None:
     """Verify seed room no fixture creates empty vault."""
     vault = tmp_path / "room" / "vault"
     shas = seed_room(None, vault)
@@ -36,7 +40,7 @@ def test_seed_room_no_fixture_creates_empty_vault(tmp_path: object) -> None:
 
 
 def test_seed_room_substitutes_today_in_path_names_and_content(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify seed room substitutes today in path names and content."""
     fixture = tmp_path / "fixture"
@@ -69,7 +73,7 @@ def test_seed_room_substitutes_today_in_path_names_and_content(
 
 
 
-def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
+def test_gather_facts_returns_tree_contents_and_shas(tmp_path: Path) -> None:
     """Verify gather facts returns tree contents and shas."""
     (tmp_path / "0. Inbox").mkdir()
     (tmp_path / "0. Inbox" / "a.md").write_text("hello")
@@ -83,14 +87,16 @@ def test_gather_facts_returns_tree_contents_and_shas(tmp_path: object) -> None:
 
 
 
-def _stream(*pairs: object) -> object:
+def _stream(*pairs: tuple[str, str]) -> str:
     """Build a read_files-script stdout from (path, content) pairs."""
-    return "".join(f"\x1e\x1eARTIFACT\x1e\x1e{p}\x1e\x1e\n{c}" for p, c in pairs)
+    return "".join(
+        f"\x1e\x1eARTIFACT\x1e\x1e{path}\x1e\x1e\n{content}" for path, content in pairs
+    )
 
 
-def _sha_lines(*pairs: object) -> object:
+def _sha_lines(*pairs: tuple[str, str]) -> str:
     """Build sha256sum stdout (`<hex>  <path>`) from (path, sha) pairs."""
-    return "".join(f"{sha}  {p}\n" for p, sha in pairs)
+    return "".join(f"{sha}  {path}\n" for path, sha in pairs)
 
 
 def test_sha_snapshot_script_lists_each_dir_and_skips_missing() -> None:
@@ -102,7 +108,7 @@ def test_sha_snapshot_script_lists_each_dir_and_skips_missing() -> None:
     assert "sha256sum" in script  # hashes, doesn't cat
 
 
-def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: object) -> None:
+def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: Path) -> None:
     """Verify sha snapshot script exits zero when last dir missing."""
     # A `for` loop exits with its last iteration's status, so a missing LAST dir makes
     # `[ -d "$d" ] &&` short-circuit to exit 1 — which the caller would read as a failed
@@ -118,7 +124,7 @@ def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: object) 
 
 
 def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify sha snapshot script descends through a symlinked load dir."""
     # The skills-home bridge replaces the agent's load dir with a SYMLINK to the fixed

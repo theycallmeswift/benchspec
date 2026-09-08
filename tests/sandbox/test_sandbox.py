@@ -1,113 +1,98 @@
 """Tests for sandbox."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import subprocess
+import sys
+import types
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
 
+from benchspec.agents import CodingAgent
 from benchspec.agents.base import FIXED_SKILLS_HOME
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
+from benchspec.grading.trigger import detect_skill_fired
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox import backend as backend_mod
 from benchspec.sandbox import microsandbox as microsandbox_mod
 from benchspec.sandbox import registry, sandbox
-from benchspec.sandbox.docker import DockerBackend
+from benchspec.sandbox.docker import DockerBackend, DockerMount, DockerVolume
+from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.specs.discovery import EnvConfig
-from benchspec.testing import FakeExecOutput, FakeSandbox
+from benchspec.specs.schema import SchemaError
+from benchspec.testing import FakeExecEvent, FakeExecOutput, FakeSandbox
 
 
-def _claude_agent(harness: object = None) -> object:
+def _claude_agent(harness: str | None = None) -> ClaudeCodeAgent:
     """Build the claude agent test fixture (accepts and ignores an optional harness arg)."""
     return ClaudeCodeAgent(auth_value="test-token", version="v")
 
 
-class _FakeEvent:
-    """One microsandbox `exec_stream` event: a `stdout` chunk, or a terminal.
-
-    `exited` carrying an exit code.
-    """
-
-    def __init__(
-        self: object, event_type: object, data: object = None, code: object = None
-    ) -> None:
-        """Initialize the instance."""
-        self.event_type, self.data, self.code = event_type, data, code
-
-
-def _stdout(*chunks: object) -> object:
+def _stdout(*chunks: bytes) -> list[FakeExecEvent]:
     """`stdout` events from raw byte chunks."""
-    return [_FakeEvent("stdout", data=chunk) for chunk in chunks]
+    return [FakeExecEvent("stdout", data=chunk) for chunk in chunks]
+
+
+def _shell_scripts(fake: FakeSandbox) -> list[str]:
+    """The script of every `shell` call recorded on `fake`, in call order."""
+    scripts: list[str] = []
+    for call in fake.calls:
+        kind, script = call[0], call[1]
+        if kind == "shell":
+            assert isinstance(script, str)
+            scripts.append(script)
+    return scripts
+
+
+def _first_exec_args(fake: FakeSandbox) -> list[str]:
+    """The argument list of the first `exec` call recorded on `fake`."""
+    exec_call = next(call for call in fake.calls if call[0] == "exec")
+    args = exec_call[2]
+    assert isinstance(args, list)
+    return args
+
+
+def _exec_stream_kwargs(fake: FakeSandbox) -> dict[str, object]:
+    """The keyword arguments of the single `exec_stream` call recorded on `fake`."""
+    (stream_call,) = [call for call in fake.calls if call[0] == "exec_stream"]
+    kwargs = stream_call[3]
+    assert isinstance(kwargs, dict)
+    return kwargs
 
 
 def _route_via_fake_vm(
-    monkeypatch: object,
-    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     *,
-    events: object,
-    agent_factory: object,
-    model: object,
-    capture: object = None,
-) -> object:
+    events: list[FakeExecEvent],
+    agent_factory: Callable[[], CodingAgent],
+    model: str,
+    capture: dict[str, object] | None = None,
+) -> list[str]:
     """Drive `route_in_sandbox` against a fake trigger VM whose `exec_stream` yields.
 
     `events`. If `capture` is given, it receives the `exec_stream` kwargs (so a test can
     assert what was passed). Returns the captured `lines`.
     """
-
-    class FakeHandle:
-        """Provide a fake handle for tests."""
-
-        def __init__(self: object) -> None:
-            """Initialize the instance."""
-            self._index = 0
-
-        def __aiter__(self: object) -> object:
-            """Build the aiter test fixture."""
-            return self
-
-        async def __anext__(self: object) -> object:
-            """Build the anext test fixture."""
-            if self._index >= len(events):
-                raise StopAsyncIteration
-            event = events[self._index]
-            self._index += 1
-            return event
-
-        async def kill(self: object) -> None:
-            """Kill."""
-            pass
-
-    class FakeTriggerSandbox:
-        """Provide a fake trigger sandbox for tests."""
-
-        async def shell(self: object, *args: object, **kwargs: object) -> object:
-            """Shell."""
-            return FakeExecOutput(0)
-
-        async def exec_stream(self: object, *args: object, **kwargs: object) -> object:
-            """Exec stream."""
-            if capture is not None:
-                capture.update(kwargs)
-            return FakeHandle()
-
-        async def stop(self: object, timeout: object = None) -> None:
-            """Stop."""
-            return None
-
+    trigger_vm = FakeSandbox(stream_events=events)
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
     monkeypatch.setattr(sandbox, "make_agent", agent_factory)
 
-    async def fake_create_trigger(self: object, **kwargs: object) -> object:
+    async def fake_create_trigger(self: DockerBackend, **kwargs: object) -> FakeSandbox:
         """Fake create trigger (class-level: takes self)."""
-        return FakeTriggerSandbox()
+        return trigger_vm
 
     monkeypatch.setattr(DockerBackend, "create_trigger_sandbox", fake_create_trigger)
-    return sandbox.route_in_sandbox(
+    lines = sandbox.route_in_sandbox(
         "query",
         tmp_path,
         model,
@@ -115,6 +100,9 @@ def _route_via_fake_vm(
         effort="low",
         skill_name="archive",
     )
+    if capture is not None:
+        capture.update(_exec_stream_kwargs(trigger_vm))
+    return lines
 
 
 def test_snapshot_name_carries_backend_id() -> None:
@@ -153,7 +141,7 @@ def test_snapshot_name_changes_when_script_bytes_change() -> None:
 
 
 def test_preflight_collects_backend_and_credential_failures(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Preflight surfaces both the default backend's host errors and the credential error."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
@@ -166,7 +154,7 @@ def test_preflight_collects_backend_and_credential_failures(
     assert "credential" in message
 
 
-def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> None:
+def test_preflight_dispatches_host_checks_to_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """`sandbox.preflight()` must call `MicrosandboxBackend.preflight()`, not reimplement.
 
     host checks inline. Pin this by returning a sentinel from the backend method and
@@ -184,7 +172,9 @@ def test_preflight_dispatches_host_checks_to_backend(monkeypatch: object) -> Non
     assert "SENTINEL_HOST_ERR" in str(exc_info.value)
 
 
-def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch: object) -> None:
+def test_preflight_credential_error_surfaces_with_no_backend_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The credential check still surfaces when the backend reports a clean host.
 
     (dispatch AND the shared credential check are both wired, independently of each
@@ -198,7 +188,7 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(monkeypatch:
     assert "credential" in str(exc_info.value)
 
 
-def test_preflight_passes_on_supported(monkeypatch: object) -> None:
+def test_preflight_passes_on_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     """A supported host with a credential set passes without raising."""
     monkeypatch.setattr(microsandbox_mod.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(microsandbox_mod.platform, "machine", lambda: "arm64")
@@ -208,24 +198,30 @@ def test_preflight_passes_on_supported(monkeypatch: object) -> None:
     sandbox.preflight(registry.resolve_sandbox("microsandbox"))  # no raise
 
 
-def test_ensure_snapshot_skips_build_when_present(monkeypatch: object, tmp_path: object) -> None:
+def test_ensure_snapshot_skips_build_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A present snapshot is returned without a build."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: True)
-    built: list = []
-    monkeypatch.setattr(microsandbox_backend, "build_snapshot", lambda *a, **k: built.append(a))
+    built: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        microsandbox_backend, "build_snapshot", lambda *args, **kwargs: built.append(args)
+    )
     agent = ClaudeCodeAgent(auth_value="test-token", version="v1")
     name = sandbox.ensure_snapshot(agent, repo_root=tmp_path, backend=microsandbox_backend)
     assert name.startswith("benchspec-microsandbox-claude-code-v1-")
     assert built == []
 
 
-def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: object) -> None:
+def test_ensure_snapshot_builds_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A missing snapshot is built exactly once under the lock."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     states = iter([False, False])  # missing before lock, still missing inside
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: next(states))
-    built: list = []
+    built: list[str] = []
     monkeypatch.setattr(
         microsandbox_backend, "build_snapshot", lambda agent, name, env: built.append(name)
     )
@@ -235,14 +231,16 @@ def test_ensure_snapshot_builds_when_missing(monkeypatch: object, tmp_path: obje
     assert name.startswith("benchspec-microsandbox-claude-code-v1-")
 
 
-def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path: object) -> None:
+def test_ensure_snapshot_name_reflects_env_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The env config from repo_root reaches both the snapshot name and the build."""
     (tmp_path / "pyproject.toml").write_text(
         '[tool.benchspec]\nbase_image = "python:3.12-slim"\n', encoding="utf-8"
     )
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "snapshot_exists", lambda name: False)
-    captured: dict = {}
+    captured: dict[str, object] = {}
     monkeypatch.setattr(
         microsandbox_backend,
         "build_snapshot",
@@ -259,7 +257,7 @@ def test_ensure_snapshot_name_reflects_env_config(monkeypatch: object, tmp_path:
 
 
 def test_cli_build_resolves_environment_from_repo_root(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Bare cli_build reads its environment config from the given repo_root, not cwd."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
@@ -267,7 +265,7 @@ def test_cli_build_resolves_environment_from_repo_root(
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(DockerBackend, "build_snapshot", lambda self, agent, name, env: None)
-    resolved_roots: list = []
+    resolved_roots: list[Path] = []
     monkeypatch.setattr(
         sandbox,
         "resolve_environment_config",
@@ -280,7 +278,7 @@ def test_cli_build_resolves_environment_from_repo_root(
 
 
 def test_cli_build_with_microsandbox_set_resolves_and_builds(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A microsandbox set drives the real cli_build path to a backend build call."""
     (tmp_path / "pyproject.toml").write_text(
@@ -298,7 +296,7 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
-    built: list = []
+    built: list[str] = []
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
@@ -311,7 +309,7 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
     assert built[0].startswith("benchspec-microsandbox-")
 
 
-def _agent_for_harness(harness: object = None) -> object:
+def _agent_for_harness(harness: str | None = None) -> CodingAgent:
     """Build a per-harness test fixture agent (mirrors `make_agent`'s harness dispatch)."""
     if harness == "codex":
         return CodexAgent(auth_value="test-token", version="v")
@@ -319,7 +317,7 @@ def _agent_for_harness(harness: object = None) -> object:
 
 
 def test_cli_build_with_set_builds_once_per_distinct_harness(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Two DISTINCT-harness arms build two snapshots, one per harness."""
     (tmp_path / "pyproject.toml").write_text(
@@ -336,9 +334,9 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
         encoding="utf-8",
     )
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
-    make_agent_calls: list = []
+    make_agent_calls: list[str | None] = []
 
-    def fake_make_agent(harness: object = None) -> object:
+    def fake_make_agent(harness: str | None = None) -> CodingAgent:
         """Record the harness each call resolved and delegate to the test fixture."""
         make_agent_calls.append(harness)
         return _agent_for_harness(harness)
@@ -347,7 +345,7 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
-    built: list = []
+    built: list[str] = []
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
@@ -363,7 +361,7 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
 
 
 def test_cli_build_with_set_dedupes_shared_harness(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Two arms sharing one harness build exactly once."""
     (tmp_path / "pyproject.toml").write_text(
@@ -380,9 +378,9 @@ def test_cli_build_with_set_dedupes_shared_harness(
         encoding="utf-8",
     )
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
-    make_agent_calls: list = []
+    make_agent_calls: list[str | None] = []
 
-    def fake_make_agent(harness: object = None) -> object:
+    def fake_make_agent(harness: str | None = None) -> CodingAgent:
         """Record the harness each call resolved and delegate to the test fixture."""
         make_agent_calls.append(harness)
         return _claude_agent()
@@ -391,7 +389,7 @@ def test_cli_build_with_set_dedupes_shared_harness(
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
-    built: list = []
+    built: list[str] = []
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend,
         "build_snapshot",
@@ -405,7 +403,7 @@ def test_cli_build_with_set_dedupes_shared_harness(
 
 
 def test_cli_build_multi_harness_propagates_second_build_failure(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A later harness's build failure propagates undisturbed after an earlier success.
 
@@ -431,9 +429,11 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
     )
-    built: list = []
+    built: list[str] = []
 
-    def failing_build(self: object, agent: object, name: object, env: object) -> None:
+    def failing_build(
+        self: microsandbox_mod.MicrosandboxBackend, agent: CodingAgent, name: str, env: EnvConfig
+    ) -> None:
         """Succeed for the first harness, then fail as a real build failure would."""
         if built:
             raise RuntimeError("snapshot build failed")
@@ -448,11 +448,9 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
 
 
 def test_cli_build_reports_image_identity_available(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Every built/reused snapshot's image-identity status is reported."""
-    from benchspec.sandbox.provenance import ImageIdentity
-
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
@@ -467,11 +465,9 @@ def test_cli_build_reports_image_identity_available(
 
 
 def test_cli_build_reports_image_identity_unavailable(
-    monkeypatch: object, tmp_path: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unavailable image-identity lookup surfaces its error, never a bare null."""
-    from benchspec.sandbox.provenance import ImageIdentity
-
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
@@ -490,12 +486,12 @@ def test_cli_build_reports_image_identity_unavailable(
 
 
 def test_cli_build_bare_path_requires_no_sets_table(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Bare `sandbox:build` builds only the default agent with no `[tool.benchspec.sets]`."""
-    make_agent_calls: list = []
+    make_agent_calls: list[str | None] = []
 
-    def fake_make_agent(harness: object = None) -> object:
+    def fake_make_agent(harness: str | None = None) -> CodingAgent:
         """Record the harness each call resolved and delegate to the test fixture."""
         make_agent_calls.append(harness)
         return _claude_agent()
@@ -511,11 +507,9 @@ def test_cli_build_bare_path_requires_no_sets_table(
 
 
 def test_cli_build_unknown_sandbox_set_raises_schema_error(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A set naming an unimplemented sandbox fails at resolution, before preflight or build."""
-    from benchspec.specs.schema import SchemaError
-
     (tmp_path / "pyproject.toml").write_text(
         "[tool.benchspec]\n"
         'default-set = "virt"\n'
@@ -526,7 +520,7 @@ def test_cli_build_unknown_sandbox_set_raises_schema_error(
         'arms = [{ name = "baseline", harness = "claude-code" }]\n',
         encoding="utf-8",
     )
-    called_preflight: list = []
+    called_preflight: list[bool] = []
     monkeypatch.setattr(
         sandbox, "preflight", lambda backend=None: called_preflight.append(True)
     )
@@ -537,10 +531,8 @@ def test_cli_build_unknown_sandbox_set_raises_schema_error(
     assert called_preflight == []
 
 
-def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:
+def test_layer_build_config_rejects_non_table_sets(tmp_path: Path) -> None:
     """A malformed scratch sets value raises a contextual schema error."""
-    from benchspec.specs.schema import SchemaError
-
     config = tmp_path / "config.toml"
     config.write_text('[tool.benchspec]\nsets = ["oops"]\n', encoding="utf-8")
 
@@ -548,7 +540,7 @@ def test_layer_build_config_rejects_non_table_sets(tmp_path: object) -> None:
         sandbox._layer_build_config({}, str(config))
 
 
-def test_plugin_dir_for(tmp_path: object) -> None:
+def test_plugin_dir_for(tmp_path: Path) -> None:
     """Verify plugin dir for."""
     assert sandbox._plugin_dir_for(None) is None
     assert sandbox._plugin_dir_for(tmp_path) is None  # no .claude-plugin/plugin.json
@@ -557,31 +549,22 @@ def test_plugin_dir_for(tmp_path: object) -> None:
     assert sandbox._plugin_dir_for(tmp_path) == sandbox.PROJECT_MOUNT
 
 
-def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: object) -> None:
+def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: Path) -> None:
     """Verify agent extra volumes mounts codex auth json."""
     auth = tmp_path / "auth.json"
     auth.write_text("{}")
     agent = CodexAgent(auth_json_path=str(auth))
 
-    class FakeVolume:
-        """Provide a fake volume for tests."""
-
-        @staticmethod
-        def bind(path: object, *, readonly: object = False) -> object:
-            """Bind."""
-            return {"path": path, "readonly": readonly}
-
-    volumes = sandbox._agent_extra_volumes(agent, FakeVolume)
+    volumes = sandbox._agent_extra_volumes(agent, DockerVolume)
 
     assert volumes == {
-        "/benchspec-codex-auth/auth.json": {
-            "path": str(auth),
-            "readonly": True,
-        },
+        "/benchspec-codex-auth/auth.json": DockerMount(host_path=str(auth), readonly=True),
     }
 
 
-def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_runs_turn_and_tears_down(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session runs turn and tears down."""
     fake = FakeSandbox(
         exec_outputs=[
@@ -592,16 +575,15 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
         ]
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
-        fake.create_kwargs = kwargs
         return fake
 
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -622,7 +604,9 @@ def test_arm_session_runs_turn_and_tears_down(monkeypatch: object, tmp_path: obj
     assert fake.stopped is True
 
 
-def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_propagates_create_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session propagates create failure."""
 
     async def boom(**kwargs: object) -> NoReturn:
@@ -652,7 +636,9 @@ def test_arm_session_propagates_create_failure(monkeypatch: object, tmp_path: ob
         asyncio.run(drive())
 
 
-def test_route_in_sandbox_returns_lines_on_dispatch(monkeypatch: object, tmp_path: object) -> None:
+def test_route_in_sandbox_returns_lines_on_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify route in sandbox returns lines on dispatch."""
     events = _stdout(
         b'{"type":"system"}\n',
@@ -668,19 +654,19 @@ def test_route_in_sandbox_returns_lines_on_dispatch(monkeypatch: object, tmp_pat
         model="sonnet",
     )
 
-    from benchspec.grading.trigger import detect_skill_fired
-
     assert detect_skill_fired(lines, "archive") is True
 
 
-def test_route_in_sandbox_raises_on_nonzero_exit(monkeypatch: object, tmp_path: object) -> None:
+def test_route_in_sandbox_raises_on_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify route in sandbox raises for on nonzero exit."""
     events = [
-        _FakeEvent(
+        FakeExecEvent(
             "stdout",
             data=b'{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n',
         ),
-        _FakeEvent("exited", code=1),
+        FakeExecEvent("exited", code=1),
     ]
 
     with pytest.raises(sandbox.RoutingError):
@@ -693,14 +679,16 @@ def test_route_in_sandbox_raises_on_nonzero_exit(monkeypatch: object, tmp_path: 
         )
 
 
-def test_route_passes_empty_stdin_to_exec_stream(monkeypatch: object, tmp_path: object) -> None:
+def test_route_passes_empty_stdin_to_exec_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify route passes empty stdin to exec stream."""
     events = _stdout(
         b'{"type":"system"}\n',
         b'{"type":"assistant","message":{"content":'
         b'[{"type":"tool_use","name":"Skill","input":{"skill":"archive"}}]}}\n',
     )
-    captured = {}
+    captured: dict[str, object] = {}
 
     _route_via_fake_vm(
         monkeypatch,
@@ -714,21 +702,22 @@ def test_route_passes_empty_stdin_to_exec_stream(monkeypatch: object, tmp_path: 
     assert captured.get("stdin") == b""
 
 
-class _RecordingBackend:
-    """A fake backend whose `prune` records that it ran, for `cli_clean` fan-out tests."""
+class _RecordingBackend(DockerBackend):
+    """A backend whose `prune` records that it ran, for `cli_clean` fan-out tests."""
 
-    def __init__(self: object, calls: list[str], label: str) -> None:
+    def __init__(self, calls: list[str], label: str) -> None:
         """Bind the shared call log and this instance's label."""
+        super().__init__()
         self._calls = calls
         self._label = label
 
-    def prune(self: object) -> None:
+    def prune(self) -> None:
         """Record that this backend's prune ran."""
         self._calls.append(self._label)
 
 
 def test_cli_clean_invokes_prune_on_every_registered_backend(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify cli_clean prunes every backend `registered_backends` returns, not just one."""
     calls: list[str] = []
@@ -746,7 +735,9 @@ def test_cli_clean_invokes_prune_on_every_registered_backend(
     assert sorted(calls) == ["alpha", "beta"]
 
 
-def test_cli_clean_removes_repo_snapshot_lock_files(monkeypatch: object, tmp_path: object) -> None:
+def test_cli_clean_removes_repo_snapshot_lock_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify cli_clean unlinks every per-repo snapshot lock file regardless of backends."""
     monkeypatch.setattr(sandbox, "registered_backends", lambda: {})
     lock_file = tmp_path / "tmp" / ".benchspec-snapshot-claude-code.lock"
@@ -758,26 +749,26 @@ def test_cli_clean_removes_repo_snapshot_lock_files(monkeypatch: object, tmp_pat
     assert not lock_file.exists()
 
 
-def _opencode_agent() -> object:
+def _opencode_agent() -> OpenCodeAgent:
     """Build the opencode agent test fixture."""
     return OpenCodeAgent(auth_value="test-token", auth_env="GEMINI_API_KEY", version="v")
 
 
 def _drive_route_with_stdout_events(
-    monkeypatch: object, tmp_path: object, events: object
-) -> object:
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, events: list[tuple[str, bytes]]
+) -> list[str]:
     """Build the drive route with stdout events test fixture."""
     return _route_via_fake_vm(
         monkeypatch,
         tmp_path,
-        events=[_FakeEvent(event_type, data=data) for event_type, data in events],
+        events=[FakeExecEvent(event_type, data=data) for event_type, data in events],
         agent_factory=_opencode_agent,
         model="google/gemini-3.5-flash",
     )
 
 
 def test_route_reassembles_jsonl_split_across_stream_chunks(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify route reassembles jsonl split across stream chunks."""
     # Stream chunks can split JSONL records; routing must reassemble complete lines.
@@ -804,7 +795,7 @@ def test_route_reassembles_jsonl_split_across_stream_chunks(
 
 
 def test_route_flushes_trailing_partial_line_without_newline(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify route flushes trailing partial line without newline."""
     # The final JSONL event may arrive without a trailing newline. The drain loop must
@@ -832,32 +823,57 @@ def test_route_flushes_trailing_partial_line_without_newline(
     assert _opencode_agent().detect_fired(lines, "archive") is True
 
 
-def _artifact_stream(*pairs: object) -> object:
+def _artifact_stream(*pairs: tuple[str, str]) -> str:
     """Build the artifact stream test fixture."""
     return "".join(f"\x1e\x1eARTIFACT\x1e\x1e{path}\x1e\x1e\n{content}" for path, content in pairs)
 
 
-def _sha_lines(*pairs: object) -> object:
+def _sha_lines(*pairs: tuple[str, str]) -> str:
     """Build the sha lines test fixture."""
     return "".join(f"{sha}  {path}\n" for path, sha in pairs)
 
 
+@dataclass(frozen=True)
+class _ShellCall:
+    """One `shell` call a scripted sandbox saw: the script plus the env and cwd it ran under."""
+
+    script: str
+    env: dict[str, str]
+    cwd: str | None
+
+
 class _QueuedShellSandbox(FakeSandbox):
-    """Store queued shell sandbox data."""
+    """A `FakeSandbox` whose `shell` replays queued outputs and keeps typed call records.
 
-    def __init__(self: object, shell_queue: object, exec_outputs: object) -> None:
-        """Initialize the instance."""
-        super().__init__(exec_outputs=list(exec_outputs))
+    `shell_queue` is consumed in order, one output per shell call. `shell_calls` holds what
+    each call was asked to run, so a test asserts on the script, env, and cwd directly.
+    """
+
+    def __init__(
+        self,
+        shell_queue: list[FakeExecOutput],
+        exec_outputs: list[FakeExecOutput] | None = None,
+    ) -> None:
+        """Queue the shell outputs to replay and the exec outputs `FakeSandbox` hands out."""
+        super().__init__(exec_outputs=list(exec_outputs or []))
         self._shell_queue = list(shell_queue)
+        self.shell_calls: list[_ShellCall] = []
 
-    async def shell(self: object, script: object, **kwargs: object) -> object:
-        """Shell."""
-        self.calls.append(("shell", script, kwargs))
+    async def shell(
+        self,
+        script: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> FakeExecOutput:
+        """Record the call and replay the next queued output."""
+        self.shell_calls.append(_ShellCall(script=script, env=dict(env or {}), cwd=cwd))
+        self.calls.append(("shell", script, {"env": env, "cwd": cwd}))
         return self._shell_queue.pop(0)
 
 
 def test_arm_session_captures_authored_skill_excluding_staged_baseline(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify arm session captures authored skill excluding staged baseline."""
     # The agent writes a NEW skill into ~/.claude/skills (outside the workdir mount). The
@@ -880,7 +896,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -888,7 +904,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -929,7 +945,7 @@ def test_snapshot_artifact_shas_returns_none_on_shell_failure() -> None:
 
 
 def test_baseline_snapshot_failure_captures_no_artifacts(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify baseline snapshot failure captures no artifacts."""
     # Failed baseline snapshots capture no authored artifacts.
@@ -948,7 +964,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -956,7 +972,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -975,74 +991,36 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     assert response.artifacts == {}  # the staged tree was NOT dumped as authored
 
 
-
-
-class _SetupShellSandbox:
-    """Record shell calls and return one canned result.
-
-    Tests use this to assert the cwd, environment, and script a setup.sh run used.
-    """
-
-    def __init__(self: object, exit_code: object = 0, stderr: object = "") -> None:
-        """Initialize the instance."""
-        self.calls = []
-        self._result = FakeExecOutput(exit_code=exit_code, stderr_text=stderr)
-
-    async def shell(self: object, script: object, env: object = None, cwd: object = None) -> object:
-        """Shell."""
-        self.calls.append({"script": script, "env": env, "cwd": cwd})
-        return self._result
-
-
-class _SetupAgent:
-    """Minimal agent stub: cell_env mirrors the real claude/opencode contract.
-
-    (guest_env + BENCHSPEC_*, harness derived as self.id).
-    """
-
-    id = "claude-code"
-
-    def cell_env(self: object, *, arm: object, model: object, eval_set: object = "") -> object:
-        """Cell env."""
-        return {
-            "HOME": "/root",
-            "BENCHSPEC_ARM": arm,
-            "BENCHSPEC_MODEL": model,
-            "BENCHSPEC_HARNESS": self.id,
-            "BENCHSPEC_SET": eval_set,
-        }
-
-
 def test_run_setup_sh_runs_reldir_script_and_env() -> None:
     """Verify run setup sh runs the eval-dir script with cell env."""
-    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
+    fake_sandbox = _QueuedShellSandbox(shell_queue=[FakeExecOutput(0)])
 
     asyncio.run(
         sandbox.run_setup_sh(
             fake_sandbox,
-            agent,
+            _claude_agent(),
             setup_reldir="skills/ingest/evals/single-article",
             arm="trial",
             model="opus",
         )
     )
 
-    call = fake_sandbox.calls[-1]
-    assert call["cwd"] == sandbox.PROJECT_MOUNT
-    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/single-article/setup.sh" in call["script"]
-    assert "bash ./setup.sh" in call["script"]
-    assert call["env"]["BENCHSPEC_ARM"] == "trial"
-    assert call["env"]["BENCHSPEC_MODEL"] == "opus"
+    call = fake_sandbox.shell_calls[-1]
+    assert call.cwd == sandbox.PROJECT_MOUNT
+    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/single-article/setup.sh" in call.script
+    assert "bash ./setup.sh" in call.script
+    assert call.env["BENCHSPEC_ARM"] == "trial"
+    assert call.env["BENCHSPEC_MODEL"] == "opus"
 
 
 def test_run_setup_sh_passes_set_and_arm_env() -> None:
     """Verify run setup sh passes set and arm env."""
-    fake_sandbox, agent = _SetupShellSandbox(), _SetupAgent()
+    fake_sandbox = _QueuedShellSandbox(shell_queue=[FakeExecOutput(0)])
 
     asyncio.run(
         sandbox.run_setup_sh(
             fake_sandbox,
-            agent,
+            _claude_agent(),
             setup_reldir="skills/ingest/evals/x",
             arm="trial",
             model="opus",
@@ -1051,36 +1029,49 @@ def test_run_setup_sh_passes_set_and_arm_env() -> None:
         )
     )
 
-    env = fake_sandbox.calls[-1]["env"]
+    env = fake_sandbox.shell_calls[-1].env
     assert env["BENCHSPEC_SET"] == "popular-harnesses"
     assert env["ANTHROPIC_BASE_URL"] == "https://o"
 
 
 def test_run_setup_sh_nonzero_exit_raises() -> None:
     """Verify run setup sh nonzero exit raises."""
-    fake_sandbox, agent = _SetupShellSandbox(exit_code=2, stderr="boom"), _SetupAgent()
+    fake_sandbox = _QueuedShellSandbox(
+        shell_queue=[FakeExecOutput(exit_code=2, stderr_text="boom")]
+    )
 
     with pytest.raises(RuntimeError, match="setup.sh"):
         asyncio.run(
             sandbox.run_setup_sh(
-                fake_sandbox, agent, setup_reldir="skills/ingest/evals/x", arm="trial", model="opus"
+                fake_sandbox,
+                _claude_agent(),
+                setup_reldir="skills/ingest/evals/x",
+                arm="trial",
+                model="opus",
             )
         )
 
 
-class _LocalShellSandbox:
+class _LocalShellSandbox(FakeSandbox):
     """Runs the script string in a real /bin/sh under a temp cwd, so the shell logic.
 
     itself is under test: an absent ./evals/setup.sh → exit 0; a present-but-failing
     one → its own exit code. This is the contradiction the `|| true` form hid.
     """
 
-    def __init__(self: object, cwd: object) -> None:
-        """Initialize the instance."""
+    def __init__(self, cwd: Path) -> None:
+        """Pin the directory the real shell runs in."""
+        super().__init__()
         self._cwd = cwd
 
-    async def shell(self: object, script: object, env: object = None, cwd: object = None) -> object:
-        """Shell."""
+    async def shell(
+        self,
+        script: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> FakeExecOutput:
+        """Run `script` under /bin/sh and report its exit code and stderr."""
         proc = subprocess.run(
             ["/bin/sh", "-c", script],
             cwd=str(self._cwd),
@@ -1090,7 +1081,7 @@ class _LocalShellSandbox:
         return FakeExecOutput(exit_code=proc.returncode, stderr_text=proc.stderr)
 
 
-def test_run_setup_sh_absent_file_is_noop(tmp_path: object, monkeypatch: object) -> None:
+def test_run_setup_sh_absent_file_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run setup sh absent file is noop."""
     # A real /bin/sh under a project mount with no <reldir>/setup.sh → clean exit 0.
     monkeypatch.setattr(sandbox, "PROJECT_MOUNT", str(tmp_path))
@@ -1099,12 +1090,14 @@ def test_run_setup_sh_absent_file_is_noop(tmp_path: object, monkeypatch: object)
 
     asyncio.run(
         sandbox.run_setup_sh(
-            fake_sandbox, _SetupAgent(), setup_reldir="evals/x", arm="trial", model="opus"
+            fake_sandbox, _claude_agent(), setup_reldir="evals/x", arm="trial", model="opus"
         )
     )
 
 
-def test_run_setup_sh_present_but_failing_propagates(tmp_path: object, monkeypatch: object) -> None:
+def test_run_setup_sh_present_but_failing_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify run setup sh present but failing propagates."""
     monkeypatch.setattr(sandbox, "PROJECT_MOUNT", str(tmp_path))
     eval_dir = tmp_path / "evals" / "x"
@@ -1115,12 +1108,14 @@ def test_run_setup_sh_present_but_failing_propagates(tmp_path: object, monkeypat
     with pytest.raises(RuntimeError, match="setup.sh"):
         asyncio.run(
             sandbox.run_setup_sh(
-                fake_sandbox, _SetupAgent(), setup_reldir="evals/x", arm="trial", model="opus"
+                fake_sandbox, _claude_agent(), setup_reldir="evals/x", arm="trial", model="opus"
             )
         )
 
 
-def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_runs_setup_sh_when_reldir_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session runs setup sh when reldir set."""
     # When a session carries `setup_reldir`, __aenter__ installs the eval's setup.sh
     # BEFORE the artifact baseline. The first shell on the cell is the setup.sh run,
@@ -1139,7 +1134,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -1147,7 +1142,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -1165,17 +1160,17 @@ def test_arm_session_runs_setup_sh_when_reldir_set(monkeypatch: object, tmp_path
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
     asyncio.run(drive())
-    setup_call = fake.calls[0]
-    assert setup_call[0] == "shell"
-    assert "setup.sh" in setup_call[1]
-    assert setup_call[2]["cwd"] == sandbox.PROJECT_MOUNT
-    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/x/setup.sh" in setup_call[1]
-    assert setup_call[2]["env"]["BENCHSPEC_ARM"] == "trial"
-    assert setup_call[2]["env"]["BENCHSPEC_MODEL"] == "opus"
+    assert fake.calls[0][0] == "shell"
+    setup_call = fake.shell_calls[0]
+    assert "setup.sh" in setup_call.script
+    assert setup_call.cwd == sandbox.PROJECT_MOUNT
+    assert f"{sandbox.PROJECT_MOUNT}/skills/ingest/evals/x/setup.sh" in setup_call.script
+    assert setup_call.env["BENCHSPEC_ARM"] == "trial"
+    assert setup_call.env["BENCHSPEC_MODEL"] == "opus"
 
 
 def test_arm_session_does_not_implicitly_pass_plugin_dir(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify arm session does not implicitly pass plugin dir."""
     # Output evals mount the project so setup.sh can install per-arm assets, but the
@@ -1196,7 +1191,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -1204,7 +1199,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -1222,11 +1217,12 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
     asyncio.run(drive())
-    exec_call = next(call for call in fake.calls if call[0] == "exec")
-    assert "--plugin-dir" not in exec_call[2]
+    assert "--plugin-dir" not in _first_exec_args(fake)
 
 
-def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_passes_explicit_harness_args(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session passes explicit harness args."""
     fake = _QueuedShellSandbox(
         shell_queue=[
@@ -1242,7 +1238,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -1250,7 +1246,7 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -1269,11 +1265,12 @@ def test_arm_session_passes_explicit_harness_args(monkeypatch: object, tmp_path:
             return await run("prompt", resume_session_id=None, detect_skill="ingest")
 
     asyncio.run(drive())
-    exec_call = next(call for call in fake.calls if call[0] == "exec")
-    assert exec_call[2][-2:] == ["--plugin-dir", "/project"]
+    assert _first_exec_args(fake)[-2:] == ["--plugin-dir", "/project"]
 
 
-def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_skips_setup_sh_when_no_skill(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session skips setup sh when setup_reldir is None."""
     # No `setup_reldir` ⇒ no per-cell install: the only shells are the artifact snapshots,
     # never a setup.sh run. (A cell whose eval dir isn't located relative to a mount.)
@@ -1290,7 +1287,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
         ],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -1298,7 +1295,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    async def drive() -> object:
+    async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
             agent=agent,
@@ -1314,10 +1311,12 @@ def test_arm_session_skips_setup_sh_when_no_skill(monkeypatch: object, tmp_path:
             return await run("prompt", resume_session_id=None, detect_skill=None)
 
     asyncio.run(drive())
-    assert all("setup.sh" not in call[1] for call in fake.calls if call[0] == "shell")
+    assert all("setup.sh" not in call.script for call in fake.shell_calls)
 
 
-def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: object) -> None:
+def test_arm_session_setup_sh_failure_stops_vm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify arm session setup sh failure stops vm."""
     # A failing setup.sh aborts the cell loudly AND tears the VM down — the caller's
     # `async with` never entered, so __aenter__ owns the teardown on this path.
@@ -1326,7 +1325,7 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
         exec_outputs=[],
     )
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Fake create."""
         return fake
 
@@ -1356,80 +1355,49 @@ def test_arm_session_setup_sh_failure_stops_vm(monkeypatch: object, tmp_path: ob
     assert fake.stopped is True
 
 
-def test_build_runs_skills_home_bridge_after_provision(monkeypatch: object) -> None:
-    """Verify build runs skills home bridge after provision."""
-    # The bridge symlinks the agent's load dir → FIXED_SKILLS_HOME, run once at provision
-    # (after agent.provision, before the environment script). Three shells: provision,
-    # bridge, environment script.
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
+@dataclass
+class _BuildRecorder:
+    """What the stubbed microsandbox primitives observed during one snapshot build."""
 
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    microsandbox_backend.build_snapshot(
-        agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
-    )
-
-    shells = [call for call in fake.calls if call[0] == "shell"]
-    assert len(shells) == 3
-    assert "claude.ai/install.sh" in shells[0][1]  # provision
-    assert "ln -s" in shells[1][1]  # bridge
-    assert FIXED_SKILLS_HOME in shells[1][1]
-    assert "echo hi" in shells[2][1]  # environment script
-    assert fake.sealed is True
+    create_image: str | None = None
+    sealed: bool = False
 
 
-def test_build_raises_when_skills_home_bridge_fails(monkeypatch: object) -> None:
-    """Verify build raises for when skills home bridge fails."""
-    # A broken bridge must fail the build, never seal a snapshot that can't load skills.
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
+class _StubModule(types.ModuleType):
+    """A module stand-in whose public names are fixed up front, so `from x import y` resolves."""
 
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    # provision (first shell) succeeds; the bridge (second shell) fails.
-    outputs = iter([FakeExecOutput(0), FakeExecOutput(exit_code=1, stderr_text="ln failed")])
-
-    async def shell(script: object, **kwargs: object) -> object:
-        """Shell."""
-        fake.calls.append(("shell", script, kwargs))
-        return next(outputs)
-
-    fake.shell = shell
-    with pytest.raises(RuntimeError, match="bridge"):
-        microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
-    assert fake.sealed is False
+    def __init__(self, name: str, **members: object) -> None:
+        """Create the module `name` exposing `members` as its attributes."""
+        super().__init__(name)
+        self.__dict__.update(members)
 
 
-
-
-def _patch_build_primitives(monkeypatch: object, fake: object) -> None:
+def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) -> _BuildRecorder:
     """Patch microsandbox Sandbox/Snapshot so _build_snapshot_async drives `fake`.
 
-    Records the image passed to Sandbox.create on `fake.create_image` and whether a
-    snapshot was sealed on `fake.sealed`.
+    Returns a recorder holding the image passed to Sandbox.create and whether a
+    snapshot was sealed.
     """
-    fake.create_image = None
-    fake.sealed = False
+    recorder = _BuildRecorder()
 
     class _FakeSandboxCls:
         """Provide a fake sandbox cls for tests."""
 
         @staticmethod
         async def create(
-            name: object,
+            name: str,
             *,
-            image: object,
-            cpus: object,
-            memory: object,
-            replace: object,
-        ) -> object:
-            """Create."""
-            fake.create_image = image
+            image: str,
+            cpus: int,
+            memory: int,
+            replace: bool,
+        ) -> FakeSandbox:
+            """Record the requested image and hand back the shared fake guest."""
+            recorder.create_image = image
             return fake
 
         @staticmethod
-        async def remove(name: object) -> None:
+        async def remove(name: str) -> None:
             """Remove."""
             return None
 
@@ -1437,72 +1405,33 @@ def _patch_build_primitives(monkeypatch: object, fake: object) -> None:
         """Provide a fake snapshot for tests."""
 
         @staticmethod
-        async def create(name: object, *, from_sandbox: object, record_integrity: object) -> None:
-            """Create."""
-            fake.sealed = True
+        async def create(name: str, *, from_sandbox: str, record_integrity: bool) -> None:
+            """Mark the snapshot sealed."""
+            recorder.sealed = True
             return None
 
     # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and
     # `from microsandbox.errors import MicrosandboxError` — stub the module surface.
-    import sys
-    import types
+    monkeypatch.setitem(
+        sys.modules,
+        "microsandbox",
+        _StubModule("microsandbox", Sandbox=_FakeSandboxCls, Snapshot=_FakeSnapshot),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "microsandbox.errors",
+        _StubModule("microsandbox.errors", MicrosandboxError=RuntimeError),
+    )
+    return recorder
 
-    msb = types.ModuleType("microsandbox")
-    msb.Sandbox = _FakeSandboxCls
-    msb.Snapshot = _FakeSnapshot
-    errs = types.ModuleType("microsandbox.errors")
-    errs.MicrosandboxError = RuntimeError
-    monkeypatch.setitem(sys.modules, "microsandbox", msb)
-    monkeypatch.setitem(sys.modules, "microsandbox.errors", errs)
 
-
-def test_build_passes_base_image_to_sandbox_create(monkeypatch: object) -> None:
-    """Verify build passes the declared base image to sandbox create and seals it."""
+def test_build_runs_skills_home_bridge_after_provision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build runs skills home bridge after provision."""
+    # The bridge symlinks the agent's load dir → FIXED_SKILLS_HOME, run once at provision
+    # (after agent.provision, before the environment script). Three shells: provision,
+    # bridge, environment script.
     fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
-
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
-
-    assert fake.create_image == "python:3.12-slim"
-    assert fake.sealed is True
-
-
-def test_build_uses_the_declared_image_the_fingerprint_hashed(monkeypatch: object) -> None:
-    """Build and fingerprint reference the same declared image — benchspec never re-resolves it.
-
-    benchspec hashes and pulls the declared reference as-is (no separate digest lookup), so the
-    image the cache key names and the image the build pulls cannot diverge.
-    """
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
-
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    env = EnvConfig(base_image="python:3.12-slim")
-    microsandbox_backend.cache_fingerprint(agent, env)
-    microsandbox_backend.build_snapshot(agent, "snap", env)
-
-    assert fake.create_image == "python:3.12-slim"
-
-
-def test_build_defaults_base_image_when_env_has_none(monkeypatch: object) -> None:
-    """Verify build defaults base image when env has none."""
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
-
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
-
-    assert fake.create_image == backend_mod.BASE_IMAGE
-
-
-def test_build_runs_environment_script_after_provision(monkeypatch: object) -> None:
-    """Verify build runs environment script after provision."""
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
+    build = _patch_build_primitives(monkeypatch, fake)
 
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1510,24 +1439,106 @@ def test_build_runs_environment_script_after_provision(monkeypatch: object) -> N
         agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
     )
 
-    shells = [call for call in fake.calls if call[0] == "shell"]
+    shells = _shell_scripts(fake)
+    assert len(shells) == 3
+    assert "claude.ai/install.sh" in shells[0]  # provision
+    assert "ln -s" in shells[1]  # bridge
+    assert FIXED_SKILLS_HOME in shells[1]
+    assert "echo hi" in shells[2]  # environment script
+    assert build.sealed is True
+
+
+def test_build_raises_when_skills_home_bridge_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build raises for when skills home bridge fails."""
+    # A broken bridge must fail the build, never seal a snapshot that can't load skills.
+    # provision (first shell) succeeds; the bridge (second shell) fails.
+    fake = _QueuedShellSandbox(
+        shell_queue=[FakeExecOutput(0), FakeExecOutput(exit_code=1, stderr_text="ln failed")]
+    )
+    build = _patch_build_primitives(monkeypatch, fake)
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+
+    with pytest.raises(RuntimeError, match="bridge"):
+        microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
+    assert build.sealed is False
+
+
+def test_build_passes_base_image_to_sandbox_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build passes the declared base image to sandbox create and seals it."""
+    fake = FakeSandbox()
+    build = _patch_build_primitives(monkeypatch, fake)
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
+
+    assert build.create_image == "python:3.12-slim"
+    assert build.sealed is True
+
+
+def test_build_uses_the_declared_image_the_fingerprint_hashed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build and fingerprint reference the same declared image — benchspec never re-resolves it.
+
+    benchspec hashes and pulls the declared reference as-is (no separate digest lookup), so the
+    image the cache key names and the image the build pulls cannot diverge.
+    """
+    fake = FakeSandbox()
+    build = _patch_build_primitives(monkeypatch, fake)
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    env = EnvConfig(base_image="python:3.12-slim")
+    microsandbox_backend.cache_fingerprint(agent, env)
+    microsandbox_backend.build_snapshot(agent, "snap", env)
+
+    assert build.create_image == "python:3.12-slim"
+
+
+def test_build_defaults_base_image_when_env_has_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build defaults base image when env has none."""
+    fake = FakeSandbox()
+    build = _patch_build_primitives(monkeypatch, fake)
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    microsandbox_backend.build_snapshot(agent, "snap", EnvConfig())
+
+    assert build.create_image == backend_mod.BASE_IMAGE
+
+
+def test_build_runs_environment_script_after_provision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build runs environment script after provision."""
+    fake = FakeSandbox()
+    build = _patch_build_primitives(monkeypatch, fake)
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    microsandbox_backend.build_snapshot(
+        agent, "snap", EnvConfig(script=b"echo hi\n", script_path="s.sh")
+    )
+
+    shells = _shell_scripts(fake)
     # provision runs provision_script() first (claude.py.provision issues exactly one
     # shell); the skills-home bridge second; the environment script third.
     assert len(shells) == 3
-    assert "claude.ai/install.sh" in shells[0][1]  # agent.provision
-    assert "ln -s" in shells[1][1]  # skills-home bridge
-    assert "echo hi" in shells[2][1]  # environment script
-    assert shells[2][1].startswith("set -e\n")  # fail-loud prologue
-    assert fake.sealed is True
+    assert "claude.ai/install.sh" in shells[0]  # agent.provision
+    assert "ln -s" in shells[1]  # skills-home bridge
+    assert "echo hi" in shells[2]  # environment script
+    assert shells[2].startswith("set -e\n")  # fail-loud prologue
+    assert build.sealed is True
 
 
 def test_build_runs_base_image_and_environment_script_together(
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify build runs base image and environment script together."""
     # The worked-example shape: custom base image AND an extra-tools script.
     fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
+    build = _patch_build_primitives(monkeypatch, fake)
 
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
@@ -1540,14 +1551,14 @@ def test_build_runs_base_image_and_environment_script_together(
             script_path="s.sh",
         ),
     )
-    assert fake.create_image == "python:3.12-slim"
-    shells = [call for call in fake.calls if call[0] == "shell"]
+    assert build.create_image == "python:3.12-slim"
+    shells = _shell_scripts(fake)
     assert len(shells) == 3  # provision, bridge, environment script
-    assert "apt-get install -y jq" in shells[2][1]
-    assert fake.sealed is True
+    assert "apt-get install -y jq" in shells[2]
+    assert build.sealed is True
 
 
-def test_build_no_environment_script_runs_only_provision(monkeypatch: object) -> None:
+def test_build_no_environment_script_runs_only_provision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify build no environment script runs only provision."""
     fake = FakeSandbox()
     _patch_build_primitives(monkeypatch, fake)
@@ -1555,35 +1566,28 @@ def test_build_no_environment_script_runs_only_provision(monkeypatch: object) ->
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     microsandbox_backend.build_snapshot(agent, "snap", EnvConfig(base_image="python:3.12-slim"))
-    shells = [call for call in fake.calls if call[0] == "shell"]
+    shells = _shell_scripts(fake)
     assert len(shells) == 2  # provision + skills-home bridge; no environment script declared
 
 
-def test_build_raises_when_environment_script_fails(monkeypatch: object) -> None:
+def test_build_raises_when_environment_script_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify build raises for when environment script fails."""
-    fake = FakeSandbox()
-    _patch_build_primitives(monkeypatch, fake)
-
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
     # provision + bridge (first two shells) succeed; the environment script (third shell)
     # fails. Queue distinct outputs so the fail lands on the script, not provision/bridge.
-    outputs = iter(
-        [
+    fake = _QueuedShellSandbox(
+        shell_queue=[
             FakeExecOutput(0),
             FakeExecOutput(0),
             FakeExecOutput(exit_code=2, stderr_text="boom-detail"),
         ]
     )
+    build = _patch_build_primitives(monkeypatch, fake)
 
-    async def shell(script: object, **kwargs: object) -> object:
-        """Shell."""
-        fake.calls.append(("shell", script, kwargs))
-        return next(outputs)
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
-    fake.shell = shell
     with pytest.raises(RuntimeError, match="boom-detail"):
         microsandbox_backend.build_snapshot(
             agent, "snap", EnvConfig(script=b"false\n", script_path="s.sh")
         )
-    assert fake.sealed is False  # never sealed a failed environment
+    assert build.sealed is False  # never sealed a failed environment

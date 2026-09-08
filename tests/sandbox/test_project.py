@@ -6,13 +6,14 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import project, registry, sandbox
 from benchspec.sandbox.docker import DockerBackend
-from benchspec.testing import FakeSandbox
+from benchspec.testing import FakeExecEvent, FakeSandbox
 
 
 def _git(repo_root: Path, *args: str) -> None:
@@ -179,9 +180,9 @@ def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
     repo_root = tmp_path / "repo"
     _git_repo_with_secrets(repo_root)
     fake = FakeSandbox()
-    create_kwargs: dict = {}
+    create_kwargs: dict[str, object] = {}
 
-    async def fake_create(**kwargs: object) -> object:
+    async def fake_create(**kwargs: object) -> FakeSandbox:
         """Record the mount the backend was asked for."""
         create_kwargs.update(kwargs)
         return fake
@@ -203,7 +204,8 @@ def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
             effort="medium",
             backend=microsandbox_backend,
         ):
-            mounted = Path(create_kwargs["host_repo_root"])
+            mounted = create_kwargs["host_repo_root"]
+            assert isinstance(mounted, Path)
             assert mounted != repo_root
             assert (mounted / "skills" / "hello" / "SKILL.md").is_file()
             assert not (mounted / ".env").exists()
@@ -221,9 +223,9 @@ def test_arm_session_removes_the_stage_when_boot_fails(
     """Verify a create failure does not leave a staged copy behind."""
     repo_root = tmp_path / "repo"
     _git_repo_with_secrets(repo_root)
-    create_kwargs: dict = {}
+    create_kwargs: dict[str, object] = {}
 
-    async def boom(**kwargs: object) -> object:
+    async def boom(**kwargs: object) -> NoReturn:
         """Fail the boot after recording the mount."""
         create_kwargs.update(kwargs)
         raise RuntimeError("boot failed")
@@ -250,7 +252,9 @@ def test_arm_session_removes_the_stage_when_boot_fails(
     with pytest.raises(RuntimeError, match="boot failed"):
         asyncio.run(drive())
 
-    assert not Path(create_kwargs["host_repo_root"]).exists()
+    mounted = create_kwargs["host_repo_root"]
+    assert isinstance(mounted, Path)
+    assert not mounted.exists()
 
 
 def test_route_in_sandbox_mounts_a_staged_copy(
@@ -259,47 +263,17 @@ def test_route_in_sandbox_mounts_a_staged_copy(
     """Verify trigger routing also mounts a stage rather than the checkout."""
     repo_root = tmp_path / "repo"
     _git_repo_with_secrets(repo_root)
-    create_kwargs: dict = {}
+    create_kwargs: dict[str, object] = {}
+    # The trigger VM exits cleanly without streaming a single line, which routing reports
+    # as a RoutingError — enough to drive the mount and the teardown under test.
+    trigger_vm = FakeSandbox(stream_events=[FakeExecEvent("exited", data=b"", code=0)])
 
-    class FakeHandle:
-        """Yield one dispatch line, then end."""
-
-        def __init__(self: object) -> None:
-            """Initialize the instance."""
-            self._sent = False
-
-        def __aiter__(self: object) -> object:
-            """Return self as the async iterator."""
-            return self
-
-        async def __anext__(self: object) -> object:
-            """Emit a single exited event."""
-            if self._sent:
-                raise StopAsyncIteration
-            self._sent = True
-            return type("Event", (), {"event_type": "exited", "code": 0, "data": b""})()
-
-        async def kill(self: object) -> None:
-            """Kill."""
-
-    class FakeTriggerSandbox:
-        """Fake trigger VM."""
-
-        async def shell(self: object, *args: object, **kwargs: object) -> object:
-            """Shell."""
-            return type("Out", (), {"exit_code": 0, "stdout_text": "", "stderr_text": ""})()
-
-        async def exec_stream(self: object, *args: object, **kwargs: object) -> object:
-            """Exec stream."""
-            return FakeHandle()
-
-        async def stop(self: object, timeout: object = None) -> None:
-            """Stop."""
-
-    async def fake_create_trigger(self: object, **kwargs: object) -> object:
+    async def fake_create_trigger(
+        self: DockerBackend, **kwargs: object
+    ) -> FakeSandbox:
         """Record the mount and return the fake VM."""
         create_kwargs.update(kwargs)
-        return FakeTriggerSandbox()
+        return trigger_vm
 
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
     monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
@@ -311,6 +285,7 @@ def test_route_in_sandbox_mounts_a_staged_copy(
     with pytest.raises(sandbox.RoutingError):
         sandbox.route_in_sandbox("query", repo_root, "sonnet", 20, skill_name="archive")
 
-    mounted = Path(create_kwargs["host_repo_root"])
+    mounted = create_kwargs["host_repo_root"]
+    assert isinstance(mounted, Path)
     assert mounted != repo_root
     assert not mounted.exists()

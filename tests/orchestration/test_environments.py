@@ -10,11 +10,13 @@ import pytest
 from benchspec.orchestration.environments import Host, ProcResult
 
 
-def _run_host(monkeypatch: object, *, exit_code: int, stdout: str = "", stderr: str = "") -> dict:
+def _run_host(
+    monkeypatch: pytest.MonkeyPatch, *, exit_code: int, stdout: str = "", stderr: str = ""
+) -> dict[str, object]:
     """Run Host.exec against a captured fake subprocess and return the captured kwargs."""
-    captured: dict = {}
+    captured: dict[str, object] = {}
 
-    def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         """Capture the call and return a canned CompletedProcess."""
         captured.update(kwargs)
         return subprocess.CompletedProcess(command, exit_code, stdout, stderr)
@@ -24,18 +26,18 @@ def _run_host(monkeypatch: object, *, exit_code: int, stdout: str = "", stderr: 
     return captured
 
 
-def test_host_exec_never_inherits_the_harness_stdin(monkeypatch: object) -> None:
+def test_host_exec_never_inherits_the_harness_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     """A judge subprocess gets an explicit empty stdin, not the harness's fd 0."""
     captured = _run_host(monkeypatch, exit_code=0)
 
     assert captured["stdin"] == subprocess.DEVNULL
 
 
-def test_host_exec_treats_empty_stdin_bytes_as_closed(monkeypatch: object) -> None:
+def test_host_exec_treats_empty_stdin_bytes_as_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """The guest-style `b""` EOF request maps to the same closed stdin as the default."""
-    captured: dict = {}
+    captured: dict[str, object] = {}
 
-    def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         """Capture the call and return a canned CompletedProcess."""
         captured.update(kwargs)
         return subprocess.CompletedProcess(command, 0, "", "")

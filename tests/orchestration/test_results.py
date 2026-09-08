@@ -1,5 +1,7 @@
 """Tests for results."""
 
+from __future__ import annotations
+
 import datetime
 import json
 from zoneinfo import ZoneInfo
@@ -143,8 +145,10 @@ def test_substitute_assertions_handles_typed_dicts() -> None:
         "2099-01-01",
     )
     assert out[0] == "log at 2099-01-01.md"
-    assert out[1]["path"] == "logs/2099-01-01.md"
-    assert out[1]["should_exist"] is True  # non-strings untouched
+    typed_assertion = out[1]
+    assert isinstance(typed_assertion, dict)
+    assert typed_assertion["path"] == "logs/2099-01-01.md"
+    assert typed_assertion["should_exist"] is True  # non-strings untouched
 
 
 def test_substitute_assertions_rejects_residual_placeholder() -> None:

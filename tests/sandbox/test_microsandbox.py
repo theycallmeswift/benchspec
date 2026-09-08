@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
 from textwrap import dedent
+from typing import NoReturn
 
 import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import microsandbox as microsandbox_mod
 from benchspec.sandbox.errors import SandboxError
+from benchspec.testing import FakeSandbox
 
 
-def _agent() -> object:
+def _agent() -> ClaudeCodeAgent:
     """Build a claude agent test fixture."""
     return ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
 
 
-def test_image_identity_available_on_successful_digest_read(monkeypatch: object) -> None:
+def test_image_identity_available_on_successful_digest_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`image_identity` returns available with the digest when the backend read succeeds."""
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
 
@@ -37,7 +42,9 @@ def test_image_identity_available_on_successful_digest_read(monkeypatch: object)
     assert identity.image_digest_error is None
 
 
-def test_image_identity_unavailable_with_error_when_read_raises(monkeypatch: object) -> None:
+def test_image_identity_unavailable_with_error_when_read_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`image_identity` returns unavailable with a non-empty error when the read raises."""
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
 
@@ -69,7 +76,9 @@ def test_image_identity_unavailable_when_microsandbox_not_installed() -> None:
     assert identity.image_digest_error
 
 
-def test_msb_binary_honors_msb_path_override(monkeypatch: object, tmp_path: object) -> None:
+def test_msb_binary_honors_msb_path_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """`MSB_PATH` wins over the wheel-bundled runtime, matching the SDK's resolver."""
     override = tmp_path / "custom-msb"
     monkeypatch.setenv("MSB_PATH", str(override))
@@ -78,7 +87,7 @@ def test_msb_binary_honors_msb_path_override(monkeypatch: object, tmp_path: obje
 
 
 def test_installed_false_when_msb_path_override_missing(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An `MSB_PATH` pointing at nothing means the runtime is not installed."""
     monkeypatch.setenv("MSB_PATH", str(tmp_path / "missing-msb"))
@@ -88,7 +97,7 @@ def test_installed_false_when_msb_path_override_missing(
 
 
 def test_installed_true_when_msb_path_override_exists(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An `MSB_PATH` pointing at a real file means the runtime is installed."""
     binary = tmp_path / "msb"
@@ -99,7 +108,7 @@ def test_installed_true_when_msb_path_override_exists(
     assert microsandbox_backend.installed() is True
 
 
-def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None:
+def test_microsandbox_preflight_reports_host_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """The backend preflight returns the platform + install errors as a list."""
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
     monkeypatch.setattr(microsandbox_mod.platform, "system", lambda: "Windows")
@@ -111,7 +120,7 @@ def test_microsandbox_preflight_reports_host_errors(monkeypatch: object) -> None
     assert any("microsandbox runtime not installed" in error for error in errors)
 
 
-def test_microsandbox_preflight_clean_on_supported_host(monkeypatch: object) -> None:
+def test_microsandbox_preflight_clean_on_supported_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """A supported host with the runtime installed yields no preflight errors."""
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
     monkeypatch.setattr(microsandbox_mod.platform, "system", lambda: "Darwin")
@@ -122,7 +131,7 @@ def test_microsandbox_preflight_clean_on_supported_host(monkeypatch: object) -> 
 
 
 def test_microsandbox_snapshot_exists_false_when_dir_absent(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """snapshot_exists is False when ~/.microsandbox/snapshots/<name> is absent."""
     monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
@@ -133,7 +142,7 @@ def test_microsandbox_snapshot_exists_false_when_dir_absent(
 
 
 def test_microsandbox_snapshot_exists_true_when_dir_present(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """snapshot_exists is True when ~/.microsandbox/snapshots/<name> exists on disk."""
     monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
@@ -145,7 +154,7 @@ def test_microsandbox_snapshot_exists_true_when_dir_present(
 
 
 def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
-    tmp_path: Path, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify prune walks ~/.microsandbox and removes only benchspec-prefixed entries."""
     home = tmp_path
@@ -186,7 +195,7 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
 
 
 def test_microsandbox_prune_tolerates_a_missing_runtime(
-    tmp_path: Path, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify prune is a no-op when the SDK resolves no msb runtime at all."""
     home = tmp_path
@@ -213,12 +222,19 @@ def test_microsandbox_secrets_render_scoped_secret_entries() -> None:
 
 def test_microsandbox_guest_translates_runtime_errors() -> None:
     """A MicrosandboxError from the native sandbox surfaces as the neutral SandboxError."""
+    # The package is an optional extra: only this test needs it, so the module must not.
     from microsandbox.errors import MicrosandboxError
 
-    class ExplodingSandbox:
+    class ExplodingSandbox(FakeSandbox):
         """A native sandbox whose shell call fails the way a dead VM does."""
 
-        async def shell(self: object, script: str, **kwargs: object) -> object:
+        async def shell(
+            self,
+            script: str,
+            *,
+            env: Mapping[str, str] | None = None,
+            cwd: str | None = None,
+        ) -> NoReturn:
             """Fail like a torn-down VM."""
             raise MicrosandboxError("vm gone")
 
