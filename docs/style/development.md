@@ -27,9 +27,9 @@ wins.** A reader should never be surprised.
 - **Section-header comments are a smell.** Wanting `# ---- parsing ----` means
   the region should be extracted into its own named unit.
 - **Never comment to skip a lint or type check.** No `# noqa`, no
-  `# type: ignore`, no per-file disables — a suppression is a smell. Fix the
-  underlying issue; if the rule is wrong, change the linter config, not the
-  code.
+  `# type: ignore`, no `# ty: ignore`, no per-file disables — a suppression is a
+  smell. Fix the underlying issue; if the rule is wrong, change the linter
+  config, not the code.
 - **Comments never reference external context.** No PR/issue/commit references
   (`# fixes #123`), no "added for X" provenance, no caller notes
   (`# called from server.py`), no pointers to research notes or specs. That
@@ -142,7 +142,12 @@ for _ in range(retry_budget): ...            # unused -> _
 
 ## Typing
 
-- **Maintained code:** fully typed, with a type checker enforced in CI.
+- **Maintained code:** fully typed, checked by [ty](https://docs.astral.sh/ty/)
+  as part of `make lint` and CI.
+- **Annotations name the real type.** An `object` (or `Any`) written only to
+  satisfy the annotation linter is a suppression by another name: it passes the
+  linter while telling the checker nothing. Reach for a `Protocol`, a `TypeVar`,
+  or a union instead, and let a test double satisfy the protocol structurally.
 - **Genuine throwaway code:** typing is optional.
 
 ## Tests

@@ -64,6 +64,9 @@ jobs:
       - name: Run Ruff
         run: make lint:ruff
 
+      - name: Run ty
+        run: make lint:ty
+
       # Model-backed houserules needs the Gemini secret, which GitHub withholds
       # from fork PRs and from Dependabot runs, and diffs against the PR base. Ruff
       # above still runs everywhere; only gate this step.

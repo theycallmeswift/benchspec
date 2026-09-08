@@ -122,8 +122,12 @@ integration surface. An adapter declares:
 
 The steps:
 
-1. Write `src/benchspec/agents/<name>.py` implementing the protocol. Reuse the
-   existing parsers where the CLI's output resembles one already supported.
+1. Write `src/benchspec/agents/<name>.py` as a `BaseAgent` subclass implementing
+   the protocol. `BaseAgent` carries the shared helpers and the class-level
+   factory contract the registry calls (`from_env`, `for_host`,
+   `credential_error`), so a missing one fails at import rather than mid-run.
+   Reuse the existing parsers where the CLI's output resembles one already
+   supported.
 2. Register the class in `_REGISTRY` in `src/benchspec/agents/__init__.py`; the
    name becomes a legal `harness` value everywhere at once.
 3. Test against `benchspec.testing.FakeSandbox`, a recording sandbox double, so
