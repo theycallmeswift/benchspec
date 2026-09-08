@@ -20,6 +20,7 @@ gen_ai.tool.call.arguments, content -> gen_ai.tool.call.result.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 
 # tool results can be huge (file reads); the raw .jsonl keeps the full bytes, the
 # structured projection keeps a readable prefix.
@@ -31,7 +32,7 @@ _RESULT_CONTENT_LIMIT = 2000
 TURN_DELIM = "turn"
 
 
-def iter_events(text: str) -> object:
+def iter_events(text: str) -> Iterator[dict]:
     """Yield each JSON-object event from a stream-json/JSONL text, skipping blank.
 
     and malformed lines and non-object lines. Single source of the whole-text parse
@@ -49,7 +50,17 @@ def iter_events(text: str) -> object:
             yield event
 
 
-def _content_blocks(event: object) -> object:
+def dict_or_empty(value: object) -> dict:
+    """Return `value` when it is a dict, else `{}` — the nested-payload read every parser needs.
+
+    Stream events nest optional objects (`part`, `state`, `usage`, `arguments`) that may
+    be absent or the wrong shape; reading through this keeps each parser a flat chain of
+    lookups instead of an isinstance ladder.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _content_blocks(event: dict) -> list:
     """Return message content blocks from a trajectory event."""
     message = event.get("message")
     if not isinstance(message, dict):

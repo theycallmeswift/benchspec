@@ -19,6 +19,8 @@ import asyncio
 import hashlib
 import re
 import subprocess
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -27,7 +29,7 @@ from benchspec.orchestration.results import RunResult
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
     from benchspec.orchestration.environments import ExecutionEnv
-    from benchspec.sandbox.backend import SandboxBackend
+    from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical
@@ -52,7 +54,7 @@ def _parse_version_token(output: str) -> str | None:
 
 
 async def probe_guest_version(
-    backend: SandboxBackend, sandbox: object, agent: object
+    backend: SandboxBackend, sandbox: LiveSandbox, agent: CodingAgent
 ) -> tuple[str | None, str | None]:
     """Measure the task-harness binary's version inside the live guest sandbox.
 
@@ -97,73 +99,6 @@ async def probe_guest_version(
     return version, None
 
 
-class BaseAgent:
-    """Store base agent data."""
-
-    # The binary THIS instance runs. An instance is bound to one execution
-    # environment: the default binding is the guest install path (task arms);
-    # for_host() rebinds to the name PATH resolves on the host (judge mode).
-    agent_bin: str
-
-    def provision_script(self: object) -> str:
-        """The fully-resolved commands this instance runs to install the CLI in the guest.
-
-        Concrete task adapters override it, baking in any instance state (e.g. a pinned
-        version). `provision()` runs exactly this, and `install_fingerprint()` hashes it — so
-        every install-affecting input is captured in the cache key structurally, with nothing
-        to fold by hand. Empty on the base (host/judge agents install nothing in a guest).
-        """
-        return ""
-
-    def binary_version(self: object) -> str | None:
-        """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
-        try:
-            proc = subprocess.run(
-                [self.agent_bin, "--version"], capture_output=True, text=True, timeout=10
-            )
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            return None
-        if proc.returncode != 0:
-            return None
-        return proc.stdout.strip() or None
-
-    def install_fingerprint(self: object) -> str:
-        """Cache-key fingerprint of the CLI install: a hash of the resolved provision script.
-
-        `provision_script()` is the single source of truth for what installs the CLI, so
-        changing the installer (a new revision, package list, pinned version, or bootstrap
-        commands) rebuilds the snapshot. The agent version also appears directly in the
-        snapshot name, so a version bump rebuilds even for an adapter whose installer does not
-        embed the version.
-        """
-        return hashlib.sha256(self.provision_script().encode()).hexdigest()[:12]
-
-    def bridge_skills_home_script(self: object) -> str:
-        """Bridge skills home script."""
-        skill_dir = self.skill_load_dir
-        parent = skill_dir.rsplit("/", 1)[0]
-        return (
-            f"mkdir -p {FIXED_SKILLS_HOME} && "
-            f"mkdir -p {parent} && rm -rf {skill_dir} && "
-            f"ln -s {FIXED_SKILLS_HOME} {skill_dir}"
-        )
-
-    def cell_env(self: object, *, arm: str, model: str, eval_set: str = "") -> dict:
-        """BENCHSPEC_* are informational for setup.sh — they do NOT route the task model.
-
-        (that goes through arm.model). BENCHSPEC_SET names the explicitly-selected set
-        (--benchspec-set / make evals SET=) so setup.sh can branch on it; empty when the
-        run falls back to the pyproject default-set.
-        """
-        return {
-            **self.guest_env(),
-            "BENCHSPEC_ARM": arm,
-            "BENCHSPEC_MODEL": model,
-            "BENCHSPEC_HARNESS": self.id,
-            "BENCHSPEC_SET": eval_set,
-        }
-
-
 @dataclass(frozen=True)
 class AgentCapabilities:
     """What the harness can honestly do with this agent.
@@ -196,6 +131,101 @@ class Credential:
     allow_hosts: tuple[str, ...]
 
 
+class BaseAgent(ABC):
+    """Shared behavior for the built-in adapters, plus the class-level factory contract.
+
+    The registry in `benchspec.agents` builds and preflights agents through the class
+    itself (`from_env`, `for_host`, `credential_error`), so those are abstract here: a
+    registered adapter that forgets one fails at import, not mid-run.
+    """
+
+    id: str  # snapshot-cache key + report label
+    guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
+    skill_load_dir: str  # absolute guest path the agent loads skills from
+    capabilities: AgentCapabilities
+    # The binary THIS instance runs. An instance is bound to one execution
+    # environment: the default binding is the guest install path (task arms);
+    # for_host() rebinds to the name PATH resolves on the host (judge mode).
+    agent_bin: str
+
+    @classmethod
+    @abstractmethod
+    def from_env(cls) -> CodingAgent:
+        """Build an instance from host environment settings (credential, pinned version)."""
+
+    @classmethod
+    @abstractmethod
+    def for_host(cls) -> CodingAgent:
+        """An instance bound to the host environment: agent_bin resolves from PATH."""
+
+    @staticmethod
+    @abstractmethod
+    def credential_error() -> str | None:
+        """Return a credential preflight error message when credentials are missing."""
+
+    @abstractmethod
+    def guest_env(self) -> dict[str, str]:
+        """Return environment variables passed to guest agent commands."""
+
+    def provision_script(self) -> str:
+        """The fully-resolved commands this instance runs to install the CLI in the guest.
+
+        Concrete task adapters override it, baking in any instance state (e.g. a pinned
+        version). `provision()` runs exactly this, and `install_fingerprint()` hashes it — so
+        every install-affecting input is captured in the cache key structurally, with nothing
+        to fold by hand. Empty on the base (host/judge agents install nothing in a guest).
+        """
+        return ""
+
+    def binary_version(self) -> str | None:
+        """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
+        try:
+            proc = subprocess.run(
+                [self.agent_bin, "--version"], capture_output=True, text=True, timeout=10
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.strip() or None
+
+    def install_fingerprint(self) -> str:
+        """Cache-key fingerprint of the CLI install: a hash of the resolved provision script.
+
+        `provision_script()` is the single source of truth for what installs the CLI, so
+        changing the installer (a new revision, package list, pinned version, or bootstrap
+        commands) rebuilds the snapshot. The agent version also appears directly in the
+        snapshot name, so a version bump rebuilds even for an adapter whose installer does not
+        embed the version.
+        """
+        return hashlib.sha256(self.provision_script().encode()).hexdigest()[:12]
+
+    def bridge_skills_home_script(self) -> str:
+        """Bridge skills home script."""
+        skill_dir = self.skill_load_dir
+        parent = skill_dir.rsplit("/", 1)[0]
+        return (
+            f"mkdir -p {FIXED_SKILLS_HOME} && "
+            f"mkdir -p {parent} && rm -rf {skill_dir} && "
+            f"ln -s {FIXED_SKILLS_HOME} {skill_dir}"
+        )
+
+    def cell_env(self, *, arm: str, model: str, eval_set: str = "") -> dict[str, str]:
+        """BENCHSPEC_* are informational for setup.sh — they do NOT route the task model.
+
+        (that goes through arm.model). BENCHSPEC_SET names the explicitly-selected set
+        (--benchspec-set / make evals SET=) so setup.sh can branch on it; empty when the
+        run falls back to the pyproject default-set.
+        """
+        return {
+            **self.guest_env(),
+            "BENCHSPEC_ARM": arm,
+            "BENCHSPEC_MODEL": model,
+            "BENCHSPEC_HARNESS": self.id,
+            "BENCHSPEC_SET": eval_set,
+        }
+
+
 @runtime_checkable
 class CodingAgent(Protocol):
     """Define the agent interface."""
@@ -206,48 +236,46 @@ class CodingAgent(Protocol):
     agent_bin: str  # the binary this instance runs (guest install path; for_host() rebinds)
     capabilities: AgentCapabilities
 
-    def version(self: object) -> str:
+    def version(self) -> str:
         """Return the agent CLI version string."""
         ...
 
-    def provision_script(self: object) -> str:
+    def provision_script(self) -> str:
         """Return the fully-resolved commands that install the CLI in the guest."""
         ...
 
-    def install_fingerprint(self: object) -> str:
+    def install_fingerprint(self) -> str:
         """Return the CLI install fingerprint (a hash of `provision_script()`)."""
         ...
 
-    def bridge_skills_home_script(
-        self: object,
-    ) -> str:
+    def bridge_skills_home_script(self) -> str:
         """Bridge skills home script."""
         ...
 
-    def cell_env(self: object, *, arm: str, model: str, eval_set: str = "") -> dict:
+    def cell_env(self, *, arm: str, model: str, eval_set: str = "") -> dict[str, str]:
         """Return per-cell environment variables for an arm run."""
         ...
 
-    def artifact_dirs(
-        self: object,
-    ) -> list[str]:
-        """Return guest directories that may contain agent-authored artifacts."""
+    def artifact_dirs(self) -> list[str]:
+        """Return guest directories that may contain agent-authored artifacts.
+
+        These live in the VM, NOT the workdir mount, so the session snapshots them and
+        merges the agent-authored files (diffed against the staged baseline) into the
+        judge's facts. Each agent scaffolds skills differently, so each owns its answer;
+        return [] for an agent that writes only to the workdir.
+        """
         ...
 
-    #   artifacts (e.g. ~/.claude/skills). These live in the VM, NOT the workdir mount, so
-    #   the session snapshots them and merges the agent-authored files (diffed against the
-    #   staged baseline) into the judge's facts. Each agent scaffolds skills differently, so
-    #   each owns its answer; return [] for an agent that writes only to the workdir.
-    def secrets(self: object) -> list[Credential]:
+    def secrets(self) -> list[Credential]:
         """Return the provider credentials to inject into the guest."""
         ...
 
-    def guest_env(self: object) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
         ...
 
     def build_command(
-        self: object,
+        self,
         prompt: str,
         *,
         plugin_dir: str | None,
@@ -260,17 +288,17 @@ class CodingAgent(Protocol):
         """Build the guest command used to invoke the agent."""
         ...
 
-    async def provision(self: object, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
         ...
 
-    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         ...
 
     async def invoke(
-        self: object,
-        sandbox: object,
+        self,
+        sandbox: LiveSandbox,
         prompt: str,
         *,
         eval_id: str,
@@ -282,13 +310,13 @@ class CodingAgent(Protocol):
         resume_session_id: str | None,
         detect_skill: str | None,
         harness_args: list[str] | None = None,
-        extra_env: dict | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         ...
 
     async def judge(
-        self: object,
+        self,
         prompt: str,
         config: JudgeConfig,
         *,
@@ -302,22 +330,22 @@ class CodingAgent(Protocol):
         ...
 
     @classmethod
-    def for_host(cls: object) -> CodingAgent:
+    def for_host(cls) -> CodingAgent:
         """An instance bound to the host environment: agent_bin resolves from PATH."""
         ...
 
-    def binary_version(self: object) -> str | None:
+    def binary_version(self) -> str | None:
         """Return this instance's CLI version, or None on any failure (best effort)."""
         ...
 
-    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
         """Return whether one stream line shows a skill dispatch."""
         ...
 
-    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
         """Return whether stream lines show the expected skill firing."""
         ...
 
-    def streamed_activity(self: object, lines: object) -> bool:
+    def streamed_activity(self, lines: Iterable[str]) -> bool:
         """Return whether streamed output shows meaningful agent activity."""
         ...

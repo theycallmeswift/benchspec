@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import os
 
-from benchspec.agents.base import AgentCapabilities, CodingAgent
+from benchspec.agents.base import AgentCapabilities, BaseAgent, CodingAgent
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 
 __all__ = [
     "AgentCapabilities",
+    "BaseAgent",
     "CodingAgent",
     "ClaudeCodeAgent",
     "CodexAgent",
@@ -30,7 +31,7 @@ __all__ = [
     "known_harnesses",
 ]
 
-_REGISTRY: dict[str, type] = {
+_REGISTRY: dict[str, type[BaseAgent]] = {
     "claude-code": ClaudeCodeAgent,
     "codex": CodexAgent,
     "opencode": OpenCodeAgent,
@@ -66,12 +67,12 @@ def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) ->
     return _DEFAULT_AGENT
 
 
-def _selected_agent_class() -> type:
+def _selected_agent_class() -> type[BaseAgent]:
     """Provide the selected agent class helper."""
     return _REGISTRY[resolve_agent_name()]
 
 
-def agent_class(harness: str) -> type:
+def agent_class(harness: str) -> type[BaseAgent]:
     """The registered adapter class for a harness name.
 
     Judge-mode dispatch looks the class up, then binds an instance to the host

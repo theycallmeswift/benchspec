@@ -18,18 +18,20 @@ from __future__ import annotations
 import json
 import os
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
-from benchspec.grading.trajectory import iter_events
+from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
+    from benchspec.sandbox.backend import LiveSandbox
 
 # Credentials OpenCode reads (host-side env var names), in preference order. Whichever
 # is set is handed to the backend with its provider host attached; microsandbox honors
@@ -182,17 +184,17 @@ export const BenchspecBootstrap = async () => ({
 });
 """
 
-_COMPACT_JSON = {"separators": ((",", ":"))}
+_COMPACT_SEPARATORS = (",", ":")
 _BOOTSTRAP_PACKAGE_JSON = json.dumps(
     {"name": "benchspec-bootstrap", "version": "0.0.0", "type": "module", "main": "index.js"},
-    **_COMPACT_JSON,
+    separators=_COMPACT_SEPARATORS,
 )
 _OPENCODE_CONFIG_JSON = json.dumps(
     {
         "$schema": "https://opencode.ai/config.json",
         "plugin": ["/root/.config/opencode/plugins/benchspec-bootstrap"],
     },
-    **_COMPACT_JSON,
+    separators=_COMPACT_SEPARATORS,
 )
 
 
@@ -206,7 +208,8 @@ class OpenCodeAgent(BaseAgent):
     # honor it — each call is a fresh session. token_split: OpenCode usage events
     # carry no cache split, so cost would be a guess.
     capabilities = AgentCapabilities(multi_turn=False, token_split=False)
-    def provision_script(self: object) -> str:
+
+    def provision_script(self) -> str:
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
         return (
             dedent("""\
@@ -233,7 +236,7 @@ class OpenCodeAgent(BaseAgent):
         )
 
     def __init__(
-        self: object,
+        self,
         auth_value: str = "",
         *,
         auth_env: str = "ANTHROPIC_API_KEY",
@@ -248,12 +251,12 @@ class OpenCodeAgent(BaseAgent):
         self._version = version
 
     @classmethod
-    def for_host(cls: object) -> OpenCodeAgent:
+    def for_host(cls) -> OpenCodeAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `opencode`."""
         return cls(agent_bin="opencode")
 
     @classmethod
-    def from_env(cls: object) -> OpenCodeAgent:
+    def from_env(cls) -> OpenCodeAgent:
         """Build the agent from the host env: pinned version (env var > pyproject >.
 
         'latest') + the preferred credential.
@@ -277,7 +280,7 @@ class OpenCodeAgent(BaseAgent):
         `Path.cwd()` so direct `cli_build` invocations from the repo root still find the
         pin. Returns None if the file is missing or the value isn't a string.
         """
-        candidates = []
+        candidates: list[Path] = []
         env_root = os.environ.get("PROJECT_ROOT")
         if env_root:
             candidates.append(Path(env_root) / "pyproject.toml")
@@ -299,15 +302,15 @@ class OpenCodeAgent(BaseAgent):
             return None
         return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 
-    def version(self: object) -> str:
+    def version(self) -> str:
         """Return the agent CLI version string."""
         return self._version
 
-    def artifact_dirs(self: object) -> list[str]:
+    def artifact_dirs(self) -> list[str]:
         """Return guest directories that may contain agent-authored artifacts."""
         return [f"{self.guest_home}/.config/opencode/skills"]
 
-    def guest_env(self: object) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
         return {
             "HOME": self.guest_home,
@@ -315,21 +318,21 @@ class OpenCodeAgent(BaseAgent):
             "BENCHSPEC_OPENCODE_VERSION": self._version,
         }
 
-    def secrets(self: object) -> list[Credential]:
+    def secrets(self) -> list[Credential]:
         """Return the provider credentials to inject into the guest."""
         allow_host = _PROVIDER_HOSTS[self._auth_env]
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
         return [Credential(guest_env_name, self._auth_value, (allow_host,))]
 
     def build_command(
-        self: object,
-        prompt: object,
+        self,
+        prompt: str,
         *,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
     ) -> list[str]:
         """Build the guest command used to invoke the agent."""
@@ -354,7 +357,7 @@ class OpenCodeAgent(BaseAgent):
             prompt,
         ]
 
-    async def provision(self: object, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
         res = await sandbox.shell(self.provision_script(), env=self.guest_env())
         if res.exit_code != 0:
@@ -362,7 +365,7 @@ class OpenCodeAgent(BaseAgent):
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         dest = f"{self.guest_home}/.config/opencode/skills"
         await sandbox.shell(
@@ -375,20 +378,20 @@ class OpenCodeAgent(BaseAgent):
         )
 
     async def invoke(
-        self: object,
-        sandbox: object,
-        prompt: object,
+        self,
+        sandbox: LiveSandbox,
+        prompt: str,
         *,
-        eval_id: object,
-        config: object,
-        workdir: object,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        eval_id: str,
+        config: str,
+        workdir: str,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
-        extra_env: dict | None = None,
+        extra_env: dict[str, str] | None = None,
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
@@ -428,7 +431,7 @@ class OpenCodeAgent(BaseAgent):
         return parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
 
     async def judge(
-        self: object,
+        self,
         prompt: str,
         config: JudgeConfig,
         *,
@@ -457,7 +460,7 @@ class OpenCodeAgent(BaseAgent):
             raise RuntimeError(f"opencode judge made no successful model call: {detail}")
         return json.dumps({"result": result.result_text})
 
-    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
         """Return true when a line shows any skill route."""
         text = line.strip()
         if not text:
@@ -473,7 +476,7 @@ class OpenCodeAgent(BaseAgent):
             return False
         return _part_dispatches_any_skill(part, skill_name)
 
-    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
         """Return true when the target skill fired in the OpenCode stream.
 
         Uses the strict `_tool_dispatches_skill` matcher directly (not `detect_dispatch`,
@@ -494,7 +497,7 @@ class OpenCodeAgent(BaseAgent):
                 return True
         return False
 
-    def streamed_activity(self: object, lines: object) -> bool:
+    def streamed_activity(self, lines: Iterable[str]) -> bool:
         """Return true when the OpenCode stream proves the model began a turn.
 
         OpenCode emits step_start/text/tool_use/step_finish (never Claude's `assistant`),
@@ -519,8 +522,8 @@ def _skill_dispatch_name(part: dict) -> str | None:
     """Return the skill name from a `skill` dispatcher tool_use."""
     if part.get("tool") != "skill":
         return None
-    state = part.get("state") if isinstance(part.get("state"), dict) else {}
-    inp = state.get("input") if isinstance(state.get("input"), dict) else {}
+    state = dict_or_empty(part.get("state"))
+    inp = dict_or_empty(state.get("input"))
     name = inp.get("name")
     return name if isinstance(name, str) and name else None
 
@@ -550,14 +553,14 @@ def _opencode_trajectory(events: list[dict]) -> list[dict]:
     for event in events:
         if event.get("type") != "tool_use":
             continue
-        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        part = dict_or_empty(event.get("part"))
         tool = part.get("tool")
         if not isinstance(tool, str):
             continue
-        state = part.get("state") if isinstance(part.get("state"), dict) else {}
+        state = dict_or_empty(part.get("state"))
         if state.get("status") != "completed":
             continue
-        inp = state.get("input") if isinstance(state.get("input"), dict) else {}
+        inp = dict_or_empty(state.get("input"))
         if tool == "skill":
             skill = _skill_dispatch_name(part)
             traj.append(
@@ -608,10 +611,10 @@ def parse_opencode_jsonl(
             session_id = parsed_session_id
 
         event_type = event.get("type")
-        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        part = dict_or_empty(event.get("part"))
 
         if event_type == "step_finish":
-            tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+            tokens = dict_or_empty(part.get("tokens"))
             token_total = tokens.get("total")
             if isinstance(token_total, int):
                 total_tokens += token_total
@@ -621,7 +624,7 @@ def parse_opencode_jsonl(
                 text_parts.append(text_value)
         elif event_type == "tool_use" and detect_skill:
             # Gate on completed frames so `fired` agrees with the process-facts trajectory.
-            state = part.get("state") if isinstance(part.get("state"), dict) else {}
+            state = dict_or_empty(part.get("state"))
 
             if state.get("status") == "completed" and _tool_dispatches_skill(part, detect_skill):
                 fired = True

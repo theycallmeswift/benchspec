@@ -5,17 +5,19 @@ from __future__ import annotations
 import datetime
 import json
 import os
+from collections.abc import Iterable
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
-from benchspec.grading.trajectory import iter_events
+from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
+    from benchspec.sandbox.backend import LiveSandbox
 
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
@@ -105,7 +107,8 @@ class CodexAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.codex/skills"
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
-    def provision_script(self: object) -> str:
+
+    def provision_script(self) -> str:
         """Install the instance's pinned Codex CLI version (baked in so the cache key tracks it)."""
         return dedent(f"""\
             apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
@@ -115,7 +118,7 @@ class CodexAgent(BaseAgent):
         """)
 
     def __init__(
-        self: object,
+        self,
         auth_value: str = "",
         *,
         auth_env: str = "CODEX_API_KEY",
@@ -131,12 +134,12 @@ class CodexAgent(BaseAgent):
         self.agent_bin = agent_bin
 
     @classmethod
-    def for_host(cls: object) -> CodexAgent:
+    def for_host(cls) -> CodexAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `codex`."""
         return cls(agent_bin="codex")
 
     @classmethod
-    def from_env(cls: object) -> CodexAgent:
+    def from_env(cls) -> CodexAgent:
         """Build an agent instance from host environment settings."""
         version = os.environ.get("BENCHSPEC_CODEX_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
@@ -159,22 +162,22 @@ class CodexAgent(BaseAgent):
             "no Codex credential - set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, or CODEX_ACCESS_TOKEN"
         )
 
-    def version(self: object) -> str:
+    def version(self) -> str:
         """Return the agent CLI version string."""
         return self._version
 
-    def artifact_dirs(self: object) -> list[str]:
+    def artifact_dirs(self) -> list[str]:
         """Return guest directories that may contain agent-authored artifacts."""
         # Codex populates CODEX_HOME/skills with runtime-managed `.system` skills during
         # execution. Those are not agent-authored artifacts, and some are not UTF-8-safe
         # for benchspec's artifact reader, so Codex reports workdir outputs only.
         return []
 
-    def auth_json_path(self: object) -> str:
+    def auth_json_path(self) -> str:
         """Auth json path."""
         return self._auth_json_path
 
-    def guest_env(self: object) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
         return {
             "HOME": self.guest_home,
@@ -183,7 +186,7 @@ class CodexAgent(BaseAgent):
             "BENCHSPEC_CODEX_VERSION": self._version,
         }
 
-    def secrets(self: object) -> list[Credential]:
+    def secrets(self) -> list[Credential]:
         """Return the provider credentials to inject into the guest."""
         if self._auth_json_path:
             return []
@@ -194,14 +197,14 @@ class CodexAgent(BaseAgent):
         ]
 
     def build_command(
-        self: object,
-        prompt: object,
+        self,
+        prompt: str,
         *,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
         workdir: str | None = None,
     ) -> list[str]:
@@ -225,7 +228,7 @@ class CodexAgent(BaseAgent):
             prompt,
         ]
 
-    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
         """Return whether one stream line shows a skill dispatch."""
         text = line.strip()
         if not text:
@@ -236,7 +239,7 @@ class CodexAgent(BaseAgent):
             return False
         return _item_dispatches_any_skill(_event_item(event), skill_name)
 
-    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
         """Return whether stream lines show the expected skill firing."""
         for line in lines:
             text = line.strip()
@@ -250,7 +253,7 @@ class CodexAgent(BaseAgent):
                 return True
         return False
 
-    async def _write_auth_json(self: object, sandbox: object) -> None:
+    async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
             return
@@ -265,7 +268,7 @@ class CodexAgent(BaseAgent):
                 f"codex auth copy failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    def streamed_activity(self: object, lines: object) -> bool:
+    def streamed_activity(self, lines: Iterable[str]) -> bool:
         """Return whether streamed output shows meaningful agent activity."""
         activity_events = {
             "turn.started",
@@ -285,7 +288,7 @@ class CodexAgent(BaseAgent):
                 return True
         return False
 
-    async def provision(self: object, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
         res = await sandbox.shell(self.provision_script(), env=self.guest_env())
         if res.exit_code != 0:
@@ -293,7 +296,7 @@ class CodexAgent(BaseAgent):
                 f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         await self._write_auth_json(sandbox)
         dest = self.skill_load_dir
@@ -307,20 +310,20 @@ class CodexAgent(BaseAgent):
         )
 
     async def invoke(
-        self: object,
-        sandbox: object,
-        prompt: object,
+        self,
+        sandbox: LiveSandbox,
+        prompt: str,
         *,
-        eval_id: object,
-        config: object,
-        workdir: object,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        eval_id: str,
+        config: str,
+        workdir: str,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
-        extra_env: dict | None = None,
+        extra_env: dict[str, str] | None = None,
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
@@ -357,7 +360,7 @@ class CodexAgent(BaseAgent):
         return parse_codex_jsonl(res.stdout, eval_id, config, detect_skill)
 
     async def judge(
-        self: object,
+        self,
         prompt: str,
         config: JudgeConfig,
         *,
@@ -423,7 +426,7 @@ def _skill_dispatch_name(item: dict) -> str | None:
         return name if isinstance(name, str) and name else None
     if item_type == "tool_call":
         name = item.get("name")
-        args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+        args = dict_or_empty(item.get("arguments"))
         if name == "Skill":
             skill = args.get("skill") or args.get("name")
             return skill if isinstance(skill, str) and skill else None
@@ -510,7 +513,7 @@ def _codex_trajectory(events: list[dict]) -> list[dict]:
                     }
                 )
             else:
-                args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+                args = dict_or_empty(item.get("arguments"))
                 traj.append(
                     {
                         "kind": "tool_call",
@@ -573,7 +576,7 @@ def parse_codex_jsonl(
             if detect_skill and _item_dispatches_skill(item, detect_skill):
                 fired = True
         elif etype == "turn.completed":
-            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+            usage = dict_or_empty(event.get("usage"))
             input_tokens += _usage_int(usage, "input_tokens")
             cache_read_tokens += _usage_int(usage, "cached_input_tokens", "cache_read_input_tokens")
             output_tokens += _usage_int(usage, "output_tokens")

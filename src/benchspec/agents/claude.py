@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
+    from benchspec.sandbox.backend import LiveSandbox
 
 # Credentials Claude Code reads, in preference order. Whichever is set becomes a scoped
 # credential the backend injects (substituted only for the Anthropic API host).
@@ -66,7 +68,7 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
     return harness_args
 
 
-def _validate_plugin_dir_sources(plugin_dir: object, harness_args: list[str] | None) -> None:
+def _validate_plugin_dir_sources(plugin_dir: str | None, harness_args: list[str] | None) -> None:
     """Validate plugin dir sources."""
     if plugin_dir is None or harness_args is None:
         return
@@ -98,7 +100,8 @@ class ClaudeCodeAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.claude/skills"
     capabilities = AgentCapabilities(multi_turn=True, token_split=True)
-    def provision_script(self: object) -> str:
+
+    def provision_script(self) -> str:
         """Install script — the Claude installer always fetches latest; no version is baked in."""
         return (
             "apt-get update && apt-get install -y curl ca-certificates && "
@@ -106,7 +109,7 @@ class ClaudeCodeAgent(BaseAgent):
         )
 
     def __init__(
-        self: object,
+        self,
         auth_value: str = "",
         *,
         auth_env: str = "ANTHROPIC_API_KEY",
@@ -120,12 +123,12 @@ class ClaudeCodeAgent(BaseAgent):
         self.agent_bin = agent_bin
 
     @classmethod
-    def for_host(cls: object) -> ClaudeCodeAgent:
+    def for_host(cls) -> ClaudeCodeAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `claude`."""
         return cls(agent_bin="claude")
 
     @classmethod
-    def from_env(cls: object) -> ClaudeCodeAgent:
+    def from_env(cls) -> ClaudeCodeAgent:
         """Build an agent instance from host environment settings."""
         version = os.environ.get("BENCHSPEC_CLAUDE_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
@@ -144,11 +147,11 @@ class ClaudeCodeAgent(BaseAgent):
             "or ANTHROPIC_API_KEY"
         )
 
-    def version(self: object) -> str:
+    def version(self) -> str:
         """Return the agent CLI version string."""
         return self._version
 
-    def artifact_dirs(self: object) -> list[str]:
+    def artifact_dirs(self) -> list[str]:
         """Return guest directories that may contain agent-authored artifacts."""
         # Claude Code auto-loads (and scaffolds) skills under $HOME/.claude/skills — outside
         # the workdir mount, so a skill the agent writes here is invisible to the judge
@@ -156,7 +159,7 @@ class ClaudeCodeAgent(BaseAgent):
         # baseline diff drops them, leaving only what the agent authored.
         return [f"{self.guest_home}/.claude/skills"]
 
-    def guest_env(self: object) -> dict:
+    def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
         # IS_SANDBOX=1 lets claude run bypassPermissions as root (the guest is root); the
         # sandbox is the real containment boundary. The credential rides as the backend's
@@ -168,19 +171,19 @@ class ClaudeCodeAgent(BaseAgent):
         # substituted with.
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
 
-    def secrets(self: object) -> list[Credential]:
+    def secrets(self) -> list[Credential]:
         """Return the provider credentials to inject into the guest."""
         return [Credential(self._auth_env, self._auth_value, ("api.anthropic.com",))]
 
     def build_command(
-        self: object,
-        prompt: object,
+        self,
+        prompt: str,
         *,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
     ) -> list[str]:
         """Build the guest command used to invoke the agent."""
@@ -210,7 +213,7 @@ class ClaudeCodeAgent(BaseAgent):
         cmd += _validate_harness_args(harness_args)
         return cmd
 
-    async def provision(self: object, sandbox: object) -> None:
+    async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
         res = await sandbox.shell(self.provision_script(), env={"HOME": self.guest_home})
         if res.exit_code != 0:
@@ -218,7 +221,7 @@ class ClaudeCodeAgent(BaseAgent):
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self: object, sandbox: object, project_mount: str) -> None:
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
         """Copy project-local assets needed by the guest agent."""
         # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
         # the project's local skills there for a clean per-run tree. The agent-neutral
@@ -231,7 +234,7 @@ class ClaudeCodeAgent(BaseAgent):
         )
 
     async def judge(
-        self: object,
+        self,
         prompt: str,
         config: JudgeConfig,
         *,
@@ -252,7 +255,7 @@ class ClaudeCodeAgent(BaseAgent):
         _raise_for_is_error_envelope(proc.stdout)
         return proc.stdout
 
-    def detect_dispatch(self: object, line: str, skill_name: str | None) -> bool:
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
         """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
 
         A `Skill` tool_use, or a tool_use whose name is `skill_name` (the
@@ -262,7 +265,7 @@ class ClaudeCodeAgent(BaseAgent):
         """
         return dispatches_skill(line, skill_name)
 
-    def detect_fired(self: object, lines: object, skill_name: str) -> bool:
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
         """Tally whether OUR skill fired across the routing stream.
 
         Delegates to the shared Claude-shape helper so the event-shape match lives in one
@@ -270,7 +273,7 @@ class ClaudeCodeAgent(BaseAgent):
         """
         return detect_skill_fired(lines, skill_name)
 
-    def streamed_activity(self: object, lines: object) -> bool:
+    def streamed_activity(self, lines: Iterable[str]) -> bool:
         """True if the model began a turn (an `assistant` event), distinguishing a.
 
         clean non-fire from a retryable launch stall. Delegates to the shared helper.
@@ -278,20 +281,20 @@ class ClaudeCodeAgent(BaseAgent):
         return streamed_activity(lines)
 
     async def invoke(
-        self: object,
-        sandbox: object,
-        prompt: object,
+        self,
+        sandbox: LiveSandbox,
+        prompt: str,
         *,
-        eval_id: object,
-        config: object,
-        workdir: object,
-        plugin_dir: object,
-        model: object,
-        effort: object,
-        resume_session_id: object,
-        detect_skill: object,
+        eval_id: str,
+        config: str,
+        workdir: str,
+        plugin_dir: str | None,
+        model: str,
+        effort: str,
+        resume_session_id: str | None,
+        detect_skill: str | None,
         harness_args: list[str] | None = None,
-        extra_env: dict | None = None,
+        extra_env: dict[str, str] | None = None,
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""

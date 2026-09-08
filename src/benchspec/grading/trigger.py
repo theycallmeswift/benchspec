@@ -14,6 +14,7 @@ Claude Code event-shape match without crossing a private boundary.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 
 
 class RoutingError(RuntimeError):
@@ -27,7 +28,7 @@ class RoutingError(RuntimeError):
     """
 
 
-def _tool_uses(line: str) -> object:
+def _tool_uses(line: str) -> Iterator[dict]:
     """Yield each tool_use block in one stream-json line; skip empty/malformed lines.
 
     Names/inputs can be null in a partial event, so callers guard their own string ops —
@@ -52,7 +53,7 @@ def _tool_uses(line: str) -> object:
             yield block
 
 
-def detect_skill_fired(stream_lines: object, skill_name: str) -> bool:
+def detect_skill_fired(stream_lines: Iterable[str], skill_name: str) -> bool:
     """Return whether stream events show the requested skill firing."""
     for line in stream_lines:
         for block in _tool_uses(line):
@@ -98,7 +99,7 @@ def dispatches_skill(line: str, skill_name: str | None = None) -> bool:
     return False
 
 
-def streamed_activity(stream_lines: object) -> bool:
+def streamed_activity(stream_lines: Iterable[str]) -> bool:
     """True if the model began a turn (an `assistant` event), not just the startup.
 
     `system`/init line. A budget timeout after real activity is a genuine non-fire (the
