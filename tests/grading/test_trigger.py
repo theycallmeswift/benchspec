@@ -98,7 +98,7 @@ def test_detect_skill_no_match_returns_false_on_empty() -> None:
     assert detect_skill_fired([], "bootstrap") is False
 
 
-def _malformed_shape_lines() -> object:
+def _malformed_shape_lines() -> list[str]:
     """Valid-JSON-but-unexpected shapes that must never crash detection (the caller's.
 
     retry loop only catches subprocess failures, so an AttributeError here would be

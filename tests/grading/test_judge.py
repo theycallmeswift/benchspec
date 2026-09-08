@@ -1,5 +1,7 @@
 """Tests for judge."""
 
+from __future__ import annotations
+
 import json
 import subprocess
 from typing import NoReturn
@@ -109,12 +111,14 @@ def test_parse_judge_json_coerces_quoted_true_to_true() -> None:
     assert grade["assertions"][0]["passed"] is True
 
 
-def test_grade_run_calls_run_judge_with_the_resolved_config(monkeypatch: object) -> None:
+def test_grade_run_calls_run_judge_with_the_resolved_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify grade_run forwards the resolved judge config to run_judge."""
-    captured = {}
+    captured: dict[str, JudgeConfig] = {}
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
-        """Grade."""
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
+        """Record the config and return a canned passing verdict."""
         captured["config"] = config
         return (
             '{"result": "{\\"assertions\\": [{\\"text\\": \\"a1\\", '
@@ -133,12 +137,14 @@ def test_grade_run_calls_run_judge_with_the_resolved_config(monkeypatch: object)
     assert result["assertions"][0]["passed"] is True
 
 
-def test_grade_run_defaults_to_a_default_judge_config_when_none_given(monkeypatch: object) -> None:
+def test_grade_run_defaults_to_a_default_judge_config_when_none_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify grade_run falls back to a default JudgeConfig when none given."""
-    captured = {}
+    captured: dict[str, JudgeConfig] = {}
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
-        """Grade."""
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
+        """Record the config and return a canned passing verdict."""
         captured["config"] = config
         return (
             '{"result": "{\\"assertions\\": [{\\"text\\": \\"a1\\", '
@@ -152,10 +158,10 @@ def test_grade_run_defaults_to_a_default_judge_config_when_none_given(monkeypatc
     assert captured["config"] == JudgeConfig()  # harness=claude-code, model=sonnet, ...
 
 
-def test_grade_run_timeout_records_error_not_raises(monkeypatch: object) -> None:
+def test_grade_run_timeout_records_error_not_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a judge timeout is recorded as a graded error, not raised."""
     # A hung judge must be recorded as a graded error, not crash the whole arm.
-    def fake_run_judge(prompt: object, *, config: object) -> NoReturn:
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> NoReturn:
         """Grade."""
         raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
 
@@ -167,12 +173,12 @@ def test_grade_run_timeout_records_error_not_raises(monkeypatch: object) -> None
     assert all("JUDGE ERROR" in assertion["evidence"] for assertion in grade["assertions"])
 
 
-def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: object) -> None:
+def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a misaligned assertion count is treated as unparseable."""
     # The judge drops an assertion → misaligned response treated as unparseable.
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "e"}]})
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
         """Grade."""
         return json.dumps({"result": inner})
 
@@ -183,11 +189,11 @@ def test_grade_run_assertion_count_mismatch_is_error(monkeypatch: object) -> Non
     assert all("JUDGE ERROR" in assertion["evidence"] for assertion in grade["assertions"])
 
 
-def test_grade_run_happy_path(monkeypatch: object) -> None:
+def test_grade_run_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify grade_run happy path."""
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "ok"}]})
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
         """Grade."""
         return json.dumps({"result": inner})
 
@@ -197,13 +203,13 @@ def test_grade_run_happy_path(monkeypatch: object) -> None:
     assert grade["assertions"] == [{"text": "a1", "passed": True, "evidence": "ok"}]
 
 
-def test_grade_run_does_not_mask_judge_infra_error(monkeypatch: object) -> None:
+def test_grade_run_does_not_mask_judge_infra_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify grade_run does not mask an infra-level judge failure."""
     # An infra-level judge failure (missing host CLI, auth, rate limit) reaches
     # grade_run as RuntimeError from judges.run_judge. grade_run must NOT catch it — no
     # fake "JUDGE ERROR" mask — so it propagates and run_eval_arm can mark the arm
     # errored.
-    def boom(prompt: object, *, config: object) -> NoReturn:
+    def boom(prompt: str, *, config: JudgeConfig) -> NoReturn:
         """Grade."""
         raise RuntimeError("host claude CLI not found on PATH")
 
@@ -213,9 +219,9 @@ def test_grade_run_does_not_mask_judge_infra_error(monkeypatch: object) -> None:
         grade_run(["a1"], "tree", {}, {}, "msg", "e1", "with_skill")
 
 
-def test_grade_run_does_not_catch_runtimeerror(monkeypatch: object) -> None:
+def test_grade_run_does_not_catch_runtimeerror(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify grade_run does not catch a RuntimeError from run_judge."""
-    def boom(prompt: object, *, config: object) -> NoReturn:
+    def boom(prompt: str, *, config: JudgeConfig) -> NoReturn:
         """Grade."""
         raise RuntimeError("host claude CLI returned is_error=true: Not logged in")
 
@@ -225,13 +231,13 @@ def test_grade_run_does_not_catch_runtimeerror(monkeypatch: object) -> None:
         grade_run(["a1"], "tree", {}, {}, "final", "eval1", "trial")
 
 
-def test_grade_run_passes_judge_config_through(monkeypatch: object) -> None:
+def test_grade_run_passes_judge_config_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify grade_run passes an explicit judge config through to run_judge."""
     inner = json.dumps({"assertions": [{"text": "a1", "passed": True, "evidence": "ok"}]})
-    captured = {}
+    captured: dict[str, JudgeConfig] = {}
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
-        """Grade."""
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
+        """Record the config and return a canned passing verdict."""
         captured["config"] = config
         return json.dumps({"result": inner})
 
@@ -262,12 +268,12 @@ def test_build_judge_prompt_omits_process_section_when_empty() -> None:
     assert "PROCESS / TOOL ACTIVITY" not in prompt
 
 
-def test_grade_run_passes_process_facts_into_prompt(monkeypatch: object) -> None:
+def test_grade_run_passes_process_facts_into_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify grade_run threads process facts into the judge prompt."""
-    captured = {}
+    captured: dict[str, str] = {}
 
-    def fake_run_judge(prompt: object, *, config: object) -> str:
-        """Grade."""
+    def fake_run_judge(prompt: str, *, config: JudgeConfig) -> str:
+        """Record the prompt and return a canned passing verdict."""
         captured["prompt"] = prompt
         return json.dumps({"result": json.dumps(
             {"assertions": [{"text": "a", "passed": True, "evidence": "Skill(writing-prompts)"}]}

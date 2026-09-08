@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -204,7 +205,7 @@ def test_former_trigger_doc_now_rejected() -> None:
     assert "trigger-evals.md" not in msg
 
 
-def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
+def test_validate_path_returns_parsed_data(tmp_path: Path) -> None:
     """Verify validate path returns parsed data."""
     f = tmp_path / "evals.json"
     f.write_text(json.dumps(_doc([{"id": "ok", "prompt": "p", "assertions": ["a"]}])))
@@ -214,7 +215,7 @@ def test_validate_path_returns_parsed_data(tmp_path: object) -> None:
     assert data["evals"][0]["id"] == "ok"
 
 
-def test_validate_path_raises_on_bad_schema(tmp_path: object) -> None:
+def test_validate_path_raises_on_bad_schema(tmp_path: Path) -> None:
     """Verify validate path raises for on bad schema."""
     f = tmp_path / "evals.json"
     f.write_text(json.dumps(_doc([{"id": "Bad Slug", "prompt": "p", "assertions": ["a"]}])))

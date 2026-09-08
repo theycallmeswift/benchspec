@@ -53,7 +53,7 @@ def test_validate_judge_table_rejects_unknown_key() -> None:
     ({"env": ["not", "a", "table"]}, "env"),
     ({"env": {"KEY": 1}}, "env"),
 ])
-def test_validate_judge_table_rejects_bad_types(bad_table: object, match: object) -> None:
+def test_validate_judge_table_rejects_bad_types(bad_table: dict, match: str) -> None:
     """Verify validate judge table rejects bad types."""
     with pytest.raises(SchemaError, match=match):
         _validate_judge_table("[tool.benchspec.judge]", bad_table)

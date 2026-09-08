@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 
 import pytest
 
@@ -11,10 +12,11 @@ from benchspec.agents.base import Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.orchestration.results import parse_run_json
 from benchspec.sandbox.errors import SandboxError
+from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
 
-def _agent() -> object:
+def _agent() -> ClaudeCodeAgent:
     """Build the agent test fixture."""
     return ClaudeCodeAgent(auth_value="sk-test", version="latest")
 
@@ -294,9 +296,8 @@ def test_provision_runs_install_script() -> None:
     """Verify provision runs install script."""
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
     asyncio.run(_agent().provision(sandbox))
-    kind, script, _ = sandbox.calls[0]
-    assert kind == "shell"
-    assert "claude.ai/install.sh" in script
+
+    assert "claude.ai/install.sh" in shell_call(sandbox).script
 
 
 def test_provision_raises_on_failure() -> None:
@@ -341,10 +342,10 @@ def test_invoke_baseline_parses_stream_result() -> None:
     assert res.is_error is False
     assert res.fired is False
     assert res.raw == payload
-    _, cmd, args, kw = sandbox.calls[0]
-    assert cmd == "/root/.local/bin/claude"
-    assert kw["cwd"] == "/workspace"
-    assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home
+    recorded = exec_call(sandbox)
+    assert recorded.cmd == "/root/.local/bin/claude"
+    assert recorded.cwd == "/workspace"
+    assert recorded.env["HOME"] == ClaudeCodeAgent.guest_home
 
 
 def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
@@ -375,8 +376,7 @@ def test_invoke_closes_stdin_to_avoid_cli_wait() -> None:
             detect_skill=None,
         )
     )
-    _, _cmd, _args, kw = sandbox.calls[0]
-    assert kw["stdin"] == b""
+    assert exec_call(sandbox).stdin == b""
 
 
 def test_invoke_threads_harness_args_into_build_command() -> None:
@@ -408,8 +408,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _cmd, args, _kw = sandbox.calls[0]
-    assert args[-2:] == ["--plugin-dir", "/project"]
+    assert exec_call(sandbox).args[-2:] == ["--plugin-dir", "/project"]
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
@@ -439,7 +438,16 @@ def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     class DyingSandbox(FakeSandbox):
         """A sandbox whose exec fails the way a torn-down VM does."""
 
-        async def exec(self: object, cmd: str, args: object = None, **kw: object) -> object:
+        async def exec(
+            self,
+            cmd: str,
+            args: list[str] | None = None,
+            *,
+            cwd: str | None = None,
+            env: Mapping[str, str] | None = None,
+            timeout: float | None = None,
+            stdin: bytes | None = None,
+        ) -> FakeExecOutput:
             """Fail like a torn-down VM."""
             raise SandboxError("container gone")
 
@@ -491,13 +499,13 @@ def test_stage_project_assets_copies_project_skills_into_guest_home() -> None:
     """Verify stage project assets copies project skills into guest home."""
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
     asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
-    kind, script, _ = sandbox.calls[0]
-    assert kind == "shell"
+
+    script = shell_call(sandbox).script
     assert "/project/.claude/skills" in script
     assert f"{ClaudeCodeAgent.guest_home}/.claude/skills" in script
 
 
-def test_from_env_prefers_oauth_token(monkeypatch: object) -> None:
+def test_from_env_prefers_oauth_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env prefers oauth token."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
@@ -506,7 +514,7 @@ def test_from_env_prefers_oauth_token(monkeypatch: object) -> None:
     assert agent._auth_value == "tok"
 
 
-def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
+def test_from_env_falls_back_to_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env falls back to api key."""
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
@@ -516,11 +524,13 @@ def test_from_env_falls_back_to_api_key(monkeypatch: object) -> None:
     assert agent.version() == "9.9"
 
 
-def test_credential_error_set_vs_unset(monkeypatch: object) -> None:
+def test_credential_error_set_vs_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error set vs unset."""
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert "credential" in ClaudeCodeAgent.credential_error()
+    unset_error = ClaudeCodeAgent.credential_error()
+    assert unset_error is not None
+    assert "credential" in unset_error
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     assert ClaudeCodeAgent.credential_error() is None
 
@@ -628,7 +638,7 @@ def test_claude_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _cmd, _args, kw = sandbox.calls[0]
-    assert kw["env"]["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
-    assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
-    assert kw["env"]["HOME"] == ClaudeCodeAgent.guest_home  # guest_env still present
+    env = exec_call(sandbox).env
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert env["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
+    assert env["HOME"] == ClaudeCodeAgent.guest_home  # guest_env still present

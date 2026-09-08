@@ -1,8 +1,11 @@
 """Tests for ClaudeCodeAgent's judge mode (native envelope + infra errors)."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import subprocess
+from typing import NoReturn
 
 import pytest
 
@@ -12,7 +15,7 @@ from benchspec.grading.judges.config import JudgeConfig
 
 def _fake_proc(
     stdout: str = "", stderr: str = "", returncode: int = 0
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """A CompletedProcess stand-in for a monkeypatched subprocess.run."""
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
@@ -22,15 +25,18 @@ def _judge(config: JudgeConfig) -> str:
     return asyncio.run(ClaudeCodeAgent.for_host().judge("grade this", config))
 
 
-def test_judge_returns_native_result_envelope(monkeypatch: object) -> None:
+def test_judge_returns_native_result_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge returns the native result envelope."""
     payload = json.dumps({"result": '{"assertions": []}', "is_error": False})
-    captured = {}
+    captured_command: list[str] = []
+    captured_env: dict[str, str] = {}
 
-    def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def fake_run(
+        command: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         """Capture the command and env and return a fake process."""
-        captured["command"] = command
-        captured["env"] = kwargs.get("env")
+        captured_command.extend(command)
+        captured_env.update(env)
         return _fake_proc(stdout=payload)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -42,16 +48,16 @@ def test_judge_returns_native_result_envelope(monkeypatch: object) -> None:
 
     assert out == payload
     assert json.loads(out)["result"] == '{"assertions": []}'
-    assert captured["command"][:2] == ["claude", "-p"]
-    assert "--model" in captured["command"]
-    assert "sonnet" in captured["command"]
-    assert "--effort" in captured["command"]
-    assert "medium" in captured["command"]
-    assert captured["command"][-2:] == ["--plugin-dir", "/x"]
-    assert captured["env"]["FOO"] == "bar"
+    assert captured_command[:2] == ["claude", "-p"]
+    assert "--model" in captured_command
+    assert "sonnet" in captured_command
+    assert "--effort" in captured_command
+    assert "medium" in captured_command
+    assert captured_command[-2:] == ["--plugin-dir", "/x"]
+    assert captured_env["FOO"] == "bar"
 
 
-def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(
         subprocess, "run",
@@ -62,7 +68,7 @@ def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: object) -> None:
         _judge(JudgeConfig(model="sonnet"))
 
 
-def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge raises RuntimeError on an is_error envelope."""
     payload = json.dumps({"result": "Not logged in", "is_error": True})
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout=payload))
@@ -71,9 +77,9 @@ def test_judge_raises_runtimeerror_on_is_error_envelope(monkeypatch: object) -> 
         _judge(JudgeConfig(model="sonnet"))
 
 
-def test_judge_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_when_binary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge raises RuntimeError when the binary is missing."""
-    def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def raise_not_found(*args: object, **kwargs: object) -> NoReturn:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError("[Errno 2] No such file or directory: 'claude'")
 
@@ -83,7 +89,7 @@ def test_judge_raises_runtimeerror_when_binary_missing(monkeypatch: object) -> N
         _judge(JudgeConfig(model="sonnet"))
 
 
-def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None:
+def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge raises RuntimeError on an unknown model."""
     # No local model/harness allow-list: a fake or wrong-family model reaches the
     # harness, which rejects it (nonzero exit) — surfaced as infra RuntimeError, not
@@ -97,9 +103,9 @@ def test_judge_raises_runtimeerror_on_unknown_model(monkeypatch: object) -> None
         _judge(JudgeConfig(model="gpt-5.5"))
 
 
-def test_binary_version_best_effort_none_on_failure(monkeypatch: object) -> None:
+def test_binary_version_best_effort_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify binary_version returns None on failure."""
-    def raise_not_found(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def raise_not_found(*args: object, **kwargs: object) -> NoReturn:
         """Raise to simulate a missing binary."""
         raise FileNotFoundError
 
@@ -108,7 +114,7 @@ def test_binary_version_best_effort_none_on_failure(monkeypatch: object) -> None
     assert ClaudeCodeAgent.for_host().binary_version() is None
 
 
-def test_binary_version_returns_stripped_stdout(monkeypatch: object) -> None:
+def test_binary_version_returns_stripped_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify binary_version returns stripped stdout."""
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout="2.1.0\n"))
     assert ClaudeCodeAgent.for_host().binary_version() == "2.1.0"

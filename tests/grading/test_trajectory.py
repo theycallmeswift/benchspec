@@ -1,5 +1,7 @@
 """Tests for trajectory."""
 
+from __future__ import annotations
+
 import json
 
 from benchspec.grading.trajectory import (
@@ -9,7 +11,7 @@ from benchspec.grading.trajectory import (
 )
 
 
-def _assistant_tool_use(name: object, inp: object, tool_id: object = "toolu_1") -> object:
+def _assistant_tool_use(name: str, inp: dict, tool_id: str = "toolu_1") -> str:
     """Build the assistant tool use test fixture."""
     return json.dumps(
         {
@@ -21,7 +23,7 @@ def _assistant_tool_use(name: object, inp: object, tool_id: object = "toolu_1") 
     )
 
 
-def _user_tool_result(tool_use_id: object, content: object, is_error: object = False) -> object:
+def _user_tool_result(tool_use_id: str, content: str | list, is_error: bool = False) -> str:
     """Build the user tool result test fixture."""
     return json.dumps(
         {

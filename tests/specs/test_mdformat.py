@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 
 from benchspec.specs import mdformat, schema
 
 
-def _write_eval_file(tmp_path: object, group: object, filename: object, body: object) -> object:
+def _write_eval_file(tmp_path: Path, group: str, filename: str, body: str) -> Path:
     """Write one evals/<group>/<filename>."""
     group_dir = tmp_path / group
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -17,12 +18,12 @@ def _write_eval_file(tmp_path: object, group: object, filename: object, body: ob
     return group_dir / filename
 
 
-def _write_slug(tmp_path: object, slug: object, body: object) -> object:
+def _write_slug(tmp_path: Path, slug: str, body: str) -> Path:
     """Write one eval.md whose parent folder (and derived id) is `slug`."""
     return _write_eval_file(tmp_path, slug, "eval.md", body)
 
 
-def test_parse_eval_md_id_from_folder_for_eval_md(tmp_path: object) -> None:
+def test_parse_eval_md_id_from_folder_for_eval_md(tmp_path: Path) -> None:
     """Verify parse eval md id from folder for eval.md."""
     path = _write_eval_file(
         tmp_path,
@@ -36,7 +37,7 @@ def test_parse_eval_md_id_from_folder_for_eval_md(tmp_path: object) -> None:
     assert ev["id"] == "summarize-transcript"
 
 
-def test_parse_eval_md_id_from_stem_for_dot_eval_md(tmp_path: object) -> None:
+def test_parse_eval_md_id_from_stem_for_dot_eval_md(tmp_path: Path) -> None:
     """Verify parse eval md id from stem for *.eval.md."""
     path = _write_eval_file(
         tmp_path,
@@ -50,7 +51,7 @@ def test_parse_eval_md_id_from_stem_for_dot_eval_md(tmp_path: object) -> None:
     assert ev["id"] == "write-spec"
 
 
-def test_parse_eval_md_rejects_non_eval_filename(tmp_path: object) -> None:
+def test_parse_eval_md_rejects_non_eval_filename(tmp_path: Path) -> None:
     """Verify parse eval md rejects non-eval filename."""
     path = _write_eval_file(
         tmp_path, "g", "prompt.md", "---\n{}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n- [ ] a\n"
@@ -60,7 +61,7 @@ def test_parse_eval_md_rejects_non_eval_filename(tmp_path: object) -> None:
         mdformat.parse_eval_md(path)
 
 
-def test_parse_eval_md_minimal(tmp_path: object) -> None:
+def test_parse_eval_md_minimal(tmp_path: Path) -> None:
     """Verify parse eval md minimal."""
     eval_path = _write_slug(
         tmp_path,
@@ -99,7 +100,7 @@ def test_parse_eval_md_minimal(tmp_path: object) -> None:
     assert "history" not in ev
 
 
-def test_parse_eval_md_with_history(tmp_path: object) -> None:
+def test_parse_eval_md_with_history(tmp_path: Path) -> None:
     """Verify parse eval md with history."""
     eval_path = _write_slug(
         tmp_path,
@@ -130,7 +131,7 @@ def test_parse_eval_md_with_history(tmp_path: object) -> None:
     ]
 
 
-def test_parse_eval_md_malformed_history_rejected(tmp_path: object) -> None:
+def test_parse_eval_md_malformed_history_rejected(tmp_path: Path) -> None:
     """Verify parse eval md malformed history rejected."""
     # A bare parse_eval_md call must validate history itself, not defer to discovery.
     eval_path = _write_slug(
@@ -154,7 +155,7 @@ def test_parse_eval_md_malformed_history_rejected(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_parse_eval_md_unknown_frontmatter_key_rejected(tmp_path: object) -> None:
+def test_parse_eval_md_unknown_frontmatter_key_rejected(tmp_path: Path) -> None:
     """Verify parse eval md unknown frontmatter key rejected."""
     eval_path = _write_slug(
         tmp_path,
@@ -176,7 +177,7 @@ def test_parse_eval_md_unknown_frontmatter_key_rejected(tmp_path: object) -> Non
         mdformat.parse_eval_md(eval_path)
 
 
-def test_parse_eval_md_missing_prompt_rejected(tmp_path: object) -> None:
+def test_parse_eval_md_missing_prompt_rejected(tmp_path: Path) -> None:
     """Verify parse eval md missing prompt rejected."""
     eval_path = _write_slug(
         tmp_path,
@@ -195,7 +196,7 @@ def test_parse_eval_md_missing_prompt_rejected(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_parse_eval_md_missing_assertions_rejected(tmp_path: object) -> None:
+def test_parse_eval_md_missing_assertions_rejected(tmp_path: Path) -> None:
     """Verify parse eval md missing assertions rejected."""
     eval_path = _write_slug(
         tmp_path,
@@ -214,7 +215,7 @@ def test_parse_eval_md_missing_assertions_rejected(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_continuation_lines_are_hard_errors(tmp_path: object) -> None:
+def test_continuation_lines_are_hard_errors(tmp_path: Path) -> None:
     """Verify continuation lines are hard errors."""
     eval_path = _write_slug(
         tmp_path,
@@ -237,7 +238,7 @@ def test_continuation_lines_are_hard_errors(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_unknown_heading_is_a_hard_error(tmp_path: object) -> None:
+def test_unknown_heading_is_a_hard_error(tmp_path: Path) -> None:
     """Verify unknown heading is a hard error."""
     eval_path = _write_slug(
         tmp_path,
@@ -259,7 +260,7 @@ def test_unknown_heading_is_a_hard_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_plain_bullet_is_a_hard_error(tmp_path: object) -> None:
+def test_plain_bullet_is_a_hard_error(tmp_path: Path) -> None:
     """Verify plain bullet is a hard error."""
     eval_path = _write_slug(
         tmp_path,
@@ -281,7 +282,7 @@ def test_plain_bullet_is_a_hard_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_bad_yaml_frontmatter_is_loud(tmp_path: object) -> None:
+def test_bad_yaml_frontmatter_is_loud(tmp_path: Path) -> None:
     """Verify bad yaml frontmatter is loud."""
     eval_path = _write_slug(
         tmp_path,
@@ -303,14 +304,14 @@ def test_bad_yaml_frontmatter_is_loud(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_mdformat_error_is_a_schema_error(tmp_path: object) -> None:
+def test_mdformat_error_is_a_schema_error(tmp_path: Path) -> None:
     """Verify mdformat error is a schema error."""
     # discovery's error prefixing catches schema.SchemaError; Markdown structure
     # errors must ride the same channel.
     assert issubclass(mdformat.MdFormatError, schema.SchemaError)
 
 
-def test_empty_assertions_section_is_an_error(tmp_path: object) -> None:
+def test_empty_assertions_section_is_an_error(tmp_path: Path) -> None:
     """Verify empty assertions section is an error."""
     eval_path = _write_slug(
         tmp_path,
@@ -331,7 +332,7 @@ def test_empty_assertions_section_is_an_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_stray_h3_outside_assertions_is_an_error(tmp_path: object) -> None:
+def test_stray_h3_outside_assertions_is_an_error(tmp_path: Path) -> None:
     """Verify stray h3 outside assertions is an error."""
     eval_path = _write_slug(
         tmp_path,
@@ -358,7 +359,7 @@ def test_stray_h3_outside_assertions_is_an_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_h3_before_any_h2_is_an_error(tmp_path: object) -> None:
+def test_h3_before_any_h2_is_an_error(tmp_path: Path) -> None:
     """Verify h3 before any h2 is an error."""
     # An H3 that appears before the first H2 (last_h2 is None) must still raise
     # the same "outside an ## Assertions" error — not silently pass or crash.
@@ -387,7 +388,7 @@ def test_h3_before_any_h2_is_an_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_h3_groups_under_assertions_still_parse(tmp_path: object) -> None:
+def test_h3_groups_under_assertions_still_parse(tmp_path: Path) -> None:
     """Verify h3 groups under assertions still parse."""
     eval_path = _write_slug(
         tmp_path,
@@ -414,7 +415,7 @@ def test_h3_groups_under_assertions_still_parse(tmp_path: object) -> None:
     assert doc["assertions"] == ["top-level assertion", "grouped assertion"]
 
 
-def test_parent_child_flattens_to_children(tmp_path: object) -> None:
+def test_parent_child_flattens_to_children(tmp_path: Path) -> None:
     """Verify parent child flattens to children."""
     eval_path = _write_slug(
         tmp_path,
@@ -444,7 +445,7 @@ def test_parent_child_flattens_to_children(tmp_path: object) -> None:
     ]
 
 
-def test_mixed_childless_and_parent_items_keep_document_order(tmp_path: object) -> None:
+def test_mixed_childless_and_parent_items_keep_document_order(tmp_path: Path) -> None:
     """Verify mixed childless and parent items keep document order."""
     eval_path = _write_slug(
         tmp_path,
@@ -476,7 +477,7 @@ def test_mixed_childless_and_parent_items_keep_document_order(tmp_path: object) 
     ]
 
 
-def test_flat_list_parses_unchanged(tmp_path: object) -> None:
+def test_flat_list_parses_unchanged(tmp_path: Path) -> None:
     """Verify flat list parses unchanged."""
     # Back-compat: a flat (un-nested) list parses exactly as before.
     eval_path = _write_slug(
@@ -506,7 +507,7 @@ def test_flat_list_parses_unchanged(tmp_path: object) -> None:
     ]
 
 
-def test_grandchild_is_a_hard_error(tmp_path: object) -> None:
+def test_grandchild_is_a_hard_error(tmp_path: Path) -> None:
     """Verify grandchild is a hard error."""
     eval_path = _write_slug(
         tmp_path,
@@ -530,7 +531,7 @@ def test_grandchild_is_a_hard_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_ragged_child_indent_is_a_hard_error(tmp_path: object) -> None:
+def test_ragged_child_indent_is_a_hard_error(tmp_path: Path) -> None:
     """Verify ragged child indent is a hard error."""
     eval_path = _write_slug(
         tmp_path,
@@ -554,7 +555,7 @@ def test_ragged_child_indent_is_a_hard_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_child_without_parent_is_a_hard_error(tmp_path: object) -> None:
+def test_child_without_parent_is_a_hard_error(tmp_path: Path) -> None:
     """Verify child without parent is a hard error."""
     eval_path = _write_slug(
         tmp_path,
@@ -576,7 +577,7 @@ def test_child_without_parent_is_a_hard_error(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_children_cannot_cross_h3_boundary(tmp_path: object) -> None:
+def test_children_cannot_cross_h3_boundary(tmp_path: Path) -> None:
     """Verify children cannot cross h3 boundary."""
     # The H2-body parent stays childless; the H3's indented line is then an orphan
     # (hence the "no parent" error, not silent cross-section adoption).
@@ -604,7 +605,7 @@ def test_children_cannot_cross_h3_boundary(tmp_path: object) -> None:
         mdformat.parse_eval_md(eval_path)
 
 
-def test_parent_child_decomposes_within_h3_group(tmp_path: object) -> None:
+def test_parent_child_decomposes_within_h3_group(tmp_path: Path) -> None:
     """Verify parent child decomposes within h3 group."""
     # The only claimed-but-otherwise-untested capability: decomposition inside a
     # ### group, not just the H2 body.

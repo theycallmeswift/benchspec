@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from benchspec.agents.base import Credential
 from benchspec.agents.codex import CodexAgent, parse_codex_jsonl
 from benchspec.sandbox.errors import SandboxError
+from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -144,7 +146,7 @@ def test_build_command_ignores_plugin_and_resume_until_supported() -> None:
         "review",
     ],
 )
-def test_build_command_rejects_reserved_harness_args(arg: object) -> None:
+def test_build_command_rejects_reserved_harness_args(arg: str) -> None:
     """Verify build command rejects reserved harness args."""
     with pytest.raises(ValueError, match="reserved.*Codex"):
         _agent().build_command(
@@ -179,7 +181,7 @@ def test_guest_env_omits_credentials() -> None:
     assert "secret" not in env.values()
 
 
-def test_from_env_prefers_api_key(monkeypatch: object) -> None:
+def test_from_env_prefers_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env prefers api key."""
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -191,7 +193,7 @@ def test_from_env_prefers_api_key(monkeypatch: object) -> None:
     assert agent.version() == "0.142.3"
 
 
-def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
+def test_from_env_falls_back_to_access_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env falls back to access token."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
@@ -203,7 +205,7 @@ def test_from_env_falls_back_to_access_token(monkeypatch: object) -> None:
     ]
 
 
-def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) -> None:
+def test_from_env_reads_auth_json_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify from env reads auth json path."""
     auth = tmp_path / "auth.json"
     auth.write_text(
@@ -224,7 +226,7 @@ def test_from_env_reads_auth_json_path(monkeypatch: object, tmp_path: object) ->
     assert agent.secrets() == []
 
 
-def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -> None:
+def test_credential_error_message_when_no_credentials_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error message when no credentials set."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
@@ -238,7 +240,7 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -
     assert "CODEX_ACCESS_TOKEN" in msg
 
 
-def test_credential_error_none_when_api_key_set(monkeypatch: object) -> None:
+def test_credential_error_none_when_api_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error none when api key set."""
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
 
@@ -246,7 +248,7 @@ def test_credential_error_none_when_api_key_set(monkeypatch: object) -> None:
 
 
 def test_credential_error_none_when_auth_json_path_is_valid(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify credential error none when auth json path is valid."""
     auth = tmp_path / "auth.json"
@@ -498,15 +500,15 @@ def test_provision_runs_install_script() -> None:
 
     asyncio.run(_agent().provision(sandbox))
 
-    kind, script, kw = sandbox.calls[0]
-    assert kind == "shell"
+    provision_call = shell_call(sandbox)
+    script = provision_call.script
     assert "CODEX_NON_INTERACTIVE=1" in script
     assert "npm i -g" in script
     # The version is baked into the ref (not a guest env var), so the cache key tracks it.
     assert "@openai/codex@latest" in script
     assert "codex" in script
     assert "codex.openai.com" not in script
-    assert kw["env"]["CODEX_HOME"] == "/root/.codex"
+    assert provision_call.env["CODEX_HOME"] == "/root/.codex"
 
 
 def test_provision_raises_on_failure() -> None:
@@ -523,13 +525,13 @@ def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
 
     asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
 
-    kind, script, kw = sandbox.calls[0]
-    assert kind == "shell"
+    staging_call = shell_call(sandbox)
+    script = staging_call.script
     assert "/project/skills" in script
     assert "/project/.agents/skills" in script
     assert "/project/.claude/skills" in script
     assert "/root/.codex/skills" in script
-    assert kw["env"]["HOME"] == "/root"
+    assert staging_call.env["HOME"] == "/root"
 
 
 def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
@@ -555,13 +557,12 @@ def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
         )
     )
 
-    kind, cmd, args, kw = sandbox.calls[0]
-    assert kind == "exec"
-    assert cmd == "/usr/local/bin/codex"
-    assert args[-1] == "do it"
-    assert args[args.index("-C") + 1] == "/workspace"
-    assert kw["cwd"] == "/workspace"
-    assert kw["stdin"] == b""
+    recorded = exec_call(sandbox)
+    assert recorded.cmd == "/usr/local/bin/codex"
+    assert recorded.args[-1] == "do it"
+    assert recorded.args[recorded.args.index("-C") + 1] == "/workspace"
+    assert recorded.cwd == "/workspace"
+    assert recorded.stdin == b""
     assert res.result_text == "Thinking...\n\nDone."
     assert res.fired is True
 
@@ -590,10 +591,10 @@ def test_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _, _, kw = sandbox.calls[0]
-    assert kw["env"]["TZ"] == "America/Los_Angeles"
-    assert kw["env"]["EXTRA"] == "1"
-    assert kw["env"]["HOME"] == "/root"
+    env = exec_call(sandbox).env
+    assert env["TZ"] == "America/Los_Angeles"
+    assert env["EXTRA"] == "1"
+    assert env["HOME"] == "/root"
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
@@ -625,7 +626,16 @@ def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     class DyingSandbox(FakeSandbox):
         """A sandbox whose exec fails the way a torn-down VM does."""
 
-        async def exec(self: object, cmd: str, args: object = None, **kw: object) -> object:
+        async def exec(
+            self,
+            cmd: str,
+            args: list[str] | None = None,
+            *,
+            cwd: str | None = None,
+            env: Mapping[str, str] | None = None,
+            timeout: float | None = None,
+            stdin: bytes | None = None,
+        ) -> FakeExecOutput:
             """Fail like a torn-down VM."""
             raise SandboxError("container gone")
 
@@ -672,8 +682,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _, args, _ = sandbox.calls[0]
-    assert args[-3:] == ["--color", "never", "do the thing"]
+    assert exec_call(sandbox).args[-3:] == ["--color", "never", "do the thing"]
 
 
 def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
@@ -699,11 +708,11 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
         )
     )
 
-    auth_call, exec_call = sandbox.calls
-    assert auth_call[0] == "shell"
-    assert CodexAgent.AUTH_JSON_GUEST_SOURCE in auth_call[1]
-    assert "/root/.codex/auth.json" in auth_call[1]
-    assert exec_call[0] == "exec"
+    assert len(sandbox.calls) == 2
+    auth_copy_script = shell_call(sandbox, 0).script
+    assert CodexAgent.AUTH_JSON_GUEST_SOURCE in auth_copy_script
+    assert "/root/.codex/auth.json" in auth_copy_script
+    assert exec_call(sandbox, 1).cmd == "/usr/local/bin/codex"
 
 
 def test_invoke_returns_error_when_auth_json_copy_fails() -> None:

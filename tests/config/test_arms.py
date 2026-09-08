@@ -16,7 +16,7 @@ from benchspec.config.arms import (
 from benchspec.specs.schema import SchemaError
 
 
-def _sets_table(sets: object, default: object = "default", **extra: object) -> object:
+def _sets_table(sets: dict, default: str = "default", **extra: object) -> dict:
     """Build the sets table test fixture."""
     return {"sets": sets, "default-set": default, **extra}
 

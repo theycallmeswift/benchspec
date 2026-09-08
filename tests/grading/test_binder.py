@@ -7,10 +7,14 @@ one place that monkeypatches urllib — the network transport is the painful edg
 
 from __future__ import annotations
 
+import email.message
 import inspect
 import io
 import json
 import urllib.error
+import urllib.request
+from collections.abc import Callable
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -19,7 +23,7 @@ from benchspec.grading import binder
 from benchspec.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
 
 
-def _reply(text: str) -> object:
+def _reply(text: str) -> Callable[..., GeminiReply]:
     """Build a call_model fixture that returns a fixed GeminiReply."""
     return lambda prompt, *, timeout=60: GeminiReply(
         text=text, prompt_tokens=0, output_tokens=0, latency_ms=0.0
@@ -37,6 +41,8 @@ def test_bind_file_exists() -> None:
         "the file out.md exists",
         call_model=_reply('{"checker":"file_exists","path":"out.md"}'),
     )
+
+    assert spec is not None
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "out.md"
 
@@ -56,6 +62,7 @@ def test_bare_exists_strips_quotes_without_losing_hidden_dot() -> None:
     """Verify bare exists strips quotes without losing hidden dot."""
     spec = bind("'./.meta/templates/entity-person.md' exists", call_model=_fail_call_model)
 
+    assert spec is not None
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./.meta/templates/entity-person.md"
 
@@ -64,6 +71,7 @@ def test_bare_exists_accepts_trailing_period_without_losing_hidden_dot() -> None
     """Verify bare exists accepts trailing period without losing hidden dot."""
     spec = bind("./.meta/templates/entity-person.md exists.", call_model=_fail_call_model)
 
+    assert spec is not None
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./.meta/templates/entity-person.md"
 
@@ -85,6 +93,7 @@ def test_descriptive_exists_prose_preserves_model_bound_path() -> None:
         call_model=_reply('{"checker":"file_exists","path":"./.obsidian/"}'),
     )
 
+    assert spec is not None
     assert spec["path"] == "./.obsidian/"
 
 
@@ -103,6 +112,7 @@ def test_directory_created_path_shape_binds_without_host_call() -> None:
     """Verify directory created path shape binds without host call."""
     spec = bind("the ./output/ directory was created", call_model=_fail_call_model)
 
+    assert spec is not None
     assert spec["checker"] == "file_exists"
     assert spec["path"] == "./output/"
 
@@ -153,11 +163,13 @@ def test_parses_fenced_json() -> None:
         "unknown assertion",
         call_model=_reply('```json\n{"checker":"file_exists","path":"a.md"}\n```'),
     )
+
+    assert spec is not None
     assert spec["checker"] == "file_exists"
 
 
 
-def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
+def test_returned_spec_is_dispatchable(tmp_path: Path) -> None:
     """Verify returned spec is dispatchable."""
     # The bound spec must flow straight into the existing checker dispatch.
     from benchspec.grading.checkers import run_assertion
@@ -167,6 +179,8 @@ def test_returned_spec_is_dispatchable(tmp_path: object) -> None:
         "the file out.md exists",
         call_model=_reply('{"checker":"file_exists","path":"out.md"}'),
     )
+
+    assert spec is not None
     assert run_assertion(spec, tmp_path, {})["passed"] is True
 
 
@@ -189,7 +203,8 @@ def test_prompt_carries_load_bearing_pieces() -> None:
 def test_infra_error_propagates() -> None:
     """Verify infra error propagates."""
 
-    def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
+    def boom(prompt: str, *, timeout: float = 60) -> NoReturn:
+        """Fail the way a flaky transport does."""
         raise RuntimeError("gemini transient failure")
 
     with pytest.raises(RuntimeError):
@@ -199,7 +214,8 @@ def test_infra_error_propagates() -> None:
 def test_bind_propagates_binder_auth_error() -> None:
     """Verify a BinderAuthError from call_model is never swallowed as a punt."""
 
-    def boom(prompt: object, *, timeout: object = 60) -> NoReturn:
+    def boom(prompt: str, *, timeout: float = 60) -> NoReturn:
+        """Fail the way a rejected API key does."""
         raise BinderAuthError("gemini api key rejected")
 
     with pytest.raises(BinderAuthError):
@@ -211,38 +227,58 @@ def test_bind_default_call_model_is_call_gemini() -> None:
     assert inspect.signature(bind).parameters["call_model"].default is binder._call_gemini
 
 
-def _http_response(body: dict) -> object:
-    """Build a urlopen-context-manager stub returning body as JSON."""
+class _CannedResponse:
+    """A urlopen context manager whose body is a fixed byte string."""
 
-    class _Resp:
-        def __enter__(self) -> object:
-            return self
+    def __init__(self, payload: bytes) -> None:
+        """Store the bytes `read()` hands back."""
+        self._payload = payload
 
-        def __exit__(self, *exc: object) -> None:
-            return None
+    def __enter__(self) -> _CannedResponse:
+        """Enter the context, yielding the response itself."""
+        return self
 
-        def read(self) -> bytes:
-            return json.dumps(body).encode("utf-8")
+    def __exit__(self, *exc: object) -> None:
+        """Leave the context; nothing to release."""
+        return None
 
-    return lambda request, timeout: _Resp()
+    def read(self) -> bytes:
+        """Return the canned body."""
+        return self._payload
 
 
-def _http_error(code: int, body: str) -> object:
+Urlopen = Callable[[urllib.request.Request, float], _CannedResponse]
+
+
+def _http_response(body: dict) -> Urlopen:
+    """Build a urlopen stub returning `body` as JSON."""
+
+    def respond(request: urllib.request.Request, timeout: float) -> _CannedResponse:
+        """Answer any request with the canned JSON body."""
+        return _CannedResponse(json.dumps(body).encode("utf-8"))
+
+    return respond
+
+
+def _http_error(code: int, body: str) -> Urlopen:
     """Build a urlopen stub raising HTTPError with the given status and body."""
 
-    def raise_it(request: object, timeout: object) -> NoReturn:
+    def raise_it(request: urllib.request.Request, timeout: float) -> NoReturn:
+        """Fail every request with the configured HTTP status."""
         raise urllib.error.HTTPError(
             "https://generativelanguage.googleapis.com/x",
             code,
             "err",
-            hdrs=None,
+            hdrs=email.message.Message(),
             fp=io.BytesIO(body.encode("utf-8")),
         )
 
     return raise_it
 
 
-def test_call_gemini_returns_reply_with_text_usage_and_latency(monkeypatch: object) -> None:
+def test_call_gemini_returns_reply_with_text_usage_and_latency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify call_gemini returns reply with text usage and latency."""
     monkeypatch.setattr(
         binder.urllib.request, "urlopen",
@@ -259,14 +295,17 @@ def test_call_gemini_returns_reply_with_text_usage_and_latency(monkeypatch: obje
 
 
 def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
-    monkeypatch: object, tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify the request carries x-goog-api-key, temperature 0, and JSON mime."""
-    captured = {}
+    captured_headers: dict[str, str] = {}
+    captured_body: dict = {}
 
-    def fake_urlopen(request: object, timeout: object) -> object:
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = json.loads(request.data)
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> _CannedResponse:
+        """Record the outgoing headers and JSON body, then answer with an empty verdict."""
+        captured_headers.update(request.header_items())
+        assert isinstance(request.data, bytes)
+        captured_body.update(json.loads(request.data))
         return _http_response({
             "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
         })(request, timeout)
@@ -276,20 +315,23 @@ def test_call_gemini_sends_api_key_header_temperature_zero_and_json_mime(
 
     binder._call_gemini("prompt")
 
-    assert captured["headers"]["X-goog-api-key"] == "test-key"
-    assert captured["body"]["generationConfig"]["temperature"] == 0
-    assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"
+    assert captured_headers["X-goog-api-key"] == "test-key"
+    assert captured_body["generationConfig"]["temperature"] == 0
+    assert captured_body["generationConfig"]["responseMimeType"] == "application/json"
 
 
-def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: object) -> None:
+def test_call_gemini_uses_the_passed_model_in_the_request_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify _call_gemini's `model` keyword controls the request URL — no env var involved.
 
     BENCHSPEC_BINDER_MODEL is a corpus-suite knob, read only by the corpus's recording
     wrapper; the production transport must stay env-independent.
     """
-    captured = {}
+    captured: dict[str, str] = {}
 
-    def fake_urlopen(request: object, timeout: object) -> object:
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> _CannedResponse:
+        """Record the request URL, then answer with an empty verdict."""
         captured["url"] = request.full_url
         respond = _http_response({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})
         return respond(request, timeout)
@@ -303,7 +345,7 @@ def test_call_gemini_uses_the_passed_model_in_the_request_url(monkeypatch: objec
     assert "gemini-3.5-flash-lite" not in captured["url"]
 
 
-def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> None:
+def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the `model` keyword's default is the fixed production constant, not an env read."""
     monkeypatch.delenv("BENCHSPEC_BINDER_MODEL", raising=False)
     assert (
@@ -314,7 +356,7 @@ def test_call_gemini_defaults_to_gemini_binder_model(monkeypatch: object) -> Non
 
 @pytest.mark.parametrize(("code", "body"), [(401, "unauthorized"), (403, "forbidden")])
 def test_call_gemini_raises_binder_auth_error_on_401_403(
-    monkeypatch: object, code: int, body: str
+    monkeypatch: pytest.MonkeyPatch, code: int, body: str
 ) -> None:
     """Verify 401/403 raise BinderAuthError."""
     monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(code, body))
@@ -322,7 +364,9 @@ def test_call_gemini_raises_binder_auth_error_on_401_403(
         binder._call_gemini("prompt")
 
 
-def test_call_gemini_raises_binder_auth_error_on_400_api_key_invalid(monkeypatch: object) -> None:
+def test_call_gemini_raises_binder_auth_error_on_400_api_key_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify a 400 body naming API_KEY_INVALID raises BinderAuthError, not RuntimeError."""
     monkeypatch.setattr(
         binder.urllib.request, "urlopen",
@@ -332,7 +376,7 @@ def test_call_gemini_raises_binder_auth_error_on_400_api_key_invalid(monkeypatch
         binder._call_gemini("prompt")
 
 
-def test_call_gemini_raises_runtimeerror_on_other_400(monkeypatch: object) -> None:
+def test_call_gemini_raises_runtimeerror_on_other_400(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a 400 NOT naming API_KEY_INVALID stays a RuntimeError, not auth."""
     error_body = '{"error":{"status":"INVALID_ARGUMENT"}}'
     monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(400, error_body))
@@ -340,10 +384,11 @@ def test_call_gemini_raises_runtimeerror_on_other_400(monkeypatch: object) -> No
         binder._call_gemini("prompt")
 
 
-def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: object) -> None:
+def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a transport-level URLError normalizes to RuntimeError."""
 
-    def raise_it(request: object, timeout: object) -> NoReturn:
+    def raise_it(request: urllib.request.Request, timeout: float) -> NoReturn:
+        """Fail at the transport layer."""
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
@@ -351,10 +396,11 @@ def test_call_gemini_raises_runtimeerror_on_url_error(monkeypatch: object) -> No
         binder._call_gemini("prompt")
 
 
-def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: object) -> None:
+def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a socket timeout normalizes to RuntimeError."""
 
-    def raise_it(request: object, timeout: object) -> NoReturn:
+    def raise_it(request: urllib.request.Request, timeout: float) -> NoReturn:
+        """Fail the way a socket timeout does."""
         raise TimeoutError("timed out")
 
     monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
@@ -371,7 +417,7 @@ def test_call_gemini_raises_runtimeerror_on_timeout(monkeypatch: object) -> None
     {"candidates": [{"content": {"parts": [{"text": 1}]}}]},
 ])
 def test_call_gemini_raises_runtimeerror_on_degenerate_200(
-    monkeypatch: object, payload: dict
+    monkeypatch: pytest.MonkeyPatch, payload: dict
 ) -> None:
     """Verify every degenerate-200 shape normalizes to RuntimeError, never a silent punt."""
     monkeypatch.setattr(binder.urllib.request, "urlopen", _http_response(payload))
@@ -379,39 +425,34 @@ def test_call_gemini_raises_runtimeerror_on_degenerate_200(
         binder._call_gemini("prompt")
 
 
-def test_call_gemini_raises_runtimeerror_on_malformed_json_body(monkeypatch: object) -> None:
+def test_call_gemini_raises_runtimeerror_on_malformed_json_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify a non-JSON 200 body normalizes to RuntimeError, not a raw ValueError."""
-
-    class _Resp:
-        def __enter__(self) -> object:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return b"not json"
-
-    monkeypatch.setattr(binder.urllib.request, "urlopen", lambda request, timeout: _Resp())
+    monkeypatch.setattr(
+        binder.urllib.request,
+        "urlopen",
+        lambda request, timeout: _CannedResponse(b"not json"),
+    )
     with pytest.raises(RuntimeError):
         binder._call_gemini("prompt")
 
 
-def test_preflight_gemini_key_raises_when_unset(monkeypatch: object) -> None:
+def test_preflight_gemini_key_raises_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight raises RuntimeError when GEMINI_API_KEY is unset."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         binder.preflight_gemini_key()
 
 
-def test_preflight_gemini_key_raises_when_empty(monkeypatch: object) -> None:
+def test_preflight_gemini_key_raises_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a set-but-empty GEMINI_API_KEY counts as missing."""
     monkeypatch.setenv("GEMINI_API_KEY", "")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         binder.preflight_gemini_key()
 
 
-def test_preflight_gemini_key_passes_when_set(monkeypatch: object) -> None:
+def test_preflight_gemini_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight passes with a non-empty key."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     binder.preflight_gemini_key()  # no raise
@@ -426,7 +467,7 @@ def test_binder_identity_matches_spec_shape() -> None:
     }
 
 
-def test_binder_identity_contains_no_key_material(monkeypatch: object) -> None:
+def test_binder_identity_contains_no_key_material(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify binder_identity() never reads or leaks GEMINI_API_KEY."""
     monkeypatch.setenv("GEMINI_API_KEY", "super-secret-value")
     identity = binder.binder_identity()

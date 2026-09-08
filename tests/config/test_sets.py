@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from benchspec.config import sets
@@ -15,39 +17,36 @@ class _SetConfig:
     """
 
     def __init__(
-        self: object,
-        repo_root: object,
+        self,
+        repo_root: Path,
         *,
-        set_name: object = None,
-        config: object = None,
-        model: object = None,
-        harness: object = None,
-        effort_level: object = None,
-        env: object = None,
-        models: object = None,
+        set_name: str | None = None,
+        config: str | None = None,
+        model: str | None = None,
+        harness: str | None = None,
+        effort_level: str | None = None,
+        env: list[str] | None = None,
+        models: str | None = None,
     ) -> None:
-        """Initialize the instance."""
+        """Store the eval-set options exactly as the CLI would hand them over."""
         self.rootpath = repo_root
-        self._root, self._opts = (
-            repo_root,
-            {
-                "benchspec_repo_root": str(repo_root),
-                "benchspec_set": set_name,
-                "benchspec_config": config,
-                "benchspec_model": model,
-                "benchspec_harness": harness,
-                "benchspec_effort": effort_level,
-                "benchspec_env": env or [],
-                "benchspec_models": models,
-            },
-        )
+        self._opts: dict[str, object] = {
+            "benchspec_repo_root": str(repo_root),
+            "benchspec_set": set_name,
+            "benchspec_config": config,
+            "benchspec_model": model,
+            "benchspec_harness": harness,
+            "benchspec_effort": effort_level,
+            "benchspec_env": env or [],
+            "benchspec_models": models,
+        }
 
-    def getoption(self: object, name: object) -> object:
-        """Getoption."""
+    def getoption(self, name: str) -> object:
+        """Return the configured value for `name` (None when unset)."""
         return self._opts.get(name)
 
 
-def _write_sets_pyproject(tmp_path: object) -> None:
+def _write_sets_pyproject(tmp_path: Path) -> None:
     """Write sets pyproject."""
     (tmp_path / "pyproject.toml").write_text(
         "[tool.benchspec]\n"
@@ -60,7 +59,7 @@ def _write_sets_pyproject(tmp_path: object) -> None:
     )
 
 
-def test_resolved_run_set_reads_pyproject(tmp_path: object) -> None:
+def test_resolved_run_set_reads_pyproject(tmp_path: Path) -> None:
     """Verify resolved run set reads pyproject."""
     _write_sets_pyproject(tmp_path)
     run_set = sets.resolved_run_set(_SetConfig(tmp_path))
@@ -68,7 +67,7 @@ def test_resolved_run_set_reads_pyproject(tmp_path: object) -> None:
     assert run_set.baseline == "baseline"
 
 
-def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
+def test_resolved_run_set_preserves_harness_args(tmp_path: Path) -> None:
     """Verify resolved run set preserves harness args."""
     (tmp_path / "pyproject.toml").write_text(
         "[tool.benchspec]\n"
@@ -90,7 +89,7 @@ def test_resolved_run_set_preserves_harness_args(tmp_path: object) -> None:
     assert run_set.arms[1].harness_args == ["--set-flag", "--plugin-dir", "/project"]
 
 
-def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> None:
+def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: Path) -> None:
     """Verify resolved run set set model default not clobbered."""
     # A non-sonnet set default must survive a plain run (no --benchspec-model passed).
     (tmp_path / "pyproject.toml").write_text(
@@ -102,7 +101,7 @@ def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: object) -> N
     assert run_set.arms[0].model == "opus"
 
 
-def test_resolved_run_set_models_sweep(tmp_path: object) -> None:
+def test_resolved_run_set_models_sweep(tmp_path: Path) -> None:
     """Verify resolved run set models sweep."""
     _write_sets_pyproject(tmp_path)
 
@@ -113,14 +112,14 @@ def test_resolved_run_set_models_sweep(tmp_path: object) -> None:
     assert all(arm.harness == "claude-code" for arm in run_set.arms)  # inherited, never None
 
 
-def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path: object) -> None:
+def test_resolved_run_set_unknown_set_raises_usageerror(tmp_path: Path) -> None:
     """Verify resolved run set unknown set raises for usageerror."""
     _write_sets_pyproject(tmp_path)
     with pytest.raises(pytest.UsageError, match="no eval set named"):
         sets.resolved_run_set(_SetConfig(tmp_path, set_name="ghost"))
 
 
-def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path: object) -> None:
+def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path: Path) -> None:
     """Verify resolved run set legacy config raises for usageerror."""
     (tmp_path / "pyproject.toml").write_text(
         '[tool.benchspec]\nreference = "x"\n'
@@ -131,7 +130,7 @@ def test_resolved_run_set_legacy_config_raises_usageerror(tmp_path: object) -> N
 
 
 def test_resolved_run_set_missing_scratch_config_raises_usageerror(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify resolved run set missing scratch config raises for usageerror."""
     _write_sets_pyproject(tmp_path)
@@ -141,7 +140,7 @@ def test_resolved_run_set_missing_scratch_config_raises_usageerror(
 
 
 def test_resolved_run_set_malformed_scratch_config_raises_usageerror(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify resolved run set malformed scratch config raises for usageerror."""
     _write_sets_pyproject(tmp_path)
@@ -153,7 +152,7 @@ def test_resolved_run_set_malformed_scratch_config_raises_usageerror(
 
 
 def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify resolved run set invalid utf8 scratch config raises for usageerror."""
     _write_sets_pyproject(tmp_path)
@@ -165,7 +164,7 @@ def test_resolved_run_set_invalid_utf8_scratch_config_raises_usageerror(
 
 
 def test_session_run_set_resolves_when_cases_exist(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify session_run_set resolves the set (with its sandbox) when a run has cases."""
     _write_sets_pyproject(tmp_path)  # sandbox default = docker
@@ -178,7 +177,7 @@ def test_session_run_set_resolves_when_cases_exist(
 
 
 def test_session_run_set_none_for_trigger_only(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a trigger-only run (no cases, no sets table) degrades to None, never raises."""
     (tmp_path / "pyproject.toml").write_text("[tool.other]\nx = 1\n")
@@ -188,7 +187,7 @@ def test_session_run_set_none_for_trigger_only(
     assert sets.session_run_set(_FakeConfig(tmp_path)) is None
 
 
-def test_run_set_when_needed_degrades_without_resolving(tmp_path: object) -> None:
+def test_run_set_when_needed_degrades_without_resolving(tmp_path: Path) -> None:
     """Verify needs_set=False returns None even where resolving would raise (no sets table)."""
     (tmp_path / "pyproject.toml").write_text("[tool.other]\nx = 1\n")
 
@@ -202,15 +201,15 @@ class _FakeConfig:
     surface they read.
     """
 
-    def __init__(self: object, repo_root: object, fail_under: object = None) -> None:
-        """Initialize the instance."""
+    def __init__(self, repo_root: Path, fail_under: float | None = None) -> None:
+        """Store the repo root and the optional pass-rate floor."""
         self.rootpath = repo_root
         self._repo_root = str(repo_root)
         self._fail_under = fail_under
         self.stash = pytest.Stash()
 
-    def getoption(self: object, name: object) -> object:
-        """Getoption."""
+    def getoption(self, name: str) -> object:
+        """Return the configured value for `name` (None when unset)."""
         if name == "benchspec_repo_root":
             return self._repo_root
         return {

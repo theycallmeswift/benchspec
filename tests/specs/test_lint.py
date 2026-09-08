@@ -6,10 +6,14 @@ fire.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from benchspec.specs import lint
 
 
-def _rules(text: object) -> object:
+def _rules(text: str) -> list[str]:
     """Build the rules test fixture."""
     return [finding[0] for finding in lint.lint_assertion(text)]
 
@@ -48,19 +52,19 @@ def test_existence_assertion_yields_no_findings() -> None:
 
 
 def _write_eval(
-    tmp_path: object, assertions: object, *, skill: object = "demo", slug: object = "a"
-) -> object:
+    tmp_path: Path, assertions: list[str], *, skill: str = "demo", slug: str = "a"
+) -> Path:
     """Write eval."""
     group_dir = tmp_path / "skills" / skill / "evals" / slug
     group_dir.mkdir(parents=True, exist_ok=True)
-    body = "".join(f"- [ ] {a}\n" for a in assertions)
+    body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
     (group_dir / "eval.md").write_text(
         f"---\n{{}}\n---\n\n## Prompt\n\np\n\n## Assertions\n\n{body}"
     )
     return group_dir
 
 
-def test_lint_repo_walks_suites(tmp_path: object) -> None:
+def test_lint_repo_walks_suites(tmp_path: Path) -> None:
     """Verify lint repo walks suites."""
     group_dir = _write_eval(tmp_path, ["the agent properly handles the edge case"])
 
@@ -72,7 +76,7 @@ def test_lint_repo_walks_suites(tmp_path: object) -> None:
     assert findings[0].file == group_dir / "eval.md"
 
 
-def test_main_exit_codes(tmp_path: object, capsys: object) -> None:
+def test_main_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify main exit codes."""
     _write_eval(tmp_path, ["the output names the source file"])
     assert lint.run(tmp_path) == 0

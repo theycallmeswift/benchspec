@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from benchspec.agents.base import Credential
 from benchspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
 from benchspec.sandbox.errors import SandboxError
+from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -514,7 +516,7 @@ def test_guest_env_carries_home_tz_and_pinned_version() -> None:
     assert env["BENCHSPEC_OPENCODE_VERSION"] == "0.4.2"
 
 
-def test_from_env_env_var_beats_pyproject(monkeypatch: object) -> None:
+def test_from_env_env_var_beats_pyproject(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env env var beats pyproject."""
     monkeypatch.setenv("BENCHSPEC_OPENCODE_VERSION", "1.2.3")
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
@@ -525,7 +527,7 @@ def test_from_env_env_var_beats_pyproject(monkeypatch: object) -> None:
     assert agent._auth_env == "OPENROUTER_API_KEY"
 
 
-def test_from_env_falls_back_to_anthropic_credential(monkeypatch: object) -> None:
+def test_from_env_falls_back_to_anthropic_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env falls back to anthropic credential."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
@@ -533,16 +535,18 @@ def test_from_env_falls_back_to_anthropic_credential(monkeypatch: object) -> Non
     assert agent._auth_env == "ANTHROPIC_API_KEY"
 
 
-def test_credential_error_message_when_no_credentials_set(monkeypatch: object) -> None:
+def test_credential_error_message_when_no_credentials_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error message when no credentials set."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-    assert "credential" in OpenCodeAgent.credential_error()
+    unset_error = OpenCodeAgent.credential_error()
+    assert unset_error is not None
+    assert "credential" in unset_error
 
 
-def test_credential_error_none_when_anthropic_key_set(monkeypatch: object) -> None:
+def test_credential_error_none_when_anthropic_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error none when anthropic key set."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
@@ -556,8 +560,7 @@ def test_provision_runs_install_script() -> None:
 
     asyncio.run(_opencode_agent().provision(sandbox))
 
-    call_kind, script, _ = sandbox.calls[0]
-    assert call_kind == "shell"
+    script = shell_call(sandbox).script
     assert "npm i -g" in script
     assert "opencode-ai" in script
 
@@ -582,8 +585,7 @@ def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> Non
 
     asyncio.run(_opencode_agent().stage_project_assets(sandbox, "/project"))
 
-    call_kind, script, _ = sandbox.calls[0]
-    assert call_kind == "shell"
+    script = shell_call(sandbox).script
     # Stage from all three plugin-shaped layouts (merged into one dest dir).
     # `skills/` (no leading dot) is the canonical Claude Code plugin layout; leaving it
     # out makes the eval skill invisible to OpenCode even when .claude/skills/ is staged.
@@ -634,7 +636,16 @@ def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     class DyingSandbox(FakeSandbox):
         """A sandbox whose exec fails the way a torn-down VM does."""
 
-        async def exec(self: object, cmd: str, args: object = None, **kw: object) -> object:
+        async def exec(
+            self,
+            cmd: str,
+            args: list[str] | None = None,
+            *,
+            cwd: str | None = None,
+            env: Mapping[str, str] | None = None,
+            timeout: float | None = None,
+            stdin: bytes | None = None,
+        ) -> FakeExecOutput:
             """Fail like a torn-down VM."""
             raise SandboxError("container gone")
 
@@ -847,8 +858,7 @@ def test_invoke_threads_harness_args_into_build_command() -> None:
         )
     )
 
-    _, _, command_args, _ = sandbox.calls[0]
-    assert command_args[-2:] == ["--print-logs", "do the thing"]
+    assert exec_call(sandbox).args[-2:] == ["--print-logs", "do the thing"]
 
 
 def test_parse_opencode_jsonl_carries_raw_stdout() -> None:
@@ -961,7 +971,7 @@ def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
     assert res.trajectory == []
 
 
-def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: object) -> None:
+def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: Path) -> None:
     """Verify opencode fired and skills dispatched agree on name."""
     from benchspec.grading.trajectory import skills_dispatched
 
@@ -1109,7 +1119,7 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
         )
     )
 
-    _, _cmd, _args, kw = sandbox.calls[0]
-    assert kw["env"]["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
-    assert kw["env"]["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
-    assert kw["env"]["HOME"] == OpenCodeAgent.guest_home  # guest_env still present
+    env = exec_call(sandbox).env
+    assert env["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert env["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
+    assert env["HOME"] == OpenCodeAgent.guest_home  # guest_env still present

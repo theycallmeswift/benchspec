@@ -1,5 +1,8 @@
 """Tests for judge dispatch onto the adapters, binary preflight, and version probing."""
 
+from __future__ import annotations
+
+import shutil
 from typing import NoReturn
 
 import pytest
@@ -29,34 +32,28 @@ def test_judge_binary_names() -> None:
     assert judge_binary("opencode") == "opencode"
 
 
-class _Config:
-    """A minimal JudgeConfig stand-in exposing only the `harness` attribute."""
-
-    def __init__(self, harness: object) -> None:
-        """Store the harness name."""
-        self.harness = harness
-
-
-def test_preflight_judge_binary_raises_when_missing(monkeypatch: object) -> None:
+def test_preflight_judge_binary_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight judge binary raises when missing."""
-    import shutil
     monkeypatch.setattr(shutil, "which", lambda name: None)
+
     with pytest.raises(RuntimeError, match="not found on PATH"):
-        preflight_judge_binary(_Config("claude-code"))
+        preflight_judge_binary(JudgeConfig(harness="claude-code"))
 
 
-def test_preflight_judge_binary_passes_when_present(monkeypatch: object) -> None:
+def test_preflight_judge_binary_passes_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight judge binary passes when present."""
-    import shutil
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/local/bin/{name}")
-    preflight_judge_binary(_Config("codex"))  # no raise
+
+    preflight_judge_binary(JudgeConfig(harness="codex"))  # no raise
 
 
-def test_run_judge_dispatches_to_the_harness_adapter(monkeypatch: object) -> None:
+def test_run_judge_dispatches_to_the_harness_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run_judge dispatches to the selected harness's adapter."""
-    calls = []
+    calls: list[tuple[str, JudgeConfig]] = []
 
-    async def fake_judge(self: object, prompt: object, config: object, **kwargs: object) -> str:
+    async def fake_judge(
+        self: ClaudeCodeAgent, prompt: str, config: JudgeConfig, **kwargs: object
+    ) -> str:
         """Record the dispatched call and return a canned envelope."""
         calls.append((prompt, config))
         return '{"result": "ok"}'
@@ -70,12 +67,14 @@ def test_run_judge_dispatches_to_the_harness_adapter(monkeypatch: object) -> Non
     assert calls[0][1].model == "sonnet"
 
 
-def test_run_judge_expands_env_using_arms_expand_env(monkeypatch: object) -> None:
+def test_run_judge_expands_env_using_arms_expand_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run_judge expands env using arms expand_env before dispatch."""
     monkeypatch.setenv("MY_JUDGE_VAR", "expanded-value")
-    captured = {}
+    captured: dict[str, dict[str, str]] = {}
 
-    async def fake_judge(self: object, prompt: object, config: object, **kwargs: object) -> str:
+    async def fake_judge(
+        self: CodexAgent, prompt: str, config: JudgeConfig, **kwargs: object
+    ) -> str:
         """Capture the expanded env handed to the adapter and return a canned envelope."""
         captured["env"] = config.env
         return '{"result": "ok"}'
@@ -88,7 +87,7 @@ def test_run_judge_expands_env_using_arms_expand_env(monkeypatch: object) -> Non
     assert captured["env"] == {"CODEX_HOME": "expanded-value", "LITERAL": "x"}
 
 
-def test_run_judge_env_unset_var_raises_schemaerror(monkeypatch: object) -> None:
+def test_run_judge_env_unset_var_raises_schemaerror(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run judge env unset var raises SchemaError."""
     monkeypatch.delenv("DEFINITELY_UNSET_JUDGE_VAR", raising=False)
 
@@ -96,9 +95,9 @@ def test_run_judge_env_unset_var_raises_schemaerror(monkeypatch: object) -> None
         run_judge("grade", config=JudgeConfig(env={"KEY": "$DEFINITELY_UNSET_JUDGE_VAR"}))
 
 
-def test_probe_judge_version_best_effort_none_on_exception(monkeypatch: object) -> None:
+def test_probe_judge_version_best_effort_none_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify probe judge version is best effort, returning None on exception."""
-    def boom(self: object) -> NoReturn:
+    def boom(self: ClaudeCodeAgent) -> NoReturn:
         """Raise to simulate a probe failure."""
         raise RuntimeError("boom")
 
@@ -107,7 +106,7 @@ def test_probe_judge_version_best_effort_none_on_exception(monkeypatch: object) 
     assert probe_judge_version("claude-code") is None
 
 
-def test_probe_judge_version_returns_probe_result(monkeypatch: object) -> None:
+def test_probe_judge_version_returns_probe_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify probe judge version returns the probe result."""
     monkeypatch.setattr(CodexAgent, "binary_version", lambda self: "1.2.3")
     assert probe_judge_version("codex") == "1.2.3"

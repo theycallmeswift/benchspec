@@ -7,13 +7,13 @@ import pytest
 from benchspec import agents
 
 
-def test_default_is_claude_code(monkeypatch: object) -> None:
+def test_default_is_claude_code(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify default is claude code."""
     monkeypatch.delenv("BENCHSPEC_AGENT", raising=False)
     assert agents.resolve_agent_name() == "claude-code"
 
 
-def test_flag_beats_env_beats_pyproject(monkeypatch: object) -> None:
+def test_flag_beats_env_beats_pyproject(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify flag beats env beats pyproject."""
     monkeypatch.setenv("BENCHSPEC_AGENT", "opencode")
     assert agents.resolve_agent_name(flag="claude-code", pyproject="opencode") == "claude-code"
@@ -35,7 +35,7 @@ def test_known_harnesses_include_codex() -> None:
     ],
 )
 def test_unknown_value_names_its_source(
-    monkeypatch: object, kwargs: object, source: object
+    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, str], source: str
 ) -> None:
     """Verify unknown value names its source."""
     monkeypatch.delenv("BENCHSPEC_AGENT", raising=False)
@@ -45,7 +45,7 @@ def test_unknown_value_names_its_source(
     assert "claude-code" in str(ei.value)  # the valid set is listed
 
 
-def test_unknown_env_value_names_env(monkeypatch: object) -> None:
+def test_unknown_env_value_names_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify unknown env value names env."""
     monkeypatch.setenv("BENCHSPEC_AGENT", "not-a-harness")
     with pytest.raises(RuntimeError, match="BENCHSPEC_AGENT"):
