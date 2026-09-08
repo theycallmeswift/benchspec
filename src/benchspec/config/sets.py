@@ -9,6 +9,12 @@ import pytest
 
 from benchspec.config.arms import Set as EvalSet
 from benchspec.config.arms import parse_sets, resolve_set
+from benchspec.config.options import (
+    RunOptions,
+    option_int,
+    option_str,
+    option_str_list,
+)
 from benchspec.grading.judges import JudgeConfig, resolve_judge_config
 from benchspec.specs.discovery import (
     discover_eval_cases,
@@ -19,9 +25,9 @@ from benchspec.specs.discovery import (
 from benchspec.specs.schema import SchemaError
 
 
-def _parse_env_pairs(pairs: list) -> dict:
+def _parse_env_pairs(pairs: list[str]) -> dict[str, str]:
     """Parse KEY=VALUE environment overrides from CLI options."""
-    out = {}
+    out: dict[str, str] = {}
     for pair in pairs:
         if "=" not in pair:
             raise pytest.UsageError(f"--benchspec-env expects KEY=VAL, got {pair!r}")
@@ -73,7 +79,7 @@ def _layer_config_sets(table: dict, config_path: str | None) -> dict:
     return merged
 
 
-def resolved_run_set(config: object) -> EvalSet:
+def resolved_run_set(config: RunOptions) -> EvalSet:
     """The single eval set this run uses — uniform columns across every skill.
 
     Layers `--benchspec-config` over pyproject, selects `--benchspec-set` (else default-
@@ -81,8 +87,8 @@ def resolved_run_set(config: object) -> EvalSet:
     UsageError at collection.
     """
     repo_root = resolve_repo_root(config)
-    table = _layer_config_sets(pyproject_table(repo_root), config.getoption("benchspec_config"))
-    raw_models = config.getoption("benchspec_models")
+    table = _layer_config_sets(pyproject_table(repo_root), option_str(config, "benchspec_config"))
+    raw_models = option_str(config, "benchspec_models")
     models = (
         [model.strip() for model in raw_models.split(",") if model.strip()]
         if raw_models
@@ -93,18 +99,18 @@ def resolved_run_set(config: object) -> EvalSet:
         return resolve_set(
             rawsets,
             default_set,
-            set_name=config.getoption("benchspec_set"),
-            model=config.getoption("benchspec_model"),
-            harness=config.getoption("benchspec_harness"),
-            effort=config.getoption("benchspec_effort"),
-            env=_parse_env_pairs(config.getoption("benchspec_env")),
+            set_name=option_str(config, "benchspec_set"),
+            model=option_str(config, "benchspec_model"),
+            harness=option_str(config, "benchspec_harness"),
+            effort=option_str(config, "benchspec_effort"),
+            env=_parse_env_pairs(option_str_list(config, "benchspec_env")),
             models=models,
         )
     except SchemaError as error:
         raise pytest.UsageError(str(error)) from None
 
 
-def has_configured_set(config: object) -> bool:
+def has_configured_set(config: RunOptions) -> bool:
     """True when the layered config declares a `[tool.benchspec.sets.*]` table.
 
     This is the collection-time fact — an eval set is configured — not whether output
@@ -114,12 +120,12 @@ def has_configured_set(config: object) -> bool:
     declares no sets table and degrades to None.
     """
     repo_root = resolve_repo_root(config)
-    table = _layer_config_sets(pyproject_table(repo_root), config.getoption("benchspec_config"))
+    table = _layer_config_sets(pyproject_table(repo_root), option_str(config, "benchspec_config"))
     sets_table = table.get("sets")
     return isinstance(sets_table, dict) and bool(sets_table)
 
 
-def run_set_when_needed(config: object, *, needs_set: bool) -> EvalSet | None:
+def run_set_when_needed(config: RunOptions, *, needs_set: bool) -> EvalSet | None:
     """Resolve this run's eval set, but only when the run actually needs one.
 
     A trigger-only project declares no `[tool.benchspec.sets.*]` table, so calling
@@ -132,7 +138,7 @@ def run_set_when_needed(config: object, *, needs_set: bool) -> EvalSet | None:
     return resolved_run_set(config) if needs_set else None
 
 
-def session_run_set(config: object) -> EvalSet | None:
+def session_run_set(config: RunOptions) -> EvalSet | None:
     """The eval set for the session sandbox preflight, or None for a trigger-only run.
 
     Guards `resolved_run_set` on the same eval-case-existence signal
@@ -146,7 +152,7 @@ def session_run_set(config: object) -> EvalSet | None:
     return run_set_when_needed(config, needs_set=bool(cases))
 
 
-def _parse_judge_cli_table(config: object) -> dict:
+def _parse_judge_cli_table(config: RunOptions) -> dict:
     """The CLI-override layer for resolve_judge_config.
 
     Only the `--benchspec-judge-*` flags the user actually passed. Scalar flags signal
@@ -158,19 +164,20 @@ def _parse_judge_cli_table(config: object) -> dict:
         ("benchspec_judge_harness", "harness"),
         ("benchspec_judge_model", "model"),
         ("benchspec_judge_effort", "effort"),
-        ("benchspec_judge_timeout", "timeout"),
     ):
-        if (value := config.getoption(option)) is not None:
+        if (value := option_str(config, option)) is not None:
             cli_table[key] = value
+    if (timeout := option_int(config, "benchspec_judge_timeout")) is not None:
+        cli_table["timeout"] = timeout
 
-    if harness_args := config.getoption("benchspec_judge_harness_arg"):
+    if harness_args := option_str_list(config, "benchspec_judge_harness_arg"):
         cli_table["harness_args"] = harness_args
-    if env_pairs := config.getoption("benchspec_judge_env"):
+    if env_pairs := option_str_list(config, "benchspec_judge_env"):
         cli_table["env"] = _parse_env_pairs(env_pairs)
     return cli_table
 
 
-def resolved_judge_config(config: object) -> JudgeConfig:
+def resolved_judge_config(config: RunOptions) -> JudgeConfig:
     """The single JudgeConfig this run uses.
 
     Layers `--benchspec-config`'s [tool.benchspec.judge] over pyproject's, applies CLI
@@ -181,7 +188,8 @@ def resolved_judge_config(config: object) -> JudgeConfig:
     """
     repo_root = resolve_repo_root(config)
     pyproject_judge = pyproject_table(repo_root).get("judge")
-    scratch = _read_scratch_benchspec_table(config.getoption("benchspec_config"))
+    scratch_path = option_str(config, "benchspec_config")
+    scratch = _read_scratch_benchspec_table(scratch_path)
     scratch_judge = scratch.get("judge")
     # A present-but-non-dict `judge` key is a malformed config, not "no judge table" —
     # coercing it to None here would silently skip _validate_judge_table entirely and
@@ -194,7 +202,7 @@ def resolved_judge_config(config: object) -> JudgeConfig:
         )
     if scratch_judge is not None and not isinstance(scratch_judge, dict):
         raise pytest.UsageError(
-            f"--benchspec-config {config.getoption('benchspec_config')}: "
+            f"--benchspec-config {scratch_path}: "
             f"[tool.benchspec.judge] must be a table, got {type(scratch_judge).__name__}"
         )
     try:

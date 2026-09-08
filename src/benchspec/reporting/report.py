@@ -271,7 +271,7 @@ def index_rows(
     return rows
 
 
-def _pct(value: object) -> str:
+def _pct(value: float | None) -> str:
     """Format a numeric rate as a percentage string."""
     return "n/a" if value is None else f"{value:.0%}"
 

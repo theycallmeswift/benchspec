@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from benchspec.config.options import RunOptions, option_str
 from benchspec.specs import mdformat, schema
 
 
@@ -28,48 +29,48 @@ class EvalCase:
     eval: dict  # {id, prompt, assertions, history?} from parse_eval_md
 
     @property
-    def skill(self: object) -> str:
+    def skill(self) -> str:
         """The group name — kept in the `<skill>` artifact-path slot this phase."""
         return self.group
 
     @property
-    def eval_id(self: object) -> str:
+    def eval_id(self) -> str:
         """Return the stable eval identifier used in reports and artifact paths."""
         return self.eval["id"]
 
     @property
-    def param_id(self: object) -> str:
+    def param_id(self) -> str:
         """Return the pytest parameter id for this case."""
         return f"{self.group}-{self.eval_id}"
 
     @property
-    def prompt(self: object) -> str:
+    def prompt(self) -> str:
         """Return the prompt text for this discovered case."""
         return self.eval["prompt"]
 
     @property
-    def assertions(self: object) -> list[str]:
+    def assertions(self) -> list[str]:
         """Return assertion text for this discovered case."""
         return self.eval["assertions"]
 
     @property
-    def history(self: object) -> list[dict]:
+    def history(self) -> list[dict]:
         """Return prior-context turns for this discovered case."""
         return self.eval.get("history", [])
 
     @property
-    def workspace_dir(self: object) -> Path | None:
+    def workspace_dir(self) -> Path | None:
         """Return the per-eval workspace directory when present."""
         workspace_dir = self.eval_dir / "workspace"
         return workspace_dir if workspace_dir.is_dir() else None
 
 
-def resolve_repo_root(config: object) -> Path:
+def resolve_repo_root(config: RunOptions) -> Path:
     """The repo root that `eval_paths` discovery and project-relative paths resolve against.
 
     Order: --benchspec-repo-root, then $PROJECT_ROOT, then the pytest rootdir.
     """
-    raw = config.getoption("benchspec_repo_root") or os.environ.get("PROJECT_ROOT")
+    raw = option_str(config, "benchspec_repo_root") or os.environ.get("PROJECT_ROOT")
     if raw:
         return Path(raw).resolve()
     return Path(config.rootpath)
@@ -100,14 +101,14 @@ def _pyproject_eval_paths(repo_root: Path) -> list[str] | None:
     return paths
 
 
-def resolve_eval_paths(config: object) -> list[str]:
+def resolve_eval_paths(config: RunOptions) -> list[str]:
     """Where to search for output evals, in precedence order.
 
     --benchspec-eval-paths (comma-separated CLI flag) > [tool.benchspec] eval_paths in
     pyproject.toml > built-in default (skills, tests, evals, benchmarks). Each path is
     a repo-root-relative directory whose tree is walked for `eval.md` / `*.eval.md`.
     """
-    raw = config.getoption("benchspec_eval_paths")
+    raw = option_str(config, "benchspec_eval_paths")
     if raw:
         return [path.strip() for path in raw.split(",") if path.strip()]
     repo_root = resolve_repo_root(config)
@@ -130,13 +131,13 @@ class EnvConfig:
     script: bytes = b""
     script_path: str | None = None
 
-    def __bool__(self: object) -> bool:
+    def __bool__(self) -> bool:
         """Return whether the preflight result contains an error."""
         return self.base_image is not None or bool(self.script)
 
-    def digest(self: object) -> str:
+    def digest(self) -> str:
         """Return a stable digest for environment snapshot caching."""
-        if not self:
+        if self.base_image is None and not self.script:
             return ""
         payload = (self.base_image or "").encode() + b"\0" + self.script
         return hashlib.sha256(payload).hexdigest()[:8]

@@ -28,7 +28,7 @@ class Arm:
     harness: str
     model: str
     effort: str = "medium"
-    env: dict = field(default_factory=dict, hash=False)  # dict is unhashable; keep Arm hashable
+    env: dict[str, str] = field(default_factory=dict, hash=False)  # unhashable; keep Arm hashable
     harness_args: list[str] = field(default_factory=list, hash=False)
 
 
@@ -188,7 +188,7 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
     return rawsets, default_set
 
 
-def expand_env(env: dict, environ: Mapping) -> dict:
+def expand_env(env: Mapping[str, str], environ: Mapping[str, str]) -> dict[str, str]:
     """Expand a `$VAR`/`${VAR}` env value from `environ`; literals pass through.
 
     An unset referenced var raises SchemaError (never a silent empty string).
@@ -229,16 +229,16 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
 
 
 def resolve_set(
-    rawsets: dict,
+    rawsets: dict[str, RawSet],
     default_set: str,
     *,
     set_name: str | None = None,
     model: str | None = None,
     harness: str | None = None,
     effort: str | None = None,
-    env: dict | None = None,
-    models: list | None = None,
-    environ: Mapping | None = None,
+    env: dict[str, str] | None = None,
+    models: list[str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> Set:
     """Resolve one eval set into concrete arms."""
     environ = environ if environ is not None else os.environ

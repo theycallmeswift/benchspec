@@ -12,8 +12,11 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import TypeVar
 
 _EVALS_V1 = "benchspec/v1"
+
+FieldT = TypeVar("FieldT")
 
 _ID_KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -62,39 +65,32 @@ class SchemaError(ValueError):
 
 
 def _require(
-    obj: object,
+    obj: dict,
     key: str,
-    expected_type: type | tuple[type, ...],
+    expected_type: type[FieldT],
     path: str,
     example: str | None = None,
-) -> object:
+) -> FieldT:
     """Return a required key after validating its type."""
     if key not in obj:
         hint = f" — e.g. {example}" if example else ""
         raise SchemaError(f"{path}: missing required field `{key}`{hint}")
-    val = obj[key]
-    if not isinstance(val, expected_type):
-        expected_name = (
-            expected_type.__name__
-            if isinstance(expected_type, type)
-            else " | ".join(candidate_type.__name__ for candidate_type in expected_type)
-        )
-        raise SchemaError(f"{path}.{key}: expected {expected_name}, got {type(val).__name__}")
-    return val
+    return _checked(obj[key], key, expected_type, path)
 
 
-def _optional(obj: object, key: str, expected_type: type | tuple[type, ...], path: str) -> object:
+def _optional(obj: dict, key: str, expected_type: type[FieldT], path: str) -> FieldT | None:
     """Return an optional key after validating its type when present."""
     if key not in obj:
         return None
-    val = obj[key]
+    return _checked(obj[key], key, expected_type, path)
+
+
+def _checked(val: object, key: str, expected_type: type[FieldT], path: str) -> FieldT:
+    """Return `val` once it is an `expected_type`, else raise naming the field."""
     if not isinstance(val, expected_type):
-        expected_name = (
-            expected_type.__name__
-            if isinstance(expected_type, type)
-            else " | ".join(candidate_type.__name__ for candidate_type in expected_type)
+        raise SchemaError(
+            f"{path}.{key}: expected {expected_type.__name__}, got {type(val).__name__}"
         )
-        raise SchemaError(f"{path}.{key}: expected {expected_name}, got {type(val).__name__}")
     return val
 
 

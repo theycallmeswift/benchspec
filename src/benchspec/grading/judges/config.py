@@ -23,6 +23,7 @@ DEFAULT_MODEL = "sonnet"
 DEFAULT_EFFORT = "medium"
 DEFAULT_TIMEOUT = 300
 
+
 def _validated_non_empty_str(where: str, key: str, value: object) -> str:
     """Return value when it is a non-empty string, else raise SchemaError."""
     if not isinstance(value, str) or not value:
@@ -37,14 +38,14 @@ def _validated_positive_int(where: str, key: str, value: object) -> int:
     return value
 
 
-def _validated_str_list(where: str, key: str, value: object) -> list:
+def _validated_str_list(where: str, key: str, value: object) -> list[str]:
     """Return value when it is a list of strings, else raise SchemaError."""
     if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
         raise SchemaError(f"{where}: `{key}` must be a list of strings")
     return value
 
 
-def _validated_str_dict(where: str, key: str, value: object) -> dict:
+def _validated_str_dict(where: str, key: str, value: object) -> dict[str, str]:
     """Return value when it is a table with string values, else raise SchemaError."""
     if not isinstance(value, dict) or not all(
         isinstance(entry, str) for entry in value.values()
@@ -73,12 +74,13 @@ class JudgeConfig:
     arm's own harness/model/effort/env — resolving this must never mutate or read arm
     config.
     """
+
     harness: str = DEFAULT_HARNESS
     model: str = DEFAULT_MODEL
     effort: str = DEFAULT_EFFORT
     timeout: int = DEFAULT_TIMEOUT
     harness_args: list[str] = field(default_factory=list, hash=False)
-    env: dict = field(default_factory=dict, hash=False)
+    env: dict[str, str] = field(default_factory=dict, hash=False)
 
 
 def _validate_judge_table(where: str, table: dict) -> dict:

@@ -20,9 +20,6 @@ from pathlib import Path
 
 import yaml
 
-# A checker maps (spec, workdir, pre-run SHA map, process-fact context) to (passed, evidence).
-Checker = Callable[[dict, Path, dict, object], tuple[bool, str]]
-
 
 @dataclass(frozen=True)
 class GradeContext:
@@ -35,7 +32,11 @@ class GradeContext:
     fired_skills: tuple[str, ...] = ()
 
 
-def assertion_text(assertion: object) -> str:
+# A checker maps (spec, workdir, pre-run SHA map, process-fact context) to (passed, evidence).
+Checker = Callable[[dict, Path, dict, GradeContext | None], tuple[bool, str]]
+
+
+def assertion_text(assertion: str | dict) -> str:
     """Display text for plain strings, typed assertion objects, or checker specs."""
     if isinstance(assertion, str):
         return assertion
@@ -105,7 +106,7 @@ def _frontmatter(path: Path) -> dict | None:
 
 
 def _file_exists(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Report whether the checker's path is present in the clean-room root.
 
@@ -117,7 +118,7 @@ def _file_exists(
 
 
 def _glob_count(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Evaluate a glob-count checker against the clean-room root."""
     # Same workdir boundary the path checkers enforce via _resolve: reject a `../`-bearing
@@ -142,7 +143,7 @@ def _glob_count(
 
 
 def _sha256_match(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Evaluate a SHA-256 checker against the clean-room root."""
     path = _resolve(spec["path"], workdir)
@@ -158,7 +159,7 @@ def _sha256_match(
     return actual == expected, f"sha256 {actual[:12]}… vs expected {expected[:12]}…"
 
 
-def _yaml_scalar(text: str) -> object:
+def _yaml_scalar(text: str) -> str | bool | int | float | datetime.date:
     """Coerce an author's string expectation to the Python type YAML would produce.
 
     for the same literal, so a `value:` matches a typed frontmatter value
@@ -175,7 +176,7 @@ def _yaml_scalar(text: str) -> object:
 
 
 def _frontmatter_has(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Evaluate a frontmatter key/value checker."""
     path = _resolve(spec["path"], workdir)
@@ -196,7 +197,7 @@ def _frontmatter_has(
 
 
 def _regex(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Evaluate a regex checker against file content."""
     path = _resolve(spec["path"], workdir)
@@ -209,7 +210,7 @@ def _regex(
 
 
 def _skill_invoked(
-    spec: dict, workdir: Path, original_shas: dict, context: object = None
+    spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
 ) -> tuple[bool, str]:
     """Report whether the asserted skill appears in the run's fired-skill facts.
 
@@ -231,7 +232,7 @@ def _negated(checker: Checker) -> Checker:
     """
 
     def negated(
-        spec: dict, workdir: Path, original_shas: dict, context: object = None
+        spec: dict, workdir: Path, original_shas: dict, context: GradeContext | None = None
     ) -> tuple[bool, str]:
         passed, evidence = checker(spec, workdir, original_shas, context)
         return not passed, evidence

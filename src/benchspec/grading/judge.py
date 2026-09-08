@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
+from collections.abc import Iterator
 
 from benchspec.grading.judges import JudgeConfig, run_judge
 
@@ -86,7 +87,7 @@ def build_judge_prompt(
     )
 
 
-def _balanced_objects(text: str) -> object:
+def _balanced_objects(text: str) -> Iterator[str]:
     """Yield each top-level `{...}` substring, respecting strings/escapes.
 
     `find("{")`/`rfind("}")` breaks when the judge's prose contains stray braces (e.g.
@@ -157,17 +158,17 @@ def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
 
 
 def grade_run(
-    assertions: object,
-    tree: object,
-    file_contents: object,
-    shas: object,
-    final_message: object,
-    eval_id: object,
-    config: object,
+    assertions: list[str],
+    tree: str,
+    file_contents: dict[str, str],
+    shas: dict[str, str],
+    final_message: str,
+    eval_id: str,
+    config: str,
     *,
     judge_config: JudgeConfig | None = None,
-    original_shas: object = None,
-    process_facts: object = "",
+    original_shas: dict[str, str] | None = None,
+    process_facts: str = "",
 ) -> dict:
     """Grade one completed agent run against assertions."""
     judge_config = judge_config or JudgeConfig()
