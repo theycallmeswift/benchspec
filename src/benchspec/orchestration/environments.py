@@ -2,7 +2,7 @@
 
 An adapter builds commands and parses output; an `ExecutionEnv` owns actually running
 the process. `Host` runs on the host machine (judge mode); `GuestSandbox` runs inside
-a microsandbox guest (task arms). The adapter is transport-blind — sandbox-vs-host is
+a sandbox guest (task arms). The adapter is transport-blind — sandbox-vs-host is
 a parameter, not a code path baked into each harness.
 """
 
@@ -95,7 +95,7 @@ class Host:
 
 
 class GuestSandbox:
-    """Run harness processes inside a live microsandbox guest (the task arms' environment)."""
+    """Run harness processes inside a live sandbox guest (the task arms' environment)."""
 
     def __init__(self: object, sandbox: object) -> None:
         """Wrap a live sandbox session's exec surface."""

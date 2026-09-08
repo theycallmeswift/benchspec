@@ -33,7 +33,7 @@ from benchspec.orchestration import results
 from benchspec.orchestration.execution import run_eval_arm
 from benchspec.orchestration.room import seed_room
 from benchspec.sandbox import sandbox
-from benchspec.sandbox.backend import resolve_sandbox
+from benchspec.sandbox.registry import resolve_sandbox
 from benchspec.specs.discovery import (
     EvalCase,
     discover_eval_cases,

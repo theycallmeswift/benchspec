@@ -58,7 +58,7 @@ judge. It never grades anything itself. Reference:
 ## Cell
 
 One `(eval × arm)` pair. Each cell becomes one parametrized pytest test that
-boots its own microVM, runs the agent, and grades the result. A two-eval,
+boots its own sandbox, runs the agent, and grades the result. A two-eval,
 three-arm set has six cells. Example: `test_eval[hello-greets-by-name-trial]`.
 
 ## Checker
@@ -73,7 +73,7 @@ variance, zero judge cost. Example: "./out/report.md exists" binds to
 
 The clean room is a fresh temporary directory on the host, seeded from the
 eval's `workspace/` folder (or empty), that is mounted read-write into the
-microVM at `/workspace`. It is the agent's working directory, and the host
+sandbox at `/workspace`. It is the agent's working directory, and the host
 grades the same directory afterward. Every path in an eval is written
 `./`-relative to it. Example: an eval with `workspace/request.md` starts the
 agent in a directory containing exactly `request.md`.
@@ -115,7 +115,7 @@ identity, `(group, eval_id)`, and the artifact tree is keyed on it. Sibling
 ## Harness
 
 The agent CLI under test: `claude-code`, `codex`, or `opencode`. Each is
-one adapter that knows how to install the CLI into a microVM, which credential it
+one adapter that knows how to install the CLI into a sandbox, which credential it
 needs, how to run it headless, and how to read its output stream. Chosen per arm.
 Details and how to add one: [harnesses.md](harnesses.md).
 
@@ -152,15 +152,16 @@ delta. Example: `benchspec run -- --count 5`. See
 
 ## Sandbox and snapshot
 
-Every cell runs inside a microVM, a small hardware-isolated virtual machine
-booted from a **snapshot**: a sealed image with the base OS, the harness CLI,
-and any suite-wide tools already installed. Snapshots build once per
-configuration and are cached; cells boot from them in seconds. Reference:
+Every cell runs inside an isolated **sandbox** — a Docker container by
+default, or a microsandbox microVM for the opt-in — booted from a
+**snapshot**: a sealed image with the base OS, the harness CLI, and any
+suite-wide tools already installed. Snapshots build once per configuration
+and are cached; cells boot from them in seconds. Reference:
 [sandbox.md](sandbox.md).
 
 ## `setup.sh`
 
-An optional script beside the eval file that runs inside the microVM before the
+An optional script beside the eval file that runs inside the sandbox before the
 prompt, with `BENCHSPEC_ARM` set to the arm's name. It is the one place arms
 diverge: the canonical script installs a skill on `trial` and exits early on
 `baseline`. Reference:

@@ -5,7 +5,7 @@ graded prompt. Both arms grade identically — there is no with-skill invocation
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
 the arm's dispatched-skills set, not a harness assert. `session_factory`, `grade`, and `bind`
-are injectable so the loop is unit-testable without spawning a microVM or calling the host.
+are injectable so the loop is unit-testable without spawning a sandbox or calling the host.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from benchspec.grading.trajectory import TURN_DELIM, render_process_facts, skill
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import substitute_assertions, substitute_prompt
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
-from benchspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.sandbox.sandbox import (
     DEFAULT_PROJECT_MARKER,
     SandboxSession,
@@ -56,7 +56,7 @@ class ArmOutcome:
 
 @dataclass
 class _ArmRun:
-    """Everything accumulated from running an arm in one VM session."""
+    """Everything accumulated from running an arm in one sandbox session."""
 
     tree: str = ""
     contents: dict = field(default_factory=dict)
@@ -247,8 +247,8 @@ async def _run_arm_turns(
     harness_args: object = None,
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm."""
-    # The whole VM lifecycle (boot → run → teardown) runs in ONE asyncio.run: the microVM
-    # is bound to the loop it was created in. Grading runs afterward, on the host.
+    # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
+    # guest is bound to the loop it was created in. Grading runs afterward, on the host.
     run_acc = _ArmRun()
 
     async with session_factory(
@@ -407,7 +407,7 @@ def run_eval_arm(
     # missing snapshot itself calls asyncio.run, which can't nest inside a running loop.
     # The agent is selected per arm so a multi-harness set runs each column on its own
     # harness. `sandbox_name` is the resolved set's backend threaded in by the caller;
-    # it defaults to "microsandbox" (the only implemented backend) for other callers.
+    # it defaults to DEFAULT_SANDBOX for other callers.
     agent = make_agent(arm.harness)
     backend = resolve_sandbox(sandbox_name)
     # Resolve the host environment config ONCE and thread the same value into both snapshot

@@ -11,10 +11,10 @@ test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
 # Shared by e2e and evals. Keep it a fixed, modest number rather than `auto`:
-# each e2e cell reserves a 2 GB microVM, and binder fan-out past ~12 trips the
+# each e2e cell reserves a 2 GB sandbox, and binder fan-out past ~12 trips the
 # Gemini call's ~60s timeout.
 WORKERS ?= 6
-e2e:  ## Run the end-to-end suite across WORKERS microVMs (default 6, 2 GB each; needs claude+codex CLIs and credentials); EVAL_ARGS appends pytest args
+e2e:  ## Run the end-to-end suite across WORKERS sandboxes (default 6, 2 GB each; needs claude+codex CLIs, credentials, and a running Docker daemon); EVAL_ARGS appends pytest args
 	uv run benchspec run --set e2e -- -n $(WORKERS) $(EVAL_ARGS)
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection

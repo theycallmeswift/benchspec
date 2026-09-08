@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from benchspec.agents import known_harnesses
-from benchspec.sandbox.backend import DEFAULT_SANDBOX, resolve_sandbox
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.specs.schema import SchemaError
 
 
@@ -165,9 +165,9 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         sandbox_name = body.get("sandbox", DEFAULT_SANDBOX)
         if not isinstance(sandbox_name, str) or not sandbox_name:
             raise SchemaError(f"{where}: sandbox must be a non-empty string")
-        # resolve_sandbox raises SchemaError on docker/unknown with the specific
-        # "not implemented" wording; re-raise with the set's `where` prefix so the
-        # message names the offending [tool.benchspec.sets.<name>] (spec example).
+        # resolve_sandbox raises SchemaError on an unregistered name listing the
+        # supported values; re-raise with the set's `where` prefix so the message
+        # names the offending [tool.benchspec.sets.<name>].
         try:
             resolve_sandbox(sandbox_name)
         except SchemaError as err:

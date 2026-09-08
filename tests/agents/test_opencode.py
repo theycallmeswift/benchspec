@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.agents.base import Credential
 from benchspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
+from benchspec.sandbox.errors import SandboxError
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -464,108 +466,42 @@ def test_parse_opencode_jsonl_skip_detect_when_no_skill() -> None:
     assert res.fired is False
 
 
-def test_secrets_scopes_to_provider_host(monkeypatch: object) -> None:
+def test_secrets_scopes_to_provider_host() -> None:
     """Verify secrets scopes to provider host."""
-    captured = {}
-
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, value=value, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
     agent = OpenCodeAgent(auth_value="or-key", auth_env="OPENROUTER_API_KEY")
 
     secs = agent.secrets()
 
-    assert len(secs) == 1
-    assert captured["env_var"] == "OPENROUTER_API_KEY"
-    assert captured["value"] == "or-key"
-    assert captured["allow_hosts"] == ["openrouter.ai"]
+    assert secs == [Credential("OPENROUTER_API_KEY", "or-key", ("openrouter.ai",))]
 
 
-def test_secrets_anthropic_fallback_scopes_to_anthropic_host(
-    monkeypatch: object,
-) -> None:
+def test_secrets_anthropic_fallback_scopes_to_anthropic_host() -> None:
     """Verify secrets anthropic fallback scopes to anthropic host."""
-    captured = {}
+    secs = OpenCodeAgent(auth_value="ak", auth_env="ANTHROPIC_API_KEY").secrets()
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="ak", auth_env="ANTHROPIC_API_KEY").secrets()
-
-    assert captured["allow_hosts"] == ["api.anthropic.com"]
+    assert secs == [Credential("ANTHROPIC_API_KEY", "ak", ("api.anthropic.com",))]
 
 
-def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host(
-    monkeypatch: object,
-) -> None:
+def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host() -> None:
     """Verify secrets gemini remaps to sdk env name and scopes to google host."""
     # OpenCode is built on the Vercel AI SDK, whose Google provider reads
     # GOOGLE_GENERATIVE_AI_API_KEY (not GEMINI_API_KEY). Accept the friendlier
     # GEMINI_API_KEY on the host and inject under the SDK's name in the guest.
-    captured = {}
+    secs = OpenCodeAgent(auth_value="gk", auth_env="GEMINI_API_KEY").secrets()
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="gk", auth_env="GEMINI_API_KEY").secrets()
-
-    assert captured["env_var"] == "GOOGLE_GENERATIVE_AI_API_KEY"
-    assert captured["allow_hosts"] == ["generativelanguage.googleapis.com"]
+    assert secs == [
+        Credential("GOOGLE_GENERATIVE_AI_API_KEY", "gk", ("generativelanguage.googleapis.com",))
+    ]
 
 
-def test_secrets_google_generative_ai_passthrough_unchanged(
-    monkeypatch: object,
-) -> None:
+def test_secrets_google_generative_ai_passthrough_unchanged() -> None:
     """Verify secrets google generative ai passthrough unchanged."""
     # The SDK's native env var name passes through unchanged.
-    captured = {}
+    secs = OpenCodeAgent(auth_value="gk", auth_env="GOOGLE_GENERATIVE_AI_API_KEY").secrets()
 
-    class FakeSecret:
-        """Provide a fake secret for tests."""
-
-        @staticmethod
-        def env(env_var: object, *, value: object, allow_hosts: object) -> object:
-            """Env."""
-            captured.update(env_var=env_var, allow_hosts=list(allow_hosts))
-            return ("secret", env_var)
-
-    import microsandbox
-
-    monkeypatch.setattr(microsandbox, "Secret", FakeSecret)
-
-    OpenCodeAgent(auth_value="gk", auth_env="GOOGLE_GENERATIVE_AI_API_KEY").secrets()
-
-    assert captured["env_var"] == "GOOGLE_GENERATIVE_AI_API_KEY"
-    assert captured["allow_hosts"] == ["generativelanguage.googleapis.com"]
+    assert secs == [
+        Credential("GOOGLE_GENERATIVE_AI_API_KEY", "gk", ("generativelanguage.googleapis.com",))
+    ]
 
 
 def test_guest_env_carries_home_tz_and_pinned_version() -> None:
@@ -690,6 +626,35 @@ def test_invoke_nonzero_exit_is_error() -> None:
 
     assert res.is_error is True
     assert "bad" in res.result_text
+
+
+def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
+    """A SandboxError from the guest's exec is recorded as an is_error result, not raised."""
+
+    class DyingSandbox(FakeSandbox):
+        """A sandbox whose exec fails the way a torn-down VM does."""
+
+        async def exec(self: object, cmd: str, args: object = None, **kw: object) -> object:
+            """Fail like a torn-down VM."""
+            raise SandboxError("container gone")
+
+    res = asyncio.run(
+        _opencode_agent().invoke(
+            DyingSandbox(),
+            "p",
+            eval_id="e1",
+            config="without_skill",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="provider/model",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert res.is_error is True
+    assert res.result_text.startswith("<sandbox-error>")
 
 
 def test_build_command_places_harness_args_before_prompt() -> None:

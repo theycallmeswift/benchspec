@@ -15,6 +15,7 @@ import pytest
 
 from benchspec import __main__
 from benchspec.grading.binder import BinderAuthError
+from benchspec.sandbox.errors import SandboxError
 from benchspec.specs.schema import SchemaError
 
 
@@ -172,16 +173,16 @@ def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None
     assert seen == {"set_name": None, "config": None}
 
 
-def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object) -> None:
-    """A set whose sandbox is `docker` fails fast at exit 2 before any build."""
+def test_sandbox_build_unknown_sandbox_exits_two(monkeypatch: object, capsys: object) -> None:
+    """A set naming a sandbox no backend implements fails fast at exit 2 before any build."""
 
     def failing_cli_build(
         repo_root: object, *, set_name: object = None, config: object = None
     ) -> None:
-        """Raise the SchemaError a docker set produces at resolution."""
+        """Raise the SchemaError an unknown sandbox name produces at resolution."""
         raise SchemaError(
-            "[tool.benchspec.sets.dock]: unsupported sandbox `docker` "
-            "(supported: ['microsandbox']). Docker is not implemented."
+            "[tool.benchspec.sets.dock]: unsupported sandbox `qemu` "
+            "(supported: ['docker', 'microsandbox'])"
         )
 
     monkeypatch.setattr(__main__.sandbox, "cli_build", failing_cli_build)
@@ -189,7 +190,7 @@ def test_sandbox_build_docker_set_exits_two(monkeypatch: object, capsys: object)
     exit_code = __main__.main(["sandbox:build", "some/dir", "--set", "dock"])
 
     assert exit_code == 2
-    assert "docker" in capsys.readouterr().err
+    assert "qemu" in capsys.readouterr().err
 
 
 def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
@@ -221,12 +222,11 @@ def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object, capsys: 
 
 
 def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object) -> None:
-    """Verify a build-time MicrosandboxError (not a RuntimeError) exits 1 with a clean error."""
-    from microsandbox.errors import MicrosandboxError
+    """Verify a build-time SandboxError (not a plain RuntimeError) exits 1 with a clean error."""
 
     def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
         """Fail provisioning the way a real snapshot build does."""
-        raise MicrosandboxError("snapshot build failed")
+        raise SandboxError("snapshot build failed")
 
     monkeypatch.setattr(__main__.sandbox, "cli_build", failing_build)
 
@@ -234,6 +234,30 @@ def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object
 
     assert exit_code == 1
     assert "error: snapshot build failed" in capsys.readouterr().err
+
+
+def test_sandbox_build_finding_wins_over_the_usage_superclass(
+    monkeypatch: object, capsys: object
+) -> None:
+    """Verify a SandboxError exits 1 even though it is also one of the mapped usage types.
+
+    `sandbox:build` maps preflight `RuntimeError` to USAGE (2) and `SandboxError` to
+    FINDING (1), and `SandboxError` subclasses `RuntimeError` — so the boundary must test
+    the finding types before the usage types. Were that order reversed, every genuine
+    build failure would silently report the preflight exit code instead.
+    """
+    assert issubclass(SandboxError, RuntimeError)
+
+    def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
+        """Fail the build with the backend-neutral error every backend raises."""
+        raise SandboxError("docker build failed")
+
+    monkeypatch.setattr(__main__.sandbox, "cli_build", failing_build)
+
+    exit_code = __main__.main(["sandbox:build"])
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == "error: docker build failed\n"
 
 
 def test_sandbox_clean_resolves_root_into_cli_clean(monkeypatch: object) -> None:
@@ -367,13 +391,13 @@ def test_subcommand_registered(monkeypatch: object, command: str) -> None:
 def test_sandbox_build_missing_package_exits_two_before_importing_errors(
     monkeypatch: object,
 ) -> None:
-    """Verify a host without microsandbox hits preflight's exit 2, never the errors import.
+    """Verify a host without microsandbox hits preflight's exit 2, never a microsandbox import.
 
-    Poisoning `microsandbox.errors` makes `from microsandbox.errors import MicrosandboxError`
-    raise `ImportError`. `cli_build` preflights before any microsandbox import, so a
-    missing-package preflight `RuntimeError` is caught as USAGE (2) on a branch that never
-    imports the error type. Were the import to precede that catch, the poisoned module would
-    raise an uncaught `ImportError` instead of yielding 2.
+    `_run_sandbox_build`'s exit-code mapping is backend-neutral now: it catches `SandboxError`
+    and `RuntimeError`, never importing anything microsandbox-specific. Poisoning
+    `microsandbox.errors` proves the build path never imports it at any point: a
+    missing-package preflight `RuntimeError` is still caught as USAGE (2) even with the
+    module poisoned to raise `ImportError` on import.
     """
     monkeypatch.setitem(sys.modules, "microsandbox.errors", None)
 

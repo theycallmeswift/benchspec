@@ -1,4 +1,4 @@
-"""Manage microsandbox snapshots and per-arm eval sessions."""
+"""Manage sandbox snapshots and per-arm eval sessions through the resolved backend."""
 
 from __future__ import annotations
 
@@ -24,14 +24,12 @@ from benchspec.orchestration.room import (
 )
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
-    DEFAULT_SANDBOX,
     NAME_PREFIX,
     SandboxBackend,
     host_mount_path,
-    msb_binary,
-    resolve_sandbox,
 )
 from benchspec.sandbox.project import discard_stage, stage_project
+from benchspec.sandbox.registry import DEFAULT_SANDBOX, registered_backends, resolve_sandbox
 from benchspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from benchspec.specs.schema import SchemaError
 
@@ -54,9 +52,9 @@ def snapshot_name(
 def preflight(backend: SandboxBackend | None = None) -> None:
     """Fail fast if the host can't run sandboxed evals.
 
-    Host-readiness checks come from the resolved backend (default: microsandbox); the
-    credential check is shared across backends. Raises RuntimeError (the exit-2 signal)
-    listing every failure.
+    Host-readiness checks come from the resolved backend (the default one when none is
+    passed); the credential check is shared across backends. Raises RuntimeError (the
+    exit-2 signal) listing every failure.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errs: list[str] = list(backend.preflight())
@@ -83,7 +81,7 @@ def _file_lock(path: Path) -> object:
 async def _snapshot_artifact_shas(
     sandbox: object, agent: object, backend: SandboxBackend
 ) -> dict | None:
-    """Snapshot agent artifact paths to SHA-256 digests inside the VM."""
+    """Snapshot agent artifact paths to SHA-256 digests inside the guest."""
     dirs = agent.artifact_dirs()
     if not dirs:
         return {}
@@ -138,7 +136,7 @@ def _worker_tag() -> str:
 
 
 def _sandbox_run_name(eval_id: str, config: str) -> str:
-    """Build a stable microsandbox run name for a snapshot or cell."""
+    """Build a stable guest run name for a snapshot or cell."""
     return f"{NAME_PREFIX}eval-{eval_id}-{config}-{_worker_tag()}"
 
 
@@ -204,9 +202,9 @@ async def run_setup_sh(
 
 
 class SandboxSession:
-    """Async context manager holding one microVM open across an arm's turns.
+    """Async context manager holding one guest open across an arm's turns.
 
-    `__aenter__` boots the VM and returns a per-turn async `run`; `__aexit__` tears it
+    `__aenter__` boots the guest and returns a per-turn async `run`; `__aexit__` tears it
     down.
 
     The whole lifecycle (create → turns → stop) runs inside a single `asyncio.run`.
@@ -544,11 +542,11 @@ def cli_build(
     """Build the agent-ready snapshot(s) (loud on error).
 
     With neither `--set` nor `--config`, preserves the Phase-5 bare-build path: a single
-    `make_agent()`, env from the repo root, and the default microsandbox backend — NO sets
-    table required. With `--set`/`--config`, layers config over pyproject, resolves the set,
-    and drives the resolved set's sandbox backend (a `docker` set raises SchemaError → exit 2),
-    building one snapshot per DISTINCT harness in the set (two arms sharing a harness build
-    once) via `make_agent(harness)`.
+    `make_agent()`, env from the repo root, and the default backend — NO sets table required.
+    With `--set`/`--config`, layers config over pyproject, resolves the set, and drives the
+    resolved set's sandbox backend (an unimplemented `sandbox` value raises SchemaError →
+    exit 2), building one snapshot per DISTINCT harness in the set (two arms sharing a
+    harness build once) via `make_agent(harness)`.
 
     Args:
         repo_root: Repo root whose pyproject + environment config drive the build.
@@ -602,39 +600,17 @@ def _display_base_image(env: EnvConfig) -> str:
 
 
 def cli_clean(repo_root: Path) -> None:
-    """Remove every `benchspec-*` sandbox and snapshot via the msb CLI.
+    """Prune every registered backend's `benchspec-*` sandboxes and snapshots.
 
-    One prefix selects leaked cells, trigger probes, build VMs, and snapshots alike;
-    anything another tool put under `~/.microsandbox` is left alone. Also removes the
-    per-repo snapshot lock files under `<repo_root>/tmp/`.
+    Each backend owns its own resources: microsandbox prunes sandboxes and snapshots
+    under `~/.microsandbox`; Docker prunes `benchspec-*` containers and
+    `benchspec-snapshot` images. A backend with no runtime installed tolerates that and
+    prunes nothing. Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `benchspec sandbox:build`.
     """
-    import subprocess
+    for backend_class in registered_backends().values():
+        backend_class().prune()
 
-    binary = msb_binary()
-
-    def _msb(*args: object) -> None:
-        """Run the SDK-resolved msb binary; a missing runtime means nothing to prune."""
-        if binary is None:
-            return
-        try:
-            subprocess.run([str(binary), *args], check=False)
-        except FileNotFoundError:
-            pass
-
-    home = Path.home() / ".microsandbox"
-    for sub in ("sandboxes", "snapshots"):
-        target_dir = home / sub
-        if not target_dir.is_dir():
-            continue
-        for entry in target_dir.iterdir():
-            if not entry.name.startswith(NAME_PREFIX):
-                continue
-            if sub == "sandboxes":
-                _msb("stop", entry.name)
-                _msb("rm", "-f", entry.name)
-            else:
-                _msb("snapshot", "rm", "--force", entry.name)
     for lock in workspace.workspace_parent(repo_root).glob(".benchspec-snapshot-*.lock"):
         lock.unlink(missing_ok=True)

@@ -102,14 +102,14 @@ def gather_facts(workdir: Path, max_bytes: int = 20000) -> object:
 
 
 # Agents may write skill artifacts to fixed guest dirs rather than the workdir mount. Those
-# dirs are internal to the microVM, so artifact capture snapshots them in-guest and merges
+# dirs are internal to the guest, so artifact capture snapshots them in-guest and merges
 # authored files into the workdir facts.
 
 # Two-phase capture keeps snapshot cost off the hot path: hash every file cheaply each turn
 # (a SHA line is ~80 bytes), diff against the staged baseline, stream the bytes of ONLY the
 # changed/new files. When the agent authored nothing in its skills dir (the common case)
 # that's zero content transfer — one `sha256sum` pass — so the snapshot doesn't add 296KB×N
-# of stdout per turn and starve the concurrent agent VMs into timeouts.
+# of stdout per turn and starve the concurrent agent sandboxes into timeouts.
 
 
 def sha_snapshot_script(dirs: list[str]) -> str:

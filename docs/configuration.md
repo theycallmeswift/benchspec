@@ -44,7 +44,7 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 | `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags benchspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional: without it, arms report absolute rates and no delta. Must name a declared arm. |
 | `runner` | string | The test harness driving the set. `pytest` is the only supported value (and the default); anything else fails fast with exit `2`. |
-| `sandbox` | string | The sandbox backend. `microsandbox` is the only implementation (and the default); `docker` is recognized but fails fast as not implemented. |
+| `sandbox` | string | The sandbox backend: `docker` (the default) or `microsandbox`. Docker needs a reachable daemon; microsandbox needs Apple Silicon or Linux with KVM. See [`sandbox.md`](sandbox.md). |
 
 > **Key concept:** `runner` names the *test harness*, not the agent;
 > agents are chosen per arm via `harness`. Both `runner` and `sandbox` are
@@ -172,13 +172,13 @@ Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
 benchspec run -- -k greets-by-name     # one eval (substring match on the test id)
-benchspec run -- -n 8                  # fan cells across 8 microVMs (pytest-xdist)
+benchspec run -- -n 8                  # fan cells across 8 sandboxes (pytest-xdist)
 benchspec run -- --count 5             # 5 samples per cell (pytest-repeat)
 benchspec run -- --collect-only -q     # list the cells without running
 ```
 
 The in-repo `make e2e` and `make evals` targets pass `-n $(WORKERS)` (default
-6; each e2e worker reserves a 2 GB microVM), and `EVAL_ARGS` appends further
+6; each e2e worker reserves a 2 GB sandbox), and `EVAL_ARGS` appends further
 pytest arguments after it, so `make e2e WORKERS=1` or `EVAL_ARGS="-n 1"`
 restores a sequential run.
 

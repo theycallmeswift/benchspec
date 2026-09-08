@@ -1,7 +1,7 @@
 """Claude Code implementation of the `CodingAgent` interface.
 
-Provisions the Claude Code CLI into a microVM (the cached snapshot step), injects the
-Anthropic credential as a host-substituted secret, builds the headless `claude -p`
+Provisions the Claude Code CLI into a sandbox (the cached snapshot step), declares the
+Anthropic credential for the backend to inject, builds the headless `claude -p`
 command, and parses its output through the shared helpers in `results.py`.
 """
 
@@ -12,16 +12,17 @@ import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent
+from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
 from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, parse_stream_run
+from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
 
-# Credentials Claude Code reads, in preference order. The runner injects whichever is set as
-# a microsandbox secret (substituted only for the Anthropic API host).
+# Credentials Claude Code reads, in preference order. Whichever is set becomes a scoped
+# credential the backend injects (substituted only for the Anthropic API host).
 AUTH_ENV_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 _RESERVED_HARNESS_ARGS = {
     "-p",
@@ -158,23 +159,18 @@ class ClaudeCodeAgent(BaseAgent):
     def guest_env(self: object) -> dict:
         """Return environment variables passed to guest agent commands."""
         # IS_SANDBOX=1 lets claude run bypassPermissions as root (the guest is root); the
-        # microVM is the real containment boundary. The credential rides as a substituted
-        # secret (see secrets()), never entering the guest as a plain value. TZ=UTC pins the
-        # guest clock to the zone the host computes {TODAY} in, so a dated path the agent
-        # writes matches the date the assertions were substituted with.
+        # sandbox is the real containment boundary. The credential rides as the backend's
+        # injection of secrets() — microsandbox scopes it to the provider host at the
+        # network boundary, Docker passes it as a container environment variable, so how
+        # exposed it is inside the guest is the backend's answer, not this adapter's.
+        # TZ=UTC pins the guest clock to the zone the host computes {TODAY}
+        # in, so a dated path the agent writes matches the date the assertions were
+        # substituted with.
         return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
 
-    def secrets(self: object) -> list:
-        """Return secret values that must be redacted from logs."""
-        from microsandbox import Secret
-
-        return [
-            Secret.env(
-                self._auth_env,
-                value=self._auth_value,
-                allow_hosts=["api.anthropic.com"],
-            )
-        ]
+    def secrets(self: object) -> list[Credential]:
+        """Return the provider credentials to inject into the guest."""
+        return [Credential(self._auth_env, self._auth_value, ("api.anthropic.com",))]
 
     def build_command(
         self: object,
@@ -190,7 +186,7 @@ class ClaudeCodeAgent(BaseAgent):
         """Build the guest command used to invoke the agent."""
         # Always stream-json so both arms capture a trajectory (the baseline too); detect_skill
         # gates fired-detection downstream, not the format.
-        # bypassPermissions (not acceptEdits): the microVM is the containment boundary,
+        # bypassPermissions (not acceptEdits): the sandbox is the containment boundary,
         # so the agent runs with full autonomy — no host-side --allowedTools workaround needed.
         _validate_plugin_dir_sources(plugin_dir, harness_args)
         cmd = [
@@ -299,8 +295,6 @@ class ClaudeCodeAgent(BaseAgent):
         timeout: int = 600,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
-        from microsandbox.errors import MicrosandboxError
-
         cmd = self.build_command(
             prompt,
             plugin_dir=plugin_dir,
@@ -320,7 +314,7 @@ class ClaudeCodeAgent(BaseAgent):
                 timeout=timeout,
                 stdin=b"",
             )
-        except (TimeoutError, MicrosandboxError, OSError) as error:
+        except (TimeoutError, SandboxError, OSError) as error:
             # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
             # not a graded miss — record it so the benchmark excludes it. A programming
             # error is not caught here: let it surface.

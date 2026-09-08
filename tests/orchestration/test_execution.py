@@ -24,8 +24,11 @@ BASELINE = Arm("baseline", "claude-code", "opus")
 @pytest.fixture(autouse=True)
 def _no_real_vm(monkeypatch: object) -> None:
     """Build the no real vm test fixture."""
-    # run_eval_arm resolves a real agent + snapshot (which would build a microVM). Stub both
-    # so unit tests never touch microsandbox; session_factory is faked separately per test.
+    # run_eval_arm resolves a real agent + snapshot (which would build a live guest). Stub
+    # both so unit tests never touch a sandbox runtime, and point the default backend's
+    # docker CLI at nothing so its image lookups cannot reach a real daemon;
+    # session_factory is faked separately per test.
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/benchspec-docker")
     monkeypatch.setattr(
         "benchspec.orchestration.execution.make_agent", lambda harness=None: None
     )
