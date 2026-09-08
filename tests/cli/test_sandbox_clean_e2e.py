@@ -42,7 +42,7 @@ def _run_sandbox_clean(
     *,
     containers: str = "",
     images: str = "",
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run the real `benchspec sandbox:clean <repo_root>` with every runtime redirected.
 
     Args:

@@ -24,7 +24,7 @@ def run_benchspec(
     cwd: Path,
     env: dict[str, str] | None = None,
     drop: Iterable[str] = (),
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run the real `benchspec` console entry point and capture its output.
 
     The child inherits this process's environment so the venv and any provider

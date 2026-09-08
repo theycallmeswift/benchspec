@@ -34,10 +34,13 @@ def seed_arm(
 
     Returns the sample dir.
     """
-    d = eval_root / f"eval-{eval_id}" / arm / f"sample-{sample}"
-    d.mkdir(parents=True)
-    assertions = [{"text": f"a{i}", "passed": i < passes, "evidence": ""} for i in range(total)]
-    (d / "grading.json").write_text(
+    sample_dir = eval_root / f"eval-{eval_id}" / arm / f"sample-{sample}"
+    sample_dir.mkdir(parents=True)
+    assertions = [
+        {"text": f"a{index}", "passed": index < passes, "evidence": ""}
+        for index in range(total)
+    ]
+    (sample_dir / "grading.json").write_text(
         json.dumps(
             {
                 "eval_id": eval_id,
@@ -50,7 +53,7 @@ def seed_arm(
             }
         )
     )
-    (d / "timing.json").write_text(
+    (sample_dir / "timing.json").write_text(
         json.dumps(
             {
                 "duration_ms": duration_ms,
@@ -63,4 +66,4 @@ def seed_arm(
             }
         )
     )
-    return d
+    return sample_dir

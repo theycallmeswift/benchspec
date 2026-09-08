@@ -5,17 +5,21 @@ runs; we assert on the parametrized node ids the plugin generates. Each project 
 `[tool.benchspec]` eval set so `resolved_run_set` has a real set to resolve.
 """
 
+from __future__ import annotations
+
+import io
 import json
 import textwrap
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from benchspec.agents.base import AgentCapabilities
 from benchspec.orchestration import workspace
+from benchspec.orchestration.execution import ArmOutcome
 from benchspec.reporting import report
 from benchspec.runners import pytest as plugin
+from benchspec.runners.run import PluginOptions
 from benchspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
 from tests.support import seed_arm
 
@@ -104,9 +108,9 @@ def pytest_configure(config):
 
 
 def _make_project(
-    pytester: object, skill: object = "myskill", arms_toml: object = ARMS_TOML
+    pytester: pytest.Pytester, skill: str = "myskill", arms_toml: str = ARMS_TOML
 ) -> None:
-    """Create project."""
+    """Write a pyproject, two evals under `skills/<skill>`, and the dummy cases module."""
     (pytester.path / "pyproject.toml").write_text(arms_toml)
     evals = pytester.path / "skills" / skill / "evals" / skill
     evals.mkdir(parents=True)
@@ -115,8 +119,8 @@ def _make_project(
     pytester.makepyfile(test_cases=DUMMY_CASES)
 
 
-def _collect(pytester: object, *extra: object) -> object:
-    """Build the collect test fixture."""
+def _collect(pytester: pytest.Pytester, *extra: str) -> pytest.RunResult:
+    """Collect the dummy `test_eval` in-process with the plugin loaded against `pytester.path`."""
     return pytester.runpytest(
         "-p",
         "benchspec.runners.pytest",
@@ -129,7 +133,7 @@ def _collect(pytester: object, *extra: object) -> object:
     )
 
 
-def test_help_describes_eval_search_paths(pytester: object) -> None:
+def test_help_describes_eval_search_paths(pytester: pytest.Pytester) -> None:
     """Verify the eval-paths option help names the default search paths."""
     result = pytester.runpytest("-p", "benchspec.runners.pytest", "--help")
 
@@ -139,7 +143,7 @@ def test_help_describes_eval_search_paths(pytester: object) -> None:
     assert "skills, tests, evals, benchmarks" in output
 
 
-def test_cross_product_of_evals_and_arms(pytester: object) -> None:
+def test_cross_product_of_evals_and_arms(pytester: pytest.Pytester) -> None:
     """Verify cross product of evals and arms."""
     _make_project(pytester)
 
@@ -156,7 +160,7 @@ def test_cross_product_of_evals_and_arms(pytester: object) -> None:
 
 
 def test_plugin_self_registers_cases_without_positional(
-    pytester: object, monkeypatch: object
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify plugin self registers cases without positional."""
     # `make evals` passes no positional path; the plugin must inject its cases file
@@ -178,7 +182,9 @@ def test_plugin_self_registers_cases_without_positional(
     assert "test_eval[myskill-alpha-baseline]" in out
 
 
-def test_explicit_positional_is_respected(pytester: object, monkeypatch: object) -> None:
+def test_explicit_positional_is_respected(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify explicit positional is respected."""
     # When the user passes their own target, the plugin must NOT override it.
     _make_project(pytester)
@@ -198,7 +204,7 @@ def test_explicit_positional_is_respected(pytester: object, monkeypatch: object)
     assert "test_eval[myskill-alpha-baseline]" in result.stdout.str()
 
 
-def test_models_flag_sweeps_arms(pytester: object) -> None:
+def test_models_flag_sweeps_arms(pytester: pytest.Pytester) -> None:
     """Verify models flag sweeps arms."""
     # --benchspec-models is a SWEEP, not a filter: it replaces the set's arms with one
     # arm per value (named by it), inheriting the set-level harness.
@@ -211,7 +217,7 @@ def test_models_flag_sweeps_arms(pytester: object) -> None:
     assert "test_eval[myskill-alpha-opus]" in out
 
 
-def test_malformed_schema_fails_collection(pytester: object) -> None:
+def test_malformed_schema_fails_collection(pytester: pytest.Pytester) -> None:
     """Verify malformed schema fails collection."""
     (pytester.path / "pyproject.toml").write_text(ARMS_TOML)
     evals = pytester.path / "skills" / "myskill" / "evals" / "myskill"
@@ -227,7 +233,7 @@ def test_malformed_schema_fails_collection(pytester: object) -> None:
     assert result.ret != 0
 
 
-def test_bad_set_fails_collection(pytester: object) -> None:
+def test_bad_set_fails_collection(pytester: pytest.Pytester) -> None:
     """Verify bad set fails collection."""
     # A set arm with an unknown harness must fail collection with a UsageError
     # (wrapped SchemaError), not a silent empty roster.
@@ -245,7 +251,9 @@ def test_bad_set_fails_collection(pytester: object) -> None:
     assert "nope" in out
 
 
-def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object) -> None:
+def test_preflight_session_sandbox_uses_resolved_set_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
     from benchspec.config.arms import Arm, Set
     from benchspec.orchestration import cases
@@ -255,48 +263,49 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(monkeypatch: object
     )
     monkeypatch.setattr(cases, "session_run_set", lambda config: fake_set)
     monkeypatch.setattr(cases, "resolve_sandbox", lambda name: f"backend:{name}")
-    seen = {}
+    preflighted_backends: list[str | None] = []
     monkeypatch.setattr(
-        cases.sandbox, "preflight", lambda backend=None: seen.__setitem__("backend", backend)
+        cases.sandbox, "preflight", lambda backend=None: preflighted_backends.append(backend)
     )
 
-    cases.preflight_session_sandbox(object())  # config unused — session_run_set stubbed
+    # The options go unread — `session_run_set` is stubbed — so an empty adapter suffices.
+    cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    assert seen["backend"] == "backend:custombackend"
+    assert preflighted_backends == ["backend:custombackend"]
 
 
-def test_preflight_session_sandbox_trigger_only_uses_default(monkeypatch: object) -> None:
+def test_preflight_session_sandbox_trigger_only_uses_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Verify a trigger-only run passes None so preflight resolves the default backend."""
     from benchspec.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
-    seen = {}
+    preflighted_backends: list[str | None] = []
     monkeypatch.setattr(
-        cases.sandbox, "preflight", lambda backend=None: seen.setdefault("backend", backend)
+        cases.sandbox, "preflight", lambda backend=None: preflighted_backends.append(backend)
     )
 
-    cases.preflight_session_sandbox(object())
+    cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    assert seen["backend"] is None  # None => preflight resolves DEFAULT_SANDBOX itself
+    assert preflighted_backends == [None]  # None => preflight resolves DEFAULT_SANDBOX itself
 
 
 def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
-    pytester: object, monkeypatch: object
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
-    import types
-
     from benchspec.grading import binder
     from benchspec.orchestration import cases
     from benchspec.sandbox import sandbox
 
     _make_project(pytester)  # set with sandbox default = docker
-    captured: list = []
+    captured: list[str] = []
 
-    def capture(*args: object, **kwargs: object) -> object:
-        """Capture."""
-        captured.append(kwargs["sandbox_name"])
-        return types.SimpleNamespace(errored=False)
+    def capture(*args: object, sandbox_name: str, **kwargs: object) -> ArmOutcome:
+        """Record the sandbox name the cell was handed and report a clean, empty outcome."""
+        captured.append(sandbox_name)
+        return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
 
     # Neutralize the environment-dependent preflights so the body reaches run_eval_arm.
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
@@ -319,7 +328,7 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     assert set(captured) == {"docker"}  # every arm got the resolved set's sandbox
 
 
-def test_count_two_parametrizes_sample_index(pytester: object, tmp_path: object) -> None:
+def test_count_two_parametrizes_sample_index(pytester: pytest.Pytester, tmp_path: Path) -> None:
     """Verify count two parametrizes sample index."""
     # --count 2 must yield 8 items (2 evals × 2 arms × 2 samples) AND the
     # sample_index fixture must resolve to BOTH 0 and 1 — not just `in (0, 1)`,
@@ -356,7 +365,7 @@ def test_eval(eval_arm, sample_index):
     assert sorted(observed) == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
-def test_progress_attributes_cells_to_authored_eval_files(pytester: object) -> None:
+def test_progress_attributes_cells_to_authored_eval_files(pytester: pytest.Pytester) -> None:
     """Verify default progress groups cells under their `.eval.md`, not the wrapper module."""
     _make_project(pytester)
 
@@ -378,7 +387,7 @@ def test_progress_attributes_cells_to_authored_eval_files(pytester: object) -> N
     assert "test_cases.py .." not in result.stdout.str()
 
 
-def test_verbose_progress_keeps_eval_arm_ids(pytester: object) -> None:
+def test_verbose_progress_keeps_eval_arm_ids(pytester: pytest.Pytester) -> None:
     """Verify verbose lines still carry the unique eval × arm id per cell."""
     _make_project(pytester)
 
@@ -404,89 +413,19 @@ def test_verbose_progress_keeps_eval_arm_ids(pytester: object) -> None:
     )
 
 
-class _FakeConfig:
-    """Fake config for the pytest_sessionfinish / pytest_terminal_summary tests.
-
-    Those hooks are the manifest + benchmark glue; this stub supplies the option
-    surface they read.
-    """
-
-    def __init__(
-        self: object, repo_root: object, fail_under: object = None, hasmarkup: bool = False
-    ) -> None:
-        """Initialize the instance."""
-        self.rootpath = repo_root
-        self._repo_root = str(repo_root)
-        self._fail_under = fail_under
-        self._hasmarkup = hasmarkup
-        self.stash = pytest.Stash()
-
-    def get_terminal_writer(self: object) -> object:
-        """Return a writer stub carrying only the markup flag the summary reads."""
-        return SimpleNamespace(hasmarkup=self._hasmarkup)
-
-    def getoption(self: object, name: object) -> object:
-        """Getoption."""
-        if name == "benchspec_repo_root":
-            return self._repo_root
-        return {
-            "benchspec_model": None,
-            "benchspec_set": None,
-            "benchspec_config": None,
-            "benchspec_harness": None,
-            "benchspec_effort": None,
-            "benchspec_env": [],
-            "benchspec_models": None,
-            "benchspec_judge_harness": None,
-            "benchspec_judge_model": None,
-            "benchspec_judge_effort": None,
-            "benchspec_judge_timeout": None,
-            "benchspec_judge_harness_arg": [],
-            "benchspec_judge_env": [],
-            "benchspec_fail_under": self._fail_under,
-        }.get(name)
-
-
-class _FakeTR:
-    """Provide a fake t r for tests."""
-
-    def __init__(self: object) -> None:
-        """Initialize the instance."""
-        self.events = []
-        self.lines = []
-
-    def write_sep(self: object, separator: object, title: object) -> None:
-        """Write separator."""
-        self.events.append(("separator", title))
-
-    def line(self: object, message: object) -> None:
-        """Line."""
-        self.events.append(("line", message))
-        self.lines.append(message)
-
-
-class _FakeSession:
-    """Provide a fake session for tests."""
-
-    def __init__(self: object, config: object) -> None:
-        """Initialize the instance."""
-        self.config = config
-        self.exitstatus = 0
-
-
 class _StubAgent:
-    """Store stub agent data."""
+    """The slice of `CodingAgent` the planned-arm roster reads: id, selector, capabilities."""
 
     id = "claude-code"
     capabilities = AgentCapabilities(multi_turn=True, token_split=True)
 
-    def version(self: object) -> str:
-        """Version."""
+    def version(self) -> str:
+        """Return the install selector the manifest records as `requested_version`."""
         return "9.9.9"
 
 
 @pytest.fixture(autouse=True)
-def _stub_judge_probe(monkeypatch: object) -> None:
+def _stub_judge_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the host judge-version probe so sessionfinish tests stay hermetic.
 
     `manifest.judge_meta` shells out to `<judge binary> --version`; on a dev box with the
@@ -498,32 +437,69 @@ def _stub_judge_probe(monkeypatch: object) -> None:
     )
 
 
-def _finish_and_summarize(tmp_path: object, monkeypatch: object = None) -> object:
+def _configured_plugin(
+    pytester: pytest.Pytester, repo_root: Path, *options: str
+) -> pytest.Config:
+    """Parse and configure a real pytest `Config` with the plugin loaded against `repo_root`.
+
+    This is everything `pytest_sessionfinish` / `pytest_terminal_summary` read: the
+    plugin's `--benchspec-*` options, the stash, and the terminal writer (`--color=no`
+    keeps the summary matrix plain unless a test passes its own `--color`).
+
+    Configuring runs the plugin's `pytest_configure`, which names the run's iteration from
+    what already sits under `repo_root` — build the config before seeding artifacts, then
+    pin the iteration the seeds use.
+    """
+    return pytester.parseconfigure(
+        "-p",
+        "benchspec.runners.pytest",
+        f"--benchspec-repo-root={repo_root}",
+        "--color=no",
+        *options,
+    )
+
+
+def _session(config: pytest.Config) -> pytest.Session:
+    """A real session on `config`, carrying the OK exit status pytest sets before its hooks."""
+    session = pytest.Session.from_config(config)
+    session.exitstatus = 0
+    return session
+
+
+def _printed_summary(config: pytest.Config, exitstatus: int) -> list[str]:
+    """Drive `pytest_terminal_summary` through a real reporter and return the lines it wrote."""
+    output = io.StringIO()
+    reporter = pytest.TerminalReporter(config, file=output)
+    plugin.pytest_terminal_summary(reporter, exitstatus, config)
+    return output.getvalue().splitlines()
+
+
+def _finish_and_summarize(config: pytest.Config) -> tuple[pytest.Session, list[str]]:
     """Drive the post-run pipeline the way pytest does.
 
     `sessionfinish` builds the artifacts; `terminal_summary` only prints them.
     """
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
-    return session, terminal_reporter
+    return session, _printed_summary(config, 0)
 
 
-def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -> None:
+def test_terminal_summary_prints_matrix(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the summary is a per-eval matrix ending in a pointer at benchmark.md."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)
 
-    _, terminal_reporter = _finish_and_summarize(tmp_path)
+    _, printed = _finish_and_summarize(config)
 
-    assert ("separator", "benchspec benchmark") in terminal_reporter.events
-    header, eval_row, rule, footer, versus, pointer = terminal_reporter.lines
+    assert printed[0].strip("= ") == "benchspec benchmark"
+    header, eval_row, rule, footer, versus, pointer = printed[1:]
     assert header.split() == ["Eval", "baseline", "trial"]
     assert eval_row.split() == ["archive/alpha", "0%", "100%"]
     assert rule == "-" * len(header)
@@ -534,12 +510,15 @@ def test_terminal_summary_prints_matrix(tmp_path: object, monkeypatch: object) -
     assert benchmark_md.is_file()
 
 
-def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatch: object) -> None:
+def test_terminal_summary_multi_skill_single_header(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify terminal summary multi skill single header."""
     # Two skills with eval-* children pool into ONE run-level table, under a single
     # header (rows sorted: archive before ingest).
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
 
@@ -551,11 +530,12 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     seed_arm(ingest_dir, "beta", "trial", passes=1, total=2)
     seed_arm(ingest_dir, "beta", "baseline", passes=1, total=2)
 
-    _, terminal_reporter = _finish_and_summarize(tmp_path)
+    _, printed = _finish_and_summarize(config)
 
-    assert terminal_reporter.events.count(("separator", "benchspec benchmark")) == 1
+    headers = [line for line in printed if line.strip("= ") == "benchspec benchmark"]
+    assert headers == [printed[0]]
 
-    *table, pointer = terminal_reporter.lines
+    *table, pointer = printed[1:]
     assert [line.split("  ")[0] for line in table] == [
         "Eval",
         "archive/alpha",
@@ -575,7 +555,9 @@ def test_terminal_summary_multi_skill_single_header(tmp_path: object, monkeypatc
     assert "| All evals |" in markdown
 
 
-def test_sessionfinish_writes_run_manifest(tmp_path: object, monkeypatch: object) -> None:
+def test_sessionfinish_writes_run_manifest(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify sessionfinish writes run manifest."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(
@@ -596,12 +578,13 @@ arms = [
 """
         )
     )
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert meta["format_version"] == 2
@@ -651,17 +634,18 @@ arms = [
     assert "- Harness args: `--set-flag` `--plugin-dir` `/project`" in benchmark_markdown
 
 
-def test_sessionfinish_retains_planned_config_when_all_evals_fail(
-    tmp_path: object, monkeypatch: object
+def test_sessionfinish_retains_planned_config_when_all_evals_fail(pytester: pytest.Pytester, 
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a fully failed run retains its configured set, runner, and arms."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skills_root = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     skills_root.mkdir(parents=True)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     meta = json.loads((skills_root.parent / "meta.json").read_text())
     assert meta["set"] == "default"
@@ -669,17 +653,20 @@ def test_sessionfinish_retains_planned_config_when_all_evals_fail(
     assert [arm["name"] for arm in meta["arms"]] == ["baseline", "trial"]
 
 
-def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch: object) -> None:
+def test_sessionfinish_writes_nested_judge_object(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify sessionfinish writes nested judge object."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     # harness=claude-code, model=sonnet/opus arms
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert "judge_model" not in meta
@@ -693,8 +680,8 @@ def test_sessionfinish_writes_nested_judge_object(tmp_path: object, monkeypatch:
     assert "warnings" not in meta["judge"]
 
 
-def test_sessionfinish_redacts_secret_shaped_judge_env(
-    tmp_path: object, monkeypatch: object
+def test_sessionfinish_redacts_secret_shaped_judge_env(pytester: pytest.Pytester, 
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify sessionfinish redacts secret shaped judge env."""
     # Every other judge test here uses JudgeConfig.env == {}, so redact_env({}) == {}
@@ -703,12 +690,13 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     # only passes if the value is actually masked before it hits meta.json.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(JUDGE_ENV_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     raw_text = (skill_results_dir.parent.parent / "meta.json").read_text()
     meta = json.loads(raw_text)
@@ -716,7 +704,9 @@ def test_sessionfinish_redacts_secret_shaped_judge_env(
     assert "sk-live-supersecret123" not in raw_text
 
 
-def test_manifest_writes_without_agent_credential(tmp_path: object, monkeypatch: object) -> None:
+def test_manifest_writes_without_agent_credential(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a credential-less environment still writes a valid v2 manifest.
 
     `requested_version` is a pure install selector (`version()`), not a credentialed probe,
@@ -727,11 +717,12 @@ def test_manifest_writes_without_agent_credential(tmp_path: object, monkeypatch:
     for env_var in ("BENCHSPEC_CLAUDE_VERSION", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
         monkeypatch.delenv(env_var, raising=False)
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert meta["format_version"] == 2
@@ -742,12 +733,12 @@ def test_manifest_writes_without_agent_credential(tmp_path: object, monkeypatch:
 
 
 def _seed_provenance(
-    sample_dir: object,
-    arm: object,
+    sample_dir: Path,
+    arm: str,
     *,
-    actual_version: object = "1.2.3",
-    snapshot: object = "snap-abc",
-    digest: object = "sha256:dead",
+    actual_version: str = "1.2.3",
+    snapshot: str = "snap-abc",
+    digest: str = "sha256:dead",
 ) -> None:
     """Write a `provenance.json` beside a seeded sample's grading.json.
 
@@ -772,7 +763,9 @@ def _seed_provenance(
     (sample_dir / "provenance.json").write_text(json.dumps(record.to_disk_dict()))
 
 
-def test_observed_arms_excludes_unrun_arm(tmp_path: object, monkeypatch: object) -> None:
+def test_observed_arms_excludes_unrun_arm(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify observed_arms holds only arms with a persisted record; planned holds all."""
     # `trial` ran and persisted provenance; `baseline` is configured but has no record.
     # Planned `arms` must list both; `observed_arms` must contain `trial` only, never a
@@ -780,13 +773,14 @@ def test_observed_arms_excludes_unrun_arm(tmp_path: object, monkeypatch: object)
     # coexists with a distinct concrete guest `actual_version` ("1.2.3").
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     trial_sample = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
     _seed_provenance(trial_sample, "trial", actual_version="1.2.3")
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=1)  # no provenance.json
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert sorted(arm["name"] for arm in meta["arms"]) == ["baseline", "trial"]
@@ -800,12 +794,15 @@ def test_observed_arms_excludes_unrun_arm(tmp_path: object, monkeypatch: object)
     assert observed_trial["sandbox"]["image_digest"] == "sha256:dead"
 
 
-def test_conflicting_provenance_raises(tmp_path: object, monkeypatch: object) -> None:
+def test_conflicting_provenance_raises(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify two disagreeing records for one arm raise a clear aggregation error."""
     # Records that disagree on actual_version describe unlike environments; aggregation
     # must fail loudly rather than silently combine them into one report.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     sample0 = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1, sample=0)
@@ -813,56 +810,62 @@ def test_conflicting_provenance_raises(tmp_path: object, monkeypatch: object) ->
     _seed_provenance(sample0, "trial", actual_version="1.2.3")
     _seed_provenance(sample1, "trial", actual_version="9.9.9")
 
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     with pytest.raises(ValueError, match="conflicting runtime provenance for arm `trial`"):
         plugin.pytest_sessionfinish(session, 0)
 
 
-def test_provenance_arm_directory_mismatch_raises(tmp_path: object, monkeypatch: object) -> None:
+def test_provenance_arm_directory_mismatch_raises(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A record whose `arm` disagrees with its own directory raises, naming both."""
     # `baseline` is a real roster arm, so only the directory-vs-record mismatch can fire
     # here (the record sits in the `trial/` dir): a mislocated label never keys a column.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     trial_sample = seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
     _seed_provenance(trial_sample, "baseline")  # arm label disagrees with the trial/ dir
 
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     with pytest.raises(ValueError, match="provenance arm mismatch.*`baseline`.*`trial`"):
         plugin.pytest_sessionfinish(session, 0)
 
 
-def test_provenance_arm_outside_roster_raises(tmp_path: object, monkeypatch: object) -> None:
+def test_provenance_arm_outside_roster_raises(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A record for an arm the roster never configured raises, naming the arm."""
     # `ghost` sits in a matching `ghost/` dir (so the directory check passes) but is not
     # in the configured roster {baseline, trial} — the roster check must reject it.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     ghost_sample = seed_arm(skill_results_dir, "alpha", "ghost", passes=1, total=1)
     _seed_provenance(ghost_sample, "ghost")
 
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     with pytest.raises(ValueError, match="provenance arm `ghost`.*not in the configured roster"):
         plugin.pytest_sessionfinish(session, 0)
 
 
-def test_binder_identity_carries_no_key_material(tmp_path: object, monkeypatch: object) -> None:
+def test_binder_identity_carries_no_key_material(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify meta.json binder identity never leaks GEMINI_API_KEY."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-supersecret")
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     raw_text = (skill_results_dir.parent.parent / "meta.json").read_text()
     meta = json.loads(raw_text)
@@ -870,17 +873,20 @@ def test_binder_identity_carries_no_key_material(tmp_path: object, monkeypatch: 
     assert "sk-gemini-supersecret" not in raw_text
 
 
-def test_terminal_summary_noop_without_artifacts(tmp_path: object, monkeypatch: object) -> None:
+def test_terminal_summary_noop_without_artifacts(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify terminal summary noop without artifacts."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
 
-    _, terminal_reporter = _finish_and_summarize(tmp_path)
+    _, printed = _finish_and_summarize(config)
 
-    assert terminal_reporter.events == []
+    assert printed == []
 
 
-def test_unknown_agent_flag_fails_at_startup(pytester: object) -> None:
+def test_unknown_agent_flag_fails_at_startup(pytester: pytest.Pytester) -> None:
     """Verify unknown agent flag fails at startup."""
     _make_project(pytester)
 
@@ -892,7 +898,7 @@ def test_unknown_agent_flag_fails_at_startup(pytester: object) -> None:
     assert "not-a-harness" in out
 
 
-def test_agent_flag_beats_env(pytester: object, monkeypatch: object) -> None:
+def test_agent_flag_beats_env(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify agent flag beats env."""
     monkeypatch.setenv("BENCHSPEC_AGENT", "opencode")
     _make_project(pytester)
@@ -902,7 +908,7 @@ def test_agent_flag_beats_env(pytester: object, monkeypatch: object) -> None:
     assert result.ret == 0
 
 
-def test_judge_model_flag_is_accepted(pytester: object) -> None:
+def test_judge_model_flag_is_accepted(pytester: pytest.Pytester) -> None:
     """Verify judge model flag is accepted."""
     _make_project(pytester)
 
@@ -911,7 +917,7 @@ def test_judge_model_flag_is_accepted(pytester: object) -> None:
     assert result.ret == 0
 
 
-def test_judge_harness_flag_is_accepted(pytester: object) -> None:
+def test_judge_harness_flag_is_accepted(pytester: pytest.Pytester) -> None:
     """Verify judge harness flag is accepted."""
     _make_project(pytester)
     result = _collect(
@@ -921,7 +927,7 @@ def test_judge_harness_flag_is_accepted(pytester: object) -> None:
     assert result.ret == 0
 
 
-def test_judge_effort_and_timeout_flags_are_accepted(pytester: object) -> None:
+def test_judge_effort_and_timeout_flags_are_accepted(pytester: pytest.Pytester) -> None:
     """Verify judge effort and timeout flags are accepted."""
     _make_project(pytester)
     result = _collect(
@@ -931,7 +937,7 @@ def test_judge_effort_and_timeout_flags_are_accepted(pytester: object) -> None:
     assert result.ret == 0
 
 
-def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
+def test_judge_harness_arg_flag_is_repeatable(pytester: pytest.Pytester) -> None:
     """Verify judge harness arg flag is repeatable."""
     # `=` form (not two bare tokens): argparse's `action="append"` treats a bare
     # token starting with `--` as a new option, not this option's value — a stock
@@ -946,7 +952,7 @@ def test_judge_harness_arg_flag_is_repeatable(pytester: object) -> None:
     assert result.ret == 0
 
 
-def test_judge_env_flag_is_repeatable(pytester: object) -> None:
+def test_judge_env_flag_is_repeatable(pytester: pytest.Pytester) -> None:
     """Verify judge env flag is repeatable."""
     _make_project(pytester)
     result = _collect(
@@ -956,7 +962,9 @@ def test_judge_env_flag_is_repeatable(pytester: object) -> None:
     assert result.ret == 0
 
 
-def test_eval_test_body_resolves_judge_config_fixture_without_error(pytester: object) -> None:
+def test_eval_test_body_resolves_judge_config_fixture_without_error(
+    pytester: pytest.Pytester
+) -> None:
     """Verify eval test body resolves judge config fixture without error."""
     # A real (non --collect-only) run still needs a microVM to get past sandbox
     # preflight, so this only proves collection succeeds with the fixture renamed —
@@ -968,7 +976,7 @@ def test_eval_test_body_resolves_judge_config_fixture_without_error(pytester: ob
 
 
 def test_judge_preflight_fixture_raises_when_binary_missing(
-    pytester: object, monkeypatch: object
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify judge preflight fixture raises when binary missing."""
     import shutil
@@ -1004,7 +1012,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
 
 
 def test_gemini_key_preflight_fixture_raises_when_missing(
-    pytester: object, monkeypatch: object
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify the judge_config fixture fails fast on a missing GEMINI_API_KEY."""
     import shutil
@@ -1034,7 +1042,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
 
 
 def test_gemini_key_preflight_skipped_under_collect_only(
-    pytester: object, monkeypatch: object
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify --collect-only never triggers the GEMINI_API_KEY preflight."""
     from benchspec.sandbox import sandbox
@@ -1053,7 +1061,9 @@ def test_gemini_key_preflight_skipped_under_collect_only(
     assert result.ret == 0
 
 
-def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(pytester: object) -> None:
+def test_judge_model_flag_no_longer_shadows_pyproject_default_when_unset(
+    pytester: pytest.Pytester
+) -> None:
     """Verify judge model flag no longer shadows pyproject default when unset."""
     # Regression guard for the precedence bug: --benchspec-judge-model must default to
     # None so an unset flag never overrides [tool.benchspec.judge] model.
@@ -1070,7 +1080,7 @@ model = "gpt-5.5"
     assert result.ret == 0
 
 
-def test_unsupported_judge_harness_fails_at_collection(pytester: object) -> None:
+def test_unsupported_judge_harness_fails_at_collection(pytester: pytest.Pytester) -> None:
     """Verify unsupported judge harness fails at collection."""
     project_toml = (
         ARMS_TOML
@@ -1086,7 +1096,7 @@ harness = "cursor"
     assert "not a supported judge harness" in out
 
 
-def test_non_dict_pyproject_judge_table_fails_loudly(pytester: object) -> None:
+def test_non_dict_pyproject_judge_table_fails_loudly(pytester: pytest.Pytester) -> None:
     """Verify non dict pyproject judge table fails loudly."""
     # Regression guard: a present-but-non-dict [tool.benchspec.judge] (e.g. `judge =
     # "codex"` from a fat-fingered TOML edit) must raise, not silently coerce to
@@ -1104,7 +1114,7 @@ def test_non_dict_pyproject_judge_table_fails_loudly(pytester: object) -> None:
     assert "[tool.benchspec.judge] must be a table" in out
 
 
-def test_non_dict_scratch_judge_table_fails_loudly(pytester: object) -> None:
+def test_non_dict_scratch_judge_table_fails_loudly(pytester: pytest.Pytester) -> None:
     """Verify non dict scratch judge table fails loudly."""
     # Same regression guard, but for a scratch --benchspec-config file's
     # [tool.benchspec.judge] — a distinct code path (`_read_scratch_benchspec_table` +
@@ -1121,16 +1131,19 @@ def test_non_dict_scratch_judge_table_fails_loudly(pytester: object) -> None:
     assert "--benchspec-config" in out
 
 
-def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object) -> None:
+def test_sessionfinish_writes_index_jsonl(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify sessionfinish writes index jsonl."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     seed_arm(skill_results_dir / "archive", "alpha", "trial", passes=1, total=1)
     seed_arm(skill_results_dir / "archive", "alpha", "baseline", passes=0, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     lines = [
         json.loads(line)
@@ -1140,16 +1153,19 @@ def test_sessionfinish_writes_index_jsonl(tmp_path: object, monkeypatch: object)
     assert sum(1 for record in lines if record["kind"] == "eval") == 2
 
 
-def test_index_jsonl_rows_carry_core_axes(tmp_path: object, monkeypatch: object) -> None:
+def test_index_jsonl_rows_carry_core_axes(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify index.jsonl rows gain harness/model/effort from the planned arm roster."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     seed_arm(skills / "archive", "alpha", "trial", passes=1, total=1)
     seed_arm(skills / "archive", "alpha", "baseline", passes=0, total=1)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     rows = [json.loads(line) for line in (skills.parent / "index.jsonl").read_text().splitlines()]
     trial_row = next(row for row in rows if row["arm"] == "trial")
@@ -1160,21 +1176,22 @@ def test_index_jsonl_rows_carry_core_axes(tmp_path: object, monkeypatch: object)
     assert baseline_row["model"] == "sonnet"  # inherits the set default
 
 
-def test_benchmark_json_carries_runner_binder_observed(
-    tmp_path: object, monkeypatch: object
+def test_benchmark_json_carries_runner_binder_observed(pytester: pytest.Pytester, 
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify the run-level benchmark.json carries runner + binder + observed_arms."""
     # These must agree with meta.json written by the same sessionfinish: the observed
     # provenance is aggregated once and threaded into both artifacts.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     trial_sample = seed_arm(skills / "archive", "alpha", "trial", passes=1, total=1)
     _seed_provenance(trial_sample, "trial", actual_version="1.2.3")
     seed_arm(skills / "archive", "alpha", "baseline", passes=0, total=1)  # no provenance.json
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     iteration_root = skills.parent
     benchmark = json.loads((iteration_root / "benchmark.json").read_text())
@@ -1197,42 +1214,47 @@ def test_benchmark_json_carries_runner_binder_observed(
     assert "- **baseline**: not observed" in markdown
 
 
-def test_fail_under_sets_exit_status(tmp_path: object, monkeypatch: object) -> None:
+def test_fail_under_sets_exit_status(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify fail under sets exit status."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-fail-under=0.0")
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=0, total=2)  # 0%
     seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)  # 100% → delta -100pp
 
-    config = _FakeConfig(tmp_path, fail_under=0.0)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 1
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
-    assert any("fail-under" in line for line in terminal_reporter.lines)
+    printed = _printed_summary(config, 1)
+    assert any("fail-under" in line for line in printed)
 
 
-def test_fail_under_quiet_when_met(tmp_path: object, monkeypatch: object) -> None:
+def test_fail_under_quiet_when_met(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify fail under quiet when met."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-fail-under=0.0")
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)  # 100%
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)  # 0% → delta +100pp
 
-    config = _FakeConfig(tmp_path, fail_under=0.0)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 0
 
 
-def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: object) -> None:
+def test_fail_under_skipped_without_reference(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify fail under skipped without reference."""
     # A set with no `baseline` → absolute scores, no Δ to gate; the fail-under
     # threshold is a no-op rather than failing the run.
@@ -1242,25 +1264,28 @@ def test_fail_under_skipped_without_reference(tmp_path: object, monkeypatch: obj
         '[tool.benchspec.sets.default]\nharness = "claude-code"\nmodel = "sonnet"\n'
         'arms = [{name="trial-opus"}, {name="trial-sonnet"}]\n'
     )
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-fail-under=0.0")
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial-opus", passes=0, total=2)
     seed_arm(skill_results_dir, "alpha", "trial-sonnet", passes=0, total=2)
 
-    config = _FakeConfig(tmp_path, fail_under=0.0)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 0
 
 
-def test_fail_under_isolates_regressing_group(tmp_path: object, monkeypatch: object) -> None:
+def test_fail_under_isolates_regressing_group(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a single regressing group trips the per-group gate even when the pool is up."""
     # Group A dominates by sample weight (trial +100pp over 4 samples) while group B
     # regresses (trial -100pp). The run-level pooled trial Δ is +33pp, so a pooled gate
     # would NOT fire — only a per-group gate catches group B.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-fail-under=0.0")
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     for sample_index in range(4):
@@ -1270,20 +1295,18 @@ def test_fail_under_isolates_regressing_group(tmp_path: object, monkeypatch: obj
         seed_arm(skills / "ingest", "beta", "baseline", passes=1, total=1, sample=sample_index)
         seed_arm(skills / "ingest", "beta", "trial", passes=0, total=1, sample=sample_index)
 
-    config = _FakeConfig(tmp_path, fail_under=0.0)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 1
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
-    assert any("FAIL fail-under: ingest/trial" in line for line in terminal_reporter.lines)
+    printed = _printed_summary(config, 1)
+    assert any("FAIL fail-under: ingest/trial" in line for line in printed)
     benchmark = json.loads((skills.parent / "benchmark.json").read_text())
     assert benchmark["arms"]["trial"]["delta_pp"] > 0  # pooled Δ is positive → pooled gate misses
 
 
-def test_fail_under_exempts_group_missing_baseline_arm(
-    tmp_path: object, monkeypatch: object
+def test_fail_under_exempts_group_missing_baseline_arm(pytester: pytest.Pytester, 
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a group that never ran the baseline stays exempt from the per-group gate."""
     # Group A runs both arms with trial below threshold → it fails. Group B ran only
@@ -1291,29 +1314,29 @@ def test_fail_under_exempts_group_missing_baseline_arm(
     # the group's baseline to None → no Δ to gate → exempt.
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-fail-under=0.0")
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     seed_arm(skills / "archive", "alpha", "baseline", passes=2, total=2)  # 100%
     seed_arm(skills / "archive", "alpha", "trial", passes=0, total=2)  # 0% → Δ -100pp
     seed_arm(skills / "ingest", "beta", "trial", passes=0, total=2)  # only trial, no baseline
 
-    config = _FakeConfig(tmp_path, fail_under=0.0)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 1
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 1, config)
-    assert any("FAIL fail-under: archive/trial" in line for line in terminal_reporter.lines)
-    assert not any("FAIL fail-under: ingest" in line for line in terminal_reporter.lines)
+    printed = _printed_summary(config, 1)
+    assert any("FAIL fail-under: archive/trial" in line for line in printed)
+    assert not any("FAIL fail-under: ingest" in line for line in printed)
 
 
-def test_sessionfinish_writes_single_run_level_benchmark(
-    tmp_path: object, monkeypatch: object
+def test_sessionfinish_writes_single_run_level_benchmark(pytester: pytest.Pytester, 
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify exactly one run-level benchmark lands at the iteration root, none per group."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skills = tmp_path / "tmp" / "evals" / "iteration_01" / "skills"
     seed_arm(skills / "archive", "alpha", "trial", passes=2, total=2)
@@ -1321,7 +1344,7 @@ def test_sessionfinish_writes_single_run_level_benchmark(
     seed_arm(skills / "ingest", "beta", "trial", passes=1, total=2)
     seed_arm(skills / "ingest", "beta", "baseline", passes=1, total=2)
 
-    _finish_and_summarize(tmp_path)
+    _finish_and_summarize(config)
 
     iteration_root = skills.parent
     assert (iteration_root / "benchmark.json").is_file()
@@ -1335,44 +1358,46 @@ def test_sessionfinish_writes_single_run_level_benchmark(
     }
 
 
-def test_binder_degraded_warns_in_terminal_summary(tmp_path: object, monkeypatch: object) -> None:
+def test_binder_degraded_warns_in_terminal_summary(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a nonzero binder_degraded total prints a WARN line, doesn't fail the run."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2, binder_degraded=3)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)
 
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus == 0
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
-    assert any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
+    printed = _printed_summary(config, 0)
+    assert any("WARN" in line and "binder" in line for line in printed)
 
 
-def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) -> None:
+def test_binder_degraded_quiet_when_zero(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify no binder WARN line when nothing degraded."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=2, total=2)
 
-    config = _FakeConfig(tmp_path)
-    session = _FakeSession(config)
+    session = _session(config)
     plugin.pytest_sessionfinish(session, 0)
 
-    terminal_reporter = _FakeTR()
-    plugin.pytest_terminal_summary(terminal_reporter, 0, config)
+    printed = _printed_summary(config, 0)
     # A bare "binder" substring check would self-collide: pytest's tmp_path embeds this
     # test's own name (which contains "binder") into the benchmark.md path the Report
     # line names. Match the WARN line's actual shape instead.
-    assert not any("WARN" in line and "binder" in line for line in terminal_reporter.lines)
+    assert not any("WARN" in line and "binder" in line for line in printed)
 
 
 # On-disk --benchspec-config judge fixtures; each is driven end-to-end through the
@@ -1380,7 +1405,7 @@ def test_binder_degraded_quiet_when_zero(tmp_path: object, monkeypatch: object) 
 _FIXTURES = Path(__file__).parent.parent / "fixtures" / "judge"
 
 
-def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: object) -> None:
+def test_unsupported_judge_harness_fixture_exits_nonzero(pytester: pytest.Pytester) -> None:
     """Verify unsupported judge harness fixture exits nonzero."""
     _make_project(pytester)
     result = pytester.runpytest(
@@ -1426,7 +1451,9 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
         run_judge("prompt", config=config)
 
 
-def test_dotenv_loads_before_conftests_run(pytester: object, monkeypatch: object) -> None:
+def test_dotenv_loads_before_conftests_run(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify `.env` is loaded before any conftest's `pytest_configure` runs."""
     monkeypatch.delenv("BENCHSPEC_DOTENV_PROBE", raising=False)
     (pytester.path / ".env").write_text("BENCHSPEC_DOTENV_PROBE=from-dotenv\n")
@@ -1442,20 +1469,20 @@ def test_dotenv_loads_before_conftests_run(pytester: object, monkeypatch: object
 
 
 def test_summary_matrix_is_colored_only_when_the_writer_has_markup(
-    tmp_path: object, monkeypatch: object
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify session-finish renders ANSI colors exactly when the terminal supports them."""
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
     (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    plain_config = _configured_plugin(pytester, tmp_path, "--color=no")
+    color_config = _configured_plugin(pytester, tmp_path, "--color=yes")
     workspace.set_current_iteration("iteration_01")
     skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
     seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
     seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)
 
-    plain_config = _FakeConfig(tmp_path)
-    plugin.pytest_sessionfinish(_FakeSession(plain_config), 0)
-    color_config = _FakeConfig(tmp_path, hasmarkup=True)
-    plugin.pytest_sessionfinish(_FakeSession(color_config), 0)
+    plugin.pytest_sessionfinish(_session(plain_config), 0)
+    plugin.pytest_sessionfinish(_session(color_config), 0)
 
     plain_lines = plain_config.stash.get(plugin._SUMMARY_LINES, [])
     color_lines = color_config.stash.get(plugin._SUMMARY_LINES, [])

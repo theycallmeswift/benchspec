@@ -7,10 +7,11 @@ enforces the invariants required by the false-positive gate.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 import pytest
 import yaml
-from conftest import _latency_cost_summary, _recording_call_model
+from conftest import DrawRecord, _latency_cost_summary, _recording_call_model
 
 from benchspec.grading import binder
 from benchspec.grading.checkers import derive_text
@@ -18,29 +19,46 @@ from benchspec.grading.checkers import derive_text
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
 
 
-def _load_corpus(path: Path) -> list[dict]:
-    """Load corpus."""
+class CorpusEntry(TypedDict):
+    """One gold-labeled corpus line: a bind (with its expected checker) or a punt."""
+
+    text: str
+    gold: str
+    cohort: str
+    expect_checker: NotRequired[str]
+    expect: NotRequired[dict[str, object]]
+
+
+def _bind_entry(checker: str, item: object) -> CorpusEntry:
+    """Build one gold-bind entry from a `binds` line: bare text, or a mapping with `expect`.
+
+    Raises:
+        TypeError: the line is neither a string nor a mapping.
+    """
+    if isinstance(item, str):
+        return {"text": item, "gold": "bind", "cohort": checker, "expect_checker": checker}
+    if isinstance(item, dict):
+        entry: CorpusEntry = {
+            "text": item["text"],
+            "gold": "bind",
+            "cohort": checker,
+            "expect_checker": checker,
+        }
+        if "expect" in item:
+            entry["expect"] = item["expect"]
+        return entry
+    raise TypeError(
+        f"corpus bind entry under {checker!r} must be text or a mapping, got {type(item).__name__}"
+    )
+
+
+def _load_corpus(path: Path) -> list[CorpusEntry]:
+    """Flatten `corpus.yaml`'s binds-by-checker and punts-by-class tables into entries."""
     raw = yaml.safe_load(path.read_text())
-    corpus = []
+    corpus: list[CorpusEntry] = []
     for checker, texts in raw["binds"].items():
         for item in texts:
-            if isinstance(item, dict):
-                entry = {
-                    "text": item["text"],
-                    "gold": "bind",
-                    "cohort": checker,
-                    "expect_checker": checker,
-                }
-                if "expect" in item:
-                    entry["expect"] = item["expect"]
-            else:
-                entry = {
-                    "text": item,
-                    "gold": "bind",
-                    "cohort": checker,
-                    "expect_checker": checker,
-                }
-            corpus.append(entry)
+            corpus.append(_bind_entry(checker, item))
     for cohort, texts in raw["punts"].items():
         for text in texts:
             corpus.append({"text": text, "gold": "punt", "cohort": cohort})
@@ -336,12 +354,12 @@ def test_semantic_compound_punts_with_decomposed_children(
 
 def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     """Verify regex-sourced rows are excluded from latency/token/cost aggregates."""
-    rows = [
-        {"source": "regex", "attempts": 0, "latency_ms": None,
+    rows: list[DrawRecord] = [
+        {"test": "fields", "source": "regex", "attempts": 0, "latency_ms": None,
          "prompt_tokens": None, "output_tokens": None},
-        {"source": "gemini", "attempts": 1, "latency_ms": 120.0,
+        {"test": "fields", "source": "gemini", "attempts": 1, "latency_ms": 120.0,
          "prompt_tokens": 500, "output_tokens": 20},
-        {"source": "gemini", "attempts": 1, "latency_ms": 140.0,
+        {"test": "fields", "source": "gemini", "attempts": 1, "latency_ms": 140.0,
          "prompt_tokens": 500, "output_tokens": 20},
     ]
 
@@ -355,7 +373,7 @@ def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
 
 
 def test_recording_call_model_honors_benchspec_binder_model_env_override(
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify the corpus's recording call_model reads BENCHSPEC_BINDER_MODEL, not `_call_gemini`.
 
@@ -363,9 +381,12 @@ def test_recording_call_model_honors_benchspec_binder_model_env_override(
     `model` as a plain keyword with no env fallback; only this corpus-side wrapper
     reads the variable, and only this wrapper needs a test for it.
     """
-    captured = {}
+    captured: dict[str, str] = {}
 
-    def fake_call_gemini(prompt: object, *, timeout: object = 60, model: object = None) -> object:
+    def fake_call_gemini(
+        prompt: str, *, timeout: float = 60, model: str = binder.GEMINI_BINDER_MODEL
+    ) -> binder.GeminiReply:
+        """Stand in for the transport, recording the model it was asked for."""
         captured["model"] = model
         return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
 

@@ -6,6 +6,7 @@ root it resolved, with the handler stubbed so no eval discovery happens.
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -40,7 +41,7 @@ def _write_eval(tmp_path: Path, assertions: list[str], *, slug: str = "a") -> Pa
     return group_dir
 
 
-def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
+def test_analyze_command_dispatches_to_analyze_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec analyze <dir>` routes to analyze.run with the resolved root."""
     seen: list[Path] = []
 
@@ -57,7 +58,7 @@ def test_analyze_command_dispatches_to_analyze_run(monkeypatch: object) -> None:
     assert seen == [Path("some/dir").resolve()]
 
 
-def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
+def test_lint_command_dispatches_to_lint_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec lint <dir>` still routes to lint.run with the resolved root."""
     seen: list[Path] = []
 
@@ -74,11 +75,11 @@ def test_lint_command_dispatches_to_lint_run(monkeypatch: object) -> None:
     assert seen == [Path("some/dir").resolve()]
 
 
-def test_run_command_splits_passthrough_at_double_dash(monkeypatch: object) -> None:
+def test_run_command_splits_passthrough_at_double_dash(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify args after `--` are split into passthrough while flags before it still parse."""
-    seen: list[object] = []
+    seen: list[argparse.Namespace] = []
 
-    def fake_run(args: object) -> int:
+    def fake_run(args: argparse.Namespace) -> int:
         """Record the parsed namespace and report a success exit code."""
         seen.append(args)
         return 0
@@ -91,7 +92,7 @@ def test_run_command_splits_passthrough_at_double_dash(monkeypatch: object) -> N
     assert seen[0].set == "x"
 
 
-def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
+def test_run_command_dispatches_to_run_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)
 
@@ -100,7 +101,7 @@ def test_run_command_dispatches_to_run_run(monkeypatch: object) -> None:
     assert exit_code == 7
 
 
-def test_sandbox_build_resolves_root_into_cli_build(monkeypatch: object) -> None:
+def test_sandbox_build_resolves_root_into_cli_build(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `sandbox:build <dir>` builds from the resolved root, exit 0."""
     built_roots: list[Path] = []
     monkeypatch.setattr(
@@ -115,12 +116,12 @@ def test_sandbox_build_resolves_root_into_cli_build(monkeypatch: object) -> None
     assert built_roots == [Path("some/dir").resolve()]
 
 
-def test_sandbox_build_threads_set_and_config(monkeypatch: object) -> None:
+def test_sandbox_build_threads_set_and_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--set` / `--config` reach cli_build so the resolved set drives the build."""
-    seen: dict = {}
+    seen: dict[str, Path | str | None] = {}
 
     def fake_cli_build(
-        repo_root: object, *, set_name: object = None, config: object = None
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
     ) -> None:
         """Record what the CLI threaded into the build."""
         seen["root"] = repo_root
@@ -139,7 +140,7 @@ def test_sandbox_build_threads_set_and_config(monkeypatch: object) -> None:
 
 
 def test_sandbox_build_does_not_preflight_before_backend_resolution(
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The build handler lets cli_build resolve and preflight the selected backend once."""
     monkeypatch.setattr(
@@ -156,12 +157,12 @@ def test_sandbox_build_does_not_preflight_before_backend_resolution(
     assert __main__.main(["sandbox:build", "--set", "micro"]) == 0
 
 
-def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None:
+def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bare `sandbox:build` threads set_name=None, config=None (Phase-5 path preserved)."""
-    seen: dict = {}
+    seen: dict[str, Path | str | None] = {}
 
     def fake_cli_build(
-        repo_root: object, *, set_name: object = None, config: object = None
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
     ) -> None:
         """Record the bare invocation's threaded values."""
         seen["set_name"] = set_name
@@ -173,11 +174,13 @@ def test_sandbox_build_bare_passes_no_set_or_config(monkeypatch: object) -> None
     assert seen == {"set_name": None, "config": None}
 
 
-def test_sandbox_build_unknown_sandbox_exits_two(monkeypatch: object, capsys: object) -> None:
+def test_sandbox_build_unknown_sandbox_exits_two(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A set naming a sandbox no backend implements fails fast at exit 2 before any build."""
 
     def failing_cli_build(
-        repo_root: object, *, set_name: object = None, config: object = None
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
     ) -> None:
         """Raise the SchemaError an unknown sandbox name produces at resolution."""
         raise SchemaError(
@@ -193,7 +196,7 @@ def test_sandbox_build_unknown_sandbox_exits_two(monkeypatch: object, capsys: ob
     assert "qemu" in capsys.readouterr().err
 
 
-def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
+def test_sandbox_build_reuses_present_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a no-op cli_build (snapshot already present) yields exit 0."""
     monkeypatch.setattr(
         __main__.sandbox, "cli_build", lambda repo_root, *, set_name=None, config=None: None
@@ -204,11 +207,13 @@ def test_sandbox_build_reuses_present_snapshot(monkeypatch: object) -> None:
     assert exit_code == 0
 
 
-def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object, capsys: object) -> None:
+def test_sandbox_build_preflight_failure_exits_two(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Verify a host-preflight RuntimeError from cli_build maps to exit 2, not a build failure."""
 
     def failing_cli_build(
-        repo_root: Path, *, set_name: object = None, config: object = None
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
     ) -> None:
         """Reject the host the way the resolved backend's preflight does."""
         raise RuntimeError("microsandbox host unsupported")
@@ -221,10 +226,14 @@ def test_sandbox_build_preflight_failure_exits_two(monkeypatch: object, capsys: 
     assert "microsandbox host unsupported" in capsys.readouterr().err
 
 
-def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object) -> None:
+def test_sandbox_build_build_error_exits_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Verify a build-time SandboxError (not a plain RuntimeError) exits 1 with a clean error."""
 
-    def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
+    def failing_build(
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
+    ) -> None:
         """Fail provisioning the way a real snapshot build does."""
         raise SandboxError("snapshot build failed")
 
@@ -237,7 +246,7 @@ def test_sandbox_build_build_error_exits_one(monkeypatch: object, capsys: object
 
 
 def test_sandbox_build_finding_wins_over_the_usage_superclass(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify a SandboxError exits 1 even though it is also one of the mapped usage types.
 
@@ -248,7 +257,9 @@ def test_sandbox_build_finding_wins_over_the_usage_superclass(
     """
     assert issubclass(SandboxError, RuntimeError)
 
-    def failing_build(repo_root: Path, *, set_name: object = None, config: object = None) -> None:
+    def failing_build(
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
+    ) -> None:
         """Fail the build with the backend-neutral error every backend raises."""
         raise SandboxError("docker build failed")
 
@@ -260,7 +271,7 @@ def test_sandbox_build_finding_wins_over_the_usage_superclass(
     assert capsys.readouterr().err == "error: docker build failed\n"
 
 
-def test_sandbox_clean_resolves_root_into_cli_clean(monkeypatch: object) -> None:
+def test_sandbox_clean_resolves_root_into_cli_clean(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `sandbox:clean <dir>` prunes from the resolved root, exit 0."""
     cleaned_roots: list[Path] = []
     monkeypatch.setattr(
@@ -273,7 +284,7 @@ def test_sandbox_clean_resolves_root_into_cli_clean(monkeypatch: object) -> None
     assert cleaned_roots == [Path("some/dir").resolve()]
 
 
-def test_sandbox_clean_bare_uses_cwd(monkeypatch: object) -> None:
+def test_sandbox_clean_bare_uses_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bare `sandbox:clean` prunes from the resolved cwd, exit 0."""
     cleaned_roots: list[Path] = []
     monkeypatch.setattr(
@@ -287,7 +298,7 @@ def test_sandbox_clean_bare_uses_cwd(monkeypatch: object) -> None:
 
 
 def test_sandbox_clean_help_names_the_running_sandbox_hazard(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify `sandbox:clean --help` exits 0 and warns that it stops running sandboxes."""
     monkeypatch.setattr(
@@ -303,7 +314,9 @@ def test_sandbox_clean_help_names_the_running_sandbox_hazard(
     assert "stops running" in capsys.readouterr().out
 
 
-def test_sandbox_clean_rejects_unknown_flag_with_usage_exit(monkeypatch: object) -> None:
+def test_sandbox_clean_rejects_unknown_flag_with_usage_exit(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify `sandbox:clean --bogus` is an argparse usage error, exit 2."""
     monkeypatch.setattr(
         __main__.sandbox,
@@ -318,7 +331,7 @@ def test_sandbox_clean_rejects_unknown_flag_with_usage_exit(monkeypatch: object)
 
 
 def test_analyze_command_maps_schema_error_to_usage(
-    tmp_path: Path, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a malformed eval under `analyze` surfaces as the usage exit code (2)."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -330,7 +343,7 @@ def test_analyze_command_maps_schema_error_to_usage(
 
 
 def test_analyze_command_maps_preflight_error_to_usage(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify a binder-preflight RuntimeError from analyze.run maps to a clean exit 2."""
 
@@ -347,7 +360,7 @@ def test_analyze_command_maps_preflight_error_to_usage(
 
 
 def test_analyze_command_maps_binder_auth_error_to_usage(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify a rejected Gemini credential from analyze.run maps to a clean exit 2."""
 
@@ -375,7 +388,7 @@ def test_lint_command_maps_schema_error_to_usage(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "command", ["lint", "analyze", "sandbox:build", "sandbox:clean", "run"]
 )
-def test_subcommand_registered(monkeypatch: object, command: str) -> None:
+def test_subcommand_registered(monkeypatch: pytest.MonkeyPatch, command: str) -> None:
     """Verify each subcommand is registered and accepts a root positional."""
     monkeypatch.setattr(__main__.lint, "run", lambda root: 0)
     monkeypatch.setattr(__main__.analyze, "run", lambda root: 0)
@@ -389,7 +402,7 @@ def test_subcommand_registered(monkeypatch: object, command: str) -> None:
 
 
 def test_sandbox_build_missing_package_exits_two_before_importing_errors(
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a host without microsandbox hits preflight's exit 2, never a microsandbox import.
 
@@ -402,7 +415,7 @@ def test_sandbox_build_missing_package_exits_two_before_importing_errors(
     monkeypatch.setitem(sys.modules, "microsandbox.errors", None)
 
     def missing_package_cli_build(
-        repo_root: Path, *, set_name: object = None, config: object = None
+        repo_root: Path, *, set_name: str | None = None, config: str | None = None
     ) -> None:
         """Reject the host the way an absent microsandbox package does at preflight."""
         raise RuntimeError("microsandbox runtime not installed")
@@ -413,7 +426,7 @@ def test_sandbox_build_missing_package_exits_two_before_importing_errors(
 
 
 def test_main_loads_repo_dotenv_for_every_subcommand(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify the CLI loads a repo-root `.env` before dispatching any subcommand."""
     _write_eval(tmp_path, ["./out.md exists"])

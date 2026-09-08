@@ -7,12 +7,17 @@ emits for it.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import textwrap
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
+from benchspec.config.options import RunOptions
 from benchspec.runners import run
 from benchspec.runners.run import PluginOptions, translate_run_flags
 
@@ -82,31 +87,35 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
     return argparse.Namespace(root=root, **values)
 
 
-class _FakeCompleted:
-    """A stand-in for `subprocess.CompletedProcess` exposing only `.returncode`."""
+@dataclass
+class _SpawnRecord:
+    """What a fake runner saw when `run` spawned it: the argv and the child environment."""
 
-    def __init__(self: object, returncode: int) -> None:
-        """Record the return code the fake runner should report."""
-        self.returncode = returncode
+    argv: list[str] = field(default_factory=list)
+    env: dict[str, str] | None = None
 
 
 def _no_preflight(args: argparse.Namespace) -> None:
     """Skip the environment preflight so a fake-runner test never touches the host."""
 
 
-def _runner_that_must_not_run(argv: list[str], env: dict[str, str] | None = None) -> object:
+def _runner_that_must_not_run(argv: list[str], env: dict[str, str] | None = None) -> NoReturn:
     """Fail loudly if the subprocess is spawned when the run should have stopped first."""
     raise AssertionError("runner must not be called")
 
 
-def _runner_returning(returncode: int, recorder: dict[str, object]) -> object:
+def _runner_returning(
+    returncode: int, recorder: _SpawnRecord
+) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Build a fake runner that records its argv/env and reports a fixed return code."""
 
-    def fake_runner(argv: list[str], env: dict[str, str] | None = None) -> _FakeCompleted:
+    def fake_runner(
+        argv: list[str], env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         """Record the spawned argv and env, then report the chosen return code."""
-        recorder["argv"] = argv
-        recorder["env"] = env
-        return _FakeCompleted(returncode)
+        recorder.argv = argv
+        recorder.env = env
+        return subprocess.CompletedProcess(argv, returncode)
 
     return fake_runner
 
@@ -198,16 +207,16 @@ def test_absent_flags_add_nothing() -> None:
     assert tokens == [f"--benchspec-repo-root={root.resolve()}"]
 
 
-def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None:
+def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run spawns `python -m pytest` with translated flags and no `-p` plugin token."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"), set="default")
-    recorder: dict[str, object] = {}
+    recorder = _SpawnRecord()
 
     exit_code = run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
     assert exit_code == 0
-    assert recorder["argv"] == [
+    assert recorder.argv == [
         sys.executable,
         "-m",
         "pytest",
@@ -216,65 +225,68 @@ def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: object) -> None
     ]
 
 
-def test_run_forwards_passthrough_verbatim(monkeypatch: object) -> None:
+def test_run_forwards_passthrough_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify passthrough args are appended verbatim as the argv tail."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"), passthrough=["-k", "hello", "-x"])
-    recorder: dict[str, object] = {}
+    recorder = _SpawnRecord()
 
     run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
-    assert recorder["argv"][-3:] == ["-k", "hello", "-x"]
+    assert recorder.argv[-3:] == ["-k", "hello", "-x"]
 
 
-def test_run_child_env_enables_plugin_autoload(monkeypatch: object) -> None:
+def test_run_child_env_enables_plugin_autoload(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the child env drops PYTEST_DISABLE_PLUGIN_AUTOLOAD so the plugin autoloads."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     args = _run_namespace(Path("repo"))
-    recorder: dict[str, object] = {}
+    recorder = _SpawnRecord()
 
     run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
-    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in recorder["env"]
+    assert recorder.env is not None
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in recorder.env
 
 
-def test_run_maps_gate_failure_to_one(monkeypatch: object) -> None:
+def test_run_maps_gate_failure_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a pytest status of 1 (tests failed) maps to exit 1."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(1, {}), preflight=_no_preflight)
+    exit_code = run.run(args, runner=_runner_returning(1, _SpawnRecord()), preflight=_no_preflight)
 
     assert exit_code == 1
 
 
-def test_run_maps_pytest_collection_usage_status_to_two(monkeypatch: object) -> None:
+def test_run_maps_pytest_collection_usage_status_to_two(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a pytest status of 2 (collection usage error) maps to exit 2."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(2, {}), preflight=_no_preflight)
+    exit_code = run.run(args, runner=_runner_returning(2, _SpawnRecord()), preflight=_no_preflight)
 
     assert exit_code == 2
 
 
-def test_run_maps_pytest_usage_error_status_to_two(monkeypatch: object) -> None:
+def test_run_maps_pytest_usage_error_status_to_two(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a pytest status of 4 (usage error) maps to exit 2."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"))
 
-    exit_code = run.run(args, runner=_runner_returning(4, {}), preflight=_no_preflight)
+    exit_code = run.run(args, runner=_runner_returning(4, _SpawnRecord()), preflight=_no_preflight)
 
     assert exit_code == 2
 
 
 def test_run_empty_root_reports_no_evals_without_spawning(
-    tmp_path: Path, capsys: object
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify an empty root returns 5 with a readable message and never spawns the runner."""
 
-    def runner_that_must_not_run(argv: list[str], env: dict[str, str] | None = None) -> object:
+    def runner_that_must_not_run(
+        argv: list[str], env: dict[str, str] | None = None
+    ) -> NoReturn:
         """Fail loudly if the subprocess is spawned for an empty root."""
         raise AssertionError("runner must not be called when no evals are discovered")
 
@@ -332,18 +344,21 @@ def test_plugin_options_answer_none_for_any_uncurated_option(tmp_path: Path) -> 
 
 
 def test_preflight_run_drives_grading_then_sandbox_through_the_adapter(
-    monkeypatch: object, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify preflight_run runs the plugin's grading and sandbox preflights, in that order."""
-    calls: list[tuple[str, object]] = []
-    monkeypatch.setattr(
-        run.cases, "preflight_grading", lambda options: calls.append(("grading", options))
-    )
-    monkeypatch.setattr(
-        run.cases,
-        "preflight_session_sandbox",
-        lambda options: calls.append(("sandbox", options)),
-    )
+    calls: list[tuple[str, RunOptions]] = []
+
+    def record_grading(options: RunOptions) -> None:
+        """Stand in for the grading preflight, recording the options it was handed."""
+        calls.append(("grading", options))
+
+    def record_sandbox(options: RunOptions) -> None:
+        """Stand in for the sandbox preflight, recording the options it was handed."""
+        calls.append(("sandbox", options))
+
+    monkeypatch.setattr(run.cases, "preflight_grading", record_grading)
+    monkeypatch.setattr(run.cases, "preflight_session_sandbox", record_sandbox)
     args = _run_namespace(tmp_path, set="micro")
 
     run.preflight_run(args)
@@ -353,7 +368,7 @@ def test_preflight_run_drives_grading_then_sandbox_through_the_adapter(
 
 
 def test_run_preflight_runtime_error_exits_two_without_spawning(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A missing credential is one `error:` line and exit 2; pytest never spawns."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
@@ -371,7 +386,7 @@ def test_run_preflight_runtime_error_exits_two_without_spawning(
 
 
 def test_run_preflight_usage_error_exits_two_without_spawning(
-    monkeypatch: object, capsys: object
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unknown set caught by the CLI preflight is one `error:` line and exit 2."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
@@ -390,7 +405,7 @@ def test_run_preflight_usage_error_exits_two_without_spawning(
 
 @pytest.mark.parametrize("collect_flag", ["--collect-only", "--co"])
 def test_run_collect_only_passthrough_skips_preflight(
-    monkeypatch: object, collect_flag: str
+    monkeypatch: pytest.MonkeyPatch, collect_flag: str
 ) -> None:
     """A collect-only passthrough spends nothing, so the environment preflight is skipped."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
@@ -402,7 +417,7 @@ def test_run_collect_only_passthrough_skips_preflight(
     args = _run_namespace(Path("repo"), passthrough=[collect_flag, "-q"])
 
     exit_code = run.run(
-        args, runner=_runner_returning(0, {}), preflight=preflight_that_must_not_run
+        args, runner=_runner_returning(0, _SpawnRecord()), preflight=preflight_that_must_not_run
     )
 
     assert exit_code == 0

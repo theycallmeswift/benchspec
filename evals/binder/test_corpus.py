@@ -11,24 +11,35 @@ per-draw records.
 
 from __future__ import annotations
 
+import enum
 import os
 
 import pytest
-from conftest import _recording_call_model
-from test_corpus_integrity import CORPUS
+from _pytest.mark import ParameterSet
+from conftest import RecordDraw, _recording_call_model
+from test_corpus_integrity import CORPUS, CorpusEntry
 
-from benchspec.grading.binder import _bind_bare_exists, bind
+from benchspec.grading.binder import GeminiReply, _bind_bare_exists, bind
 
 pytestmark = pytest.mark.binder_corpus
 
 SAMPLES = int(os.environ.get("BENCHSPEC_BINDER_SAMPLES", "5"))
 
-# A bind that failed on infra (timeout/HTTP failure) even after a retry — distinct from a punt
-# (None) and a bind (dict). Excluded from every rate; counted by the infra-error guard.
-_ERROR = object()
+
+class _BindFailure(enum.Enum):
+    """A bind that failed on infra (timeout/HTTP failure) even after a retry.
+
+    Distinct from a punt (None) and a bind (dict). Excluded from every rate; counted by
+    the infra-error guard.
+    """
+
+    INFRA = "infra"
 
 
-def _samples_for(entry: object) -> object:
+_ERROR = _BindFailure.INFRA
+
+
+def _samples_for(entry: CorpusEntry) -> int:
     """Choose the sample count for a binder corpus entry."""
     # Heavy floor only where a false-positive can occur: persistence (the documented leak) and
     # skill_invoked (a punt on an activation assertion is unrecoverable). A zero-tolerance gate
@@ -37,7 +48,9 @@ def _samples_for(entry: object) -> object:
     return max(SAMPLES, 20) if heavy else SAMPLES
 
 
-def _bind_resilient(text: object, *, sink: list) -> tuple:
+def _bind_resilient(
+    text: str, *, sink: list[GeminiReply]
+) -> tuple[dict | None | _BindFailure, int]:
     """Bind one assertion with one retry for a transient Gemini infra failure.
 
     Args:
@@ -61,7 +74,7 @@ def _bind_resilient(text: object, *, sink: list) -> tuple:
     return _ERROR, attempts
 
 
-def _draws() -> object:
+def _draws() -> list[ParameterSet]:
     """Build parametrized binder corpus leak-check draws."""
     return [
         pytest.param(entry, id=f"{entry['cohort']}-{index}#{sample}")
@@ -70,7 +83,7 @@ def _draws() -> object:
     ]
 
 
-def _field_expectation_draws() -> object:
+def _field_expectation_draws() -> list[ParameterSet]:
     """Build binder corpus draws with expected checker fields."""
     return [
         pytest.param(entry, id=f"{entry['cohort']}-{index}#{sample}")
@@ -81,9 +94,9 @@ def _field_expectation_draws() -> object:
 
 
 @pytest.mark.parametrize("entry", _draws())
-def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
+def test_binder_corpus_blocks_punt_leaks(entry: CorpusEntry, record: RecordDraw) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
-    replies: list = []
+    replies: list[GeminiReply] = []
     binding, attempts = _bind_resilient(entry["text"], sink=replies)
     # Derive source from the same predicate bind() itself uses to skip call_model,
     # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
@@ -105,9 +118,9 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
             "checker": binding.get("checker") if isinstance(binding, dict) else None,
             "source": source,
             "attempts": attempts,
-            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
-            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
-            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
+            "latency_ms": sum(reply.latency_ms for reply in replies) if replies else None,
+            "prompt_tokens": sum(reply.prompt_tokens for reply in replies) if replies else None,
+            "output_tokens": sum(reply.output_tokens for reply in replies) if replies else None,
         }
     )
 
@@ -115,15 +128,18 @@ def test_binder_corpus_blocks_punt_leaks(entry: object, record: object) -> None:
         pytest.skip("infra failure after retry")
 
     if entry["gold"] == "punt":
+        leaked_checker = binding.get("checker") if isinstance(binding, dict) else None
         assert not isinstance(binding, dict), (
-            f"false-positive leak: {entry['text']!r} bound to {binding.get('checker')!r}"
+            f"false-positive leak: {entry['text']!r} bound to {leaked_checker!r}"
         )
 
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
-def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: object) -> None:
+def test_binder_corpus_preserves_expected_checker_fields(
+    entry: CorpusEntry, record: RecordDraw
+) -> None:
     """Ensure bound checker specs preserve expected fields from the corpus."""
-    replies: list = []
+    replies: list[GeminiReply] = []
     binding, attempts = _bind_resilient(entry["text"], sink=replies)
     source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
 
@@ -132,9 +148,9 @@ def test_binder_corpus_preserves_expected_checker_fields(entry: object, record: 
             "test": "fields",
             "source": source,
             "attempts": attempts,
-            "latency_ms": sum(r.latency_ms for r in replies) if replies else None,
-            "prompt_tokens": sum(r.prompt_tokens for r in replies) if replies else None,
-            "output_tokens": sum(r.output_tokens for r in replies) if replies else None,
+            "latency_ms": sum(reply.latency_ms for reply in replies) if replies else None,
+            "prompt_tokens": sum(reply.prompt_tokens for reply in replies) if replies else None,
+            "output_tokens": sum(reply.output_tokens for reply in replies) if replies else None,
         }
     )
 

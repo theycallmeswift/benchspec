@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from textwrap import dedent
 
@@ -16,16 +17,17 @@ import pytest
 from benchspec.config.arms import Arm
 from benchspec.grading.binder import _bind_bare_exists
 from benchspec.orchestration import workspace
-from benchspec.orchestration.execution import run_eval_arm
+from benchspec.orchestration.execution import SessionFactory, run_eval_arm
 from benchspec.orchestration.results import RunResult
 from benchspec.reporting import analyze
+from benchspec.sandbox.sandbox import TurnRunner
 from benchspec.specs import discovery
 from benchspec.specs.schema import SchemaError
 
 _ACTIVATION_FIXTURE = Path(__file__).parent.parent / "fixtures" / "activation"
 
 
-def _bind_like_binder(text: object) -> object:
+def _bind_like_binder(text: str) -> dict | None:
     """Bind stub mirroring the real binder for the canonical assertion shapes."""
     if text == "Skill `ingest` invoked":
         return {"type": "deterministic", "checker": "skill_invoked", "skill": "ingest"}
@@ -37,8 +39,8 @@ def _bind_like_binder(text: object) -> object:
 
 
 def _write_eval(
-    tmp_path: object, assertions: object, *, skill: object = "demo", slug: object = "a"
-) -> object:
+    tmp_path: Path, assertions: list[str], *, skill: str = "demo", slug: str = "a"
+) -> Path:
     """Write a minimal discoverable eval under a `skills/<skill>/evals/<slug>/` tree."""
     group_dir = tmp_path / "skills" / skill / "evals" / slug
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +85,7 @@ def test_classify_assertion_labels_judge_backed_on_punt() -> None:
     assert label == "judge-backed"
 
 
-def test_analyze_repo_labels_each_assertion(tmp_path: object) -> None:
+def test_analyze_repo_labels_each_assertion(tmp_path: Path) -> None:
     """Verify analyze_repo yields one right-labeled Classification per assertion."""
     _write_eval(
         tmp_path,
@@ -99,7 +101,7 @@ def test_analyze_repo_labels_each_assertion(tmp_path: object) -> None:
     ]
 
 
-def test_analyze_repo_records_file_and_eval_id(tmp_path: object) -> None:
+def test_analyze_repo_records_file_and_eval_id(tmp_path: Path) -> None:
     """Verify each Classification carries its source file and eval id."""
     group_dir = _write_eval(tmp_path, ["the summary is accurate"], slug="alpha")
 
@@ -109,7 +111,7 @@ def test_analyze_repo_records_file_and_eval_id(tmp_path: object) -> None:
     assert classifications[0].eval_id == "alpha"
 
 
-def test_run_returns_zero_on_clean_suite(tmp_path: object, monkeypatch: object) -> None:
+def test_run_returns_zero_on_clean_suite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify run classifies a non-empty suite and returns 0, unlike lint's warning exit.
 
     The assertions bind through the binder's offline bare-exists fast path, so the real
@@ -124,7 +126,7 @@ def test_run_returns_zero_on_clean_suite(tmp_path: object, monkeypatch: object) 
 
 
 def test_run_surfaces_schema_error_on_malformed_eval(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a malformed eval surfaces a SchemaError rather than a nonzero-clean run."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -134,7 +136,7 @@ def test_run_surfaces_schema_error_on_malformed_eval(
         analyze.run(tmp_path)
 
 
-def _bind_offline(text: object) -> object:
+def _bind_offline(text: str) -> dict | None:
     """Bind the fixture's canonical lines without a network call.
 
     The binder binds skill-activation lines via the model; this stub reproduces the two
@@ -151,16 +153,16 @@ def _bind_offline(text: object) -> object:
     return _bind_bare_exists(text)
 
 
-def _fake_session_factory(result: object) -> object:
+def _fake_session_factory(result: RunResult) -> SessionFactory:
     """Single-turn session factory yielding one fixed RunResult for the arm's run."""
 
     @contextlib.asynccontextmanager
-    async def factory(**_kwargs: object) -> object:
+    async def factory(**_kwargs: object) -> AsyncIterator[TurnRunner]:
         """Yield a run callable returning the pre-baked result."""
 
         async def run(
-            _prompt: object, *, resume_session_id: object, detect_skill: object
-        ) -> object:
+            prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+        ) -> RunResult:
             """Return the fixed run result for the single graded turn."""
             return result
 
@@ -169,7 +171,9 @@ def _fake_session_factory(result: object) -> object:
     return factory
 
 
-def _grade_all_pass(assertions: object, *_args: object, **_kwargs: object) -> object:
+def _grade_all_pass(
+    assertions: Sequence[str], *_args: object, **_kwargs: object
+) -> dict[str, list[dict[str, str | bool]]]:
     """Judge stub passing every punted assertion so no network judge is called."""
     return {
         "assertions": [
@@ -204,7 +208,7 @@ def test_activation_fixture_classifies_each_assertion() -> None:
 
 
 def test_activation_fixture_grades_both_polarities_end_to_end(
-    tmp_path: object, monkeypatch: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a discover to grade run records both activation polarities as pass.
 

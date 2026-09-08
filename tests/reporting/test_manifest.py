@@ -6,6 +6,7 @@ Manifest assembly and observed-arm aggregation by value.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from benchspec.orchestration import workspace
 from benchspec.reporting import manifest
@@ -164,12 +165,12 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
 
 
 def _seed_provenance(
-    sample_dir: object,
-    arm: object,
+    sample_dir: Path,
+    arm: str,
     *,
-    actual_version: object = "1.2.3",
-    snapshot: object = "snap-abc",
-    digest: object = "sha256:dead",
+    actual_version: str = "1.2.3",
+    snapshot: str = "snap-abc",
+    digest: str = "sha256:dead",
 ) -> None:
     """Write a `provenance.json` beside a seeded sample's grading.json.
 
@@ -194,7 +195,7 @@ def _seed_provenance(
     (sample_dir / "provenance.json").write_text(json.dumps(record.to_disk_dict()))
 
 
-def test_aggregate_observed_arms_trigger_only_skips_roster(tmp_path: object) -> None:
+def test_aggregate_observed_arms_trigger_only_skips_roster(tmp_path: Path) -> None:
     """A trigger-only run (run_set None) aggregates without roster validation."""
     # No eval set resolves for a trigger-only run, so there is no roster to check against;
     # the walk must still aggregate the record rather than reject every arm.

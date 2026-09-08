@@ -10,16 +10,16 @@ from benchspec.specs.mdformat import parse_eval_md
 README = Path(__file__).resolve().parents[1] / "README.md"
 
 
-def _embedded_eval_block(md: str) -> str:
-    """Build the embedded eval block test fixture."""
+def _embedded_eval_block(markdown: str) -> str:
+    """Return the README's one fenced eval example (the ```markdown block with assertions)."""
     # The eval example is the fenced ```markdown block containing `## Assertions`.
-    blocks = re.findall(r"```markdown\n(.*?)```", md, re.DOTALL)
-    matches = [b for b in blocks if "## Assertions" in b]
+    blocks = re.findall(r"```markdown\n(.*?)```", markdown, re.DOTALL)
+    matches = [block for block in blocks if "## Assertions" in block]
     assert len(matches) == 1, f"expected exactly one eval example block, got {len(matches)}"
     return matches[0]
 
 
-def test_readme_eval_example_parses(tmp_path: object) -> None:
+def test_readme_eval_example_parses(tmp_path: Path) -> None:
     """Verify readme eval example parses."""
     block = _embedded_eval_block(README.read_text(encoding="utf-8"))
 

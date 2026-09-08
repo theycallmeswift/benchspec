@@ -1,6 +1,9 @@
 """Tests for report."""
 
+from __future__ import annotations
+
 import re
+from pathlib import Path
 
 import pytest
 
@@ -23,7 +26,7 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
     assert out["AUTH_TOKEN"] == "***"
 
 
-def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
+def test_build_benchmark_baseline_and_arm_meta(tmp_path: Path) -> None:
     """Verify build benchmark baseline and arm meta."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
@@ -59,7 +62,7 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: object) -> None:
     assert "reference" not in bench  # renamed
 
 
-def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
+def test_build_benchmark_arm_meta_drives_column_order(tmp_path: Path) -> None:
     """Verify build benchmark arm meta drives column order."""
     # arm_stats is discovered alphabetically; arm_meta's declared order wins so the
     # matrix columns follow the set, not the alphabet.
@@ -76,7 +79,7 @@ def test_build_benchmark_arm_meta_drives_column_order(tmp_path: object) -> None:
     assert list(bench["arms"]) == ["zeta", "alpha"]
 
 
-def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
+def test_format_markdown_renders_matrix_table(tmp_path: Path) -> None:
     """Verify format markdown renders matrix table."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100% → +50pp
@@ -104,7 +107,7 @@ def test_format_markdown_renders_matrix_table(tmp_path: object) -> None:
     assert "100% (+50pp)" in md
 
 
-def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
+def test_format_markdown_renders_harness_args(tmp_path: Path) -> None:
     """Verify format markdown renders harness args."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
@@ -127,7 +130,7 @@ def test_format_markdown_renders_harness_args(tmp_path: object) -> None:
 
 
 def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify format markdown quotes harness args with spaces and backticks."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
@@ -150,7 +153,7 @@ def test_format_markdown_quotes_harness_args_with_spaces_and_backticks(
     assert "- Harness args: `--label` `value with space` `` value`withtick ``" in md
 
 
-def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
+def test_format_markdown_omits_empty_harness_args(tmp_path: Path) -> None:
     """Verify format markdown omits empty harness args."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2)
 
@@ -166,7 +169,7 @@ def test_format_markdown_omits_empty_harness_args(tmp_path: object) -> None:
     assert "Harness args:" not in md
 
 
-def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
+def test_build_benchmark_computes_pass_rates(tmp_path: Path) -> None:
     """Verify build benchmark computes pass rates."""
     skills_root = tmp_path / "iteration-1"
     seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2)  # 100%
@@ -189,7 +192,7 @@ def test_build_benchmark_computes_pass_rates(tmp_path: object) -> None:
     assert trial_eval["total_total"] == 2
 
 
-def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
+def test_build_benchmark_computes_delta_vs_reference(tmp_path: Path) -> None:
     """Verify build benchmark computes delta vs reference."""
     eval_dir = tmp_path / "archive" / "eval-alpha"
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
@@ -205,7 +208,7 @@ def test_build_benchmark_computes_delta_vs_reference(tmp_path: object) -> None:
     assert eval_dir.is_dir()  # discovered the eval dir on disk
 
 
-def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
+def test_build_benchmark_no_reference_absolute_only(tmp_path: Path) -> None:
     """Verify build benchmark no reference absolute only."""
     seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=2, total=2)
@@ -218,7 +221,7 @@ def test_build_benchmark_no_reference_absolute_only(tmp_path: object) -> None:
     assert "delta_pp" not in bench["arms"]["trial-sonnet"]
 
 
-def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> None:
+def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: Path) -> None:
     """Verify build benchmark drops reference absent from disk."""
     # A declared reference the run dropped (--skip-baseline / `baseline = false`) never
     # lands on disk: coerce reference to None and score the surviving arm absolutely,
@@ -234,7 +237,7 @@ def test_build_benchmark_drops_reference_absent_from_disk(tmp_path: object) -> N
     assert bench["arms"]["trial"]["pass_rate"] == 1.0
 
 
-def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None:
+def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: Path) -> None:
     """Verify build benchmark discovers arbitrary arm names."""
     # Arm names are arbitrary strings on disk, discovered by walking the eval dir's
     # subdirs — not pinned to a with_skill/without_skill literal.
@@ -248,7 +251,7 @@ def test_build_benchmark_discovers_arbitrary_arm_names(tmp_path: object) -> None
     assert set(bench["arms"]) == {"claude-opus", "opencode-sonnet"}
 
 
-def test_delta_noise_pp_generalized(tmp_path: object) -> None:
+def test_delta_noise_pp_generalized(tmp_path: Path) -> None:
     """Verify delta noise pp generalized."""
     # The generalized delta_noise_pp(arm_a, arm_b) takes two arm-stat dicts and returns
     # a noise band in pp — assert it's computed (and non-negative), so the Δ-noise
@@ -267,7 +270,7 @@ def test_delta_noise_pp_generalized(tmp_path: object) -> None:
     assert band >= 0
 
 
-def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
+def test_errored_arm_excluded_from_stats(tmp_path: Path) -> None:
     """Verify errored arm excluded from stats."""
     # An errored sample (timeout/crash) is an infra failure, not a measurement — it
     # must not drag the mean pass rate / duration down.
@@ -283,7 +286,7 @@ def test_errored_arm_excluded_from_stats(tmp_path: object) -> None:
     assert stats["pass_rate"] == 1.0  # the errored 0% is excluded
 
 
-def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: object) -> None:
+def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: Path) -> None:
     """Verify _arm_stats sums binder_degraded across every sample in the arm."""
     eval_root = tmp_path / "archive"
     seed_arm(eval_root, "alpha", "trial", passes=1, total=1, sample=0, binder_degraded=2)
@@ -295,7 +298,7 @@ def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: object) -> None
     assert stats["per_eval"][0]["group"] == "archive"
 
 
-def test_write_benchmark_writes_files(tmp_path: object) -> None:
+def test_write_benchmark_writes_files(tmp_path: Path) -> None:
     """Verify write benchmark writes files to the out_dir."""
     skills_root = tmp_path / "iteration-1"
     seed_arm(skills_root / "archive", "alpha", "trial", passes=1, total=2)
@@ -310,7 +313,7 @@ def test_write_benchmark_writes_files(tmp_path: object) -> None:
     assert "iteration_01" in (skills_root / "benchmark.md").read_text()
 
 
-def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
+def test_markdown_headline_shows_delta_vs_reference(tmp_path: Path) -> None:
     """Verify markdown headline shows delta vs reference."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
@@ -327,7 +330,7 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: object) -> None:
     assert "+100pp" in md
 
 
-def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
+def test_markdown_headline_absolute_when_no_reference(tmp_path: Path) -> None:
     """Verify markdown headline absolute when no reference."""
     seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
@@ -343,7 +346,7 @@ def test_markdown_headline_absolute_when_no_reference(tmp_path: object) -> None:
     assert "trial-sonnet" in md
 
 
-def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> None:
+def test_markdown_headline_reference_only_shows_its_rate(tmp_path: Path) -> None:
     """Verify markdown headline reference only shows its rate."""
     # With the reference as the sole arm on disk, the headline shows its own rate.
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
@@ -357,7 +360,7 @@ def test_markdown_headline_reference_only_shows_its_rate(tmp_path: object) -> No
     assert "50%" in headline
 
 
-def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
+def test_errored_samples_surface_instead_of_vanishing(tmp_path: Path) -> None:
     """Verify errored samples surface instead of vanishing."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=0)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=0, total=2, sample=1, errored=True)
@@ -374,7 +377,7 @@ def test_errored_samples_surface_instead_of_vanishing(tmp_path: object) -> None:
 
 def _terminal_rows(lines: list[str]) -> dict[str, str]:
     """Map each terminal matrix row's label to its whitespace-normalized cell text."""
-    rows = {}
+    rows: dict[str, str] = {}
     for line in lines[1:-1]:
         if set(line) == {"-"}:
             continue
@@ -383,7 +386,7 @@ def _terminal_rows(lines: list[str]) -> dict[str, str]:
     return rows
 
 
-def test_terminal_matrix_aligns_columns(tmp_path: object) -> None:
+def test_terminal_matrix_aligns_columns(tmp_path: Path) -> None:
     """Verify the terminal matrix pads every column so header and rows line up."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
@@ -412,7 +415,7 @@ def test_terminal_matrix_aligns_columns(tmp_path: object) -> None:
     assert pointer == f"Report: {tmp_path / 'benchmark.md'}"
 
 
-def test_terminal_matrix_rates_match_markdown_matrix(tmp_path: object) -> None:
+def test_terminal_matrix_rates_match_markdown_matrix(tmp_path: Path) -> None:
     """Verify each terminal rate is the persisted matrix cell's rate token, row for row.
 
     The Markdown cells keep their `rate (+Npp)` shape; the terminal shows only the rate
@@ -430,7 +433,7 @@ def test_terminal_matrix_rates_match_markdown_matrix(tmp_path: object) -> None:
 
     markdown = (tmp_path / "benchmark.md").read_text()
     matrix_section = markdown.split("## Matrix", 1)[1].split("## ", 1)[0]
-    markdown_rows = {}
+    markdown_rows: dict[str, list[str]] = {}
     for line in matrix_section.splitlines():
         if line.startswith("| ") and not line.startswith("| Eval"):
             label, *cells = [cell.strip() for cell in line.strip("|").split("|")]
@@ -453,7 +456,7 @@ def test_terminal_matrix_rates_match_markdown_matrix(tmp_path: object) -> None:
     assert terminal_rows["vs baseline"] == " ".join(footer_deltas)
 
 
-def test_terminal_matrix_missing_rates_render_dash(tmp_path: object) -> None:
+def test_terminal_matrix_missing_rates_render_dash(tmp_path: Path) -> None:
     """Verify an all-errored eval and a never-run arm both render — cells."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "ghost", "baseline", passes=0, total=2, errored=True)
@@ -475,7 +478,7 @@ def test_terminal_matrix_missing_rates_render_dash(tmp_path: object) -> None:
     assert "vs baseline" not in _terminal_rows(lines)
 
 
-def test_terminal_matrix_absolute_without_baseline(tmp_path: object) -> None:
+def test_terminal_matrix_absolute_without_baseline(tmp_path: Path) -> None:
     """Verify a no-baseline sweep shows each arm's absolute rate with no delta."""
     seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
@@ -490,7 +493,7 @@ def test_terminal_matrix_absolute_without_baseline(tmp_path: object) -> None:
     assert not any("pp" in line for line in lines[1:-1])
 
 
-def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: object) -> None:
+def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: Path) -> None:
     """Verify mixed-width deltas leave the terminal: rates share a right edge per column.
 
     Per-eval deltas of +67pp and +100pp differ in width; the rates must still end on
@@ -523,7 +526,7 @@ def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: obj
     assert versus[:baseline_edge].strip() == "vs baseline"
 
 
-def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: object) -> None:
+def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: Path) -> None:
     """Verify the `vs baseline` line carries one delta per non-baseline arm."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%, +50pp
@@ -544,7 +547,7 @@ def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: objec
     ]
 
 
-def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
+def test_multi_sample_stable_zero_stdev(tmp_path: Path) -> None:
     """Verify multi sample stable zero stdev."""
     skills_root = tmp_path / "iteration-1"
     seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)  # 100%
@@ -567,7 +570,7 @@ def test_multi_sample_stable_zero_stdev(tmp_path: object) -> None:
     assert row["total_total"] == 4
 
 
-def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
+def test_multi_sample_flaky_nonzero_stdev(tmp_path: Path) -> None:
     """Verify multi sample flaky nonzero stdev."""
     skills_root = tmp_path / "iteration-1"
     seed_arm(skills_root / "archive", "alpha", "trial", passes=2, total=2, sample=0)  # 100%
@@ -595,7 +598,7 @@ def test_multi_sample_flaky_nonzero_stdev(tmp_path: object) -> None:
     assert "±" in md
 
 
-def test_multi_sample_with_errored_sample_excluded(tmp_path: object) -> None:
+def test_multi_sample_with_errored_sample_excluded(tmp_path: Path) -> None:
     """Verify multi sample with errored sample excluded."""
     # One errored sample shouldn't drag the mean/stdev for the other.
     skills_root = tmp_path / "iteration-1"
@@ -616,7 +619,7 @@ def test_multi_sample_with_errored_sample_excluded(tmp_path: object) -> None:
     assert stats["n"] == 1
 
 
-def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
+def test_sample_dirs_sorted_numerically(tmp_path: Path) -> None:
     """Verify sample dirs sorted numerically."""
     # sample-10 sorts before sample-2 lexicographically — the report must use a
     # numeric key for any user-visible ordering.
@@ -640,7 +643,7 @@ def test_sample_dirs_sorted_numerically(tmp_path: object) -> None:
     assert row["passed_total"] == 12  # 0 + 2 + 10 regardless of glob order
 
 
-def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
+def test_sample_dirs_skips_non_numeric_siblings(tmp_path: Path) -> None:
     """Verify sample dirs skips non numeric siblings."""
     # A stray sibling whose suffix isn't a clean integer (e.g., a manual
     # `cp -r sample-0 sample-0bak`) must be skipped, not crash the int() parse.
@@ -659,7 +662,7 @@ def test_sample_dirs_skips_non_numeric_siblings(tmp_path: object) -> None:
     assert row["samples"] == 1  # only the well-formed sample counted
 
 
-def test_benchmark_carries_format_version(tmp_path: object) -> None:
+def test_benchmark_carries_format_version(tmp_path: Path) -> None:
     """Verify benchmark carries format version."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
 
@@ -668,7 +671,7 @@ def test_benchmark_carries_format_version(tmp_path: object) -> None:
     assert bench["format_version"] == 3
 
 
-def test_index_rows_flatten_evals(tmp_path: object) -> None:
+def test_index_rows_flatten_evals(tmp_path: Path) -> None:
     """Verify index rows flatten eval samples."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path, "alpha", "baseline", passes=1, total=2)
@@ -698,7 +701,7 @@ def test_index_rows_flatten_evals(tmp_path: object) -> None:
     assert errored["errored"] is True
 
 
-def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
+def test_index_rows_discover_arbitrary_arm_names(tmp_path: Path) -> None:
     """Verify index rows discover arbitrary arm names."""
     # index_rows iterates discovered arm names, not the retired _ARMS literal.
     seed_arm(tmp_path, "alpha", "claude-opus", passes=2, total=2)
@@ -712,7 +715,7 @@ def test_index_rows_discover_arbitrary_arm_names(tmp_path: object) -> None:
     }
 
 
-def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
+def test_noise_band_computed_from_arm_stdevs(tmp_path: Path) -> None:
     """Verify noise band computed from arm stdevs."""
     archive = tmp_path / "archive"
     for sample_index, passes in enumerate((2, 0, 2)):  # trial: 100%, 0%, 100% → noisy
@@ -729,7 +732,7 @@ def test_noise_band_computed_from_arm_stdevs(tmp_path: object) -> None:
     assert band > 0
 
 
-def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
+def test_noise_band_none_for_single_sample(tmp_path: Path) -> None:
     """Verify noise band none for single sample."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
@@ -741,7 +744,7 @@ def test_noise_band_none_for_single_sample(tmp_path: object) -> None:
     assert report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"]) is None
 
 
-def test_within_noise_label_in_markdown(tmp_path: object) -> None:
+def test_within_noise_label_in_markdown(tmp_path: Path) -> None:
     """Verify a delta inside its noise band is labeled within noise in the headline."""
     # delta +17pp, but arms this scattered have SE > 17pp → labeled.
     archive = tmp_path / "archive"
@@ -759,7 +762,7 @@ def test_within_noise_label_in_markdown(tmp_path: object) -> None:
     assert "within noise" in md
 
 
-def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: object) -> None:
+def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: Path) -> None:
     """Verify an all-errored eval still gets a roster row with a — cell."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path / "archive", "ghost", "trial", passes=0, total=2, errored=True)
@@ -774,7 +777,7 @@ def test_matrix_row_from_roster_for_all_errored_eval(tmp_path: object) -> None:
     assert "| archive/ghost | — |" in md
 
 
-def test_matrix_column_present_for_wholly_missing_arm(tmp_path: object) -> None:
+def test_matrix_column_present_for_wholly_missing_arm(tmp_path: Path) -> None:
     """Verify an arm configured but absent from disk gets a — column and footer."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
 
@@ -795,7 +798,7 @@ def test_matrix_column_present_for_wholly_missing_arm(tmp_path: object) -> None:
     assert "| All evals | 50% | — |" in md
 
 
-def test_matrix_distinguishes_same_eval_id_across_groups(tmp_path: object) -> None:
+def test_matrix_distinguishes_same_eval_id_across_groups(tmp_path: Path) -> None:
     """Verify the same eval_id in two groups renders two distinct group/eval rows."""
     seed_arm(tmp_path / "archive", "summary", "trial", passes=2, total=2)
     seed_arm(tmp_path / "ingest", "summary", "trial", passes=1, total=2)
@@ -809,7 +812,7 @@ def test_matrix_distinguishes_same_eval_id_across_groups(tmp_path: object) -> No
     assert "| ingest/summary |" in md
 
 
-def test_matrix_all_evals_footer_equals_arm_headline_single_group(tmp_path: object) -> None:
+def test_matrix_all_evals_footer_equals_arm_headline_single_group(tmp_path: Path) -> None:
     """Verify the All evals footer equals each arm's headline pass_rate (single group)."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "beta", "baseline", passes=2, total=2)  # 100%
@@ -829,7 +832,7 @@ def test_matrix_all_evals_footer_equals_arm_headline_single_group(tmp_path: obje
     )
 
 
-def test_matrix_all_evals_footer_is_run_level_pooled_mean_multi_group(tmp_path: object) -> None:
+def test_matrix_all_evals_footer_is_run_level_pooled_mean_multi_group(tmp_path: Path) -> None:
     """Verify the All evals footer baseline is the run-level pooled mean across groups."""
     # archive contributes two baseline samples (100% and 0%); ingest contributes one (50%).
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2, sample=0)
@@ -846,7 +849,7 @@ def test_matrix_all_evals_footer_is_run_level_pooled_mean_multi_group(tmp_path: 
     assert "| All evals | 50% |" in md
 
 
-def test_matrix_non_baseline_cell_shows_rate_and_delta(tmp_path: object) -> None:
+def test_matrix_non_baseline_cell_shows_rate_and_delta(tmp_path: Path) -> None:
     """Verify a non-baseline cell shows its rate and the ±pp delta vs the baseline."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
@@ -860,7 +863,7 @@ def test_matrix_non_baseline_cell_shows_rate_and_delta(tmp_path: object) -> None
     assert "| All evals | 50% | 100% (+50pp) |" in md
 
 
-def test_matrix_non_baseline_cell_absolute_without_baseline(tmp_path: object) -> None:
+def test_matrix_non_baseline_cell_absolute_without_baseline(tmp_path: Path) -> None:
     """Verify a no-baseline build shows each arm's absolute rate with no delta."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%
@@ -874,7 +877,7 @@ def test_matrix_non_baseline_cell_absolute_without_baseline(tmp_path: object) ->
     assert "| All evals | 50% | 100% |" in md
 
 
-def test_benchmark_v3_carries_planned_observed_runner_binder(tmp_path: object) -> None:
+def test_benchmark_v3_carries_planned_observed_runner_binder(tmp_path: Path) -> None:
     """Verify v3 carries the planned/observed split plus runner and binder identity."""
     # `trial` ran and has observed runtime provenance; `absent` is a configured column
     # that never ran, so it stays a valid empty matrix column with NO observed entry —
@@ -904,7 +907,7 @@ def test_benchmark_v3_carries_planned_observed_runner_binder(tmp_path: object) -
     assert set(bench["observed_arms"]) == {"trial"}
 
 
-def test_markdown_provenance_labels_unobserved_arm(tmp_path: object) -> None:
+def test_markdown_provenance_labels_unobserved_arm(tmp_path: Path) -> None:
     """Verify the Provenance section shows observed identity and labels unobserved arms."""
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
 
@@ -927,7 +930,7 @@ def test_markdown_provenance_labels_unobserved_arm(tmp_path: object) -> None:
     assert "- **absent**: not observed" in md
 
 
-def test_index_rows_carry_core_axes_and_no_heavy_provenance(tmp_path: object) -> None:
+def test_index_rows_carry_core_axes_and_no_heavy_provenance(tmp_path: Path) -> None:
     """Verify index rows gain harness/model/effort and nothing heavier."""
     seed_arm(tmp_path, "alpha", "trial", passes=2, total=2)
 
@@ -946,7 +949,7 @@ def test_index_rows_carry_core_axes_and_no_heavy_provenance(tmp_path: object) ->
     assert not (heavy & set(row))
 
 
-def test_index_rows_omit_axes_for_unknown_arm(tmp_path: object) -> None:
+def test_index_rows_omit_axes_for_unknown_arm(tmp_path: Path) -> None:
     """Verify a row whose arm isn't in the axes lookup omits the axes rather than faking null."""
     seed_arm(tmp_path, "alpha", "mystery", passes=1, total=1)
 
@@ -958,7 +961,7 @@ def test_index_rows_omit_axes_for_unknown_arm(tmp_path: object) -> None:
     assert "effort" not in row
 
 
-def test_terminal_matrix_rules_off_the_footer(tmp_path: object) -> None:
+def test_terminal_matrix_rules_off_the_footer(tmp_path: Path) -> None:
     """Verify a full-width rule sits directly above the All evals footer."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
@@ -973,7 +976,7 @@ def test_terminal_matrix_rules_off_the_footer(tmp_path: object) -> None:
 
 
 def test_terminal_matrix_color_codes_rates_by_band_and_deltas_by_sign(
-    tmp_path: object,
+    tmp_path: Path,
 ) -> None:
     """Verify color mode wraps rates green/yellow/red by band and footer deltas by sign."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50% yellow
@@ -995,7 +998,7 @@ def test_terminal_matrix_color_codes_rates_by_band_and_deltas_by_sign(
     assert "\x1b[31m-25pp\x1b[0m" in versus
 
 
-def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: object) -> None:
+def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: Path) -> None:
     """Verify a zero pooled delta colors yellow and the default render carries no escapes."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=2, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
@@ -1011,7 +1014,7 @@ def test_terminal_matrix_zero_delta_is_yellow_and_default_is_plain(tmp_path: obj
     assert not any("\x1b" in line for line in plain)
 
 
-def test_terminal_matrix_color_adds_no_width(tmp_path: object) -> None:
+def test_terminal_matrix_color_adds_no_width(tmp_path: Path) -> None:
     """Verify stripping ANSI codes from the color render yields the plain render exactly."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=3)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=3, total=3)
@@ -1028,7 +1031,7 @@ def test_terminal_matrix_color_adds_no_width(tmp_path: object) -> None:
     assert [ansi_escape.sub("", line) for line in colored] == plain
 
 
-def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: object) -> None:
+def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: Path) -> None:
     """Verify an arm name that looks like a rate or delta never gets colorized in the header."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "run-3pp", passes=2, total=2)
