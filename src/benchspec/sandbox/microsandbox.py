@@ -19,6 +19,7 @@ import contextlib
 import os
 import platform
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,7 +31,12 @@ from benchspec.sandbox.backend import (
     PROJECT_MOUNT,
     VM_CPUS,
     VM_MEMORY_MIB,
+    ExecResult,
+    ExecStream,
+    ExecStreamEvent,
+    ExtraVolumes,
     FingerprintInputs,
+    LiveSandbox,
     SharedBackendBehavior,
     bridge_skills_home,
     fingerprint_inputs_for,
@@ -43,6 +49,8 @@ from benchspec.specs.discovery import EnvConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from microsandbox import SecretEntry
 
 
 def msb_binary() -> Path | None:
@@ -62,7 +70,7 @@ def msb_binary() -> Path | None:
     return msb_path()
 
 
-def microsandbox_secrets(agent: object) -> list:
+def microsandbox_secrets(agent: CodingAgent) -> list[SecretEntry]:
     """Render an agent's backend-neutral credentials as microsandbox `Secret` entries.
 
     Args:
@@ -102,30 +110,32 @@ class MicrosandboxGuest:
 
     Every agent and driver in benchspec talks to a live sandbox through this wrapper
     (never the native `Sandbox` directly), so a torn-down VM surfaces the same
-    backend-neutral `SandboxError` a future backend would raise.
+    backend-neutral `SandboxError` a future backend would raise. The native instance is
+    held by the `LiveSandbox` shape it satisfies, not the SDK's final class, so a test can
+    hand the wrapper a scripted stand-in.
     """
 
-    def __init__(self: object, native: object) -> None:
+    def __init__(self, native: LiveSandbox) -> None:
         """Wrap a live native `Sandbox` instance."""
         self._native = native
 
     async def shell(
-        self: object, script: str, *, env: dict | None = None, cwd: str | None = None
-    ) -> object:
+        self, script: str, *, env: Mapping[str, str] | None = None, cwd: str | None = None
+    ) -> ExecResult:
         """Run a shell script in the guest, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
             return await self._native.shell(script, env=env, cwd=cwd)
 
     async def exec(
-        self: object,
+        self,
         cmd: str,
         args: list[str] | None = None,
         *,
         cwd: str | None = None,
-        env: dict | None = None,
-        timeout: int | None = None,
-        stdin: object = None,
-    ) -> object:
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        stdin: bytes | None = None,
+    ) -> ExecResult:
         """Run a command in the guest, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
             return await self._native.exec(
@@ -133,20 +143,20 @@ class MicrosandboxGuest:
             )
 
     async def exec_stream(
-        self: object,
+        self,
         cmd: str,
         args: list[str] | None = None,
         *,
         cwd: str | None = None,
-        env: dict | None = None,
-        stdin: object = None,
+        env: Mapping[str, str] | None = None,
+        stdin: bytes | None = None,
     ) -> MicrosandboxExecHandle:
         """Start a streaming command in the guest, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
             native_handle = await self._native.exec_stream(cmd, args, cwd=cwd, env=env, stdin=stdin)
         return MicrosandboxExecHandle(native_handle)
 
-    async def stop(self: object) -> None:
+    async def stop(self) -> None:
         """Stop the guest sandbox, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
             await self._native.stop()
@@ -155,20 +165,21 @@ class MicrosandboxGuest:
 class MicrosandboxExecHandle:
     """Wrap a native microsandbox `ExecHandle`, translating its errors to `SandboxError`."""
 
-    def __init__(self: object, native_handle: object) -> None:
+    def __init__(self, native_handle: ExecStream) -> None:
         """Wrap a live native streaming-exec handle."""
         self._native_handle = native_handle
+        self._events = native_handle.__aiter__()
 
-    def __aiter__(self: object) -> MicrosandboxExecHandle:
+    def __aiter__(self) -> MicrosandboxExecHandle:
         """Return self as the async iterator over streamed exec events."""
         return self
 
-    async def __anext__(self: object) -> object:
+    async def __anext__(self) -> ExecStreamEvent:
         """Return the next streamed exec event, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
-            return await self._native_handle.__anext__()
+            return await self._events.__anext__()
 
-    async def kill(self: object) -> None:
+    async def kill(self) -> None:
         """Kill the underlying streaming exec, translating a torn-down VM's error."""
         async with _translate_runtime_errors():
             await self._native_handle.kill()
@@ -179,12 +190,12 @@ class MicrosandboxBackend(SharedBackendBehavior):
 
     id = "microsandbox"
 
-    def installed(self: object) -> bool:
+    def installed(self) -> bool:
         """Return whether the `msb` runtime the SDK resolves is present on disk."""
         binary = msb_binary()
         return binary is not None and binary.is_file()
 
-    def preflight(self: object) -> list[str]:
+    def preflight(self) -> list[str]:
         """Return host-readiness errors: Apple Silicon / KVM / installed runtime.
 
         The microsandbox-specific remedy lives here, not in the shared preflight, so a
@@ -207,19 +218,19 @@ class MicrosandboxBackend(SharedBackendBehavior):
             )
         return errors
 
-    def snapshot_exists(self: object, name: str) -> bool:
+    def snapshot_exists(self, name: str) -> bool:
         """Return whether a named microsandbox snapshot exists on disk."""
         return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
 
-    def fingerprint_inputs(self: object, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
+    def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
         """Return the structured inputs and digest behind the snapshot cache fingerprint."""
         return fingerprint_inputs_for(self.id, agent, env)
 
-    def cache_fingerprint(self: object, agent: CodingAgent, env: EnvConfig) -> str:
+    def cache_fingerprint(self, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the snapshot cache fingerprint for this backend, agent, and env."""
         return self.fingerprint_inputs(agent, env).digest
 
-    def image_identity(self: object, snapshot: str) -> ImageIdentity:
+    def image_identity(self, snapshot: str) -> ImageIdentity:
         """Return `snapshot`'s native image manifest digest, or why it is unavailable.
 
         Reads the digest via the microsandbox `Snapshot` handle. Any exception —
@@ -233,14 +244,14 @@ class MicrosandboxBackend(SharedBackendBehavior):
             return ImageIdentity.unavailable(str(error) or "microsandbox image digest read failed")
         return ImageIdentity.available(digest)
 
-    async def _image_manifest_digest_async(self: object, snapshot: str) -> str:
+    async def _image_manifest_digest_async(self, snapshot: str) -> str:
         """Open `snapshot` and return its native image manifest digest."""
         from microsandbox import Snapshot
 
         handle = await Snapshot.open(snapshot)
         return handle.image_manifest_digest
 
-    def prune(self: object) -> None:
+    def prune(self) -> None:
         """Remove every `benchspec-*` sandbox and snapshot under `~/.microsandbox`.
 
         One prefix selects leaked cells, trigger probes, and build VMs alike; anything
@@ -250,7 +261,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """
         binary = msb_binary()
 
-        def _msb(*args: object) -> None:
+        def _msb(*args: str) -> None:
             """Run the SDK-resolved msb binary; a missing runtime means nothing to prune."""
             if binary is None:
                 return
@@ -273,11 +284,11 @@ class MicrosandboxBackend(SharedBackendBehavior):
                 else:
                     _msb("snapshot", "rm", "--force", entry.name)
 
-    def build_snapshot(self: object, agent: object, name: str, env: EnvConfig) -> None:
+    def build_snapshot(self, agent: CodingAgent, name: str, env: EnvConfig) -> None:
         """Provision and seal the reusable microsandbox snapshot."""
         asyncio.run(self._build_snapshot_async(agent, name, env))
 
-    async def _build_snapshot_async(self: object, agent: object, name: str, env: EnvConfig) -> None:
+    async def _build_snapshot_async(self, agent: CodingAgent, name: str, env: EnvConfig) -> None:
         """Provision and seal the reusable microsandbox snapshot asynchronously."""
         from microsandbox import Sandbox, Snapshot
 
@@ -301,15 +312,15 @@ class MicrosandboxBackend(SharedBackendBehavior):
                     await Sandbox.remove(build_name)
 
     async def create_sandbox(
-        self: object,
+        self,
         *,
-        agent: object,
-        snapshot: object,
-        name: object,
-        host_workdir: object,
-        host_repo_root: object,
-        extra_volumes: object,
-    ) -> object:
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_workdir: Path,
+        host_repo_root: Path | None,
+        extra_volumes: ExtraVolumes,
+    ) -> MicrosandboxGuest:
         """Create a microsandbox instance from a snapshot for an arm session."""
         from microsandbox import Sandbox, Volume
 
@@ -332,14 +343,14 @@ class MicrosandboxBackend(SharedBackendBehavior):
         return MicrosandboxGuest(native)
 
     async def create_trigger_sandbox(
-        self: object,
+        self,
         *,
-        agent: object,
-        snapshot: object,
-        name: object,
-        host_repo_root: object,
-        extra_volumes: object,
-    ) -> object:
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_repo_root: Path,
+        extra_volumes: ExtraVolumes,
+    ) -> MicrosandboxGuest:
         """Create the sandbox used for trigger-routing probes."""
         from microsandbox import Sandbox, Volume
 

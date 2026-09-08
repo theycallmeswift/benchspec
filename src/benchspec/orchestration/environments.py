@@ -11,8 +11,12 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from benchspec.sandbox.backend import LiveSandbox
 
 
 @dataclass(frozen=True)
@@ -24,7 +28,7 @@ class ProcResult:
     stdout: str
     stderr: str
 
-    def require_success(self: object) -> ProcResult:
+    def require_success(self) -> ProcResult:
         """Return self on a zero exit; raise RuntimeError (with output tail) otherwise.
 
         RuntimeError is the infra-failure contract grading relies on: run_eval_arm
@@ -47,16 +51,20 @@ class ProcResult:
 
 @runtime_checkable
 class ExecutionEnv(Protocol):
-    """Anywhere a harness process can run — the transport half of an adapter call."""
+    """Anywhere a harness process can run — the transport half of an adapter call.
+
+    `stdin` is the bytes fed to the process; `None` and `b""` both mean a closed,
+    empty stdin, so a harness that would otherwise block on an open pipe sees EOF.
+    """
 
     async def exec(
-        self: object,
+        self,
         command: list[str],
         *,
-        env: dict,
+        env: Mapping[str, str],
         timeout: int,
         cwd: str | None = None,
-        stdin: object = None,
+        stdin: bytes | None = None,
     ) -> ProcResult:
         """Run `command` to completion and return its ProcResult."""
         ...
@@ -66,29 +74,37 @@ class Host:
     """Run harness processes directly on the host machine (the judge's environment)."""
 
     async def exec(
-        self: object,
+        self,
         command: list[str],
         *,
-        env: dict,
+        env: Mapping[str, str],
         timeout: int,
         cwd: str | None = None,
-        stdin: object = None,
+        stdin: bytes | None = None,
     ) -> ProcResult:
         """Run `command` as a host subprocess with `env` merged over the host environment.
 
         A missing binary raises RuntimeError naming it; a subprocess.TimeoutExpired
-        propagates unchanged (grade_run records a hung judge as a graded error).
+        propagates unchanged (grade_run records a hung judge as a graded error). The
+        host never feeds a process input: a non-empty `stdin` is a programming error.
         """
+        if stdin:
+            raise ValueError("Host.exec cannot feed stdin; pass None or b'' to close it")
         run_env = {**os.environ, **env}
-        # Never inherit the harness's stdin: a judge CLI like `codex exec` reads it as
-        # "additional input", and concurrent judges (xdist) racing for the same terminal
-        # fd make some exit nonzero. An explicit empty stdin isolates each process.
-        proc_stdin = subprocess.DEVNULL if stdin is None else stdin
-        try:
-            proc = await asyncio.to_thread(
-                subprocess.run, command, capture_output=True, text=True,
-                timeout=timeout, env=run_env, cwd=cwd, stdin=proc_stdin,
+
+        def run_on_host() -> subprocess.CompletedProcess[str]:
+            """Run the command synchronously; `to_thread` keeps the event loop free."""
+            # Never inherit the harness's stdin: a judge CLI like `codex exec` reads it
+            # as "additional input", and concurrent judges (xdist) racing for the same
+            # terminal fd make some exit nonzero. An explicit empty stdin isolates each
+            # process.
+            return subprocess.run(
+                command, capture_output=True, text=True,
+                timeout=timeout, env=run_env, cwd=cwd, stdin=subprocess.DEVNULL,
             )
+
+        try:
+            proc = await asyncio.to_thread(run_on_host)
         except FileNotFoundError as error:
             raise RuntimeError(f"host {command[0]} CLI not found on PATH") from error
         return ProcResult(command, proc.returncode, proc.stdout, proc.stderr)
@@ -97,18 +113,18 @@ class Host:
 class GuestSandbox:
     """Run harness processes inside a live sandbox guest (the task arms' environment)."""
 
-    def __init__(self: object, sandbox: object) -> None:
+    def __init__(self, sandbox: LiveSandbox) -> None:
         """Wrap a live sandbox session's exec surface."""
         self._sandbox = sandbox
 
     async def exec(
-        self: object,
+        self,
         command: list[str],
         *,
-        env: dict,
+        env: Mapping[str, str],
         timeout: int,
         cwd: str | None = None,
-        stdin: object = None,
+        stdin: bytes | None = None,
     ) -> ProcResult:
         """Run `command` inside the guest via the sandbox's exec primitive."""
         res = await self._sandbox.exec(

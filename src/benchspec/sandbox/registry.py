@@ -9,6 +9,8 @@ this module hands back. Adding a third backend is additive — implement the
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from benchspec.sandbox.backend import SandboxBackend
 from benchspec.sandbox.docker import DockerBackend
 from benchspec.sandbox.microsandbox import MicrosandboxBackend
@@ -19,8 +21,8 @@ from benchspec.specs.schema import SchemaError
 DEFAULT_SANDBOX = "docker"
 
 
-def registered_backends() -> dict[str, type]:
-    """Return every implemented backend keyed by its `sandbox` value."""
+def registered_backends() -> dict[str, Callable[[], SandboxBackend]]:
+    """Return every implemented backend as a fresh-instance factory, keyed by `sandbox` value."""
     return {"microsandbox": MicrosandboxBackend, "docker": DockerBackend}
 
 

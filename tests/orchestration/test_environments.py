@@ -31,8 +31,8 @@ def test_host_exec_never_inherits_the_harness_stdin(monkeypatch: object) -> None
     assert captured["stdin"] == subprocess.DEVNULL
 
 
-def test_host_exec_forwards_an_explicit_stdin_unchanged(monkeypatch: object) -> None:
-    """An explicit stdin is passed straight through — only None becomes DEVNULL."""
+def test_host_exec_treats_empty_stdin_bytes_as_closed(monkeypatch: object) -> None:
+    """The guest-style `b""` EOF request maps to the same closed stdin as the default."""
     captured: dict = {}
 
     def fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess:
@@ -41,9 +41,15 @@ def test_host_exec_forwards_an_explicit_stdin_unchanged(monkeypatch: object) -> 
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    asyncio.run(Host().exec(["codex"], env={}, timeout=5, stdin=subprocess.PIPE))
+    asyncio.run(Host().exec(["codex"], env={}, timeout=5, stdin=b""))
 
-    assert captured["stdin"] == subprocess.PIPE
+    assert captured["stdin"] == subprocess.DEVNULL
+
+
+def test_host_exec_rejects_stdin_it_cannot_feed() -> None:
+    """The host never feeds a process input, so non-empty bytes are a programming error."""
+    with pytest.raises(ValueError, match="cannot feed stdin"):
+        asyncio.run(Host().exec(["codex"], env={}, timeout=5, stdin=b"payload"))
 
 
 def test_require_success_surfaces_stdout_behind_noisy_stderr() -> None:

@@ -21,6 +21,7 @@ import contextlib
 import os
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from benchspec.sandbox.backend import (
     PROJECT_MOUNT,
     VM_CPUS,
     VM_MEMORY_MIB,
+    ExtraVolumes,
     FingerprintInputs,
     SharedBackendBehavior,
     bridge_skills_home,
@@ -120,6 +122,20 @@ def _carries_runtime_failure(stderr_text: str) -> bool:
     return any(marker in stderr_text for marker in RUNTIME_FAILURE_MARKERS)
 
 
+def _piped_reader(stream: asyncio.StreamReader | None, name: str) -> asyncio.StreamReader:
+    """Return a process stream that was opened as a pipe; a missing one is a programming error."""
+    if stream is None:
+        raise RuntimeError(f"docker exec was started without a piped {name}")
+    return stream
+
+
+def _piped_writer(stream: asyncio.StreamWriter | None) -> asyncio.StreamWriter:
+    """Return a process stdin that was opened as a pipe; a missing one is a programming error."""
+    if stream is None:
+        raise RuntimeError("docker exec was started without a piped stdin")
+    return stream
+
+
 @dataclass(frozen=True)
 class DockerExecOutput:
     """The finished result of one guest command: its exit code and both streams."""
@@ -203,7 +219,7 @@ def image_ref(snapshot: str) -> str:
 
 
 def run_argv(
-    name: str, image: str, *, mounts: dict[str, DockerMount], env: dict[str, str]
+    name: str, image: str, *, mounts: dict[str, DockerMount], env: Mapping[str, str]
 ) -> list[str]:
     """Render the `docker run` arguments that start one detached, idle guest.
 
@@ -243,7 +259,7 @@ def exec_argv(
     args: list[str],
     *,
     cwd: str | None,
-    env: dict[str, str] | None,
+    env: Mapping[str, str] | None,
     interactive: bool,
 ) -> list[str]:
     """Render the `docker exec` arguments for one guest command.
@@ -300,7 +316,7 @@ def images_argv() -> list[str]:
 
 
 def shell_argv(
-    container: str, script: str, *, cwd: str | None, env: dict[str, str] | None
+    container: str, script: str, *, cwd: str | None, env: Mapping[str, str] | None
 ) -> list[str]:
     """Render the `docker exec` arguments that run a shell script under bash.
 
@@ -351,8 +367,11 @@ async def _run_docker(
         await process.wait()
         raise
 
+    # `communicate` has already reaped the process; `wait` just hands back the code as an
+    # `int` rather than the `int | None` the returncode attribute carries.
+    exit_code = await process.wait()
     output = DockerExecOutput(
-        exit_code=process.returncode, stdout_bytes=stdout_bytes, stderr_bytes=stderr_bytes
+        exit_code=exit_code, stdout_bytes=stdout_bytes, stderr_bytes=stderr_bytes
     )
     if _carries_runtime_failure(output.stderr_text):
         raise SandboxError(output.stderr_text.strip()[-_ERROR_TAIL_CHARS:])
@@ -419,8 +438,12 @@ class DockerExecHandle:
             # the task is collected. A cancellation is a `BaseException` and still escapes.
             with contextlib.suppress(Exception):
                 await asyncio.gather(
-                    self._pump_stream(self._process.stdout, "stdout", None),
-                    self._pump_stream(self._process.stderr, "stderr", stderr_chunks),
+                    self._pump_stream(
+                        _piped_reader(self._process.stdout, "stdout"), "stdout", None
+                    ),
+                    self._pump_stream(
+                        _piped_reader(self._process.stderr, "stderr"), "stderr", stderr_chunks
+                    ),
                 )
                 exit_code = await self._process.wait()
         finally:
@@ -469,7 +492,7 @@ class DockerSandbox:
         self._binary = binary
 
     async def shell(
-        self, script: str, *, env: dict | None = None, cwd: str | None = None
+        self, script: str, *, env: Mapping[str, str] | None = None, cwd: str | None = None
     ) -> DockerExecOutput:
         """Run a shell script in the guest under bash.
 
@@ -497,7 +520,7 @@ class DockerSandbox:
         args: list[str] | None = None,
         *,
         cwd: str | None = None,
-        env: dict | None = None,
+        env: Mapping[str, str] | None = None,
         timeout: float | None = None,
         stdin: bytes | None = None,
     ) -> DockerExecOutput:
@@ -532,7 +555,7 @@ class DockerSandbox:
         args: list[str] | None = None,
         *,
         cwd: str | None = None,
-        env: dict | None = None,
+        env: Mapping[str, str] | None = None,
         stdin: bytes | None = None,
     ) -> DockerExecHandle:
         """Start a command in the guest and stream its output as it arrives.
@@ -565,10 +588,11 @@ class DockerSandbox:
             # A guest command that exits without reading its input breaks the pipe
             # mid-write; the caller's answer is the terminal event the pump queues, not a
             # write error from a command that has already had its say.
+            writer = _piped_writer(process.stdin)
             with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-                process.stdin.write(stdin)
-                await process.stdin.drain()
-                process.stdin.close()
+                writer.write(stdin)
+                await writer.drain()
+                writer.close()
 
         return handle
 
@@ -670,19 +694,19 @@ class DockerBackend(SharedBackendBehavior):
             _stderr_tail(completed.stderr) or "docker image inspect returned no id"
         )
 
-    def build_snapshot(self, agent: object, name: str, env: EnvConfig) -> None:
+    def build_snapshot(self, agent: CodingAgent, name: str, env: EnvConfig) -> None:
         """Provision a build container and commit it as the reusable snapshot image."""
         asyncio.run(self._build_snapshot_async(agent, name, env))
 
     async def create_sandbox(
         self,
         *,
-        agent: object,
-        snapshot: object,
-        name: object,
-        host_workdir: object,
-        host_repo_root: object,
-        extra_volumes: object,
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_workdir: Path,
+        host_repo_root: Path | None,
+        extra_volumes: ExtraVolumes,
     ) -> DockerSandbox:
         """Create a container from a snapshot image for an arm session."""
         mounts = {GUEST_WORKDIR: DockerVolume.bind(host_mount_path(host_workdir))}
@@ -699,11 +723,11 @@ class DockerBackend(SharedBackendBehavior):
     async def create_trigger_sandbox(
         self,
         *,
-        agent: object,
-        snapshot: object,
-        name: object,
-        host_repo_root: object,
-        extra_volumes: object,
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_repo_root: Path,
+        extra_volumes: ExtraVolumes,
     ) -> DockerSandbox:
         """Create the container used for trigger-routing probes."""
         mounts = {PROJECT_MOUNT: DockerVolume.bind(host_mount_path(host_repo_root), readonly=True)}
@@ -784,7 +808,7 @@ class DockerBackend(SharedBackendBehavior):
 
     def _docker_sync(
         self, argv: list[str], *, timeout: float = DOCKER_COMMAND_TIMEOUT_SECONDS
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run one `docker` command synchronously and return its completed process.
 
         Args:
@@ -840,7 +864,7 @@ class DockerBackend(SharedBackendBehavior):
             await self._docker(["rm", "-f", name])
 
     async def _run_container(
-        self, name: str, snapshot: object, *, mounts: dict[str, DockerMount], agent: object
+        self, name: str, snapshot: str, *, mounts: dict[str, DockerMount], agent: CodingAgent
     ) -> DockerSandbox:
         """Replace any container of this name, start one from `snapshot`, and wrap it.
 
@@ -863,7 +887,7 @@ class DockerBackend(SharedBackendBehavior):
 
         return DockerSandbox(name, binary=self._binary())
 
-    async def _build_snapshot_async(self, agent: object, name: str, env: EnvConfig) -> None:
+    async def _build_snapshot_async(self, agent: CodingAgent, name: str, env: EnvConfig) -> None:
         """Provision a build container, commit it as the snapshot image, then remove it."""
         build_name = f"{NAME_PREFIX}build-{agent.id}"
         base_image = env.base_image or BASE_IMAGE

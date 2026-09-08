@@ -7,13 +7,16 @@ import contextlib
 import fcntl
 import os
 import shlex
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import Protocol
 
 from benchspec.agents import CodingAgent, credential_preflight_error, make_agent
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.trigger import RoutingError
 from benchspec.orchestration import workspace
+from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import (
     changed_paths,
     parse_artifact_stream,
@@ -25,7 +28,10 @@ from benchspec.orchestration.room import (
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
     NAME_PREFIX,
+    LiveSandbox,
+    MountT,
     SandboxBackend,
+    VolumeBinder,
     host_mount_path,
 )
 from benchspec.sandbox.project import discard_stage, stage_project
@@ -66,7 +72,7 @@ def preflight(backend: SandboxBackend | None = None) -> None:
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path) -> object:
+def _file_lock(path: Path) -> Iterator[None]:
     """Hold an exclusive filesystem lock for snapshot build coordination."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(path, "w")
@@ -79,8 +85,8 @@ def _file_lock(path: Path) -> object:
 
 
 async def _snapshot_artifact_shas(
-    sandbox: object, agent: object, backend: SandboxBackend
-) -> dict | None:
+    sandbox: LiveSandbox, agent: CodingAgent, backend: SandboxBackend
+) -> dict[str, str] | None:
     """Snapshot agent artifact paths to SHA-256 digests inside the guest."""
     dirs = agent.artifact_dirs()
     if not dirs:
@@ -90,8 +96,11 @@ async def _snapshot_artifact_shas(
 
 
 async def _read_authored(
-    sandbox: object, agent: object, baseline_shas: dict | None, backend: SandboxBackend
-) -> dict:
+    sandbox: LiveSandbox,
+    agent: CodingAgent,
+    baseline_shas: dict[str, str] | None,
+    backend: SandboxBackend,
+) -> dict[str, str]:
     """Return display-path content for files authored since `baseline_shas`."""
     if baseline_shas is None:
         return {}
@@ -108,7 +117,11 @@ async def _read_authored(
 
 
 def ensure_snapshot(
-    agent: object, *, repo_root: object, backend: SandboxBackend, env: object = None
+    agent: CodingAgent,
+    *,
+    repo_root: Path,
+    backend: SandboxBackend,
+    env: EnvConfig | None = None,
 ) -> str:
     """Return the snapshot name, building it once (file-locked) if missing.
 
@@ -143,7 +156,9 @@ def _sandbox_run_name(eval_id: str, config: str) -> str:
 DEFAULT_PROJECT_MARKER = ".claude-plugin/plugin.json"
 
 
-def _plugin_dir_for(host_repo_root: object, marker: str = DEFAULT_PROJECT_MARKER) -> str | None:
+def _plugin_dir_for(
+    host_repo_root: Path | None, marker: str = DEFAULT_PROJECT_MARKER
+) -> str | None:
     """Resolve the plugin directory mounted for an eval run."""
     # --plugin-dir only when the project has the configured marker. Local skills reach the
     # guest by the trigger path's stage_project_assets (_create_trigger_sandbox); output
@@ -155,7 +170,9 @@ def _plugin_dir_for(host_repo_root: object, marker: str = DEFAULT_PROJECT_MARKER
     return None
 
 
-def _agent_extra_volumes(agent: object, volume_cls: object) -> dict:
+def _agent_extra_volumes(
+    agent: CodingAgent, volume_cls: VolumeBinder[MountT]
+) -> dict[str, MountT]:
     """Optional agent-owned host files that must be visible in the guest."""
     path_getter = getattr(agent, "auth_json_path", None)
     if not callable(path_getter):
@@ -171,14 +188,14 @@ def _agent_extra_volumes(agent: object, volume_cls: object) -> dict:
 
 
 async def run_setup_sh(
-    sandbox: object,
-    agent: object,
+    sandbox: LiveSandbox,
+    agent: CodingAgent,
     *,
     setup_reldir: str,
     arm: str,
     model: str,
     eval_set: str = "",
-    arm_env: dict | None = None,
+    arm_env: dict[str, str] | None = None,
 ) -> None:
     """Run an eval's own setup.sh inside the arm sandbox when present.
 
@@ -201,6 +218,16 @@ async def run_setup_sh(
         )
 
 
+class TurnRunner(Protocol):
+    """One prompt turn inside an open arm session, as handed back by `SandboxSession`."""
+
+    async def __call__(
+        self, prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+    ) -> RunResult:
+        """Run `prompt` through the session's agent and return the parsed result."""
+        ...
+
+
 class SandboxSession:
     """Async context manager holding one guest open across an arm's turns.
 
@@ -211,20 +238,20 @@ class SandboxSession:
     """
 
     def __init__(
-        self: object,
+        self,
         *,
-        agent: object,
-        snapshot: object,
-        eval_id: object,
-        config: object,
-        host_workdir: object,
-        host_repo_root: object,
-        model: object,
-        effort: object,
+        agent: CodingAgent,
+        snapshot: str,
+        eval_id: str,
+        config: str,
+        host_workdir: Path,
+        host_repo_root: Path | None,
+        model: str,
+        effort: str,
         backend: SandboxBackend,
         setup_reldir: str | None = None,
         arm: str | None = None,
-        arm_env: dict | None = None,
+        arm_env: dict[str, str] | None = None,
         eval_set: str = "",
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
@@ -247,8 +274,12 @@ class SandboxSession:
         self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
         self._project_marker = project_marker
+        # Populated by __aenter__; None until the VM is booted.
+        self._staged_project: Path | None = None
+        self._sandbox: LiveSandbox | None = None
+        self._artifact_base: dict[str, str] | None = None
 
-    async def __aenter__(self: object) -> object:
+    async def __aenter__(self) -> TurnRunner:
         """Enter the arm session and capture baseline artifact state."""
         # The guest gets a staged copy of the project, never the checkout: the copy has
         # the same layout minus `.env`, `.git`, and prior-run artifacts.
@@ -288,12 +319,19 @@ class SandboxSession:
         )
         return self._run
 
+    def _live(self) -> LiveSandbox:
+        """The booted guest; a call before `__aenter__` is a programming error."""
+        if self._sandbox is None:
+            raise RuntimeError("sandbox session used before it was entered")
+        return self._sandbox
+
     async def _run(
-        self: object, prompt: object, *, resume_session_id: object, detect_skill: object
-    ) -> object:
+        self, prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+    ) -> RunResult:
         """Provide the run helper."""
+        sandbox = self._live()
         result = await self._agent.invoke(
-            self._sandbox,
+            sandbox,
             prompt,
             eval_id=self._eval_id,
             config=self._config,
@@ -307,35 +345,33 @@ class SandboxSession:
             harness_args=self._harness_args,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
-        authored = await _read_authored(
-            self._sandbox, self._agent, self._artifact_base, self._backend
-        )
+        authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
         if authored:
             result = replace(result, artifacts=authored)
         return result
 
-    async def __aexit__(self: object, *exc: object) -> object:
+    async def __aexit__(self, *exc: object) -> None:
         """Close the arm session and release sandbox resources."""
         try:
-            await self._sandbox.stop()
+            await self._live().stop()
         finally:
             discard_stage(self._staged_project)
 
 
 def arm_session(
     *,
-    agent: object,
-    snapshot: object,
-    eval_id: object,
-    config: object,
-    host_workdir: object,
-    host_repo_root: object,
-    model: object,
-    effort: object,
+    agent: CodingAgent,
+    snapshot: str,
+    eval_id: str,
+    config: str,
+    host_workdir: Path,
+    host_repo_root: Path | None,
+    model: str,
+    effort: str,
     backend: SandboxBackend,
     setup_reldir: str | None = None,
     arm: str | None = None,
-    arm_env: dict | None = None,
+    arm_env: dict[str, str] | None = None,
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
@@ -361,12 +397,12 @@ def arm_session(
 
 
 def _trigger_command(
-    agent: object,
-    query: object,
-    repo_root: object,
-    model: object,
-    effort: object,
-    project_marker: object,
+    agent: CodingAgent,
+    query: str,
+    repo_root: Path,
+    model: str,
+    effort: str,
+    project_marker: str,
 ) -> list[str]:
     """Build the command that asks an agent to route a trigger query."""
     plugin = _plugin_dir_for(repo_root, project_marker)
@@ -382,18 +418,18 @@ def _trigger_command(
 
 
 async def _route_in_sandbox_async(
-    query: object,
-    repo_root: object,
-    model: object,
-    timeout: object,
+    query: str,
+    repo_root: Path,
+    model: str,
+    timeout: float,
     *,
-    effort: object,
-    skill_name: object,
-    agent: object,
-    snapshot: object,
+    effort: str,
+    skill_name: str | None,
+    agent: CodingAgent,
+    snapshot: str,
     backend: SandboxBackend,
-    project_marker: object = DEFAULT_PROJECT_MARKER,
-) -> object:
+    project_marker: str = DEFAULT_PROJECT_MARKER,
+) -> list[str]:
     """Route in sandbox async."""
     # Snapshot resolution happens before this coroutine because snapshot builds run loops.
     staged_project = stage_project(repo_root)
@@ -429,7 +465,7 @@ async def _route_in_sandbox_async(
             buffer = ""
             async for event in handle:
                 if event.event_type == "stdout":
-                    buffer += event.data.decode("utf-8", errors="replace")
+                    buffer += (event.data or b"").decode("utf-8", errors="replace")
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
                         lines.append(line)
@@ -470,16 +506,16 @@ async def _route_in_sandbox_async(
 
 
 def route_in_sandbox(
-    query: object,
-    repo_root: object,
-    model: object,
-    timeout: object,
+    query: str,
+    repo_root: Path,
+    model: str,
+    timeout: float,
     *,
-    effort: object = "low",
-    skill_name: object = None,
-    project_marker: object = DEFAULT_PROJECT_MARKER,
-) -> object:
-    """Run trigger routing inside a sandbox and return the fire count."""
+    effort: str = "low",
+    skill_name: str | None = None,
+    project_marker: str = DEFAULT_PROJECT_MARKER,
+) -> list[str]:
+    """Run trigger routing inside a sandbox and return the streamed output lines."""
     # Resolve agent + snapshot up-front: a missing snapshot triggers build_snapshot
     # → asyncio.run, which can't nest inside the asyncio.run below.
     agent = make_agent()
@@ -609,8 +645,8 @@ def cli_clean(repo_root: Path) -> None:
 
     Tolerates 'none found'. Snapshots are regenerable via `benchspec sandbox:build`.
     """
-    for backend_class in registered_backends().values():
-        backend_class().prune()
+    for backend_factory in registered_backends().values():
+        backend_factory().prune()
 
     for lock in workspace.workspace_parent(repo_root).glob(".benchspec-snapshot-*.lock"):
         lock.unlink(missing_ok=True)

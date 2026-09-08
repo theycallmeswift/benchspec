@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import tomllib
 from pathlib import Path
 from textwrap import dedent
@@ -448,10 +447,8 @@ class OpenCodeAgent(BaseAgent):
             self.agent_bin, "run", "--format", "json", "--variant", variant,
             "-m", config.model, *config.harness_args, prompt,
         ]
-        proc = await (env or Host()).exec(
-            command, env=config.env, timeout=config.timeout,
-            stdin=subprocess.DEVNULL,  # opencode blocks reading stdin forever without this
-        )
+        # Host closes stdin by default; opencode blocks reading an open pipe forever.
+        proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
 
         proc.require_success()
         result = parse_opencode_jsonl(proc.stdout, "judge", "judge", None)
