@@ -21,6 +21,7 @@ from benchspec.agents import (
 from benchspec.agents.claude import _validate_harness_args as _validate_claude_code_harness_args
 from benchspec.agents.codex import _validate_harness_args as _validate_codex_harness_args
 from benchspec.agents.opencode import _validate_harness_args as _validate_opencode_harness_args
+from benchspec.agents.opencode import openrouter_model_error as _opencode_openrouter_model_error
 from benchspec.grading.judges.registry import known_judge_harnesses
 from benchspec.specs.schema import SchemaError
 
@@ -152,6 +153,10 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
             "judge harness `opencode` needs a provider-qualified model "
             f"(e.g. 'anthropic/claude-sonnet-4-6'), got `{config.model}`"
         )
+    if config.harness == "opencode" and config.provider == OPENROUTER_PROVIDER:
+        model_error = _opencode_openrouter_model_error(config.model)
+        if model_error:
+            raise SchemaError(f"judge harness `opencode`: {model_error}")
 
 
 def resolve_judge_config(
