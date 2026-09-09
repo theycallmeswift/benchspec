@@ -18,12 +18,12 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, Credential
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
@@ -243,20 +243,22 @@ class OpenCodeAgent(BaseAgent):
         version: str = "latest",
         # Default binding: the guest install path (npm i -g installs the symlink here).
         agent_bin: str = "/usr/local/bin/opencode",
+        provider: str = DEFAULT_PROVIDER,
     ) -> None:
         """Initialize the instance."""
         self.agent_bin = agent_bin
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
+        self.provider = provider
 
     @classmethod
-    def for_host(cls) -> OpenCodeAgent:
+    def for_host(cls, provider: str = DEFAULT_PROVIDER) -> OpenCodeAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `opencode`."""
-        return cls(agent_bin="opencode")
+        return cls(agent_bin="opencode", provider=provider)
 
     @classmethod
-    def from_env(cls) -> OpenCodeAgent:
+    def from_env(cls, provider: str = DEFAULT_PROVIDER) -> OpenCodeAgent:
         """Build the agent from the host env: pinned version (env var > pyproject >.
 
         'latest') + the preferred credential.
@@ -269,8 +271,10 @@ class OpenCodeAgent(BaseAgent):
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
-                return cls(auth_value=value, auth_env=env_name, version=version)
-        return cls(version=version)  # no credential set; preflight gates this
+                return cls(
+                    auth_value=value, auth_env=env_name, version=version, provider=provider
+                )
+        return cls(version=version, provider=provider)  # no credential set; preflight gates this
 
     @staticmethod
     def _pinned_version_from_pyproject() -> str | None:
@@ -296,9 +300,12 @@ class OpenCodeAgent(BaseAgent):
         return None
 
     @staticmethod
-    def credential_error() -> str | None:
+    def credential_error(
+        provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(env_name) for env_name in AUTH_ENV_VARS):
+        environ = os.environ if environ is None else environ
+        if any(environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
         return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 

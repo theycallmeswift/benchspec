@@ -38,7 +38,7 @@ class _FakeGuestAgent(ClaudeCodeAgent):
     """A real agent whose `for_host` fails the test if the guest probe ever rebinds."""
 
     @classmethod
-    def for_host(cls) -> ClaudeCodeAgent:
+    def for_host(cls, provider: str = "default") -> ClaudeCodeAgent:
         """Fail the test — the guest probe must never rebind to the host."""
         raise AssertionError("probe_guest_version must not call for_host()")
 
