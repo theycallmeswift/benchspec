@@ -52,11 +52,16 @@ def preflight_verify_judge_credential(config: JudgeConfig) -> None:
     """RuntimeError if the selected judge harness cannot authenticate on the host.
 
     The judge runs on the host through `for_host()`, so the adapter's host check decides:
-    an env credential, or the CLI's own login where it can report one. Environment-
-    dependent like `preflight_verify_judge_binary`, and meant to run after it, so a missing
-    binary is reported as such rather than as a failed login probe.
+    an env credential, or the CLI's own login where it can report one. The check sees
+    the environment the judge process will actually run with — the host's, with
+    `config.env` expanded over it by the same rule `run_judge` uses — so a judge whose
+    credential lives only in its own `env` table passes. Environment-dependent like
+    `preflight_verify_judge_binary`, and meant to run after it, so a missing binary is
+    reported as such rather than as a failed login probe.
     """
-    error = agent_class(config.harness).for_host().host_credential_error()
+    environ = {**os.environ, **expand_env(config.env, os.environ)}
+    adapter = agent_class(config.harness).for_host(provider=config.provider)
+    error = adapter.host_credential_error(environ=environ)
     if error:
         raise RuntimeError(f"judge harness `{config.harness}`: {error}")
 
@@ -71,7 +76,7 @@ def run_judge(prompt: str, *, config: JudgeConfig) -> str:
     infra failures.
     """
     expanded = replace(config, env=expand_env(config.env, os.environ))
-    agent = agent_class(config.harness).for_host()
+    agent = agent_class(config.harness).for_host(provider=config.provider)
 
     return asyncio.run(agent.judge(prompt, expanded))
 

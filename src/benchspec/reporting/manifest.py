@@ -10,7 +10,6 @@ from pathlib import Path
 
 import benchspec
 from benchspec.config.arms import Set as EvalSet
-from benchspec.grading.binder import binder_identity
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.judges.registry import probe_judge_version
 from benchspec.reporting import report
@@ -76,6 +75,7 @@ def judge_meta(judge_config: JudgeConfig) -> dict:
     """
     return {
         "harness": judge_config.harness,
+        "provider": judge_config.provider,
         "model": judge_config.model,
         "effort": judge_config.effort,
         "timeout": judge_config.timeout,
@@ -91,6 +91,7 @@ def write_manifest(
     repo_root: Path,
     run_set: EvalSet | None,
     judge_meta: dict,
+    binder_meta: dict,
     observed_arms: dict,
     *,
     started_at: str | None,
@@ -108,15 +109,16 @@ def write_manifest(
     here. The v1 run-level `agent`/`agent_version`/`token_split` fields are gone with no
     aliases — the selector and capabilities live per planned arm. `run_set` is None for a
     run with no eval set — `set`/`runner` degrade to null and `arms` to empty. `judge_meta`
-    is the already-resolved judge object (see `judge_meta`); `binder` is the fixed
-    run-level binder transport identity (no key material).
+    is the already-resolved judge object (see `judge_meta`); `binder_meta` is the resolved
+    run-level binder transport identity (see `binder_config.binder_identity`; no key
+    material).
     """
     cfg = {
         "set": run_set.name if run_set else None,
         "runner": run_set.runner if run_set else None,
         "arms": report.planned_arms(run_set),
         "judge": judge_meta,
-        "binder": binder_identity(),
+        "binder": binder_meta,
     }
     manifest = build_manifest(
         run_id=uuid.uuid4().hex,

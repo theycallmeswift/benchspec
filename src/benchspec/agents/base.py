@@ -20,7 +20,7 @@ import hashlib
 import re
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
     from benchspec.orchestration.environments import ExecutionEnv
     from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
+
+DEFAULT_PROVIDER = "default"
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical
@@ -147,21 +149,34 @@ class BaseAgent(ABC):
     # environment: the default binding is the guest install path (task arms);
     # for_host() rebinds to the name PATH resolves on the host (judge mode).
     agent_bin: str
+    # The routing this instance was built for: DEFAULT_PROVIDER is the vendor's own API
+    # or CLI login; a gateway value reroutes the credential and endpoint.
+    provider: str
+    # An adapter widens this as it learns to route through a gateway. Config validation
+    # reads it, so an unsupported `provider` dies at config-read time, not mid-run.
+    supported_providers: frozenset[str] = frozenset({DEFAULT_PROVIDER})
 
     @classmethod
     @abstractmethod
-    def from_env(cls) -> CodingAgent:
+    def from_env(cls, *, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """Build an instance from host environment settings (credential, pinned version)."""
 
     @classmethod
     @abstractmethod
-    def for_host(cls) -> CodingAgent:
+    def for_host(cls, *, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """An instance bound to the host environment: agent_bin resolves from PATH."""
 
     @staticmethod
     @abstractmethod
-    def credential_error() -> str | None:
-        """Return a credential preflight error message when credentials are missing."""
+    def credential_error(
+        *, provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
+        """Return a credential preflight error message when credentials are missing.
+
+        Args:
+            provider: The routing the credential must serve.
+            environ: The environment to read credentials from; the host's when None.
+        """
 
     @abstractmethod
     def guest_env(self) -> dict[str, str]:
@@ -177,20 +192,34 @@ class BaseAgent(ABC):
         """
         return ""
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, *, environ: Mapping[str, str] | None = None) -> str | None:
         """Judge-mode credential check for an instance bound to the host (`for_host()`).
 
         The judge runs on the host with whatever its CLI can authenticate with, so an env
         credential is sufficient but not necessary. Adapters whose CLI can report its own
         login state override this to ask it; the base accepts the env credential alone.
-        """
-        return self.credential_error()
 
-    def host_probe(self, *args: str) -> subprocess.CompletedProcess[str] | None:
-        """Run `agent_bin *args` on the host; None when it cannot run at all (absent, hung)."""
+        Args:
+            environ: The environment the judge process will run with; the host's when None.
+        """
+        return self.credential_error(provider=self.provider, environ=environ)
+
+    def host_probe(
+        self, *args: str, env: Mapping[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Run `agent_bin *args` on the host; None when it cannot run at all (absent, hung).
+
+        Args:
+            args: The CLI arguments after the binary.
+            env: The process environment; the host's own when None.
+        """
         try:
             return subprocess.run(
-                [self.agent_bin, *args], capture_output=True, text=True, timeout=10
+                [self.agent_bin, *args],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=dict(env) if env is not None else None,
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             return None
@@ -247,6 +276,7 @@ class CodingAgent(Protocol):
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
     skill_load_dir: str  # absolute guest path the agent loads skills from
     agent_bin: str  # the binary this instance runs (guest install path; for_host() rebinds)
+    provider: str  # the routing this instance was built for
     capabilities: AgentCapabilities
 
     def version(self) -> str:
@@ -343,7 +373,7 @@ class CodingAgent(Protocol):
         ...
 
     @classmethod
-    def for_host(cls) -> CodingAgent:
+    def for_host(cls, *, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """An instance bound to the host environment: agent_bin resolves from PATH."""
         ...
 
@@ -351,7 +381,7 @@ class CodingAgent(Protocol):
         """Return this instance's CLI version, or None on any failure (best effort)."""
         ...
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, *, environ: Mapping[str, str] | None = None) -> str | None:
         """Return a remediation message when this host-bound instance cannot authenticate."""
         ...
 

@@ -22,10 +22,11 @@ from benchspec.config.arms import Arm
 from benchspec.config.options import option_float, option_str
 from benchspec.config.sets import (
     has_configured_set,
+    resolved_binder_config,
     resolved_judge_config,
     run_set_when_needed,
 )
-from benchspec.grading.binder import binder_identity
+from benchspec.grading.binder_config import BinderConfig, binder_identity
 from benchspec.grading.judges import JudgeConfig
 from benchspec.orchestration import cases, workspace
 from benchspec.reporting import manifest, report
@@ -151,6 +152,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
              "[tool.benchspec.judge] harness). One of claude-code, codex, opencode.",
     )
     group.addoption(
+        "--benchspec-judge-provider",
+        default=None,
+        help="scalar override of the judge provider (default: default, or "
+             "[tool.benchspec.judge] provider). `default` is the harness vendor's own "
+             "API or CLI login; other values must be supported by the judge harness.",
+    )
+    group.addoption(
         "--benchspec-judge-model",
         default=None,
         help="model for the LLM judge (default: sonnet, or [tool.benchspec.judge] "
@@ -192,6 +200,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
              "[tool.benchspec.judge] env, CLI keys winning. A $VAR value expands "
              "from the host environment at judge EXECUTION time (never at "
              "collection); an unset referenced var raises.",
+    )
+    group.addoption(
+        "--benchspec-binder-provider",
+        default=None,
+        help="scalar override of the assertion binder's provider (default: gemini, or "
+             "[tool.benchspec.binder] provider). Recorded in meta.json under "
+             "`binder.provider`.",
     )
     group.addoption(
         "--benchspec-fail-under",
@@ -312,6 +327,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     run_set = run_set_when_needed(config, needs_set=needs_set)
     judge_config = resolved_judge_config(config) if needs_set else JudgeConfig()
     judge_meta = manifest.judge_meta(judge_config)
+    binder_config = resolved_binder_config(config) if needs_set else BinderConfig()
+    binder_meta = binder_identity(binder_config)
     # Aggregate observed provenance BEFORE writing the manifest — the records live under
     # the skills root the same walk below reads, so meta.json must not be written with a
     # stale/empty observed_arms. Conflicting records raise here and abort the write, which
@@ -323,6 +340,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         repo_root,
         run_set,
         judge_meta,
+        binder_meta,
         observed_arms,
         started_at=config.stash.get(_STARTED_AT, None),
     )
@@ -371,7 +389,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             planned=planned,
             observed_arms=observed_arms,
             runner=runner,
-            binder=binder_identity(),
+            binder=binder_meta,
         )
         binder_degraded_total = sum(
             stats.get("binder_degraded", 0) for stats in benchmark["arms"].values()

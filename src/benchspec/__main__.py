@@ -45,8 +45,14 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument(
         "--judge-harness", help="judge harness (--benchspec-judge-harness)"
     )
+    run_parser.add_argument(
+        "--judge-provider", help="judge provider (--benchspec-judge-provider)"
+    )
     run_parser.add_argument("--judge-model", help="judge model (--benchspec-judge-model)")
     run_parser.add_argument("--judge-effort", help="judge effort (--benchspec-judge-effort)")
+    run_parser.add_argument(
+        "--binder-provider", help="assertion binder provider (--benchspec-binder-provider)"
+    )
     run_parser.add_argument(
         "--env",
         action="append",

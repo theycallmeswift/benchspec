@@ -309,19 +309,6 @@ def preflight_verify_gemini_key() -> None:
         )
 
 
-def binder_identity() -> dict:
-    """Return the configured binder's transport identity for artifact metadata.
-
-    Fixed and run-level — describes the assertion binder, not the grader. Never
-    reads or includes `GEMINI_API_KEY` or any other key material.
-    """
-    return {
-        "provider": "gemini",
-        "model": GEMINI_BINDER_MODEL,
-        "api_path": GEMINI_API_PATH,
-    }
-
-
 def bind(
     assertion_text: str,
     *,

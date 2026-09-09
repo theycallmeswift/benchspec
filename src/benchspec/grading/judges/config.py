@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from benchspec.agents import provider_error
+from benchspec.agents.base import DEFAULT_PROVIDER
 from benchspec.agents.claude import _validate_harness_args as _validate_claude_code_harness_args
 from benchspec.agents.codex import _validate_harness_args as _validate_codex_harness_args
 from benchspec.agents.opencode import _validate_harness_args as _validate_opencode_harness_args
@@ -58,6 +60,7 @@ def _validated_str_dict(where: str, key: str, value: object) -> dict[str, str]:
 # cleaned value; the keys double as the set of recognized judge keys.
 _FIELD_VALIDATORS = {
     "harness": _validated_non_empty_str,
+    "provider": _validated_non_empty_str,
     "model": _validated_non_empty_str,
     "effort": _validated_non_empty_str,
     "timeout": _validated_positive_int,
@@ -81,6 +84,7 @@ class JudgeConfig:
     timeout: int = DEFAULT_TIMEOUT
     harness_args: list[str] = field(default_factory=list, hash=False)
     env: dict[str, str] = field(default_factory=dict, hash=False)
+    provider: str = DEFAULT_PROVIDER
 
 
 def _validate_judge_table(where: str, table: dict) -> dict:
@@ -120,6 +124,8 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
             f"[tool.benchspec.judge] harness `{config.harness}` is not a supported "
             f"judge harness (known: {sorted(known_judge_harnesses())})"
         )
+    if (error := provider_error(config.harness, config.provider)) is not None:
+        raise SchemaError(f"[tool.benchspec.judge] {error}")
     try:
         _HARNESS_ARG_VALIDATORS[config.harness](config.harness_args)
     except ValueError as error:
@@ -148,6 +154,7 @@ def resolve_judge_config(
     resolved: dict = {
         "harness": DEFAULT_HARNESS, "model": DEFAULT_MODEL, "effort": DEFAULT_EFFORT,
         "timeout": DEFAULT_TIMEOUT, "harness_args": [], "env": {},
+        "provider": DEFAULT_PROVIDER,
     }
     for label, table in (
         ("[tool.benchspec.judge]", pyproject_table),

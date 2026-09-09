@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, Credential
 from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, parse_stream_run
@@ -124,43 +124,50 @@ class ClaudeCodeAgent(BaseAgent):
         auth_env: str = "ANTHROPIC_API_KEY",
         version: str = "latest",
         agent_bin: str = "/root/.local/bin/claude",  # default binding: the guest install path
+        provider: str = DEFAULT_PROVIDER,
     ) -> None:
         """Initialize the instance."""
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
         self.agent_bin = agent_bin
+        self.provider = provider
 
     @classmethod
-    def for_host(cls) -> ClaudeCodeAgent:
+    def for_host(cls, *, provider: str = DEFAULT_PROVIDER) -> ClaudeCodeAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `claude`."""
-        return cls(agent_bin="claude")
+        return cls(agent_bin="claude", provider=provider)
 
     @classmethod
-    def from_env(cls) -> ClaudeCodeAgent:
+    def from_env(cls, *, provider: str = DEFAULT_PROVIDER) -> ClaudeCodeAgent:
         """Build an agent instance from host environment settings."""
         version = os.environ.get("BENCHSPEC_CLAUDE_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
-                return cls(auth_value=value, auth_env=env_name, version=version)
-        return cls(version=version)  # no credential set; preflight gates this
+                return cls(
+                    auth_value=value, auth_env=env_name, version=version, provider=provider
+                )
+        return cls(version=version, provider=provider)  # no credential; preflight gates this
 
     @staticmethod
-    def credential_error() -> str | None:
+    def credential_error(
+        *, provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(env_var) for env_var in AUTH_ENV_VARS):
+        environ = os.environ if environ is None else environ
+        if any(environ.get(env_var) for env_var in AUTH_ENV_VARS):
             return None
         return (
             "no Claude credential — set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) "
             "or ANTHROPIC_API_KEY"
         )
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, *, environ: Mapping[str, str] | None = None) -> str | None:
         """Accept an env credential, else ask `claude auth status` whether the host is logged in."""
-        if self.credential_error() is None:
+        if self.credential_error(provider=self.provider, environ=environ) is None:
             return None
-        proc = self.host_probe("auth", "status")
+        proc = self.host_probe("auth", "status", env=environ)
         if proc is not None and proc.returncode == 0 and _reports_logged_in(proc.stdout):
             return None
         return (

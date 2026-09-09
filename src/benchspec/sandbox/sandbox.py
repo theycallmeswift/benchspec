@@ -18,7 +18,8 @@ from benchspec.agents import (
     make_agent,
     resolve_agent_name,
 )
-from benchspec.config.arms import parse_sets, resolve_set
+from benchspec.agents.base import DEFAULT_PROVIDER
+from benchspec.config.arms import Arm, parse_sets, resolve_set
 from benchspec.grading.trigger import RoutingError
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import RunResult
@@ -66,32 +67,35 @@ def format_preflight_failure(heading: str, errors: Iterable[str]) -> str:
 
 
 def preflight_errors(
-    backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()
+    backend: SandboxBackend | None = None, *, arms: Iterable[Arm] = ()
 ) -> list[str]:
     """Return every reason the host can't run sandboxed evals, empty when it can.
 
     Host-readiness checks come from the resolved backend (the default one when none is
-    passed). The credential check covers the selected agent plus every harness in
-    `harnesses` (a set's arm harnesses), naming each one that fails.
+    passed). The credential check covers the selected agent plus every distinct
+    harness × provider pair in `arms` (a set's arms), naming each one that fails.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errors: list[str] = list(backend.preflight())
-    # dict.fromkeys dedupes while preserving order, so a harness is reported once even
+    # dict.fromkeys dedupes while preserving order, so a pair is reported once even
     # when it is both the selected agent and an arm's harness.
-    for harness in dict.fromkeys((resolve_agent_name(), *harnesses)):
-        credential_error = credential_preflight_error(harness)
+    targets = dict.fromkeys(
+        ((resolve_agent_name(), DEFAULT_PROVIDER), *((arm.harness, arm.provider) for arm in arms))
+    )
+    for harness, provider in targets:
+        credential_error = credential_preflight_error(harness, provider=provider)
         if credential_error:
             errors.append(f"harness `{harness}`: {credential_error}")
     return errors
 
 
-def preflight(backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()) -> None:
+def preflight(backend: SandboxBackend | None = None, *, arms: Iterable[Arm] = ()) -> None:
     """Fail fast if the host can't run sandboxed evals.
 
     Raises RuntimeError (the exit-2 signal) listing every failure `preflight_errors`
-    reports for the same backend and harnesses.
+    reports for the same backend and arms.
     """
-    errors = preflight_errors(backend, harnesses=harnesses)
+    errors = preflight_errors(backend, arms=arms)
     if errors:
         raise RuntimeError(format_preflight_failure("benchspec sandbox preflight failed", errors))
 
@@ -621,12 +625,11 @@ def cli_build(
         rawsets, default_set = parse_sets(table)
         resolved = resolve_set(rawsets, default_set, set_name=set_name)
         backend = resolve_sandbox(resolved.sandbox)
-        arm_harnesses = [resolved_arm.harness for resolved_arm in resolved.arms]
-        preflight(backend, harnesses=arm_harnesses)
+        preflight(backend, arms=resolved.arms)
         env = resolve_environment_config(root)
         # dict.fromkeys dedupes while preserving first-seen order — two arms sharing a
-        # harness build once.
-        for harness in dict.fromkeys(arm_harnesses):
+        # harness build once. Snapshots are provider-neutral: routing lands at exec time.
+        for harness in dict.fromkeys(resolved_arm.harness for resolved_arm in resolved.arms):
             _build_or_reuse_snapshot(make_agent(harness), env, backend)
     else:
         backend = resolve_sandbox(DEFAULT_SANDBOX)

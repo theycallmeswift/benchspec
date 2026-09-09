@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, CodingAgent
+from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, CodingAgent
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
@@ -27,6 +27,7 @@ __all__ = [
     "agent_class",
     "make_agent",
     "credential_preflight_error",
+    "provider_error",
     "resolve_agent_name",
     "known_harnesses",
 ]
@@ -86,25 +87,44 @@ def agent_class(harness: str) -> type[BaseAgent]:
     return _REGISTRY[harness]
 
 
-def make_agent(harness: str | None = None) -> CodingAgent:
+def provider_error(harness: str, provider: str) -> str | None:
+    """None if `harness`'s adapter can route through `provider`, else a message naming both.
+
+    One source of truth for every config surface that carries a `provider` (arms, the
+    judge), so the supported set lives on the adapter and nowhere else.
+    """
+    supported = agent_class(harness).supported_providers
+    if provider in supported:
+        return None
+    return (
+        f"harness `{harness}` does not support provider `{provider}` "
+        f"(supported: {sorted(supported)})"
+    )
+
+
+def make_agent(harness: str | None = None, *, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
     """The agent for a run or a single arm.
 
     With no `harness`, reads the run-level agent from `BENCHSPEC_AGENT` (the plugin
     normalizes the precedence chain at configure time). With an explicit `harness` (an
     arm's `harness`), builds THAT agent so one run's columns can span harnesses. An
-    unknown `harness` raises.
+    unknown `harness`, or a `provider` the adapter cannot route through, raises.
     """
-    if harness is not None:
-        return agent_class(harness).from_env()
-    return _selected_agent_class().from_env()
+    adapter = agent_class(harness) if harness is not None else _selected_agent_class()
+    if (error := provider_error(adapter.id, provider)) is not None:
+        raise RuntimeError(error)
+    return adapter.from_env(provider=provider)
 
 
-def credential_preflight_error(harness: str | None = None) -> str | None:
+def credential_preflight_error(
+    harness: str | None = None, *, provider: str = DEFAULT_PROVIDER
+) -> str | None:
     """None if a usable credential is configured for a harness, else a remediation message.
 
     With no `harness`, checks the run-level selected agent; with one (an arm's
     `harness`), checks that adapter, so a set whose arms span harnesses preflights each
-    of them rather than only the selected agent.
+    of them rather than only the selected agent. `provider` selects which credential the
+    adapter looks for.
     """
     adapter = agent_class(harness) if harness is not None else _selected_agent_class()
-    return adapter.credential_error()
+    return adapter.credential_error(provider=provider)

@@ -58,11 +58,12 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
         return []
     arms = []
     for arm in run_set.arms:
-        agent = make_agent(arm.harness)
+        agent = make_agent(arm.harness, provider=arm.provider)
         arms.append(
             {
                 "name": arm.name,
                 "harness": arm.harness,
+                "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
                 "env": redact_env(arm.env),

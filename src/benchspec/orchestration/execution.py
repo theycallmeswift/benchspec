@@ -417,7 +417,7 @@ def run_eval_arm(
     # harness. `sandbox_name` is the resolved set's backend threaded in by the caller;
     # it defaults to DEFAULT_SANDBOX for other callers.
     # Unit tests stub `make_agent` to None: the no-sandbox path every later step honors.
-    agent: CodingAgent | None = make_agent(arm.harness)
+    agent: CodingAgent | None = make_agent(arm.harness, provider=arm.provider)
     backend = resolve_sandbox(sandbox_name)
     # Resolve the host environment config ONCE and thread the same value into both snapshot
     # selection and provenance capture — a second read could drift and record inputs for a

@@ -1,4 +1,4 @@
-"""Resolve the run's eval set and judge config from pyproject, scratch config, and CLI overrides."""
+"""Resolve the run's eval set, judge, and binder config from pyproject, scratch config, and CLI overrides."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from benchspec.config.options import (
     option_str,
     option_str_list,
 )
+from benchspec.grading.binder_config import BinderConfig, resolve_binder_config
 from benchspec.grading.judges import JudgeConfig, resolve_judge_config
 from benchspec.specs.discovery import (
     discover_eval_cases,
@@ -39,9 +40,10 @@ def _parse_env_pairs(pairs: list[str]) -> dict[str, str]:
 def _read_scratch_benchspec_table(config_path: str | None) -> dict:
     """The raw `[tool.benchspec]` table from an untracked --benchspec-config scratch file.
 
-    Or {} if none was passed. Shared by `_layer_config_sets` (sets/default-set)
-    and `resolved_judge_config` ([tool.benchspec.judge]) so there's one TOML read and
-    one error-reporting path for a malformed scratch file.
+    Or {} if none was passed. Shared by `_layer_config_sets` (sets/default-set),
+    `resolved_judge_config` ([tool.benchspec.judge]), and `resolved_binder_config`
+    ([tool.benchspec.binder]) so there's one TOML read and one error-reporting path for
+    a malformed scratch file.
     """
     if not config_path:
         return {}
@@ -162,6 +164,7 @@ def _parse_judge_cli_table(config: RunOptions) -> dict:
     cli_table: dict = {}
     for option, key in (
         ("benchspec_judge_harness", "harness"),
+        ("benchspec_judge_provider", "provider"),
         ("benchspec_judge_model", "model"),
         ("benchspec_judge_effort", "effort"),
     ):
@@ -186,30 +189,56 @@ def resolved_judge_config(config: RunOptions) -> JudgeConfig:
     cases.py's judge preflight — so this stays safe to call under `--collect-only` and
     from every existing pytester-based collection test.
     """
-    repo_root = resolve_repo_root(config)
-    pyproject_judge = pyproject_table(repo_root).get("judge")
-    scratch_path = option_str(config, "benchspec_config")
-    scratch = _read_scratch_benchspec_table(scratch_path)
-    scratch_judge = scratch.get("judge")
-    # A present-but-non-dict `judge` key is a malformed config, not "no judge table" —
-    # coercing it to None here would silently skip _validate_judge_table entirely and
-    # fall through to defaults. Raise loudly instead, same as any other structural
-    # judge-config defect (caught below and turned into pytest.UsageError).
-    if pyproject_judge is not None and not isinstance(pyproject_judge, dict):
-        raise pytest.UsageError(
-            "[tool.benchspec.judge] must be a table, got "
-            f"{type(pyproject_judge).__name__}"
-        )
-    if scratch_judge is not None and not isinstance(scratch_judge, dict):
-        raise pytest.UsageError(
-            f"--benchspec-config {scratch_path}: "
-            f"[tool.benchspec.judge] must be a table, got {type(scratch_judge).__name__}"
-        )
+    pyproject_judge, scratch_judge = _component_tables(config, "judge")
     try:
         return resolve_judge_config(
             pyproject_table=pyproject_judge,
             scratch_table=scratch_judge,
             cli_table=_parse_judge_cli_table(config),
+        )
+    except SchemaError as error:
+        raise pytest.UsageError(str(error)) from None
+
+
+def _component_tables(config: RunOptions, component: str) -> tuple[dict | None, dict | None]:
+    """The pyproject and scratch `[tool.benchspec.<component>]` tables, or None when absent.
+
+    A present-but-non-dict table is a malformed config, not "no table" — coercing it to
+    None would silently skip validation and fall through to defaults. Raise loudly
+    instead, the same as any other structural defect.
+    """
+    repo_root = resolve_repo_root(config)
+    pyproject_component = pyproject_table(repo_root).get(component)
+    scratch_path = option_str(config, "benchspec_config")
+    scratch_component = _read_scratch_benchspec_table(scratch_path).get(component)
+    if pyproject_component is not None and not isinstance(pyproject_component, dict):
+        raise pytest.UsageError(
+            f"[tool.benchspec.{component}] must be a table, got "
+            f"{type(pyproject_component).__name__}"
+        )
+    if scratch_component is not None and not isinstance(scratch_component, dict):
+        raise pytest.UsageError(
+            f"--benchspec-config {scratch_path}: [tool.benchspec.{component}] must be a "
+            f"table, got {type(scratch_component).__name__}"
+        )
+    return pyproject_component, scratch_component
+
+
+def resolved_binder_config(config: RunOptions) -> BinderConfig:
+    """The single BinderConfig this run uses.
+
+    Layers `--benchspec-config`'s [tool.benchspec.binder] over pyproject's, applies the
+    `--benchspec-binder-*` CLI overrides, and validates structurally (known provider).
+    The binder credential is NOT checked here — see cases.py's grading preflight — so
+    this stays safe to call under `--collect-only`.
+    """
+    pyproject_binder, scratch_binder = _component_tables(config, "binder")
+    cli_table: dict = {}
+    if (provider := option_str(config, "benchspec_binder_provider")) is not None:
+        cli_table["provider"] = provider
+    try:
+        return resolve_binder_config(
+            pyproject_table=pyproject_binder, scratch_table=scratch_binder, cli_table=cli_table
         )
     except SchemaError as error:
         raise pytest.UsageError(str(error)) from None

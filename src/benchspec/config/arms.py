@@ -1,9 +1,10 @@
 """Parse benchspec config into typed eval sets/arms and resolve a run.
 
-An arm is a `harness×model` cell — plus its own `effort` and `env` — carried verbatim
-into one `(eval × arm)` test. Arms live in a named set (`[tool.benchspec.sets.<name>]`):
-the set adds harness/model/effort/env defaults (inherited by arms that omit a key) and a
-`baseline` (the arm every other arm's Δ is measured against). `env` `$VAR`s expand
+An arm is a `harness×model` cell — plus its own `provider`, `effort`, and `env` —
+carried verbatim into one `(eval × arm)` test. Arms live in a named set
+(`[tool.benchspec.sets.<name>]`): the set adds harness/provider/model/effort/env defaults
+(inherited by arms that omit a key) and a `baseline` (the arm every other arm's Δ is
+measured against). `env` `$VAR`s expand
 lazily at exec time, not resolve time. Validation is fail-fast at config-read time — a
 bad table raises SchemaError naming the defect, not a silent no-op mid-run.
 """
@@ -15,7 +16,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from benchspec.agents import known_harnesses
+from benchspec.agents import known_harnesses, provider_error
+from benchspec.agents.base import DEFAULT_PROVIDER
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
 from benchspec.specs.schema import SchemaError
 
@@ -30,9 +32,10 @@ class Arm:
     effort: str = "medium"
     env: dict[str, str] = field(default_factory=dict, hash=False)  # unhashable; keep Arm hashable
     harness_args: list[str] = field(default_factory=list, hash=False)
+    provider: str = DEFAULT_PROVIDER
 
 
-_SET_DEFAULT_KEYS = ("harness", "model", "effort", "env", "harness_args")
+_SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "env", "harness_args")
 _VAR = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
 _DEFAULT_EFFORT = "medium"
 _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
@@ -76,6 +79,15 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
     for arg_index, item in enumerate(value):
         if not isinstance(item, str):
             raise SchemaError(f"{where}: `harness_args[{arg_index}]` must be a string")
+    return value
+
+
+def _validate_provider(where: str, harness: str, value: object) -> str:
+    """Return `value` when it is a provider `harness`'s adapter supports, else raise SchemaError."""
+    if not isinstance(value, str) or not value:
+        raise SchemaError(f"{where}: `provider` must be a non-empty string")
+    if (error := provider_error(harness, value)) is not None:
+        raise SchemaError(f"{where}: {error}")
     return value
 
 
@@ -136,6 +148,9 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
                 raise SchemaError(f"{at}: missing `harness` (no arm value, no set default)")
             if harness not in known:
                 raise SchemaError(f"{at}: unknown harness `{harness}` (known: {sorted(known)})")
+            _validate_provider(
+                at, harness, entry.get("provider", defaults.get("provider", DEFAULT_PROVIDER))
+            )
 
             if "env" in entry:
                 _validate_env_table(f"{at}: arm-level `env`", entry["env"])
@@ -217,6 +232,9 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
         raise SchemaError(f"{where} arm `{name}`: no `harness` (no arm value, no set default)")
     if harness not in known_harnesses():
         raise SchemaError(f"{where} arm `{name}`: unknown harness `{harness}`")
+    provider = _validate_provider(
+        f"{where} arm `{name}`", harness, raw.get("provider", defaults.get("provider", DEFAULT_PROVIDER))
+    )
     model = raw.get("model", defaults.get("model"))
     if not (isinstance(model, str) and model):
         raise SchemaError(f"{where} arm `{name}`: no `model` (no arm value, no set default)")
@@ -225,7 +243,7 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
 
     # Env stays unexpanded until the arm executes.
-    return Arm(name, harness, model, effort, merged, harness_args)
+    return Arm(name, harness, model, effort, merged, harness_args, provider=provider)
 
 
 def resolve_set(

@@ -23,6 +23,7 @@ import pytest
 from benchspec.config.arms import Arm
 from benchspec.config.options import RunOptions, option_str
 from benchspec.config.sets import (
+    resolved_binder_config,
     resolved_judge_config,
     resolved_run_set,
     run_set_when_needed,
@@ -59,10 +60,11 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
     run_set = run_set_when_needed(config, needs_set=bool(cases))
     arms = run_set.arms if run_set else []
     if cases:
-        # Structural judge preflight — before ANY paid task arm runs. Raises
+        # Structural judge and binder preflight — before ANY paid task arm runs. Raises
         # pytest.UsageError at collection on a bad config; binary-on-PATH is
         # checked separately, later, only when tests actually execute.
         resolved_judge_config(config)
+        resolved_binder_config(config)
     pairs: list[tuple[EvalCase, Arm]] = []
     ids: list[str] = []
     for case in cases:
@@ -129,8 +131,9 @@ def grading_preflight_errors(config: RunOptions) -> list[str]:
         The failures, empty when grading can proceed.
 
     Raises:
-        pytest.UsageError: a structural defect in the judge config.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
+    resolved_binder_config(config)
     return _grading_environment_errors(resolved_judge_config(config))
 
 
@@ -151,9 +154,10 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
     Raises:
         RuntimeError: `GEMINI_API_KEY` missing or empty, the judge binary absent, or the
             judge harness unable to authenticate on the host; every failure listed.
-        pytest.UsageError: a structural defect in the judge config.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
     judge = resolved_judge_config(config)
+    resolved_binder_config(config)
 
     errors = _grading_environment_errors(judge)
     if errors:
@@ -205,33 +209,33 @@ def seeded_workdir(
     return workdir, pre_run_shas
 
 
-def _session_sandbox_target(config: RunOptions) -> tuple[SandboxBackend | None, list[str]]:
-    """Return the resolved set's sandbox backend and arm harnesses, for its preflight.
+def _session_sandbox_target(config: RunOptions) -> tuple[SandboxBackend | None, list[Arm]]:
+    """Return the resolved set's sandbox backend and arms, for its preflight.
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
     sets table degrades instead of raising). No eval set ⇒ a None backend, so preflight
-    resolves the default one, and no arm harnesses.
+    resolves the default one, and no arms.
     """
     run_set = session_run_set(config)
     backend = resolve_sandbox(run_set.sandbox) if run_set else None
-    harnesses = [arm.harness for arm in run_set.arms] if run_set else []
-    return backend, harnesses
+    arms = list(run_set.arms) if run_set else []
+    return backend, arms
 
 
 def sandbox_preflight_errors(config: RunOptions) -> list[str]:
     """Return every reason the resolved set's sandbox can't run, empty when it can."""
-    backend, harnesses = _session_sandbox_target(config)
-    return sandbox.preflight_errors(backend, harnesses=harnesses)
+    backend, arms = _session_sandbox_target(config)
+    return sandbox.preflight_errors(backend, arms=arms)
 
 
 def preflight_session_sandbox(config: RunOptions) -> None:
     """Preflight the resolved eval set's sandbox backend before any arm runs.
 
-    Drives `sandbox.preflight` with the set's backend and arm harnesses, so every harness
-    the arms will run under has its credential checked.
+    Drives `sandbox.preflight` with the set's backend and arms, so every harness ×
+    provider pair the arms will run under has its credential checked.
     """
-    backend, harnesses = _session_sandbox_target(config)
-    sandbox.preflight(backend, harnesses=harnesses)
+    backend, arms = _session_sandbox_target(config)
+    sandbox.preflight(backend, arms=arms)
 
 
 @pytest.fixture(scope="session", autouse=True)
