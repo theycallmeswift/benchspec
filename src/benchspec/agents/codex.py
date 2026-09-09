@@ -1,4 +1,11 @@
-"""Codex CLI implementation of the `CodingAgent` interface."""
+"""Codex CLI implementation of the `CodingAgent` interface.
+
+Under `provider = "openrouter"` the adapter appends benchspec-owned `-c` overrides that
+declare an OpenRouter model provider on the Responses wire API, in both the guest
+command and the host judge, so no `config.toml` is written anywhere and the user's
+`~/.codex/config.toml` stays untouched; `OPENROUTER_API_KEY` rides as the credential,
+scoped to `openrouter.ai`. Nothing about the snapshot changes.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,13 @@ from collections.abc import Iterable, Mapping
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import (
+    DEFAULT_PROVIDER,
+    OPENROUTER_PROVIDER,
+    AgentCapabilities,
+    BaseAgent,
+    Credential,
+)
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
@@ -33,6 +46,22 @@ _CODEX_ENV_NAMES = {
 }
 _CREDENTIAL_REMEDY = (
     "set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, OPENAI_API_KEY, or CODEX_ACCESS_TOKEN"
+)
+# Under `openrouter`, the one credential Codex reads (named by `env_key` below).
+OPENROUTER_AUTH_ENV = "OPENROUTER_API_KEY"
+_OPENROUTER_HOSTS = ["openrouter.ai"]
+_OPENROUTER_CREDENTIAL_REMEDY = "no OpenRouter credential — set OPENROUTER_API_KEY"
+# Codex reaches a custom provider only through `model_provider` plus a
+# `[model_providers.<id>]` table; these `-c` overrides declare it per invocation so no
+# config file is written. Codex ignores `OPENAI_BASE_URL`, and it speaks only the
+# Responses wire API, which OpenRouter serves at `/api/v1/responses`. Values are quoted
+# because `-c` parses them as TOML.
+_OPENROUTER_CONFIG_OVERRIDES = (
+    'model_provider="openrouter"',
+    'model_providers.openrouter.name="OpenRouter"',
+    'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    f'model_providers.openrouter.env_key="{OPENROUTER_AUTH_ENV}"',
+    'model_providers.openrouter.wire_api="responses"',
 )
 _RESERVED_HARNESS_ARGS = {
     "-m",
@@ -110,6 +139,13 @@ def _auth_json_from_env(environ: Mapping[str, str] | None = None) -> str | None:
     return path
 
 
+def _provider_overrides(provider: str) -> list[str]:
+    """The benchspec-owned `-c` tokens that route Codex through `provider`; none under `default`."""
+    if provider != OPENROUTER_PROVIDER:
+        return []
+    return [token for override in _OPENROUTER_CONFIG_OVERRIDES for token in ("-c", override)]
+
+
 def _renamed_host_credentials() -> dict[str, str]:
     """Host credentials renamed to what Codex reads; an exported Codex name is kept."""
     return {
@@ -162,8 +198,20 @@ class CodexAgent(BaseAgent):
 
     @classmethod
     def from_env(cls, provider: str = DEFAULT_PROVIDER) -> CodexAgent:
-        """Build an agent instance from host environment settings."""
+        """Build an agent instance from host environment settings.
+
+        Under `openrouter` the credential is the host's `OPENROUTER_API_KEY`; under
+        `default` it is the first Codex credential set, else a mounted auth.json. Either
+        way a missing credential is left for preflight to report.
+        """
         version = os.environ.get("BENCHSPEC_CODEX_VERSION", "latest")
+        if provider == OPENROUTER_PROVIDER:
+            return cls(
+                auth_value=os.environ.get(OPENROUTER_AUTH_ENV, ""),
+                auth_env=OPENROUTER_AUTH_ENV,
+                version=version,
+                provider=provider,
+            )
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
@@ -179,8 +227,14 @@ class CodexAgent(BaseAgent):
     def credential_error(
         provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
     ) -> str | None:
-        """Return a credential preflight error message when credentials are missing."""
+        """Return a credential preflight error message when credentials are missing.
+
+        Under `openrouter` only `OPENROUTER_API_KEY` counts — an OpenAI credential or a
+        ChatGPT login cannot authenticate to the gateway, so neither is accepted or named.
+        """
         environ = os.environ if environ is None else environ
+        if provider == OPENROUTER_PROVIDER:
+            return None if environ.get(OPENROUTER_AUTH_ENV) else _OPENROUTER_CREDENTIAL_REMEDY
         if any(environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
         if _auth_json_from_env(environ):
@@ -188,9 +242,15 @@ class CodexAgent(BaseAgent):
         return f"no Codex credential - {_CREDENTIAL_REMEDY}"
 
     def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
-        """Accept an env credential, else ask `codex login status` whether the host is logged in."""
+        """Accept an env credential, else ask `codex login status` whether the host is logged in.
+
+        Under `openrouter` the probe is skipped: `codex login status` reports "Not logged
+        in" by design with a custom provider, so the env check alone decides.
+        """
         if self.credential_error(self.provider, environ) is None:
             return None
+        if self.provider == OPENROUTER_PROVIDER:
+            return _OPENROUTER_CREDENTIAL_REMEDY
         proc = self.host_probe("login", "status", env=environ)
         if proc is not None and proc.returncode == 0:
             return None
@@ -221,7 +281,13 @@ class CodexAgent(BaseAgent):
         }
 
     def secrets(self) -> list[Credential]:
-        """Return the provider credentials to inject into the guest."""
+        """Return the provider credentials to inject into the guest.
+
+        Under `openrouter` the key may only reach `openrouter.ai`, so under microsandbox
+        the guest never sees it and cannot send it anywhere else.
+        """
+        if self.provider == OPENROUTER_PROVIDER:
+            return [Credential(OPENROUTER_AUTH_ENV, self._auth_value, tuple(_OPENROUTER_HOSTS))]
         if self._auth_json_path:
             return []
         guest_env_name = _CODEX_ENV_NAMES.get(self._auth_env, self._auth_env)
@@ -241,7 +307,11 @@ class CodexAgent(BaseAgent):
         harness_args: list[str] | None = None,
         workdir: str | None = None,
     ) -> list[str]:
-        """Build the guest command used to invoke the agent."""
+        """Build the guest command used to invoke the agent.
+
+        The provider overrides are benchspec-owned `-c` tokens appended by the adapter;
+        `-c` stays reserved for user `harness_args`.
+        """
         # plugin_dir/resume_session_id/detect_skill are accepted for protocol parity.
         # Codex exec has no stable benchspec-owned equivalents for them yet.
         cd = workdir or self.guest_home
@@ -253,6 +323,7 @@ class CodexAgent(BaseAgent):
             model,
             "-c",
             f"model_reasoning_effort={effort}",
+            *_provider_overrides(self.provider),
             "-C",
             cd,
             "--dangerously-bypass-approvals-and-sandbox",
@@ -406,12 +477,15 @@ class CodexAgent(BaseAgent):
         and raises RuntimeError on infra failure — a missing binary, a nonzero exit,
         or a harness error event surfaced by the parser as `is_error`. `config.effort`
         is pinned via `-c model_reasoning_effort=...` so the verdict never depends on
-        whatever `~/.codex/config.toml` the host happens to carry. A host `OPENAI_API_KEY`
-        reaches Codex as `CODEX_API_KEY`; `config.env` wins.
+        whatever `~/.codex/config.toml` the host happens to carry, and under `openrouter`
+        the same `-c` overrides the guest gets declare the provider per invocation, so
+        the host's config.toml is neither read for it nor written. A host
+        `OPENAI_API_KEY` reaches Codex as `CODEX_API_KEY`; `config.env` wins.
         """
         command = [
             self.agent_bin, "exec", "--json", "-m", config.model,
             "-c", f"model_reasoning_effort={config.effort}",
+            *_provider_overrides(self.provider),
             *config.harness_args, prompt,
         ]
         judge_env = {**_renamed_host_credentials(), **config.env}
