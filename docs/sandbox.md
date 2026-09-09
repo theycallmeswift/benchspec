@@ -187,6 +187,44 @@ installs glibc-linked CLIs. `environment_script` is for suite-wide system
 dependencies; per-eval and per-arm setup belongs in the eval's own `setup.sh`,
 which can branch on `BENCHSPEC_ARM` and `BENCHSPEC_SET`.
 
+`BENCHSPEC_BASE_IMAGE` in the host environment overrides `base_image` for that
+host only. It exists for hosts whose base must carry something the shared config
+shouldn't: the provision step fetches the agent CLI over HTTPS, so a host behind
+a TLS-intercepting proxy needs its CA trusted inside the guest before the
+install runs. `environment_script` runs too late for that.
+
+### Claude Code on the web
+
+The cloud VM is one such host. [`scripts/cloud-env-setup.sh`](../scripts/cloud-env-setup.sh)
+is the environment's setup script: paste it into the **Setup script** field of
+the cloud environment at claude.ai/code. It installs the Codex judge, writes the
+dotenv file described below, starts `dockerd`, and builds
+`benchspec-base:proxy-ca` from `ubuntu:latest` with the proxy CA installed and
+`NODE_EXTRA_CA_CERTS` pointing at it. The script runs once; the environment
+snapshot keeps its files and images for later sessions.
+
+Two things the snapshot can't carry:
+
+- **A running daemon.** Sessions after the first start with `dockerd` stopped.
+  Start it before `make e2e`:
+
+  ```bash
+  setsid nohup dockerd >/tmp/benchspec-dockerd.log 2>&1 </dev/null &
+  ```
+
+- **The Claude credential.** Claude Code strips its own auth variables
+  (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from every command it runs,
+  so a value under either name in the cloud environment never reaches
+  `make e2e`. Store the token as `BENCHSPEC_CLAUDE_OAUTH_TOKEN` instead. The
+  setup script writes `/home/user/.env`, above the clone, mapping it back;
+  benchspec's dotenv loader walks up from the repo and expands the reference at
+  run time, so the file holds no secret. The same file carries
+  `BENCHSPEC_BASE_IMAGE`.
+
+`GEMINI_API_KEY` and the Codex credential pass through untouched. The Codex
+judge also needs `api.openai.com` in the environment's allowed domains; the
+Trusted default list doesn't include it.
+
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
 `benchspec.sandbox.docker` and `benchspec.sandbox.microsandbox` (the two backend

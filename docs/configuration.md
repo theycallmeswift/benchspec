@@ -240,6 +240,7 @@ guest (see [`sandbox.md`](sandbox.md#credentials)).
 | `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order; see [`harnesses.md`](harnesses.md). |
 | `OPENROUTER_API_KEY` | OpenCode's preferred provider credential (falls back to `ANTHROPIC_API_KEY`, then `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`). |
 | `BENCHSPEC_CLAUDE_VERSION` / `BENCHSPEC_CODEX_VERSION` / `BENCHSPEC_OPENCODE_VERSION` | Select a harness CLI version instead of `latest`; each value keys its own sandbox snapshot. Codex and OpenCode install exactly that version; the Claude Code installer always fetches the latest release, so its value only names the snapshot (the version that ran is recorded in `meta.json`). |
+| `BENCHSPEC_BASE_IMAGE` | OCI image the sandbox snapshot builds from, above `[tool.benchspec] base_image`. For a host whose base needs something the config shouldn't carry, such as a proxy CA; see [`sandbox.md`](sandbox.md#customizing-the-image). |
 | `PROJECT_ROOT` | Repo-root override (below `--benchspec-repo-root`, above the pytest rootdir). |
 
 Inside the sandbox, each cell's `setup.sh` additionally sees `BENCHSPEC_ARM`,
