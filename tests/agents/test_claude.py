@@ -642,3 +642,92 @@ def test_claude_invoke_extra_env_overrides_guest_env() -> None:
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert env["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert env["HOME"] == ClaudeCodeAgent.guest_home  # guest_env still present
+
+
+def _openrouter_agent() -> ClaudeCodeAgent:
+    """Build an arm agent routed through OpenRouter with a known key."""
+    return ClaudeCodeAgent(
+        auth_value="sk-or-test", auth_env="ANTHROPIC_AUTH_TOKEN", provider="openrouter"
+    )
+
+
+def test_from_env_under_openrouter_reads_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under `openrouter` the credential is OPENROUTER_API_KEY, not an Anthropic key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ignored")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    agent = ClaudeCodeAgent.from_env("openrouter")
+
+    assert agent.provider == "openrouter"
+    assert agent.secrets() == [
+        Credential("ANTHROPIC_AUTH_TOKEN", "sk-or-test", ("openrouter.ai",))
+    ]
+
+
+def test_guest_env_under_openrouter_points_at_the_gateway_and_empties_the_api_key() -> None:
+    """The guest gets the cookbook base URL (no `/v1`) and an explicitly empty API key."""
+    env = _openrouter_agent().guest_env()
+
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_API_KEY"] == ""
+    assert env["HOME"] == ClaudeCodeAgent.guest_home
+    assert env["IS_SANDBOX"] == "1"
+    assert env["TZ"] == "UTC"
+
+
+def test_guest_env_under_default_is_unchanged() -> None:
+    """The `default` provider produces exactly today's guest env: no gateway keys at all."""
+    assert _agent().guest_env() == {"HOME": "/root", "IS_SANDBOX": "1", "TZ": "UTC"}
+
+
+def test_secrets_under_default_stay_scoped_to_anthropic() -> None:
+    """The `default` provider still scopes the credential to the Anthropic API host."""
+    assert _agent().secrets() == [
+        Credential("ANTHROPIC_API_KEY", "sk-test", ("api.anthropic.com",))
+    ]
+
+
+def test_credential_error_under_openrouter_needs_only_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An Anthropic credential neither satisfies nor is named by the OpenRouter check."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    error = ClaudeCodeAgent.credential_error("openrouter")
+
+    assert error is not None
+    assert "OPENROUTER_API_KEY" in error
+    assert "ANTHROPIC_API_KEY" not in error
+
+
+def test_credential_error_under_openrouter_passes_with_only_that_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an OpenRouter arm needs no Anthropic credential at all."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    assert ClaudeCodeAgent.credential_error("openrouter") is None
+
+
+def test_invoke_under_openrouter_hands_the_guest_the_gateway_env() -> None:
+    """The exec env the guest runs with carries the OpenRouter routing, arm env still winning."""
+    payload = json.dumps({"type": "result", "result": "ok", "is_error": False, "session_id": "s"})
+    sandbox = FakeSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=payload)])
+
+    asyncio.run(
+        _openrouter_agent().invoke(
+            sandbox, "hi", eval_id="e", config="trial", workdir="/w", plugin_dir=None,
+            model="anthropic/claude-sonnet-4.6", effort="medium", resume_session_id=None,
+            detect_skill=None, extra_env={"ANTHROPIC_BASE_URL": "https://example.test"},
+        )
+    )
+
+    env = exec_call(sandbox).env
+    assert env["ANTHROPIC_API_KEY"] == ""
+    assert env["ANTHROPIC_BASE_URL"] == "https://example.test"  # arm env wins
+    assert "ANTHROPIC_AUTH_TOKEN" not in env  # the key is a scoped secret, not plain env

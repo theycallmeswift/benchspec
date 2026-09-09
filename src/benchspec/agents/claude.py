@@ -1,8 +1,14 @@
 """Claude Code implementation of the `CodingAgent` interface.
 
 Provisions the Claude Code CLI into a sandbox (the cached snapshot step), declares the
-Anthropic credential for the backend to inject, builds the headless `claude -p`
+provider credential for the backend to inject, builds the headless `claude -p`
 command, and parses its output through the shared helpers in `results.py`.
+
+Under `provider = "openrouter"` the same CLI is pointed at OpenRouter's Anthropic
+Messages skin at exec time: `ANTHROPIC_BASE_URL` names the gateway, `ANTHROPIC_API_KEY`
+is explicitly emptied so no direct-Anthropic credential can be picked up, and the
+OpenRouter key rides as `ANTHROPIC_AUTH_TOKEN` scoped to `openrouter.ai`. Nothing about
+the snapshot changes.
 """
 
 from __future__ import annotations
@@ -13,7 +19,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import (
+    DEFAULT_PROVIDER,
+    OPENROUTER_PROVIDER,
+    AgentCapabilities,
+    BaseAgent,
+    Credential,
+)
 from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, parse_stream_run
@@ -26,6 +38,13 @@ if TYPE_CHECKING:
 # Credentials Claude Code reads, in preference order. Whichever is set becomes a scoped
 # credential the backend injects (substituted only for the Anthropic API host).
 AUTH_ENV_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
+# Under `openrouter`, the host key Claude Code is handed as a bearer token.
+OPENROUTER_AUTH_ENV = "OPENROUTER_API_KEY"
+_OPENROUTER_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"
+_OPENROUTER_HOST = "openrouter.ai"
+# No `/v1`: Claude Code appends `/v1/messages` itself, per OpenRouter's cookbook.
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+_OPENROUTER_CREDENTIAL_REMEDY = "no OpenRouter credential — set OPENROUTER_API_KEY"
 _RESERVED_HARNESS_ARGS = {
     "-p",
     "--print",
@@ -93,6 +112,16 @@ def _raise_for_is_error_envelope(stdout: str) -> None:
         raise RuntimeError(f"host claude CLI returned is_error=true: {msg[:1000]}")
 
 
+def _openrouter_routing_env() -> dict[str, str]:
+    """The env that points Claude Code at OpenRouter's Anthropic Messages skin.
+
+    `ANTHROPIC_API_KEY` is set to the empty string on purpose: OpenRouter's cookbook
+    requires the explicit override so Claude Code cannot fall back to a direct-Anthropic
+    credential that happens to be in the environment.
+    """
+    return {"ANTHROPIC_BASE_URL": _OPENROUTER_BASE_URL, "ANTHROPIC_API_KEY": ""}
+
+
 def _reports_logged_in(auth_status_json: str) -> bool:
     """Whether a `claude auth status` JSON envelope reports an active login."""
     try:
@@ -140,8 +169,20 @@ class ClaudeCodeAgent(BaseAgent):
 
     @classmethod
     def from_env(cls, provider: str = DEFAULT_PROVIDER) -> ClaudeCodeAgent:
-        """Build an agent instance from host environment settings."""
+        """Build an agent instance from host environment settings.
+
+        Under `openrouter` the credential is the host's `OPENROUTER_API_KEY`, carried under
+        the bearer-token name Claude Code reads; under `default` it is the first Anthropic
+        credential set. Either way a missing credential is left for preflight to report.
+        """
         version = os.environ.get("BENCHSPEC_CLAUDE_VERSION", "latest")
+        if provider == OPENROUTER_PROVIDER:
+            return cls(
+                auth_value=os.environ.get(OPENROUTER_AUTH_ENV, ""),
+                auth_env=_OPENROUTER_TOKEN_ENV,
+                version=version,
+                provider=provider,
+            )
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
@@ -154,8 +195,14 @@ class ClaudeCodeAgent(BaseAgent):
     def credential_error(
         provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
     ) -> str | None:
-        """Return a credential preflight error message when credentials are missing."""
+        """Return a credential preflight error message when credentials are missing.
+
+        Under `openrouter` only `OPENROUTER_API_KEY` counts — an Anthropic credential
+        cannot authenticate to the gateway, so it is neither accepted nor mentioned.
+        """
         environ = os.environ if environ is None else environ
+        if provider == OPENROUTER_PROVIDER:
+            return None if environ.get(OPENROUTER_AUTH_ENV) else _OPENROUTER_CREDENTIAL_REMEDY
         if any(environ.get(env_var) for env_var in AUTH_ENV_VARS):
             return None
         return (
@@ -164,9 +211,15 @@ class ClaudeCodeAgent(BaseAgent):
         )
 
     def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
-        """Accept an env credential, else ask `claude auth status` whether the host is logged in."""
+        """Accept an env credential, else ask `claude auth status` whether the host is logged in.
+
+        Under `openrouter` the host login is irrelevant (the gateway takes only the bearer
+        token), so the probe is skipped and the env check alone decides.
+        """
         if self.credential_error(self.provider, environ) is None:
             return None
+        if self.provider == OPENROUTER_PROVIDER:
+            return _OPENROUTER_CREDENTIAL_REMEDY
         proc = self.host_probe("auth", "status", env=environ)
         if proc is not None and proc.returncode == 0 and _reports_logged_in(proc.stdout):
             return None
@@ -197,11 +250,22 @@ class ClaudeCodeAgent(BaseAgent):
         # TZ=UTC pins the guest clock to the zone the host computes {TODAY}
         # in, so a dated path the agent writes matches the date the assertions were
         # substituted with.
-        return {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
+        env = {"HOME": self.guest_home, "IS_SANDBOX": "1", "TZ": "UTC"}
+        if self.provider == OPENROUTER_PROVIDER:
+            env.update(_openrouter_routing_env())
+        return env
 
     def secrets(self) -> list[Credential]:
-        """Return the provider credentials to inject into the guest."""
-        return [Credential(self._auth_env, self._auth_value, ("api.anthropic.com",))]
+        """Return the provider credentials to inject into the guest.
+
+        The allow-host follows the provider: under `openrouter` the bearer token may only
+        reach `openrouter.ai`, so under microsandbox the guest never sees the key and
+        cannot send it anywhere else.
+        """
+        allow_host = (
+            _OPENROUTER_HOST if self.provider == OPENROUTER_PROVIDER else "api.anthropic.com"
+        )
+        return [Credential(self._auth_env, self._auth_value, (allow_host,))]
 
     def build_command(
         self,
@@ -272,16 +336,30 @@ class ClaudeCodeAgent(BaseAgent):
 
         The output is already the {"result": ..., "is_error": ...} envelope judge.py
         parses, so it is returned as-is after infra checks. RuntimeError on a missing
-        binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota).
+        binary, a nonzero exit, or an is_error envelope (auth/rate-limit/quota). Under
+        `openrouter` the routing env and the bearer token are merged under `config.env`,
+        so a user's judge `env` still wins.
         """
         command = [self.agent_bin, "-p", prompt, "--output-format", "json",
                    "--model", config.model, "--effort", config.effort,
                    *config.harness_args]
-        proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
+        judge_env = {**self._judge_provider_env(config.env), **config.env}
+        proc = await (env or Host()).exec(command, env=judge_env, timeout=config.timeout)
 
         proc.require_success()
         _raise_for_is_error_envelope(proc.stdout)
         return proc.stdout
+
+    def _judge_provider_env(self, config_env: Mapping[str, str]) -> dict[str, str]:
+        """The provider routing the host judge needs beneath `config_env`; empty under `default`.
+
+        The OpenRouter key is read from the host environment with the judge's own `env`
+        laid over it — the same view the credential preflight evaluated.
+        """
+        if self.provider != OPENROUTER_PROVIDER:
+            return {}
+        token = {**os.environ, **config_env}.get(OPENROUTER_AUTH_ENV, "")
+        return {**_openrouter_routing_env(), _OPENROUTER_TOKEN_ENV: token}
 
     def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
         """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
