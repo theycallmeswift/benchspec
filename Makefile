@@ -14,8 +14,12 @@ test:  ## Run the unit test suite
 # each e2e cell reserves a 2 GB sandbox, and binder fan-out past ~12 trips the
 # Gemini call's ~60s timeout.
 WORKERS ?= 6
-e2e:  ## Run the in-repo hello suite end to end on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Prerequisites: README, Development
+# The second run puts the binder, the judge, and every harness on OpenRouter, so one
+# command proves both the default path and the single-key path. The judge stays on
+# Codex but grades on a Google slug: the arms are Anthropic and OpenAI models.
+e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter, on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Prerequisites: README, Development
 	uv run benchspec run --set e2e -- -n $(WORKERS) $(EVAL_ARGS)
+	uv run benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model google/gemini-3.5-flash --binder-provider openrouter -- -n $(WORKERS) $(EVAL_ARGS)
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection
 	uv run pytest -m binder_corpus -n $(WORKERS) evals/binder $(EVAL_ARGS)

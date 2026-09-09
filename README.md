@@ -200,12 +200,14 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 2. **Confirm the suite collects.** Needs no credentials and no Docker:
 
    ```bash
-   make e2e EVAL_ARGS="--collect-only -q"   # 6 cells: 2 evals × 3 arms
+   make e2e EVAL_ARGS="--collect-only -q"   # 6 cells: 2 evals × 3 arms, then 8 through OpenRouter
    ```
 
-3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/):
-   two evals across three Claude Code arms, judged by Codex. It needs `claude` and
-   `codex` on `PATH`, a running Docker daemon, and three credentials in `.env`:
+3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/)
+   twice: two evals across three Claude Code arms, judged by Codex; then the same
+   evals across Claude Code, Codex, and OpenCode arms with the binder, the judge,
+   and every arm on OpenRouter. It needs `claude` and `codex` on `PATH`, a running
+   Docker daemon, and four credentials in `.env`:
 
    ```bash
    cp .env.example .env
@@ -216,6 +218,7 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
    | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` | the arms |
    | `GEMINI_API_KEY` | the binder |
    | `OPENAI_API_KEY` | the Codex judge |
+   | `OPENROUTER_API_KEY` | the second run: binder, judge, and arms through OpenRouter |
 
    Preflight lists every missing piece in one message and exits before anything
    is spent.

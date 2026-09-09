@@ -135,6 +135,23 @@ arms = [
   { name = "trial-overrides", model = "opus", effort = "high", env = { GREETING_LOCALE = "en-GB" } },
 ]
 
+# The same hello suite with the binder, the judge, and every harness on OpenRouter, so
+# `make e2e` covers the single-key path too. Arms stay on Anthropic and OpenAI models;
+# `make e2e` puts the Codex judge on a Google slug so it grades cross-family.
+[tool.benchspec.sets.e2e-openrouter]
+harness  = "claude-code"
+provider = "openrouter"
+model    = "anthropic/claude-sonnet-4.6"
+effort   = "medium"
+baseline = "baseline"
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "baseline" },                                                              # installs no skill
+  { name = "trial" },                                                                 # installs the skill, set defaults
+  { name = "trial-codex", harness = "codex", model = "openai/gpt-5.5" },
+  { name = "trial-opencode", harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
+]
+
 [tool.benchspec.judge]
 harness = "codex"
 model   = "gpt-5.5"
