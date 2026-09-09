@@ -294,7 +294,7 @@ def _usage_int(value: object) -> int:
     return 0
 
 
-def preflight_gemini_key() -> None:
+def preflight_verify_gemini_key() -> None:
     """Raise RuntimeError if GEMINI_API_KEY is missing or empty.
 
     A GEMINI_API_KEY set to the empty string counts as missing — python-dotenv

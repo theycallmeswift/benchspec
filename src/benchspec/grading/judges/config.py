@@ -4,7 +4,7 @@ Resolved once per run from four layers (CLI > scratch --benchspec-config >
 pyproject.toml [tool.benchspec.judge] > built-in defaults — see resolve_judge_config).
 Structural validation (field types, known harness, reserved harness_args) happens at
 resolve time, safe to run under `--collect-only`. Binary-on-PATH is a separate, later
-check (judges.registry.preflight_judge_binary) that only runs when tests actually
+check (judges.registry.preflight_verify_judge_binary) that only runs when tests actually
 execute.
 """
 
@@ -112,7 +112,7 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
     """Structural, environment-free checks — safe to run under `--collect-only`.
 
     Also safe on a host with no judge CLI installed. Binary-on-PATH is a separate,
-    later check (judges.registry.preflight_judge_binary) run only when tests actually
+    later check (judges.registry.preflight_verify_judge_binary) run only when tests actually
     execute.
     """
     if config.harness not in known_judge_harnesses():

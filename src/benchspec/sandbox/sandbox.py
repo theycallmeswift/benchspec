@@ -60,24 +60,40 @@ def snapshot_name(
     return f"{NAME_PREFIX}{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
 
 
-def preflight(backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()) -> None:
-    """Fail fast if the host can't run sandboxed evals.
+def format_preflight_failure(heading: str, errors: Iterable[str]) -> str:
+    """Render preflight failures as one message: the heading, then one bullet per error."""
+    return f"{heading}:\n  - " + "\n  - ".join(errors)
+
+
+def preflight_errors(
+    backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()
+) -> list[str]:
+    """Return every reason the host can't run sandboxed evals, empty when it can.
 
     Host-readiness checks come from the resolved backend (the default one when none is
     passed). The credential check covers the selected agent plus every harness in
-    `harnesses` (a set's arm harnesses), naming each one that fails. Raises RuntimeError
-    (the exit-2 signal) listing every failure.
+    `harnesses` (a set's arm harnesses), naming each one that fails.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
-    errs: list[str] = list(backend.preflight())
+    errors: list[str] = list(backend.preflight())
     # dict.fromkeys dedupes while preserving order, so a harness is reported once even
     # when it is both the selected agent and an arm's harness.
     for harness in dict.fromkeys((resolve_agent_name(), *harnesses)):
-        cred_err = credential_preflight_error(harness)
-        if cred_err:
-            errs.append(f"harness `{harness}`: {cred_err}")
-    if errs:
-        raise RuntimeError("benchspec sandbox preflight failed:\n  - " + "\n  - ".join(errs))
+        credential_error = credential_preflight_error(harness)
+        if credential_error:
+            errors.append(f"harness `{harness}`: {credential_error}")
+    return errors
+
+
+def preflight(backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()) -> None:
+    """Fail fast if the host can't run sandboxed evals.
+
+    Raises RuntimeError (the exit-2 signal) listing every failure `preflight_errors`
+    reports for the same backend and harnesses.
+    """
+    errors = preflight_errors(backend, harnesses=harnesses)
+    if errors:
+        raise RuntimeError(format_preflight_failure("benchspec sandbox preflight failed", errors))
 
 
 @contextlib.contextmanager

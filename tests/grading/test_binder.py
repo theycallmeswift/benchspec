@@ -438,24 +438,24 @@ def test_call_gemini_raises_runtimeerror_on_malformed_json_body(
         binder._call_gemini("prompt")
 
 
-def test_preflight_gemini_key_raises_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_gemini_key_raises_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight raises RuntimeError when GEMINI_API_KEY is unset."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        binder.preflight_gemini_key()
+        binder.preflight_verify_gemini_key()
 
 
-def test_preflight_gemini_key_raises_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_gemini_key_raises_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a set-but-empty GEMINI_API_KEY counts as missing."""
     monkeypatch.setenv("GEMINI_API_KEY", "")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        binder.preflight_gemini_key()
+        binder.preflight_verify_gemini_key()
 
 
-def test_preflight_gemini_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_gemini_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight passes with a non-empty key."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    binder.preflight_gemini_key()  # no raise
+    binder.preflight_verify_gemini_key()  # no raise
 
 
 def test_binder_identity_matches_spec_shape() -> None:

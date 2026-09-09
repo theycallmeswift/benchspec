@@ -87,7 +87,7 @@ def pytest_configure(config: pytest.Config) -> None:
     if not (_is_controller(config) and _binder_selected(config)):
         return
     try:
-        binder.preflight_gemini_key()
+        binder.preflight_verify_gemini_key()
     except RuntimeError as error:
         raise pytest.UsageError(str(error)) from None
     config.stash[_RAN] = True

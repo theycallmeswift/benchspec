@@ -50,7 +50,7 @@ def pytest_load_initial_conftests(
 
     Not `pytest_configure`: conftest plugins register after entry-point plugins, and
     pluggy calls hooks LIFO, so every conftest's `pytest_configure` runs first — the
-    binder corpus conftest's `preflight_gemini_key()` was aborting the run before this
+    binder corpus conftest's `preflight_verify_gemini_key()` was aborting the run before this
     plugin ever loaded `.env`. This hook fires before initial conftest collection, so
     credentials are in `os.environ` for anything a conftest does.
 

@@ -13,8 +13,8 @@ from benchspec.grading.judges.config import JudgeConfig
 from benchspec.grading.judges.registry import (
     judge_binary,
     known_judge_harnesses,
-    preflight_judge_binary,
-    preflight_judge_credential,
+    preflight_verify_judge_binary,
+    preflight_verify_judge_credential,
     probe_judge_version,
     run_judge,
 )
@@ -33,22 +33,22 @@ def test_judge_binary_names() -> None:
     assert judge_binary("opencode") == "opencode"
 
 
-def test_preflight_judge_binary_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_judge_binary_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight judge binary raises when missing."""
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
     with pytest.raises(RuntimeError, match="not found on PATH"):
-        preflight_judge_binary(JudgeConfig(harness="claude-code"))
+        preflight_verify_judge_binary(JudgeConfig(harness="claude-code"))
 
 
-def test_preflight_judge_binary_passes_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_judge_binary_passes_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight judge binary passes when present."""
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/local/bin/{name}")
 
-    preflight_judge_binary(JudgeConfig(harness="codex"))  # no raise
+    preflight_verify_judge_binary(JudgeConfig(harness="codex"))  # no raise
 
 
-def test_preflight_judge_credential_raises_naming_the_harness(
+def test_preflight_verify_judge_credential_raises_naming_the_harness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The judge harness's host credential check fails the preflight with the harness named."""
@@ -57,16 +57,16 @@ def test_preflight_judge_credential_raises_naming_the_harness(
     )
 
     with pytest.raises(RuntimeError, match="judge harness `codex`: Codex is not logged in"):
-        preflight_judge_credential(JudgeConfig(harness="codex"))
+        preflight_verify_judge_credential(JudgeConfig(harness="codex"))
 
 
-def test_preflight_judge_credential_passes_when_host_can_authenticate(
+def test_preflight_verify_judge_credential_passes_when_host_can_authenticate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A clean host credential check lets the preflight through."""
     monkeypatch.setattr(ClaudeCodeAgent, "host_credential_error", lambda self: None)
 
-    preflight_judge_credential(JudgeConfig(harness="claude-code"))  # no raise
+    preflight_verify_judge_credential(JudgeConfig(harness="claude-code"))  # no raise
 
 
 def test_run_judge_dispatches_to_the_harness_adapter(monkeypatch: pytest.MonkeyPatch) -> None:

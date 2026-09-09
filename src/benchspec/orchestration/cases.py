@@ -30,11 +30,15 @@ from benchspec.config.sets import (
 )
 from benchspec.grading import binder
 from benchspec.grading.judges import JudgeConfig
-from benchspec.grading.judges.registry import preflight_judge_binary, preflight_judge_credential
+from benchspec.grading.judges.registry import (
+    preflight_verify_judge_binary,
+    preflight_verify_judge_credential,
+)
 from benchspec.orchestration import results
 from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
 from benchspec.sandbox import sandbox
+from benchspec.sandbox.backend import SandboxBackend
 from benchspec.sandbox.registry import resolve_sandbox
 from benchspec.specs.discovery import (
     EvalCase,
@@ -91,14 +95,52 @@ def eval_set_name(request: pytest.FixtureRequest) -> str:
     return option_str(request.config, "benchspec_set") or ""
 
 
+def _grading_environment_errors(judge: JudgeConfig) -> list[str]:
+    """Return every environment failure grading would hit with `judge`, empty when none.
+
+    Two independent checks, each reported so one run surfaces both: the binder's Gemini
+    credential (an env read), then the judge binary on PATH followed by the judge's host
+    credential. The credential probe runs only when the binary exists, so a missing
+    binary is reported as such rather than as a failed login.
+    """
+    errors: list[str] = []
+
+    try:
+        binder.preflight_verify_gemini_key()
+    except RuntimeError as error:
+        errors.append(str(error))
+
+    try:
+        preflight_verify_judge_binary(judge)
+        preflight_verify_judge_credential(judge)
+    except RuntimeError as error:
+        errors.append(str(error))
+
+    return errors
+
+
+def grading_preflight_errors(config: RunOptions) -> list[str]:
+    """Return every environment failure grading would hit, resolving the judge from `config`.
+
+    Args:
+        config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
+
+    Returns:
+        The failures, empty when grading can proceed.
+
+    Raises:
+        pytest.UsageError: a structural defect in the judge config.
+    """
+    return _grading_environment_errors(resolved_judge_config(config))
+
+
 def preflight_grading(config: RunOptions) -> JudgeConfig:
     """Preflight everything grading needs and return the run's judge config.
 
-    Environment-dependent, in the order that fails cheapest and most specifically:
-    the binder's Gemini credential (an env read), the judge config (structural), the
-    judge binary on PATH, then the judge's host credential. Shared by the `judge_config`
-    fixture and the `run` CLI, so what the CLI refuses before spawning pytest is exactly
-    what pytest would refuse at grading time.
+    The judge config is resolved first (structural), then the environment checks run and
+    every failure is reported together. Shared by the `judge_config` fixture and the
+    `run` CLI, so what the CLI refuses before spawning pytest is exactly what pytest
+    would refuse at grading time.
 
     Args:
         config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
@@ -108,14 +150,16 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
 
     Raises:
         RuntimeError: `GEMINI_API_KEY` missing or empty, the judge binary absent, or the
-            judge harness unable to authenticate on the host.
+            judge harness unable to authenticate on the host; every failure listed.
         pytest.UsageError: a structural defect in the judge config.
     """
-    binder.preflight_gemini_key()
-
     judge = resolved_judge_config(config)
-    preflight_judge_binary(judge)
-    preflight_judge_credential(judge)
+
+    errors = _grading_environment_errors(judge)
+    if errors:
+        raise RuntimeError(
+            sandbox.format_preflight_failure("benchspec grading preflight failed", errors)
+        )
 
     return judge
 
@@ -161,17 +205,32 @@ def seeded_workdir(
     return workdir, pre_run_shas
 
 
-def preflight_session_sandbox(config: RunOptions) -> None:
-    """Preflight the resolved eval set's sandbox backend before any arm runs.
+def _session_sandbox_target(config: RunOptions) -> tuple[SandboxBackend | None, list[str]]:
+    """Return the resolved set's sandbox backend and arm harnesses, for its preflight.
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
-    sets table degrades instead of raising) and drives `sandbox.preflight` with that
-    set's backend and arm harnesses, so every harness the arms will run under has its
-    credential checked. No eval set ⇒ pass None, so preflight resolves the default backend.
+    sets table degrades instead of raising). No eval set ⇒ a None backend, so preflight
+    resolves the default one, and no arm harnesses.
     """
     run_set = session_run_set(config)
     backend = resolve_sandbox(run_set.sandbox) if run_set else None
     harnesses = [arm.harness for arm in run_set.arms] if run_set else []
+    return backend, harnesses
+
+
+def sandbox_preflight_errors(config: RunOptions) -> list[str]:
+    """Return every reason the resolved set's sandbox can't run, empty when it can."""
+    backend, harnesses = _session_sandbox_target(config)
+    return sandbox.preflight_errors(backend, harnesses=harnesses)
+
+
+def preflight_session_sandbox(config: RunOptions) -> None:
+    """Preflight the resolved eval set's sandbox backend before any arm runs.
+
+    Drives `sandbox.preflight` with the set's backend and arm harnesses, so every harness
+    the arms will run under has its credential checked.
+    """
+    backend, harnesses = _session_sandbox_target(config)
     sandbox.preflight(backend, harnesses=harnesses)
 
 

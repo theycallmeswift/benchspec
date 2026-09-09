@@ -195,9 +195,11 @@ install runs. `environment_script` runs too late for that.
 
 ### Claude Code on the web
 
-The cloud VM is one such host. [`scripts/cloud-env-setup.sh`](../scripts/cloud-env-setup.sh)
-is the environment's setup script: paste it into the **Setup script** field of
-the cloud environment at claude.ai/code. It installs the Codex judge, writes the
+The cloud VM is one such host. Once the environment is set up as below, a fresh
+session's whole hello world is `make install && make e2e`.
+[`scripts/cloud-env-setup.sh`](../scripts/cloud-env-setup.sh) is the
+environment's setup script: paste it into the **Setup script** field of the
+cloud environment at claude.ai/code. It installs the Codex judge, writes the
 dotenv file described below, starts `dockerd`, builds `benchspec-base:proxy-ca`
 from `ubuntu:latest` with the proxy CA installed and `NODE_EXTRA_CA_CERTS`
 pointing at it, and writes the session hook described below. The script runs

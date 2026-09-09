@@ -124,7 +124,7 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
 1. **Boots a sandbox** — a Docker container by default, or a microsandbox
    microVM for the opt-in — from a cached snapshot with the agent CLI already
-   installed. The first run builds the snapshot (a few minutes); later runs
+   installed. The first run builds the snapshot (about a minute); later runs
    reuse it. `benchspec sandbox:build` pays that cost up front,
    `benchspec sandbox:clean` reclaims the disk.
 2. **Seeds the clean room** — the eval's optional `workspace/` files land in a
@@ -181,23 +181,60 @@ sequentially.
 
 ## Development
 
+Clone to a graded run of the in-repo suite in four steps. Steps 1 and 2 cost
+nothing; step 3 is the first paid call.
+
 ```bash
 git clone https://github.com/theycallmeswift/benchspec && cd benchspec
-cp .env.example .env    # fill in the credentials below
-make install            # uv sync
-make test               # unit suite: no credentials, no sandbox
-make lint               # ruff, ty, houserules (needs GEMINI_API_KEY)
-make e2e                # the in-repo hello suite, end to end
 ```
 
-`make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/): two evals across three
-Claude Code arms, judged by Codex. It needs `claude` and `codex` on `PATH`, a
-running Docker daemon, and three credentials in `.env`: a Claude credential
-(`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) for the arms, `GEMINI_API_KEY`
-for the binder, and `OPENAI_API_KEY` for the judge. Preflight names whatever is
-missing and exits before anything is spent. The first run builds the sandbox
-snapshot (about a minute); `make e2e WORKERS=1 EVAL_ARGS="-k greets-by-name"`
-runs one eval sequentially.
+1. **Install.** [`uv`](https://docs.astral.sh/uv/) manages the venv;
+   `make install` runs `uv sync`. Then the free checks:
+
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh   # if you don't have uv
+   make install
+   make test     # unit suite: no credentials, no sandbox
+   ```
+
+2. **Confirm the suite collects.** Needs no credentials and no Docker:
+
+   ```bash
+   make e2e EVAL_ARGS="--collect-only -q"   # 6 cells: 2 evals × 3 arms
+   ```
+
+3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/):
+   two evals across three Claude Code arms, judged by Codex. It needs `claude` and
+   `codex` on `PATH`, a running Docker daemon, and three credentials in `.env`:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   | Variable | For |
+   |---|---|
+   | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` | the arms |
+   | `GEMINI_API_KEY` | the binder |
+   | `OPENAI_API_KEY` | the Codex judge |
+
+   Preflight lists every missing piece in one message and exits before anything
+   is spent.
+
+4. **Run it.** The cheapest real run is one eval, one sandbox:
+
+   ```bash
+   make e2e WORKERS=1 EVAL_ARGS="-k greets-by-name"   # one eval, sequential
+   make e2e                                          # the whole suite, six sandboxes
+   ```
+
+   The first run builds the sandbox snapshot (about a minute); with the snapshot
+   cached, the whole suite takes about a minute on six workers. The report lands
+   in `tmp/evals/iteration_01/benchmark.md`.
+
+Then `make lint` (ruff, ty, houserules; needs `GEMINI_API_KEY`) before a pull
+request. On Claude Code on the web, the environment's setup script does steps 1
+and 3 once for every session; see
+[`sandbox.md`](docs/sandbox.md#claude-code-on-the-web).
 
 Issues and pull requests are welcome at
 [github.com/theycallmeswift/benchspec](https://github.com/theycallmeswift/benchspec).
