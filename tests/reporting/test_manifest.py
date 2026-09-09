@@ -8,6 +8,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from benchspec.grading.judges import JudgeConfig
 from benchspec.orchestration import workspace
 from benchspec.reporting import manifest
 from benchspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
@@ -207,3 +210,16 @@ def test_aggregate_observed_arms_trigger_only_skips_roster(tmp_path: Path) -> No
     observed = manifest.aggregate_observed_arms(skills_root, None)
 
     assert set(observed) == {"ghost"}  # off-roster arm accepted when no set is configured
+
+
+def test_judge_meta_carries_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the judge's provider lands beside its harness in meta.json's judge object."""
+    monkeypatch.setattr(manifest, "probe_judge_version", lambda harness: None)
+
+    meta = manifest.judge_meta(
+        JudgeConfig(harness="codex", provider="openrouter", model="openai/gpt-5.5")
+    )
+
+    assert meta["harness"] == "codex"
+    assert meta["provider"] == "openrouter"
+    assert meta["model"] == "openai/gpt-5.5"

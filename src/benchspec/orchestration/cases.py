@@ -23,6 +23,7 @@ import pytest
 from benchspec.config.arms import Arm
 from benchspec.config.options import RunOptions, option_str
 from benchspec.config.sets import (
+    resolved_binder_config,
     resolved_judge_config,
     resolved_run_set,
     run_set_when_needed,
@@ -59,10 +60,11 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
     run_set = run_set_when_needed(config, needs_set=bool(cases))
     arms = run_set.arms if run_set else []
     if cases:
-        # Structural judge preflight — before ANY paid task arm runs. Raises
-        # pytest.UsageError at collection on a bad config; binary-on-PATH is
-        # checked separately, later, only when tests actually execute.
+        # Structural judge and binder preflight — before ANY paid task arm runs. Raises
+        # pytest.UsageError at collection on a bad config; binary-on-PATH and credentials
+        # are checked separately, later, only when tests actually execute.
         resolved_judge_config(config)
+        resolved_binder_config(config)
     pairs: list[tuple[EvalCase, Arm]] = []
     ids: list[str] = []
     for case in cases:

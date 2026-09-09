@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.agents.base import AgentCapabilities
 from benchspec.reporting import report
 from tests.support import seed_arm
 
@@ -1045,3 +1046,34 @@ def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: Path) -> None
     eval_row = next(line for line in lines if line.startswith("archive/alpha"))
     assert "\x1b" not in header
     assert "\x1b" in eval_row
+
+
+def test_planned_arms_carry_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify each planned arm records its provider beside harness and model."""
+    from benchspec.config.arms import Arm, Set
+
+    class _StubAgent:
+        """The slice of `CodingAgent` the planned-arm roster reads."""
+
+        capabilities = AgentCapabilities(multi_turn=True, token_split=True)
+
+        def version(self) -> str:
+            """Return a fixed install selector."""
+            return "latest"
+
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    run_set = Set(
+        "s",
+        [
+            Arm("direct", "claude-code", "sonnet"),
+            Arm("routed", "claude-code", "anthropic/claude-sonnet-4.6", provider="openrouter"),
+        ],
+        baseline="direct",
+    )
+
+    planned = report.planned_arms(run_set)
+
+    assert [(arm["name"], arm["provider"]) for arm in planned] == [
+        ("direct", "default"),
+        ("routed", "openrouter"),
+    ]

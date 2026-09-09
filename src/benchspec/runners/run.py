@@ -35,8 +35,11 @@ _SCALAR_OPTIONS = {
     "eval_paths": "--benchspec-eval-paths",
     "fail_under": "--benchspec-fail-under",
     "judge_harness": "--benchspec-judge-harness",
+    "judge_provider": "--benchspec-judge-provider",
     "judge_model": "--benchspec-judge-model",
     "judge_effort": "--benchspec-judge-effort",
+    "binder_provider": "--benchspec-binder-provider",
+    "binder_model": "--benchspec-binder-model",
 }
 
 # Repeatable flags: each collected value emits its own `option=value` token.

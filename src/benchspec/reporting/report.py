@@ -63,6 +63,7 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
             {
                 "name": arm.name,
                 "harness": arm.harness,
+                "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
                 "env": redact_env(arm.env),

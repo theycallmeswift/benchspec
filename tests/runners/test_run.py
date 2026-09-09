@@ -77,8 +77,11 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
             "eval_paths",
             "fail_under",
             "judge_harness",
+            "judge_provider",
             "judge_model",
             "judge_effort",
+            "binder_provider",
+            "binder_model",
         )
     }
     values["env"] = []
@@ -451,3 +454,19 @@ def test_run_collect_only_passthrough_skips_preflight(
     )
 
     assert exit_code == 0
+
+
+def test_translates_provider_flags_for_judge_and_binder() -> None:
+    """Verify judge/binder provider and binder model each become their --benchspec-* token."""
+    args = _run_namespace(
+        Path("repo"),
+        judge_provider="openrouter",
+        binder_provider="openrouter",
+        binder_model="google/gemini-3.5-flash-lite",
+    )
+
+    tokens = translate_run_flags(args)
+
+    assert "--benchspec-judge-provider=openrouter" in tokens
+    assert "--benchspec-binder-provider=openrouter" in tokens
+    assert "--benchspec-binder-model=google/gemini-3.5-flash-lite" in tokens

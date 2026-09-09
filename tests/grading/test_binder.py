@@ -21,6 +21,7 @@ import pytest
 
 from benchspec.grading import binder
 from benchspec.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
+from benchspec.grading.binder_config import BinderConfig
 
 
 def _reply(text: str) -> Callable[..., GeminiReply]:
@@ -464,6 +465,19 @@ def test_binder_identity_matches_spec_shape() -> None:
         "provider": "gemini",
         "model": "gemini-3.5-flash-lite",
         "api_path": "generativelanguage.googleapis.com/v1beta",
+    }
+
+
+def test_binder_identity_reports_the_configured_openrouter_transport() -> None:
+    """Verify binder_identity() reflects the resolved provider, model, and API path."""
+    config = BinderConfig(provider="openrouter", model="google/gemini-3.5-flash-lite")
+
+    identity = binder.binder_identity(config)
+
+    assert identity == {
+        "provider": "openrouter",
+        "model": "google/gemini-3.5-flash-lite",
+        "api_path": "openrouter.ai/api/v1",
     }
 
 
