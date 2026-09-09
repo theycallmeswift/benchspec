@@ -19,11 +19,21 @@ if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
     from benchspec.sandbox.backend import LiveSandbox
 
+# In preference order.
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
     "CODEX_ACCESS_TOKEN": ["chatgpt.com", "auth.openai.com"],
+    "OPENAI_API_KEY": ["api.openai.com"],
 }
 AUTH_ENV_VARS = tuple(_PROVIDER_HOSTS)
+# Host env var → the name Codex reads; unlisted entries keep theirs. Codex CLI ignores
+# `OPENAI_API_KEY`, so accept it but inject it as `CODEX_API_KEY`, in guest and judge.
+_CODEX_ENV_NAMES = {
+    "OPENAI_API_KEY": "CODEX_API_KEY",
+}
+_CREDENTIAL_REMEDY = (
+    "set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, OPENAI_API_KEY, or CODEX_ACCESS_TOKEN"
+)
 _RESERVED_HARNESS_ARGS = {
     "-m",
     "--model",
@@ -99,6 +109,15 @@ def _auth_json_from_env() -> str | None:
     return path
 
 
+def _renamed_host_credentials() -> dict[str, str]:
+    """Host credentials renamed to what Codex reads; an exported Codex name is kept."""
+    return {
+        codex_name: os.environ[host_name]
+        for host_name, codex_name in _CODEX_ENV_NAMES.items()
+        if os.environ.get(host_name) and not os.environ.get(codex_name)
+    }
+
+
 class CodexAgent(BaseAgent):
     """Store codex agent data."""
 
@@ -158,9 +177,7 @@ class CodexAgent(BaseAgent):
             return None
         if _auth_json_from_env():
             return None
-        return (
-            "no Codex credential - set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, or CODEX_ACCESS_TOKEN"
-        )
+        return f"no Codex credential - {_CREDENTIAL_REMEDY}"
 
     def host_credential_error(self) -> str | None:
         """Accept an env credential, else ask `codex login status` whether the host is logged in."""
@@ -169,10 +186,7 @@ class CodexAgent(BaseAgent):
         proc = self.host_probe("login", "status")
         if proc is not None and proc.returncode == 0:
             return None
-        return (
-            "Codex is not logged in on the host - run `codex login`, or set "
-            "CODEX_AUTH_JSON_PATH, CODEX_API_KEY, or CODEX_ACCESS_TOKEN"
-        )
+        return f"Codex is not logged in on the host - run `codex login`, or {_CREDENTIAL_REMEDY}"
 
     def version(self) -> str:
         """Return the agent CLI version string."""
@@ -202,10 +216,9 @@ class CodexAgent(BaseAgent):
         """Return the provider credentials to inject into the guest."""
         if self._auth_json_path:
             return []
+        guest_env_name = _CODEX_ENV_NAMES.get(self._auth_env, self._auth_env)
         return [
-            Credential(
-                self._auth_env, self._auth_value, tuple(_PROVIDER_HOSTS[self._auth_env])
-            )
+            Credential(guest_env_name, self._auth_value, tuple(_PROVIDER_HOSTS[self._auth_env]))
         ]
 
     def build_command(
@@ -385,14 +398,16 @@ class CodexAgent(BaseAgent):
         and raises RuntimeError on infra failure — a missing binary, a nonzero exit,
         or a harness error event surfaced by the parser as `is_error`. `config.effort`
         is pinned via `-c model_reasoning_effort=...` so the verdict never depends on
-        whatever `~/.codex/config.toml` the host happens to carry.
+        whatever `~/.codex/config.toml` the host happens to carry. A host `OPENAI_API_KEY`
+        reaches Codex as `CODEX_API_KEY`; `config.env` wins.
         """
         command = [
             self.agent_bin, "exec", "--json", "-m", config.model,
             "-c", f"model_reasoning_effort={config.effort}",
             *config.harness_args, prompt,
         ]
-        proc = await (env or Host()).exec(command, env=config.env, timeout=config.timeout)
+        judge_env = {**_renamed_host_credentials(), **config.env}
+        proc = await (env or Host()).exec(command, env=judge_env, timeout=config.timeout)
 
         # Parse before the exit check: codex reports a rejected request as a `turn.failed`
         # event on stdout and exits 1 with only progress chatter on stderr.

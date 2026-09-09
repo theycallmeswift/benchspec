@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+from collections.abc import Mapping
 from typing import NoReturn
 
 import pytest
@@ -58,6 +59,50 @@ def test_judge_wraps_final_agent_message_in_result_envelope(
     assert "-m" in captured["command"]
     assert "gpt-5.5" in captured["command"]
     assert captured["command"][-1] == "grade this"  # trailing positional prompt
+
+
+def test_judge_hands_openai_api_key_to_codex_under_its_own_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host with only `OPENAI_API_KEY` judges: the key rides as `CODEX_API_KEY`."""
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    captured: dict[str, dict[str, str]] = {}
+
+    def fake_run(
+        command: list[str], *, env: Mapping[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture the subprocess env and return a completed turn."""
+        captured["env"] = dict(env)
+        return _fake_proc(stdout=_stream({"type": "turn.completed", "usage": {}}))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _judge("grade this", JudgeConfig(harness="codex", model="gpt-5.5"))
+
+    assert captured["env"]["CODEX_API_KEY"] == "sk-openai"
+
+
+def test_judge_keeps_host_codex_api_key_over_openai_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host that exports Codex's own name is left alone."""
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    captured: dict[str, dict[str, str]] = {}
+
+    def fake_run(
+        command: list[str], *, env: Mapping[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture the subprocess env and return a completed turn."""
+        captured["env"] = dict(env)
+        return _fake_proc(stdout=_stream({"type": "turn.completed", "usage": {}}))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _judge("grade this", JudgeConfig(harness="codex", model="gpt-5.5"))
+
+    assert captured["env"]["CODEX_API_KEY"] == "sk-codex"
 
 
 def test_judge_pins_reasoning_effort_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,7 +203,9 @@ def test_binary_version_best_effort_none_on_failure(monkeypatch: pytest.MonkeyPa
 
 def _without_codex_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear every env credential so only the host login probe can pass the check."""
-    for env_name in ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_AUTH_JSON_PATH"):
+    for env_name in (
+        "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON_PATH"
+    ):
         monkeypatch.delenv(env_name, raising=False)
 
 

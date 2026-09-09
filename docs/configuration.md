@@ -111,9 +111,11 @@ model   = "gpt-5.5"
 > different model family than the arms, as this repo's own `e2e` set does with a
 > Codex judge over Claude arms.
 
-The judge harness's CLI must be installed on the host with valid credentials. The
-`run` command preflights the binary before spawning pytest; inside pytest it is
-checked again when tests actually execute, not at collection.
+The judge harness's CLI must be installed on the host with its credential (the
+harness's own; see [`harnesses.md`](harnesses.md#the-in-tree-harnesses)). The
+`run` command preflights both before spawning pytest; inside pytest they are
+checked again when tests actually execute, not at collection. Funding is not
+preflighted: an unfunded key fails at grading, after the arms have run.
 
 ## Top-level `[tool.benchspec]` keys
 
@@ -237,7 +239,7 @@ guest (see [`sandbox.md`](sandbox.md#credentials)).
 |---|---|
 | `GEMINI_API_KEY` | The binder. Required for every graded run and for `analyze`; empty counts as missing. |
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude Code credential (OAuth token preferred; from `claude setup-token`). |
-| `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order; see [`harnesses.md`](harnesses.md). |
+| `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `OPENAI_API_KEY` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order; see [`harnesses.md`](harnesses.md). |
 | `OPENROUTER_API_KEY` | OpenCode's preferred provider credential (falls back to `ANTHROPIC_API_KEY`, then `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`). |
 | `BENCHSPEC_CLAUDE_VERSION` / `BENCHSPEC_CODEX_VERSION` / `BENCHSPEC_OPENCODE_VERSION` | Select a harness CLI version instead of `latest`; each value keys its own sandbox snapshot. Codex and OpenCode install exactly that version; the Claude Code installer always fetches the latest release, so its value only names the snapshot (the version that ran is recorded in `meta.json`). |
 | `BENCHSPEC_BASE_IMAGE` | OCI image the sandbox snapshot builds from, above `[tool.benchspec] base_image`. For a host whose base needs something the config shouldn't carry, such as a proxy CA; see [`sandbox.md`](sandbox.md#customizing-the-image). |

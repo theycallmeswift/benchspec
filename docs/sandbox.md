@@ -221,9 +221,9 @@ Two things the snapshot can't carry:
   run time, so the file holds no secret. The same file carries
   `BENCHSPEC_BASE_IMAGE`.
 
-`GEMINI_API_KEY` and the Codex credential pass through untouched. The Codex
-judge also needs `api.openai.com` in the environment's allowed domains; the
-Trusted default list doesn't include it.
+`GEMINI_API_KEY` and the Codex credential (`CODEX_API_KEY` or `OPENAI_API_KEY`)
+pass through untouched. The Codex judge also needs `api.openai.com` in the
+environment's allowed domains; the Trusted default list doesn't include it.
 
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
