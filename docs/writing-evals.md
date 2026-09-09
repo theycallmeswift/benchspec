@@ -179,7 +179,9 @@ serves every harness in a mixed set.
 This is the part worth internalizing, because it shapes how you word assertions.
 Every assertion takes one of two paths, and the split is decided per line, at
 grade time, by the **binder**: a conservative classifier (a fixed
-`gemini-3.5-flash-lite` call, which is why `GEMINI_API_KEY` is always required).
+`gemini-3.5-flash-lite` call, which is why its credential, `GEMINI_API_KEY` by
+default or `OPENROUTER_API_KEY` under `[tool.benchspec.binder] provider =
+"openrouter"`, is always required).
 
 - **Bind**: the binder maps the prose to one deterministic **checker**, run on
   the host against the final workspace (or the run's process facts). Zero
@@ -244,9 +246,9 @@ wording the judge cannot fairly grade, and exits `1` on any finding:
 `benchspec analyze` asks the binder itself. It binds every assertion exactly
 as a live run would and prints one label per line, `deterministic` or
 `judge-backed`, so you can see where each assertion lands and tighten wording
-until the facts you care most about grade deterministically. It needs
-`GEMINI_API_KEY` exported (bare existence lines take a free local fast path;
-every other line pays one Gemini call) and always exits `0` on a classified
+until the facts you care most about grade deterministically. It needs the
+binder's credential exported (bare existence lines take a free local fast path;
+every other line pays one binder call) and always exits `0` on a classified
 suite: it is a report, not a gate.
 
 ## Reference: validation rules

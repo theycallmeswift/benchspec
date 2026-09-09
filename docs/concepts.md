@@ -49,8 +49,9 @@ nothing. Reading deltas: [results.md](results.md).
 ## Binder
 
 A fixed, deliberately conservative classifier (one call to
-`gemini-3.5-flash-lite` per assertion, which is why `GEMINI_API_KEY` is always
-required) that decides, at grade time, whether an assertion can be checked
+`gemini-3.5-flash-lite` per assertion, through Gemini's API on `GEMINI_API_KEY` or
+through OpenRouter on `OPENROUTER_API_KEY`, by `[tool.benchspec.binder]
+provider`) that decides, at grade time, whether an assertion can be checked
 mechanically. It either **binds** the line to one checker or **punts** it to the
 judge. It never grades anything itself. Reference:
 [writing-evals.md](writing-evals.md#how-assertions-are-graded).

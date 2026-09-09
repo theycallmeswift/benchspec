@@ -125,7 +125,7 @@ changes their contents.
 Two other visibility lines can follow the table: `FAIL fail-under: …` when the
 gate trips, and `WARN binder: N assertion(s) degraded to judge grading` when a
 transient binder infrastructure failure rerouted assertions to the judge (never
-silent, never an error; a rejected `GEMINI_API_KEY`, by contrast, fails the run
+silent, never an error; a rejected binder key, by contrast, fails the run
 outright).
 
 ## The machine layer

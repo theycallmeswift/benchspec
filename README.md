@@ -35,11 +35,14 @@ off — in percentage points — how good each one actually is at accomplishing 
 |---|---|
 | Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in. Python 3.11+. |
 | Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
-| `GEMINI_API_KEY` | The binder: a fixed Gemini call that classifies each assertion. Required for every `analyze` and `run`. |
+| Binder credential | The binder is a fixed model call that classifies each assertion, required for every `analyze` and `run`: `GEMINI_API_KEY` by default, or `OPENROUTER_API_KEY` with `[tool.benchspec.binder] provider = "openrouter"`. |
 | Judge credential | The judge runs on the host through an agent CLI, using either its env credential or the CLI's own login (`claude login`, `codex login`); the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |
 
 Credentials can live in a repo-root `.env`. A graded run can touch up to three
-vendors: the agent's, Gemini for the binder, and the judge's. `lint` is free;
+vendors: the agent's, the binder's, and the judge's. Or exactly one: set
+`provider = "openrouter"` on the binder, the judge, and the arms, and the whole
+run needs only `OPENROUTER_API_KEY` (see
+[`configuration.md`](docs/configuration.md#providers)). `lint` is free;
 `analyze` and `run` spend API calls, and `run` also boots sandboxes. Preflight
 lists every missing piece and exits before anything is spent.
 
