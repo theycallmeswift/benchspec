@@ -63,12 +63,14 @@ _FIELD_VALIDATORS = {
 }
 
 
-def _validate_binder_table(where: str, table: dict) -> dict:
+def _validate_binder_table(where: str, table: object) -> dict:
     """Validate one layer's [tool.benchspec.binder]-shaped dict.
 
     Return only the keys it declared (partial — callers merge over prior layers).
     Raises SchemaError naming the defect, never a silent no-op.
     """
+    if not isinstance(table, dict):
+        raise SchemaError(f"{where} must be a table, got {type(table).__name__}")
     unknown = sorted(set(table) - set(_FIELD_VALIDATORS))
     if unknown:
         raise SchemaError(
@@ -82,8 +84,8 @@ def _validate_binder_table(where: str, table: dict) -> dict:
 
 
 def resolve_binder_config(
-    *, pyproject_table: dict | None = None, scratch_table: dict | None = None,
-    cli_table: dict | None = None,
+    *, pyproject_table: object = None, scratch_table: object = None,
+    cli_table: object = None,
 ) -> BinderConfig:
     """Resolve the run's one BinderConfig from four layers, per field.
 

@@ -1,12 +1,12 @@
-"""Live labeled-corpus eval for the Gemini binder: the false-positive gate.
+"""Live labeled-corpus eval for the binder: the false-positive gate.
 
-Samples the real Gemini binder over the gold-labeled corpus and enforces the one hard
-gate — a punt-labeled assertion must never bind to a checker. One pytest item per draw,
-so the run shows live per-item progress and a leak names the exact draw; `make
-evals` shards the draws across xdist workers and the `binder_corpus` marker keeps
-it out of `make test` (it costs money and needs a `GEMINI_API_KEY`). Corpus-wide stats
-(infra-error guard, retention/over-punt/mismatch) are aggregated in conftest.py from the
-per-draw records.
+Samples the real binder — through the provider `[tool.benchspec.binder]` selects — over
+the gold-labeled corpus and enforces the one hard gate: a punt-labeled assertion must
+never bind to a checker. One pytest item per draw, so the run shows live per-item
+progress and a leak names the exact draw; `make evals` shards the draws across xdist
+workers and the `binder_corpus` marker keeps it out of `make test` (it costs money and
+needs the provider's key). Corpus-wide stats (infra-error guard,
+retention/over-punt/mismatch) are aggregated in conftest.py from the per-draw records.
 """
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ from _pytest.mark import ParameterSet
 from conftest import RecordDraw, _recording_call_model
 from test_corpus_integrity import CORPUS, CorpusEntry
 
-from benchspec.grading.binder import GeminiReply, _bind_bare_exists, bind
+from benchspec.grading.binder import BinderReply, _bind_bare_exists, bind
+from benchspec.grading.binder_config import BinderConfig
 
 pytestmark = pytest.mark.binder_corpus
 
@@ -49,13 +50,14 @@ def _samples_for(entry: CorpusEntry) -> int:
 
 
 def _bind_resilient(
-    text: str, *, sink: list[GeminiReply]
+    text: str, *, sink: list[BinderReply], config: BinderConfig
 ) -> tuple[dict | None | _BindFailure, int]:
-    """Bind one assertion with one retry for a transient Gemini infra failure.
+    """Bind one assertion with one retry for a transient binder infra failure.
 
     Args:
         text: The assertion text to bind.
-        sink: List that the recording call_model appends each GeminiReply to.
+        sink: List that the recording call_model appends each BinderReply to.
+        config: The resolved binder config selecting the transport and model.
 
     Returns:
         A (binding, attempts) tuple. `binding` is a checker spec dict, None (punt),
@@ -63,7 +65,7 @@ def _bind_resilient(
         iteration entered — `len(sink)` would undercount a retry that raised before
         producing a reply — and is 1 for a regex fast-path bind (no API call).
     """
-    call_model = _recording_call_model(sink)
+    call_model = _recording_call_model(sink, config)
     attempts = 0
     for _ in range(2):
         attempts += 1
@@ -94,15 +96,17 @@ def _field_expectation_draws() -> list[ParameterSet]:
 
 
 @pytest.mark.parametrize("entry", _draws())
-def test_binder_corpus_blocks_punt_leaks(entry: CorpusEntry, record: RecordDraw) -> None:
+def test_binder_corpus_blocks_punt_leaks(
+    entry: CorpusEntry, record: RecordDraw, binder_config: BinderConfig
+) -> None:
     """Reject corpus examples where a punt expectation binds to a checker."""
-    replies: list[GeminiReply] = []
-    binding, attempts = _bind_resilient(entry["text"], sink=replies)
+    replies: list[BinderReply] = []
+    binding, attempts = _bind_resilient(entry["text"], sink=replies, config=binder_config)
     # Derive source from the same predicate bind() itself uses to skip call_model,
-    # not from whether `replies` is non-empty — an all-retries-errored Gemini draw
+    # not from whether `replies` is non-empty — an all-retries-errored model draw
     # never appends to `replies` either, and mislabeling it "regex" would inflate
-    # regex_fast_path_count and deflate gemini_count.
-    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+    # regex_fast_path_count and deflate model_call_count.
+    source = "regex" if _bind_bare_exists(entry["text"]) else binder_config.provider
 
     record(
         {
@@ -117,6 +121,7 @@ def test_binder_corpus_blocks_punt_leaks(entry: CorpusEntry, record: RecordDraw)
             "result": "error" if binding is _ERROR else "punt" if binding is None else "bound",
             "checker": binding.get("checker") if isinstance(binding, dict) else None,
             "source": source,
+            "model": None if source == "regex" else binder_config.model,
             "attempts": attempts,
             "latency_ms": sum(reply.latency_ms for reply in replies) if replies else None,
             "prompt_tokens": sum(reply.prompt_tokens for reply in replies) if replies else None,
@@ -136,17 +141,18 @@ def test_binder_corpus_blocks_punt_leaks(entry: CorpusEntry, record: RecordDraw)
 
 @pytest.mark.parametrize("entry", _field_expectation_draws())
 def test_binder_corpus_preserves_expected_checker_fields(
-    entry: CorpusEntry, record: RecordDraw
+    entry: CorpusEntry, record: RecordDraw, binder_config: BinderConfig
 ) -> None:
     """Ensure bound checker specs preserve expected fields from the corpus."""
-    replies: list[GeminiReply] = []
-    binding, attempts = _bind_resilient(entry["text"], sink=replies)
-    source = "regex" if _bind_bare_exists(entry["text"]) else "gemini"
+    replies: list[BinderReply] = []
+    binding, attempts = _bind_resilient(entry["text"], sink=replies, config=binder_config)
+    source = "regex" if _bind_bare_exists(entry["text"]) else binder_config.provider
 
     record(
         {
             "test": "fields",
             "source": source,
+            "model": None if source == "regex" else binder_config.model,
             "attempts": attempts,
             "latency_ms": sum(reply.latency_ms for reply in replies) if replies else None,
             "prompt_tokens": sum(reply.prompt_tokens for reply in replies) if replies else None,

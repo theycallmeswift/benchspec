@@ -17,6 +17,9 @@ from typing import NotRequired, TypedDict
 import pytest
 
 from benchspec.grading import binder
+from benchspec.grading.binder_config import BinderConfig, resolve_binder_config
+from benchspec.specs.discovery import pyproject_table
+from benchspec.specs.schema import SchemaError
 
 _SUMMARY = pytest.StashKey[list[str]]()
 _RAN = pytest.StashKey[bool]()
@@ -25,12 +28,14 @@ _RAN = pytest.StashKey[bool]()
 class DrawRecord(TypedDict):
     """One binder draw's per-worker record.
 
-    Every draw meters its transport (`source`, `attempts`, latency, tokens); only the
-    leak-gate draws carry the gold label and the bind outcome the retention rates read.
+    Every draw meters its transport (`source` — the binder provider, or `regex` for the
+    local fast path — plus the `model` it resolved to, `attempts`, latency, tokens); only
+    the leak-gate draws carry the gold label and the bind outcome the retention rates read.
     """
 
     test: str
     source: str
+    model: str | None
     attempts: int
     latency_ms: float | None
     prompt_tokens: int | None
@@ -64,6 +69,26 @@ def _binder_selected(config: pytest.Config) -> bool:
     return (config.getoption("markexpr") or "").strip() == "binder_corpus"
 
 
+def binder_config_for(rootpath: Path) -> BinderConfig:
+    """The binder the corpus exercises: the `[tool.benchspec.binder]` table under `rootpath`.
+
+    `BENCHSPEC_BINDER_MODEL` overrides the model — a corpus-suite knob for trying another
+    model on the same corpus; the production transports take no env input. Raises
+    SchemaError on a malformed table or, under `openrouter`, an unqualified model.
+    """
+    table = pyproject_table(rootpath).get("binder")
+    model_override = os.environ.get("BENCHSPEC_BINDER_MODEL")
+    cli_table = {"model": model_override} if model_override else None
+
+    return resolve_binder_config(pyproject_table=table, cli_table=cli_table)
+
+
+@pytest.fixture(scope="session")
+def binder_config(request: pytest.FixtureRequest) -> BinderConfig:
+    """Return the resolved binder config every corpus draw binds through."""
+    return binder_config_for(Path(request.config.rootpath))
+
+
 @pytest.fixture
 def record(request: pytest.FixtureRequest) -> RecordDraw:
     """Return a worker-local callback for recording binder corpus draw results."""
@@ -87,8 +112,8 @@ def pytest_configure(config: pytest.Config) -> None:
     if not (_is_controller(config) and _binder_selected(config)):
         return
     try:
-        binder.preflight_verify_gemini_key()
-    except RuntimeError as error:
+        binder.preflight_verify_binder_key(binder_config_for(Path(config.rootpath)))
+    except (RuntimeError, SchemaError) as error:
         raise pytest.UsageError(str(error)) from None
     config.stash[_RAN] = True
     results_dir = _results_dir(config)
@@ -103,39 +128,46 @@ def _rate(rows: list[DrawRecord], hit: Callable[[DrawRecord], bool]) -> float:
     return sum(1 for row in rows if hit(row)) / len(rows) if rows else 0.0
 
 
-def _recording_call_model(sink: list[binder.GeminiReply]) -> Callable[..., binder.GeminiReply]:
-    """Build a call_model that delegates to _call_gemini and records every reply.
+def _recording_call_model(
+    sink: list[binder.BinderReply], config: BinderConfig
+) -> Callable[..., binder.BinderReply]:
+    """Build a call_model that delegates to the configured transport and records every reply.
 
-    Reads BENCHSPEC_BINDER_MODEL here, not in _call_gemini — the override is a
-    corpus-suite knob and the production transport takes no env input. Exceptions
-    propagate unchanged and only successful replies land in `sink`, so per-draw
-    `attempts` is tracked by _bind_resilient's retry loop instead: `len(sink)`
-    would undercount a retry that raised before producing a reply.
+    The transport and model come from `config` (see `binder_config_for`), the same
+    selection a graded run makes. Exceptions propagate unchanged and only successful
+    replies land in `sink`, so per-draw `attempts` is tracked by _bind_resilient's retry
+    loop instead: `len(sink)` would undercount a retry that raised before producing a
+    reply.
 
     Args:
-        sink: List to append each successful GeminiReply to.
+        sink: List to append each successful BinderReply to.
+        config: The resolved binder config selecting the provider and model.
 
     Returns:
         A call_model callable suitable for `bind(..., call_model=...)`.
     """
-    model = os.environ.get("BENCHSPEC_BINDER_MODEL", binder.GEMINI_BINDER_MODEL)
+    transport = binder.call_model_for(config)
 
-    def call(prompt: str, *, timeout: float = 60) -> binder.GeminiReply:
-        """Call the Gemini binder model and record the reply in sink."""
-        reply = binder._call_gemini(prompt, timeout=timeout, model=model)
+    def call(prompt: str, *, timeout: float = 60) -> binder.BinderReply:
+        """Call the configured binder model and record the reply in sink."""
+        reply = transport(prompt, timeout=timeout)
         sink.append(reply)
         return reply
 
     return call
 
 
-# Approximate — a corpus-suite pricing constant, not a billing source of truth.
-_GEMINI_FLASH_LITE_USD_PER_1K_PROMPT_TOKENS = 0.0003
-_GEMINI_FLASH_LITE_USD_PER_1K_OUTPUT_TOKENS = 0.0025
+# Approximate USD per 1K (prompt, output) tokens by resolved model — a corpus-suite
+# pricing constant, not a billing source of truth. OpenRouter lists the same Gemini
+# model at its direct price; its credit fee is not modelled.
+_USD_PER_1K_TOKENS_BY_MODEL: dict[str, tuple[float, float]] = {
+    "gemini-3.5-flash-lite": (0.0003, 0.0025),
+    "google/gemini-3.5-flash-lite": (0.0003, 0.0025),
+}
 
 
-def _gemini_latencies(rows: list[DrawRecord]) -> list[float]:
-    """Return the measured latencies of the Gemini-sourced rows, ascending."""
+def _model_latencies(rows: list[DrawRecord]) -> list[float]:
+    """Return the measured latencies of the model-sourced rows, ascending."""
     latencies: list[float] = []
     for row in rows:
         latency = row["latency_ms"]
@@ -144,8 +176,21 @@ def _gemini_latencies(rows: list[DrawRecord]) -> list[float]:
     return sorted(latencies)
 
 
+def _estimated_cost_usd(rows: list[DrawRecord]) -> float | None:
+    """Price the model-sourced rows by their resolved model; None when any model is unpriced."""
+    total = 0.0
+    for row in rows:
+        prices = _USD_PER_1K_TOKENS_BY_MODEL.get(row["model"] or "")
+        if prices is None:
+            return None
+        prompt_price, output_price = prices
+        total += (row["prompt_tokens"] or 0) / 1000 * prompt_price
+        total += (row["output_tokens"] or 0) / 1000 * output_price
+    return total
+
+
 def _latency_cost_summary(rows: list[DrawRecord]) -> dict[str, float | int | None]:
-    """Aggregate latency/token/cost stats over Gemini-sourced rows only.
+    """Aggregate latency/token/cost stats over model-sourced rows only.
 
     Regex fast-path rows (bare file_exists assertions bound without any API call)
     are reported as their own count, never folded into the latency mean — their
@@ -155,25 +200,22 @@ def _latency_cost_summary(rows: list[DrawRecord]) -> dict[str, float | int | Non
         rows: Per-draw records from both live tests (leak and field-preservation).
 
     Returns:
-        A dict of regex/gemini counts, latency mean/p95, token totals, and an
-        approximate USD cost estimate.
+        A dict of regex/model-call counts, latency mean/p95, token totals, and an
+        approximate USD cost estimate (None when a row's model has no price listed).
     """
-    gemini_rows = [row for row in rows if row["source"] == "gemini"]
-    latencies = _gemini_latencies(gemini_rows)
-    prompt_tokens = sum(row["prompt_tokens"] or 0 for row in gemini_rows)
-    output_tokens = sum(row["output_tokens"] or 0 for row in gemini_rows)
+    model_rows = [row for row in rows if row["source"] != "regex"]
+    latencies = _model_latencies(model_rows)
+    prompt_tokens = sum(row["prompt_tokens"] or 0 for row in model_rows)
+    output_tokens = sum(row["output_tokens"] or 0 for row in model_rows)
     p95_index = max(0, int(len(latencies) * 0.95) - 1) if latencies else None
     return {
         "regex_fast_path_count": sum(1 for row in rows if row["source"] == "regex"),
-        "gemini_count": len(gemini_rows),
+        "model_call_count": len(model_rows),
         "latency_ms_mean": sum(latencies) / len(latencies) if latencies else None,
         "latency_ms_p95": latencies[p95_index] if p95_index is not None else None,
         "total_prompt_tokens": prompt_tokens,
         "total_output_tokens": output_tokens,
-        "estimated_cost_usd": (
-            prompt_tokens / 1000 * _GEMINI_FLASH_LITE_USD_PER_1K_PROMPT_TOKENS
-            + output_tokens / 1000 * _GEMINI_FLASH_LITE_USD_PER_1K_OUTPUT_TOKENS
-        ),
+        "estimated_cost_usd": _estimated_cost_usd(model_rows),
     }
 
 
@@ -212,11 +254,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     # Both live tests (leak + field-preservation) meter latency/cost; the leak-only
     # gate above is unaffected — it only ever read leak_rows.
     cost = _latency_cost_summary(rows)
+    models = sorted({row["model"] for row in rows if row["source"] != "regex" and row["model"]})
+    estimated_cost = cost["estimated_cost_usd"]
+    cost_label = f"{estimated_cost:.4f}" if estimated_cost is not None else "unpriced"
     lines.append(
         f"latency_ms: mean={cost['latency_ms_mean']} p95={cost['latency_ms_p95']} "
-        f"(gemini={cost['gemini_count']} regex_fast_path={cost['regex_fast_path_count']})  "
+        f"(model_calls={cost['model_call_count']} regex_fast_path={cost['regex_fast_path_count']} "
+        f"model={','.join(models) or 'none'})  "
         f"tokens: prompt={cost['total_prompt_tokens']} output={cost['total_output_tokens']}  "
-        f"est_cost_usd~{cost['estimated_cost_usd']:.4f}"
+        f"est_cost_usd~{cost_label}"
     )
 
     # 0 leaks is meaningless if most draws errored, so a broadly-broken infra run fails loud.

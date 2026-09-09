@@ -1,7 +1,15 @@
-"""Bind prose assertions to deterministic checker specs when safe."""
+"""Bind prose assertions to deterministic checker specs when safe.
+
+The binder is a fixed classifier with two interchangeable transports, chosen by the
+run's `BinderConfig`: Gemini's native `generateContent` API, or OpenRouter's
+chat-completions API carrying the same Gemini model under its vendor-prefixed slug. Both
+return a `BinderReply`; the failure taxonomy is total for each — a rejected credential
+is a `BinderAuthError` that stops the run, every other failure a `RuntimeError`.
+"""
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -16,6 +24,7 @@ from benchspec.agents import OPENROUTER_PROVIDER
 from benchspec.grading.binder_config import (
     GEMINI_BINDER_MODEL,
     GEMINI_PROVIDER,
+    OPENROUTER_BINDER_MODEL,
     BinderConfig,
 )
 from benchspec.grading.judge import _balanced_objects
@@ -25,8 +34,15 @@ GEMINI_API_PATH = "generativelanguage.googleapis.com/v1beta"
 OPENROUTER_API_PATH = "openrouter.ai/api/v1"
 _API_PATHS = {GEMINI_PROVIDER: GEMINI_API_PATH, OPENROUTER_PROVIDER: OPENROUTER_API_PATH}
 _GEMINI_URL = f"https://{GEMINI_API_PATH}/models/{{model}}:generateContent"
-_GEMINI_TIMEOUT_SECONDS = 60.0
+_OPENROUTER_URL = f"https://{OPENROUTER_API_PATH}/chat/completions"
+_BINDER_TIMEOUT_SECONDS = 60.0
+_GEMINI_TIMEOUT_SECONDS = _BINDER_TIMEOUT_SECONDS
 _AUTH_HTTP_CODES = {401, 403}
+# OpenRouter: 401 is a bad key and 402 an unfunded account. 403 is content moderation
+# there, not auth, so it stays in the RuntimeError half of the taxonomy.
+_OPENROUTER_AUTH_HTTP_CODES = {401, 402}
+# The credential each binder provider reads from the host environment.
+_CREDENTIAL_ENV = {GEMINI_PROVIDER: "GEMINI_API_KEY", OPENROUTER_PROVIDER: "OPENROUTER_API_KEY"}
 
 _PATHLIKE_RE = re.compile(r"^(?:\.?/|/|\.[^/\s]+/)|/")
 _BARE_EXISTS_RE = re.compile(
@@ -151,7 +167,7 @@ _BINDING_PROMPT = textwrap.dedent(
 
 
 class BinderAuthError(Exception):
-    """Raised when the Gemini API rejects the configured credential.
+    """Raised when the binder's API rejects the configured credential.
 
     Deliberately NOT a RuntimeError subclass — every RuntimeError catch site in the
     binder's failure taxonomy (execution.py's degrade-to-judge path, the corpus
@@ -161,8 +177,8 @@ class BinderAuthError(Exception):
 
 
 @dataclass(frozen=True)
-class GeminiReply:
-    """One Gemini generateContent response.
+class BinderReply:
+    """One binder model response, whichever transport produced it.
 
     Trimmed to what the binder and the binder corpus suite need.
     """
@@ -178,7 +194,7 @@ def _call_gemini(
     *,
     timeout: float = _GEMINI_TIMEOUT_SECONDS,
     model: str = GEMINI_BINDER_MODEL,
-) -> GeminiReply:
+) -> BinderReply:
     """Call the Gemini binder model and return its reply.
 
     Args:
@@ -231,7 +247,7 @@ def _call_gemini(
     return _parse_gemini_payload(payload, latency_ms=latency_ms)
 
 
-def _parse_gemini_payload(payload: object, *, latency_ms: float) -> GeminiReply:
+def _parse_gemini_payload(payload: object, *, latency_ms: float) -> BinderReply:
     """Validate a 200-OK Gemini payload and extract text + usage.
 
     Raises RuntimeError for every degenerate shape (no candidates, empty parts,
@@ -249,7 +265,7 @@ def _parse_gemini_payload(payload: object, *, latency_ms: float) -> GeminiReply:
     usage = payload.get("usageMetadata")
     usage = usage if isinstance(usage, dict) else {}
 
-    return GeminiReply(
+    return BinderReply(
         text=text,
         prompt_tokens=_usage_int(usage.get("promptTokenCount")),
         output_tokens=_usage_int(usage.get("candidatesTokenCount")),
@@ -300,17 +316,130 @@ def _usage_int(value: object) -> int:
     return 0
 
 
-def preflight_verify_gemini_key() -> None:
-    """Raise RuntimeError if GEMINI_API_KEY is missing or empty.
+def _call_openrouter(
+    prompt: str,
+    *,
+    timeout: float = _BINDER_TIMEOUT_SECONDS,
+    model: str = OPENROUTER_BINDER_MODEL,
+) -> BinderReply:
+    """Call the binder model through OpenRouter's chat-completions API and return its reply.
 
-    A GEMINI_API_KEY set to the empty string counts as missing — python-dotenv
-    never overrides an already-set environment variable, so `GEMINI_API_KEY=
-    make evals` can't be silently repopulated from `.env`; this makes that
-    invocation fail fast, before any paid call, exactly as intended.
+    The request pins `temperature: 0` and JSON mode, and sets
+    `provider.require_parameters` so OpenRouter refuses a route that would silently drop
+    either instead of serving it.
+
+    Args:
+        prompt: The rendered binding prompt.
+        timeout: Request timeout in seconds.
+        model: The vendor-prefixed OpenRouter model slug.
+
+    Returns:
+        The model's text plus token usage and measured latency.
+
+    Raises:
+        BinderAuthError: the key was rejected (HTTP 401) or the account is unfunded (402).
+        RuntimeError: every other transport, HTTP, or degenerate-response failure —
+            including a 200 whose choice carries an `error` or finished with `error`.
     """
-    if not os.environ.get("GEMINI_API_KEY"):
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "provider": {"require_parameters": True},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        _OPENROUTER_URL,
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        if error.code in _OPENROUTER_AUTH_HTTP_CODES:
+            raise BinderAuthError(
+                f"OpenRouter rejected the credential (HTTP {error.code}): {error_body[:500]}"
+            ) from error
+        raise RuntimeError(f"OpenRouter HTTP {error.code}: {error_body[:500]}") from error
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        raise RuntimeError(f"OpenRouter transport failure: {error}") from error
+    latency_ms = (time.perf_counter() - started) * 1000
+
+    return _parse_openrouter_payload(payload, latency_ms=latency_ms)
+
+
+def _parse_openrouter_payload(payload: object, *, latency_ms: float) -> BinderReply:
+    """Validate a 200-OK OpenRouter chat-completions payload and extract text + usage.
+
+    Raises RuntimeError for every degenerate shape: no choices, a choice carrying an
+    `error` object or `finish_reason: "error"` (a provider failure OpenRouter relays
+    inside a 200), or empty message content.
+    """
+    if not isinstance(payload, dict):
+        raise RuntimeError("OpenRouter returned a non-object payload")
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("OpenRouter response had no choices")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise RuntimeError("OpenRouter choice was not an object")
+    if choice.get("error") or choice.get("finish_reason") == "error":
+        raise RuntimeError(f"OpenRouter relayed a provider error: {choice.get('error')}")
+
+    message = choice.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise RuntimeError("OpenRouter response message content must be a string")
+    if not content:
+        raise RuntimeError("OpenRouter response had empty text")
+
+    usage = payload.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+
+    return BinderReply(
+        text=content,
+        prompt_tokens=_usage_int(usage.get("prompt_tokens")),
+        output_tokens=_usage_int(usage.get("completion_tokens")),
+        latency_ms=latency_ms,
+    )
+
+
+def _transport(provider: str) -> Callable[..., BinderReply]:
+    """The request function for a binder provider, looked up at call time."""
+    transports: dict[str, Callable[..., BinderReply]] = {
+        GEMINI_PROVIDER: _call_gemini,
+        OPENROUTER_PROVIDER: _call_openrouter,
+    }
+    return transports[provider]
+
+
+def binder_credential_env(config: BinderConfig) -> str:
+    """The host environment variable the configured binder provider authenticates with."""
+    return _CREDENTIAL_ENV[config.provider]
+
+
+def preflight_verify_binder_key(config: BinderConfig) -> None:
+    """Raise RuntimeError if the configured provider's key is missing or empty.
+
+    A key set to the empty string counts as missing — python-dotenv never overrides an
+    already-set environment variable, so `GEMINI_API_KEY= make evals` can't be silently
+    repopulated from `.env`; this makes that invocation fail fast, before any paid call,
+    exactly as intended.
+
+    Args:
+        config: The run's resolved binder config, which names the provider.
+    """
+    env_name = binder_credential_env(config)
+    if not os.environ.get(env_name):
         raise RuntimeError(
-            "GEMINI_API_KEY is required — the binder calls the Gemini API for every "
+            f"{env_name} is required — the binder calls the {config.provider} API for every "
             "graded run. Set it in the environment or a repo-root .env."
         )
 
@@ -333,22 +462,44 @@ def binder_identity(config: BinderConfig | None = None) -> dict:
     }
 
 
+CallModel = Callable[..., BinderReply]
+
+
+def call_model_for(config: BinderConfig) -> CallModel:
+    """The transport `bind` calls under `config`: its provider's request shape, model pinned."""
+    return functools.partial(_transport(config.provider), model=config.model)
+
+
 def bind(
     assertion_text: str,
     *,
-    call_model: Callable[..., GeminiReply] = _call_gemini,
+    config: BinderConfig | None = None,
+    call_model: CallModel | None = None,
 ) -> dict | None:
     """Return a deterministic checker spec dict for `assertion_text`, or None to punt.
 
     The returned dict is the exact checker-spec shape `checkers.run_assertion` consumes.
-    `call_model` is injected so tests drive the binder with fake GeminiReply objects
-    (no network); production and the corpus suite both default to `_call_gemini`.
+    The transport comes from `config` (the built-in Gemini default when None) unless
+    `call_model` is injected, which is how tests drive the binder with fake BinderReply
+    objects (no network) and how the corpus suite meters every reply.
+
+    Args:
+        assertion_text: The assertion prose to bind.
+        config: The run's resolved binder config; selects the provider and model.
+        call_model: A transport override; when given, `config` is not consulted.
     """
     if spec := _bind_bare_exists(assertion_text):
         return spec
+    if call_model is None:
+        call_model = call_model_for(config or BinderConfig())
     prompt = _BINDING_PROMPT.format(assertion=assertion_text)
-    reply = call_model(prompt, timeout=60)
+    reply = call_model(prompt, timeout=_BINDER_TIMEOUT_SECONDS)
     return _parse_binding(reply.text)
+
+
+def binder_for(config: BinderConfig) -> Callable[[str], dict | None]:
+    """`bind` with the run's config fixed, in the one-argument shape grading consumes."""
+    return functools.partial(bind, config=config)
 
 
 def _clean_bare_exists_path(raw: str) -> str:
@@ -379,7 +530,7 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
 
 
 def _parse_binding(text: str) -> dict | None:
-    """Parse a Gemini reply's text into a checker spec or punt."""
+    """Parse a binder reply's text into a checker spec or punt."""
     for candidate in _balanced_objects(text):
         try:
             obj = json.loads(candidate)
