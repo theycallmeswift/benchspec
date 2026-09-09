@@ -67,7 +67,7 @@ how an arm borrows a host secret without committing it:
 ```toml
 arms = [
   { name = "via-openrouter", env = {
-      ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1",
+      ANTHROPIC_BASE_URL = "https://openrouter.ai/api",
       ANTHROPIC_AUTH_TOKEN = "$OPENROUTER_API_KEY" } },
 ]
 ```
