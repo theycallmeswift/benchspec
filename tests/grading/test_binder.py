@@ -1,8 +1,9 @@
 """Binder tests — all mocked, NO network.
 
-`call_model` is injected with fake GeminiReply objects so bind()'s parse, validate,
-and punt logic is exercised offline. `_call_gemini` taxonomy tests (below) are the
-one place that monkeypatches urllib — the network transport is the painful edge.
+`call_model` is injected with fake BinderReply objects so bind()'s parse, validate,
+and punt logic is exercised offline. The `_call_gemini` and `_call_openrouter` taxonomy
+tests (below) are the one place that monkeypatches urllib — the network transport is
+the painful edge.
 """
 
 from __future__ import annotations
@@ -20,13 +21,13 @@ from typing import NoReturn
 import pytest
 
 from benchspec.grading import binder
-from benchspec.grading.binder import _BINDING_PROMPT, BinderAuthError, GeminiReply, bind
+from benchspec.grading.binder import _BINDING_PROMPT, BinderAuthError, BinderReply, bind
 from benchspec.grading.binder_config import BinderConfig
 
 
-def _reply(text: str) -> Callable[..., GeminiReply]:
-    """Build a call_model fixture that returns a fixed GeminiReply."""
-    return lambda prompt, *, timeout=60: GeminiReply(
+def _reply(text: str) -> Callable[..., BinderReply]:
+    """Build a call_model fixture that returns a fixed BinderReply."""
+    return lambda prompt, *, timeout=60: BinderReply(
         text=text, prompt_tokens=0, output_tokens=0, latency_ms=0.0
     )
 
@@ -223,9 +224,55 @@ def test_bind_propagates_binder_auth_error() -> None:
         bind("unknown assertion", call_model=boom)
 
 
-def test_bind_default_call_model_is_call_gemini() -> None:
-    """Verify bind's default transport is the real Gemini call — the wiring proof."""
-    assert inspect.signature(bind).parameters["call_model"].default is binder._call_gemini
+def test_bind_default_config_calls_gemini_with_its_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify bind with no config reaches the real Gemini transport on the default model."""
+    captured: dict[str, str] = {}
+
+    def fake_call_gemini(prompt: str, *, timeout: float, model: str) -> BinderReply:
+        """Stand in for the Gemini transport, recording the model it was asked for."""
+        captured["model"] = model
+        return BinderReply(text='{"punt":true}', prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
+
+    assert bind("the note reads well") is None
+    assert captured["model"] == "gemini-3.5-flash-lite"
+
+
+def test_bind_openrouter_config_calls_openrouter_with_its_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an `openrouter` config routes bind through the OpenRouter transport."""
+    captured: dict[str, str] = {}
+
+    def fake_call_openrouter(prompt: str, *, timeout: float, model: str) -> BinderReply:
+        """Stand in for the OpenRouter transport, recording the model it was asked for."""
+        captured["model"] = model
+        return BinderReply(text='{"punt":true}', prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setattr(binder, "_call_openrouter", fake_call_openrouter)
+    config = BinderConfig(provider="openrouter", model="google/gemini-3.5-flash")
+
+    assert bind("the note reads well", config=config) is None
+    assert captured["model"] == "google/gemini-3.5-flash"
+
+
+def test_binder_for_fixes_the_config_in_the_one_argument_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `binder_for(config)` is a plain `bind(text)` that carries the config."""
+    seen: list[str] = []
+
+    def fake_call_openrouter(prompt: str, *, timeout: float, model: str) -> BinderReply:
+        """Record that the OpenRouter transport was the one called."""
+        seen.append(model)
+        return BinderReply(text='{"punt":true}', prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+
+    monkeypatch.setattr(binder, "_call_openrouter", fake_call_openrouter)
+    bound = binder.binder_for(BinderConfig(provider="openrouter", model="google/gemini-3.5-flash"))
+
+    assert bound("the note reads well") is None
+    assert seen == ["google/gemini-3.5-flash"]
 
 
 class _CannedResponse:
@@ -439,24 +486,204 @@ def test_call_gemini_raises_runtimeerror_on_malformed_json_body(
         binder._call_gemini("prompt")
 
 
-def test_preflight_verify_gemini_key_raises_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_binder_key_raises_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight raises RuntimeError when GEMINI_API_KEY is unset."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        binder.preflight_verify_gemini_key()
+        binder.preflight_verify_binder_key(BinderConfig())
 
 
-def test_preflight_verify_gemini_key_raises_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_binder_key_raises_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a set-but-empty GEMINI_API_KEY counts as missing."""
     monkeypatch.setenv("GEMINI_API_KEY", "")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        binder.preflight_verify_gemini_key()
+        binder.preflight_verify_binder_key(BinderConfig())
 
 
-def test_preflight_verify_gemini_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preflight_verify_binder_key_passes_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify preflight passes with a non-empty key."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    binder.preflight_verify_gemini_key()  # no raise
+    binder.preflight_verify_binder_key(BinderConfig())  # no raise
+
+
+_OPENROUTER_CONFIG = BinderConfig(provider="openrouter", model="google/gemini-3.5-flash-lite")
+
+
+def test_preflight_verify_binder_key_under_openrouter_names_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under `openrouter` the Gemini key is irrelevant; the OpenRouter key is what is named."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY is required") as exc_info:
+        binder.preflight_verify_binder_key(_OPENROUTER_CONFIG)
+
+    assert "GEMINI_API_KEY" not in str(exc_info.value)
+
+
+def test_preflight_verify_binder_key_under_openrouter_passes_with_only_that_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an OpenRouter binder needs no Gemini credential at all."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    binder.preflight_verify_binder_key(_OPENROUTER_CONFIG)  # no raise
+
+
+def test_binder_credential_env_by_provider() -> None:
+    """Verify each provider maps to the host variable it authenticates with."""
+    assert binder.binder_credential_env(BinderConfig()) == "GEMINI_API_KEY"
+    assert binder.binder_credential_env(_OPENROUTER_CONFIG) == "OPENROUTER_API_KEY"
+
+
+def _openrouter_reply(content: object, **choice_extra: object) -> dict:
+    """Build a chat-completions payload whose first choice carries `content`."""
+    return {
+        "choices": [{"message": {"role": "assistant", "content": content}, **choice_extra}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 3},
+    }
+
+
+def test_call_openrouter_returns_reply_with_text_usage_and_latency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the OpenRouter reply lands in the same BinderReply shape Gemini's does."""
+    monkeypatch.setattr(
+        binder.urllib.request, "urlopen", _http_response(_openrouter_reply('{"punt":true}'))
+    )
+
+    reply = binder._call_openrouter("prompt")
+
+    assert reply.text == '{"punt":true}'
+    assert reply.prompt_tokens == 12
+    assert reply.output_tokens == 3
+    assert reply.latency_ms >= 0
+
+
+def test_call_openrouter_sends_bearer_key_json_mode_temperature_zero_and_required_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the request body pins the model, temperature, JSON mode, and require_parameters."""
+    captured_headers: dict[str, str] = {}
+    captured_body: dict = {}
+    captured: dict[str, str] = {}
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> _CannedResponse:
+        """Record the outgoing request, then answer with an empty verdict."""
+        captured["url"] = request.full_url
+        captured_headers.update(request.header_items())
+        assert isinstance(request.data, bytes)
+        captured_body.update(json.loads(request.data))
+        return _http_response(_openrouter_reply("{}"))(request, timeout)
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setattr(binder.urllib.request, "urlopen", fake_urlopen)
+
+    binder._call_openrouter("prompt", model="google/gemini-3.5-flash")
+
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert captured_headers["Authorization"] == "Bearer sk-or-test"
+    assert captured_body["model"] == "google/gemini-3.5-flash"
+    assert captured_body["messages"] == [{"role": "user", "content": "prompt"}]
+    assert captured_body["temperature"] == 0
+    assert captured_body["response_format"] == {"type": "json_object"}
+    assert captured_body["provider"] == {"require_parameters": True}
+
+
+def test_call_openrouter_defaults_to_the_openrouter_binder_model() -> None:
+    """Verify the default model is the vendor-prefixed slug of the same Gemini model."""
+    assert (
+        inspect.signature(binder._call_openrouter).parameters["model"].default
+        == "google/gemini-3.5-flash-lite"
+    )
+
+
+@pytest.mark.parametrize(("code", "body"), [(401, "bad key"), (402, "insufficient credits")])
+def test_call_openrouter_raises_binder_auth_error_on_401_402(
+    monkeypatch: pytest.MonkeyPatch, code: int, body: str
+) -> None:
+    """Verify a rejected key or an unfunded account stops the run as BinderAuthError."""
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(code, body))
+
+    with pytest.raises(BinderAuthError, match=str(code)):
+        binder._call_openrouter("prompt")
+
+
+@pytest.mark.parametrize("code", [403, 429, 500, 502, 503])
+def test_call_openrouter_raises_runtimeerror_on_non_auth_http_errors(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """Verify moderation (403), rate limits, and 5xx are RuntimeError, never auth."""
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_error(code, "nope"))
+
+    with pytest.raises(RuntimeError) as exc_info:
+        binder._call_openrouter("prompt")
+
+    assert not isinstance(exc_info.value, BinderAuthError)
+
+
+def test_call_openrouter_raises_runtimeerror_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a transport-level URLError normalizes to RuntimeError."""
+
+    def raise_it(request: urllib.request.Request, timeout: float) -> NoReturn:
+        """Fail at the transport layer."""
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
+    with pytest.raises(RuntimeError):
+        binder._call_openrouter("prompt")
+
+
+def test_call_openrouter_raises_runtimeerror_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a socket timeout normalizes to RuntimeError."""
+
+    def raise_it(request: urllib.request.Request, timeout: float) -> NoReturn:
+        """Fail the way a socket timeout does."""
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(binder.urllib.request, "urlopen", raise_it)
+    with pytest.raises(RuntimeError):
+        binder._call_openrouter("prompt")
+
+
+@pytest.mark.parametrize("payload", [
+    {"choices": []},
+    {"error": {"message": "no choices at all"}},
+    _openrouter_reply("{}", error={"code": 502, "message": "upstream died"}),
+    _openrouter_reply("{}", finish_reason="error"),
+    _openrouter_reply(""),
+    _openrouter_reply(None),
+    _openrouter_reply(1),
+    {"choices": ["not an object"]},
+])
+def test_call_openrouter_raises_runtimeerror_on_degenerate_200(
+    monkeypatch: pytest.MonkeyPatch, payload: dict
+) -> None:
+    """Verify every degenerate-200 shape, including a relayed provider error, is RuntimeError."""
+    monkeypatch.setattr(binder.urllib.request, "urlopen", _http_response(payload))
+
+    with pytest.raises(RuntimeError):
+        binder._call_openrouter("prompt")
+
+
+def test_call_openrouter_raises_runtimeerror_on_malformed_json_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a non-JSON 200 body normalizes to RuntimeError, not a raw ValueError."""
+    monkeypatch.setattr(
+        binder.urllib.request,
+        "urlopen",
+        lambda request, timeout: _CannedResponse(b"not json"),
+    )
+    with pytest.raises(RuntimeError):
+        binder._call_openrouter("prompt")
+
+
+def test_openrouter_url_is_built_from_the_api_path_constant() -> None:
+    """Verify `_OPENROUTER_URL` stays a single source of truth with `OPENROUTER_API_PATH`."""
+    assert binder._OPENROUTER_URL.startswith(f"https://{binder.OPENROUTER_API_PATH}")
 
 
 def test_binder_identity_matches_spec_shape() -> None:

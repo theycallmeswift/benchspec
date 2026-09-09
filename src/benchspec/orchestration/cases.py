@@ -30,6 +30,7 @@ from benchspec.config.sets import (
     session_run_set,
 )
 from benchspec.grading import binder
+from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.judges.registry import (
     preflight_verify_judge_binary,
@@ -97,18 +98,18 @@ def eval_set_name(request: pytest.FixtureRequest) -> str:
     return option_str(request.config, "benchspec_set") or ""
 
 
-def _grading_environment_errors(judge: JudgeConfig) -> list[str]:
-    """Return every environment failure grading would hit with `judge`, empty when none.
+def _grading_environment_errors(judge: JudgeConfig, binder_config: BinderConfig) -> list[str]:
+    """Return every environment failure grading would hit, empty when none.
 
-    Two independent checks, each reported so one run surfaces both: the binder's Gemini
-    credential (an env read), then the judge binary on PATH followed by the judge's host
-    credential. The credential probe runs only when the binary exists, so a missing
-    binary is reported as such rather than as a failed login.
+    Two independent checks, each reported so one run surfaces both: the binder
+    provider's credential (an env read), then the judge binary on PATH followed by the
+    judge's host credential. The credential probe runs only when the binary exists, so a
+    missing binary is reported as such rather than as a failed login.
     """
     errors: list[str] = []
 
     try:
-        binder.preflight_verify_gemini_key()
+        binder.preflight_verify_binder_key(binder_config)
     except RuntimeError as error:
         errors.append(str(error))
 
@@ -131,18 +132,20 @@ def grading_preflight_errors(config: RunOptions) -> list[str]:
         The failures, empty when grading can proceed.
 
     Raises:
-        pytest.UsageError: a structural defect in the judge config.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
-    return _grading_environment_errors(resolved_judge_config(config))
+    return _grading_environment_errors(
+        resolved_judge_config(config), resolved_binder_config(config)
+    )
 
 
 def preflight_grading(config: RunOptions) -> JudgeConfig:
     """Preflight everything grading needs and return the run's judge config.
 
-    The judge config is resolved first (structural), then the environment checks run and
-    every failure is reported together. Shared by the `judge_config` fixture and the
-    `run` CLI, so what the CLI refuses before spawning pytest is exactly what pytest
-    would refuse at grading time.
+    The judge and binder configs are resolved first (structural), then the environment
+    checks run and every failure is reported together. Shared by the `judge_config`
+    fixture and the `run` CLI, so what the CLI refuses before spawning pytest is exactly
+    what pytest would refuse at grading time.
 
     Args:
         config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
@@ -151,13 +154,13 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
         The resolved `JudgeConfig`.
 
     Raises:
-        RuntimeError: `GEMINI_API_KEY` missing or empty, the judge binary absent, or the
-            judge harness unable to authenticate on the host; every failure listed.
-        pytest.UsageError: a structural defect in the judge config.
+        RuntimeError: the binder provider's key missing or empty, the judge binary absent,
+            or the judge harness unable to authenticate on the host; every failure listed.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
     judge = resolved_judge_config(config)
 
-    errors = _grading_environment_errors(judge)
+    errors = _grading_environment_errors(judge, resolved_binder_config(config))
     if errors:
         raise RuntimeError(
             sandbox.format_preflight_failure("benchspec grading preflight failed", errors)
@@ -173,6 +176,13 @@ def judge_config(request: pytest.FixtureRequest) -> JudgeConfig:
     # exactly when a run will grade. Fixture setup is skipped under --collect-only, so
     # this stays collection-safe without an autouse gate.
     return preflight_grading(request.config)
+
+
+@pytest.fixture
+def binder_config(request: pytest.FixtureRequest) -> BinderConfig:
+    """Resolve the run's binder: the provider and model every assertion binds through."""
+    # Structural only; the provider's key was preflighted with the judge above.
+    return resolved_binder_config(request.config)
 
 
 @pytest.fixture
@@ -286,6 +296,7 @@ def test_eval(
     eval_set_name: str,
     project_marker: str,
     judge_config: JudgeConfig,
+    binder_config: BinderConfig,
     sample_index: int,
     eval_sandbox: str,
 ) -> None:
@@ -310,6 +321,7 @@ def test_eval(
         project_marker=project_marker,
         judge_config=judge_config,
         sandbox_name=eval_sandbox,
+        bind=binder.binder_for(binder_config),
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a
