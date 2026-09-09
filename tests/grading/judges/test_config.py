@@ -182,3 +182,21 @@ def test_resolve_judge_config_cli_provider_beats_pyproject() -> None:
     )
 
     assert config.provider == "default"
+
+
+def test_resolve_judge_config_opencode_under_openrouter_requires_the_openrouter_prefix() -> None:
+    """An OpenCode judge routed through OpenRouter must name an `openrouter/` slug."""
+    with pytest.raises(SchemaError, match="openrouter/"):
+        resolve_judge_config(pyproject_table={
+            "harness": "opencode", "provider": "openrouter", "model": "anthropic/claude-sonnet-4.6",
+        })
+
+
+def test_resolve_judge_config_opencode_under_openrouter_accepts_the_openrouter_prefix() -> None:
+    """Verify the prefixed slug passes the OpenCode-under-OpenRouter check."""
+    config = resolve_judge_config(pyproject_table={
+        "harness": "opencode", "provider": "openrouter",
+        "model": "openrouter/anthropic/claude-sonnet-4.6",
+    })
+
+    assert config.model == "openrouter/anthropic/claude-sonnet-4.6"

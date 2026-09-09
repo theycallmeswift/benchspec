@@ -160,3 +160,46 @@ def test_binary_version_best_effort_none_on_failure(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
     assert OpenCodeAgent.for_host().binary_version() is None
+
+
+def test_judge_under_openrouter_refuses_a_vendor_direct_model_before_spawning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model without the `openrouter/` prefix is an infra RuntimeError, no process spawned."""
+
+    def must_not_run(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if opencode is spawned with a model that would bypass the gateway."""
+        raise AssertionError("opencode must not run with a vendor-direct model under openrouter")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+
+    with pytest.raises(RuntimeError, match="openrouter/"):
+        asyncio.run(OpenCodeAgent.for_host("openrouter").judge("grade this", JudgeConfig(
+            harness="opencode", provider="openrouter", model="anthropic/claude-sonnet-4.6",
+        )))
+
+
+def test_judge_under_openrouter_passes_the_prefixed_model_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `openrouter/` slug reaches `-m` unchanged and the reply is wrapped as usual."""
+    stdout = _stream(
+        {"type": "text", "part": {"text": "{}"}},
+        {"type": "step_finish", "part": {"tokens": {"total": 5}}},
+    )
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Capture the command and return a successful process."""
+        captured["command"] = command
+        return _fake_proc(stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    out = asyncio.run(OpenCodeAgent.for_host("openrouter").judge("grade this", JudgeConfig(
+        harness="opencode", provider="openrouter", model="openrouter/openai/gpt-5.5",
+    )))
+
+    command = captured["command"]
+    assert command[command.index("-m") + 1] == "openrouter/openai/gpt-5.5"
+    assert json.loads(out)["result"] == "{}"

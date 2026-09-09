@@ -1123,3 +1123,86 @@ def test_opencode_invoke_extra_env_overrides_guest_env() -> None:
     assert env["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert env["TZ"] == "America/New_York"  # collides with guest_env's TZ=UTC; arm wins
     assert env["HOME"] == OpenCodeAgent.guest_home  # guest_env still present
+
+
+def test_from_env_under_openrouter_forces_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under `openrouter` the credential is OPENROUTER_API_KEY, whatever else is set."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ignored")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    agent = OpenCodeAgent.from_env("openrouter")
+
+    assert agent.provider == "openrouter"
+    assert agent.secrets() == [Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",))]
+
+
+def test_from_env_under_openrouter_does_not_fall_back_to_another_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With only an Anthropic key set, the OpenRouter arm carries no usable credential."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    agent = OpenCodeAgent.from_env("openrouter")
+
+    assert agent._auth_env == "OPENROUTER_API_KEY"
+    assert agent._auth_value == ""
+
+
+def test_credential_error_under_openrouter_names_openrouter_api_key_despite_other_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An Anthropic key set and the OpenRouter key unset fails preflight naming the latter."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    error = OpenCodeAgent.credential_error("openrouter")
+
+    assert error is not None
+    assert "OPENROUTER_API_KEY" in error
+    assert "ANTHROPIC_API_KEY" not in error
+
+
+def test_credential_error_under_default_keeps_the_fallback_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `default` provider still accepts any key in the chain."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+
+    assert OpenCodeAgent.credential_error() is None
+
+
+def test_build_command_under_openrouter_requires_the_openrouter_prefix() -> None:
+    """A vendor-direct slug would route around the gateway, so it is refused."""
+    agent = OpenCodeAgent(auth_value="sk-or", auth_env="OPENROUTER_API_KEY", provider="openrouter")
+
+    with pytest.raises(ValueError, match="openrouter/"):
+        agent.build_command(
+            "hi", plugin_dir=None, model="anthropic/claude-sonnet-4.6", effort="medium",
+            resume_session_id=None, detect_skill=None,
+        )
+
+
+def test_build_command_under_openrouter_accepts_the_openrouter_prefix() -> None:
+    """An `openrouter/<vendor>/<model>` slug passes through to `-m` unchanged."""
+    agent = OpenCodeAgent(auth_value="sk-or", auth_env="OPENROUTER_API_KEY", provider="openrouter")
+
+    cmd = agent.build_command(
+        "hi", plugin_dir=None, model="openrouter/anthropic/claude-sonnet-4.6", effort="medium",
+        resume_session_id=None, detect_skill=None,
+    )
+
+    assert cmd[cmd.index("-m") + 1] == "openrouter/anthropic/claude-sonnet-4.6"
+
+
+def test_build_command_under_default_accepts_any_qualified_model() -> None:
+    """The `default` provider keeps today's rule: any vendor-qualified slug is fine."""
+    cmd = _opencode_agent().build_command(
+        "hi", plugin_dir=None, model="anthropic/claude-sonnet-4.6", effort="medium",
+        resume_session_id=None, detect_skill=None,
+    )
+
+    assert "anthropic/claude-sonnet-4.6" in cmd
