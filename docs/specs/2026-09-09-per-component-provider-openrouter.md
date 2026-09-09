@@ -110,9 +110,8 @@ Same evals, arms, matrix, and exit codes. `provider` is recorded on the binder, 
 - **`meta.json`** — `binder.provider`, `judge.provider`, and `arms[].provider` are present and correct.
 
 ### End to end
-- **An OpenRouter e2e suite beside the existing one.** `evals/e2e/openrouter.toml` is a `--config` scratch file declaring `[tool.benchspec.binder] provider = "openrouter"`, `[tool.benchspec.judge] provider = "openrouter"` with a vendor slug from a different family than the arms, and a `[tool.benchspec.sets.e2e-openrouter]` set whose arms run the `hello` suite through every harness on OpenRouter: `claude-code` baseline and trial on `anthropic/...`, a `codex` trial on `openai/...`, and an `opencode` trial on `openrouter/...`. `make e2e:openrouter` runs it as `benchspec run --config evals/e2e/openrouter.toml --set e2e-openrouter` with only `OPENROUTER_API_KEY` in the environment, so the binder, the judge, and all three adapters are exercised by one key in one run.
-- **CI job.** `.github/workflows/evals.yml` gains an `e2e-openrouter` job, gated the way the binder corpus is (paths filter over `src/benchspec/agents/**`, `src/benchspec/grading/**`, `src/benchspec/config/**`, `evals/e2e/**`, and the workflow; internal PRs only; `workflow_dispatch` runs it unconditionally), running on the Docker backend with the `OPENROUTER_API_KEY` secret and uploading the iteration's `meta.json` and `benchmark.md` as artifacts. It asserts what the manual verification below asserts: a graded matrix, and `provider: "openrouter"` on the binder, the judge, and every arm.
-- **Config parse test.** `tests/test_e2e_suite.py` gains cases that resolve `evals/e2e/openrouter.toml` through the real parsers and assert the provider on the binder, the judge, and each arm, so the suite cannot drift from the config surface without `make test` noticing.
+- **The OpenRouter run is part of `make e2e`.** `pyproject.toml` gains a second set, `[tool.benchspec.sets.e2e-openrouter]`, whose arms run the `hello` suite through every harness on OpenRouter: `claude-code` baseline and trial on `anthropic/...`, a `codex` trial on `openai/...`, and an `opencode` trial on `openrouter/...`. `make e2e` runs the existing `e2e` set and then `benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model <slug from a different family than the arms> --binder-provider openrouter`, so one `make e2e` covers the default path and the OpenRouter path for the binder, the judge, and all three adapters. The OpenRouter run needs only `OPENROUTER_API_KEY`; `make e2e`'s credential list grows by that one variable.
+- **Config parse test.** `tests/test_e2e_suite.py` gains cases that resolve the `e2e-openrouter` set and the judge and binder CLI overrides through the real parsers and assert the provider on the binder, the judge, and each arm, so the suite cannot drift from the config surface without `make test` noticing.
 
 ## Open Questions
 
@@ -128,7 +127,7 @@ Same evals, arms, matrix, and exit codes. `provider` is recorded on the binder, 
 - **`docs/sandbox.md:166-167,229`**: credentials section names the OpenRouter host scope.
 - **`docs/quickstart.md:17,34,42,155,255`**, **`docs/concepts.md:52`**, **`docs/writing-evals.md:182,248`**: "the binder needs `GEMINI_API_KEY`" becomes "the binder's credential, by provider".
 - **`.env.example:3-21`**: an `OPENROUTER_API_KEY` slot with the single-key note.
-- **`README.md` Development section and `Makefile` help**: `make e2e:openrouter` beside `make e2e`, naming the one credential it needs.
+- **`README.md` Development section and `Makefile` help**: `make e2e` now runs both sets and needs `OPENROUTER_API_KEY` alongside its existing credentials.
 
 ## Out of Scope
 
@@ -163,7 +162,7 @@ Same evals, arms, matrix, and exit codes. `provider` is recorded on the binder, 
 - `OPENROUTER_API_KEY=... uv run benchspec run --set e2e` with all three providers set to `openrouter` in a scratch `--config` — proves a graded matrix from one key; `meta.json` shows `provider: "openrouter"` on binder, judge, and arms.
 - `env -u OPENROUTER_API_KEY uv run benchspec run --set e2e` with the same config — exits `2`, naming `OPENROUTER_API_KEY` once each for the binder, the judge, and the harness.
 - `make evals` with `[tool.benchspec.binder] provider = "openrouter"` — binder corpus passes its false-positive gate through OpenRouter.
-- `OPENROUTER_API_KEY=... make e2e:openrouter` — the `hello` suite grades through OpenRouter on every harness, with the binder and judge on OpenRouter too; the same job is green in `evals.yml`.
+- `make e2e` — after the existing set, the `e2e-openrouter` set grades the `hello` suite through OpenRouter on every harness with the binder and judge on OpenRouter too, and its `meta.json` shows `provider: "openrouter"` on all three.
 
 ## Done When
 
@@ -173,6 +172,6 @@ Same evals, arms, matrix, and exit codes. `provider` is recorded on the binder, 
 - Claude Code, Codex, and OpenCode judges run through OpenRouter on the host, and judge preflight passes with the key in the host env or the judge's `env`.
 - A run with all three set to `openrouter` grades with only `OPENROUTER_API_KEY` exported; preflight names that one variable when it is missing.
 - `meta.json` carries `provider` on the binder, the judge, and every arm.
-- `make e2e:openrouter` and the `e2e-openrouter` CI job run the `hello` suite through OpenRouter on the binder, the judge, and all three harnesses from `OPENROUTER_API_KEY` alone, and `tests/test_e2e_suite.py` pins the config they resolve.
+- `make e2e` runs the `e2e-openrouter` set after the existing one, grading the `hello` suite through OpenRouter on the binder, the judge, and all three harnesses from `OPENROUTER_API_KEY` alone, and `tests/test_e2e_suite.py` pins the config it resolves.
 - The `default`/`gemini` paths produce byte-identical commands, env, secrets, and requests to today's.
 - README, `configuration.md` (including the base-URL fix), `harnesses.md`, `sandbox.md`, `quickstart.md`, `concepts.md`, `writing-evals.md`, and `.env.example` describe the key and the single-credential path.
