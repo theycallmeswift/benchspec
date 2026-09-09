@@ -300,6 +300,63 @@ def test_preflight_session_sandbox_trigger_only_uses_default(
     assert preflight_calls == [(None, [])]
 
 
+def test_preflight_grading_reports_binder_and_judge_failures_together(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing Gemini key does not hide a judge that cannot authenticate."""
+    from benchspec.grading import binder
+    from benchspec.grading.judges import JudgeConfig
+    from benchspec.orchestration import cases
+
+    def reject_gemini() -> None:
+        """Reject the binder credential the way the real check does."""
+        raise RuntimeError("GEMINI_API_KEY is required")
+
+    def reject_judge(config: JudgeConfig) -> None:
+        """Reject the judge credential the way the real check does."""
+        raise RuntimeError(f"judge harness `{config.harness}`: not logged in")
+
+    monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
+    monkeypatch.setattr(binder, "preflight_gemini_key", reject_gemini)
+    monkeypatch.setattr(cases, "preflight_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_judge_credential", reject_judge)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        cases.preflight_grading(PluginOptions(values={}, rootpath=tmp_path))
+
+    assert str(exc_info.value) == textwrap.dedent(
+        """\
+        benchspec grading preflight failed:
+          - GEMINI_API_KEY is required
+          - judge harness `codex`: not logged in"""
+    )
+
+
+def test_preflight_grading_skips_the_credential_probe_when_the_judge_binary_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing judge binary is reported as such, never as a failed login on top of it."""
+    from benchspec.grading import binder
+    from benchspec.grading.judges import JudgeConfig
+    from benchspec.orchestration import cases
+
+    def reject_binary(config: JudgeConfig) -> None:
+        """Reject the judge binary the way the real check does."""
+        raise RuntimeError("judge harness `codex` binary `codex` not found on PATH")
+
+    def must_not_probe(config: JudgeConfig) -> None:
+        """Fail the test if the credential probe runs without a binary."""
+        raise AssertionError("credential probe ran without a judge binary")
+
+    monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
+    monkeypatch.setattr(binder, "preflight_gemini_key", lambda: None)
+    monkeypatch.setattr(cases, "preflight_judge_binary", reject_binary)
+    monkeypatch.setattr(cases, "preflight_judge_credential", must_not_probe)
+
+    with pytest.raises(RuntimeError, match="binary `codex` not found on PATH"):
+        cases.preflight_grading(PluginOptions(values={}, rootpath=tmp_path))
+
+
 def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:

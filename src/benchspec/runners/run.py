@@ -20,6 +20,7 @@ import pytest
 
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
 from benchspec.orchestration import cases
+from benchspec.sandbox.sandbox import format_preflight_failure
 from benchspec.specs import discovery
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
@@ -88,23 +89,28 @@ class PluginOptions:
 def preflight_run(args: argparse.Namespace) -> None:
     """Refuse a run, before pytest spawns, on anything the plugin would refuse later.
 
-    Drives the plugin's own preflights through `PluginOptions`: grading first (Gemini
-    credential, judge config, judge binary), then the resolved set's sandbox (set
-    resolution, host readiness, agent credential). Nothing is duplicated — a run that
-    passes here passes the same checks again inside pytest as a backstop for raw
-    `pytest -p benchspec.runners.pytest` invocations.
+    Drives the plugin's own preflights through `PluginOptions`: grading (Gemini
+    credential, judge config, judge binary and credential), then the resolved set's
+    sandbox (set resolution, host readiness, agent credential). Every environment
+    failure is reported in one message, so a fresh host learns everything it is missing
+    from a single run. Nothing is duplicated — a run that passes here passes the same
+    checks again inside pytest as a backstop for raw `pytest -p benchspec.runners.pytest`
+    invocations.
 
     Args:
         args: The parsed `run` namespace, with `root` a `Path`.
 
     Raises:
-        RuntimeError: a missing credential, an absent binary, or an unready host.
+        RuntimeError: a missing credential, an absent binary, or an unready host; every
+            such failure listed.
         pytest.UsageError: a malformed or unknown set, or a malformed judge config.
         SchemaError: an unsupported sandbox backend or a malformed eval.
     """
     options = PluginOptions.from_args(args)
-    cases.preflight_grading(options)
-    cases.preflight_session_sandbox(options)
+
+    errors = cases.grading_preflight_errors(options) + cases.sandbox_preflight_errors(options)
+    if errors:
+        raise RuntimeError(format_preflight_failure("benchspec preflight failed", errors))
 
 
 def translate_run_flags(args: argparse.Namespace) -> list[str]:

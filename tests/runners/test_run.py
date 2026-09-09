@@ -349,22 +349,52 @@ def test_preflight_run_drives_grading_then_sandbox_through_the_adapter(
     """Verify preflight_run runs the plugin's grading and sandbox preflights, in that order."""
     calls: list[tuple[str, RunOptions]] = []
 
-    def record_grading(options: RunOptions) -> None:
+    def record_grading(options: RunOptions) -> list[str]:
         """Stand in for the grading preflight, recording the options it was handed."""
         calls.append(("grading", options))
+        return []
 
-    def record_sandbox(options: RunOptions) -> None:
+    def record_sandbox(options: RunOptions) -> list[str]:
         """Stand in for the sandbox preflight, recording the options it was handed."""
         calls.append(("sandbox", options))
+        return []
 
-    monkeypatch.setattr(run.cases, "preflight_grading", record_grading)
-    monkeypatch.setattr(run.cases, "preflight_session_sandbox", record_sandbox)
+    monkeypatch.setattr(run.cases, "grading_preflight_errors", record_grading)
+    monkeypatch.setattr(run.cases, "sandbox_preflight_errors", record_sandbox)
     args = _run_namespace(tmp_path, set="micro")
 
     run.preflight_run(args)
 
     assert [name for name, _ in calls] == ["grading", "sandbox"]
     assert all(options.getoption("benchspec_set") == "micro" for _, options in calls)
+
+
+def test_preflight_run_reports_grading_and_sandbox_failures_together(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A host missing everything learns every missing piece from one run, not one per run."""
+    monkeypatch.setattr(
+        run.cases,
+        "grading_preflight_errors",
+        lambda options: ["GEMINI_API_KEY is required", "judge harness `codex`: not logged in"],
+    )
+    monkeypatch.setattr(
+        run.cases,
+        "sandbox_preflight_errors",
+        lambda options: ["harness `claude-code`: no Claude credential"],
+    )
+    args = _run_namespace(tmp_path)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        run.preflight_run(args)
+
+    assert str(exc_info.value) == textwrap.dedent(
+        """\
+        benchspec preflight failed:
+          - GEMINI_API_KEY is required
+          - judge harness `codex`: not logged in
+          - harness `claude-code`: no Claude credential"""
+    )
 
 
 def test_run_preflight_runtime_error_exits_two_without_spawning(
