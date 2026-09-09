@@ -4,9 +4,12 @@
 # Paste it into the environment's "Setup script" field at claude.ai/code. It runs once
 # as root, then the filesystem is snapshotted: files and Docker images carry over to
 # later sessions, running processes do not. See docs/sandbox.md, "Claude Code on the web".
+#
+# A non-zero exit fails the session start, so every step past the harness install warns
+# and continues rather than aborting: a session without `make e2e` beats no session.
 set -euo pipefail
 
-PROXY_CA_BUNDLE=/root/.ccr/ca-bundle.crt
+HOST_CA_DIR=/usr/local/share/ca-certificates
 PROXY_CA_IMAGE=benchspec-base:proxy-ca
 DOTENV=/home/user/.env
 
@@ -30,28 +33,38 @@ if ! docker info >/dev/null 2>&1; then
     sleep 1
   done
 fi
-docker info >/dev/null 2>&1 || { echo "dockerd did not start; see /tmp/benchspec-dockerd.log" >&2; exit 1; }
+if ! docker info >/dev/null 2>&1; then
+  echo "dockerd did not start; see /tmp/benchspec-dockerd.log. Skipping $PROXY_CA_IMAGE." >&2
+  exit 0
+fi
 
-# Build the sandbox base image. The VM's security proxy intercepts TLS inside containers
+# Build the sandbox base image. The VM's egress gateway intercepts TLS inside containers
 # too; without its CA the snapshot build's `curl https://claude.ai/install.sh | bash`
-# fetches nothing and the sandbox ends up with no `claude`.
-if [ ! -f "$PROXY_CA_BUNDLE" ]; then
-  echo "proxy CA bundle missing at $PROXY_CA_BUNDLE; sandbox snapshots will not build" >&2
-  exit 1
+# fetches nothing and the sandbox ends up with no `claude`. The gateway's CA is among the
+# CAs baked into the VM's local trust directory at image build time, which is why that
+# directory and not the agent proxy's bundle (absent until Claude Code launches) is the
+# source. Every CA there is Anthropic's own sandbox infrastructure, so all of them go in.
+if ! ls "$HOST_CA_DIR"/*.crt >/dev/null 2>&1; then
+  echo "no CAs under $HOST_CA_DIR; sandbox snapshots will not build. Skipping $PROXY_CA_IMAGE." >&2
+  exit 0
 fi
 
 build_dir=$(mktemp -d)
-cp "$PROXY_CA_BUNDLE" "$build_dir/proxy-ca.crt"
+mkdir "$build_dir/ca-certificates"
+cp "$HOST_CA_DIR"/*.crt "$build_dir/ca-certificates/"
 cat >"$build_dir/Dockerfile" <<'DOCKERFILE'
 FROM ubuntu:latest
-COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt
+COPY ca-certificates/ /usr/local/share/ca-certificates/
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && update-ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/proxy-ca.crt \
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 DOCKERFILE
-docker build --quiet --tag "$PROXY_CA_IMAGE" "$build_dir" >/dev/null
+if docker build --quiet --tag "$PROXY_CA_IMAGE" "$build_dir" >/dev/null; then
+  echo "built $PROXY_CA_IMAGE"
+else
+  echo "docker build of $PROXY_CA_IMAGE failed; sandbox snapshots will not build" >&2
+fi
 rm -rf "$build_dir"
-echo "built $PROXY_CA_IMAGE"
