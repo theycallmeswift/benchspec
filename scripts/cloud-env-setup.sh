@@ -12,6 +12,11 @@ set -euo pipefail
 HOST_CA_DIR=/usr/local/share/ca-certificates
 PROXY_CA_IMAGE=benchspec-base:proxy-ca
 DOTENV=/home/user/.env
+CLONE=/home/user/benchspec
+DOCKERD_LOG=/tmp/benchspec-dockerd.log
+# Starts dockerd if it is not answering, then waits for it. Shared by this script
+# and the session hook below, so both start the daemon the same way.
+START_DOCKERD="docker info >/dev/null 2>&1 || { setsid nohup dockerd >$DOCKERD_LOG 2>&1 </dev/null & for _ in \$(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done; }"
 
 # Install harnesses. `claude` is preinstalled; the judge runs on Codex.
 npm install -g @openai/codex || true
@@ -25,16 +30,32 @@ CLAUDE_CODE_OAUTH_TOKEN=\${BENCHSPEC_CLAUDE_OAUTH_TOKEN}
 BENCHSPEC_BASE_IMAGE=$PROXY_CA_IMAGE
 EOF
 
-# Start Docker. The VM ships dockerd but nothing launches it.
-if ! docker info >/dev/null 2>&1; then
-  setsid nohup dockerd >/tmp/benchspec-dockerd.log 2>&1 </dev/null &
-  for _ in $(seq 1 30); do
-    docker info >/dev/null 2>&1 && break
-    sleep 1
-  done
+# The snapshot keeps files, not processes, so every later session starts with dockerd
+# stopped. A SessionStart hook in the clone's gitignored local settings starts it on
+# each session, so `make e2e` needs no manual step.
+if [ -d "$CLONE" ]; then
+  mkdir -p "$CLONE/.claude"
+  cat >"$CLONE/.claude/settings.local.json" <<EOF
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$START_DOCKERD" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+else
+  echo "no clone at $CLONE; skipping the dockerd session hook" >&2
 fi
+
+# Start Docker. The VM ships dockerd but nothing launches it.
+bash -c "$START_DOCKERD"
 if ! docker info >/dev/null 2>&1; then
-  echo "dockerd did not start; see /tmp/benchspec-dockerd.log. Skipping $PROXY_CA_IMAGE." >&2
+  echo "dockerd did not start; see $DOCKERD_LOG. Skipping $PROXY_CA_IMAGE." >&2
   exit 0
 fi
 

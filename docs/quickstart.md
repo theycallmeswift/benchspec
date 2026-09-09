@@ -6,6 +6,22 @@ skill, and a `benchmark.md` showing the delta between them. It is written for
 someone who has read the README and nothing else; the terms it uses (arm,
 baseline, binder, judge, cell) are defined in [concepts.md](concepts.md).
 
+## TL;DR
+
+The whole walkthrough, for a reader who wants the commands first and the
+explanation as needed:
+
+```bash
+mkdir hello-evals && cd hello-evals
+python3 -m venv .venv && .venv/bin/pip install benchspec
+printf 'GEMINI_API_KEY=...\nCLAUDE_CODE_OAUTH_TOKEN=...\n' > .env   # Prerequisites
+# Steps 2–3: write skills/hello/SKILL.md, pyproject.toml, the eval, and setup.sh
+.venv/bin/benchspec lint                    # free static checks
+.venv/bin/benchspec run -- --collect-only   # confirm discovery, nothing spent
+.venv/bin/benchspec run                     # two sandboxes, graded, reported
+cat tmp/evals/iteration_01/benchmark.md
+```
+
 ## Prerequisites
 
 - **A running Docker daemon.** Any host works as long as `docker info` succeeds.
@@ -19,10 +35,19 @@ baseline, binder, judge, cell) are defined in [concepts.md](concepts.md).
   run and is unrelated to the agent credential above.
 
 Credentials can live in a repo-root `.env`; every subcommand loads it first, and
-exported variables win over `.env` values. Nothing in `.env` reaches the guest —
-the staged repo the guest sees has every dotenv file removed. If anything is
-missing, preflight fails with a remediation message before any sandbox boots or
-any paid call is made.
+exported variables win over `.env` values. For this walkthrough that file is two
+lines:
+
+```bash
+GEMINI_API_KEY=...             # the binder
+CLAUDE_CODE_OAUTH_TOKEN=...    # from `claude setup-token`; or ANTHROPIC_API_KEY=...
+```
+
+The repo's [`.env.example`](../.env.example) lists every variable benchspec
+reads, including the other harnesses' credentials. Nothing in `.env` reaches the
+guest — the staged repo the guest sees has every dotenv file removed. If anything
+is missing, preflight fails with a remediation message before any sandbox boots
+or any paid call is made.
 
 ## Step 1 — Create the project
 
@@ -150,7 +175,7 @@ A malformed eval fails here, loudly, with the offending path quoted.
 .venv/bin/benchspec run
 ```
 
-The first run builds the sandbox snapshot (a few minutes to download the base
+The first run builds the sandbox snapshot (about a minute to download the base
 image and install the agent CLI); later runs reuse it, or run
 `benchspec sandbox:build` once to pay that cost up front. Both cells then run
 under their eval file's progress line, grade, and the session ends with the
