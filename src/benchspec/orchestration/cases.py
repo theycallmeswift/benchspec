@@ -207,33 +207,35 @@ def seeded_workdir(
     return workdir, pre_run_shas
 
 
-def _session_sandbox_target(config: RunOptions) -> tuple[SandboxBackend | None, list[str]]:
-    """Return the resolved set's sandbox backend and arm harnesses, for its preflight.
+def _session_sandbox_target(
+    config: RunOptions,
+) -> tuple[SandboxBackend | None, list[tuple[str, str]]]:
+    """Return the resolved set's sandbox backend and arm (harness, provider) pairs.
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
     sets table degrades instead of raising). No eval set ⇒ a None backend, so preflight
-    resolves the default one, and no arm harnesses.
+    resolves the default one, and no arm pairs.
     """
     run_set = session_run_set(config)
     backend = resolve_sandbox(run_set.sandbox) if run_set else None
-    harnesses = [arm.harness for arm in run_set.arms] if run_set else []
-    return backend, harnesses
+    harness_providers = [(arm.harness, arm.provider) for arm in run_set.arms] if run_set else []
+    return backend, harness_providers
 
 
 def sandbox_preflight_errors(config: RunOptions) -> list[str]:
     """Return every reason the resolved set's sandbox can't run, empty when it can."""
-    backend, harnesses = _session_sandbox_target(config)
-    return sandbox.preflight_errors(backend, harnesses=harnesses)
+    backend, harness_providers = _session_sandbox_target(config)
+    return sandbox.preflight_errors(backend, harness_providers=harness_providers)
 
 
 def preflight_session_sandbox(config: RunOptions) -> None:
     """Preflight the resolved eval set's sandbox backend before any arm runs.
 
-    Drives `sandbox.preflight` with the set's backend and arm harnesses, so every harness
-    the arms will run under has its credential checked.
+    Drives `sandbox.preflight` with the set's backend and arm (harness, provider) pairs,
+    so every credential the arms will run under is checked.
     """
-    backend, harnesses = _session_sandbox_target(config)
-    sandbox.preflight(backend, harnesses=harnesses)
+    backend, harness_providers = _session_sandbox_target(config)
+    sandbox.preflight(backend, harness_providers=harness_providers)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -266,18 +266,23 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(
     )
     monkeypatch.setattr(cases, "session_run_set", lambda config: fake_set)
     monkeypatch.setattr(cases, "resolve_sandbox", lambda name: f"backend:{name}")
-    preflight_calls: list[tuple[str | None, list[str]]] = []
+    preflight_calls: list[tuple[str | None, list[tuple[str, str]]]] = []
     monkeypatch.setattr(
         cases.sandbox,
         "preflight",
-        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
+        lambda backend=None, harness_providers=(): preflight_calls.append(
+            (backend, list(harness_providers))
+        ),
     )
 
     # The options go unread — `session_run_set` is stubbed — so an empty adapter suffices.
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    # Every arm harness rides along, so a set spanning harnesses preflights each credential.
-    assert preflight_calls == [("backend:custombackend", ["claude-code", "codex"])]
+    # Every arm's (harness, provider) pair rides along, so a set spanning harnesses
+    # preflights each credential.
+    assert preflight_calls == [
+        ("backend:custombackend", [("claude-code", "default"), ("codex", "default")])
+    ]
 
 
 def test_preflight_session_sandbox_trigger_only_uses_default(
@@ -287,16 +292,18 @@ def test_preflight_session_sandbox_trigger_only_uses_default(
     from benchspec.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
-    preflight_calls: list[tuple[str | None, list[str]]] = []
+    preflight_calls: list[tuple[str | None, list[tuple[str, str]]]] = []
     monkeypatch.setattr(
         cases.sandbox,
         "preflight",
-        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
+        lambda backend=None, harness_providers=(): preflight_calls.append(
+            (backend, list(harness_providers))
+        ),
     )
 
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    # None => preflight resolves DEFAULT_SANDBOX itself; no set => no arm harnesses.
+    # None => preflight resolves DEFAULT_SANDBOX itself; no set => no arm pairs.
     assert preflight_calls == [(None, [])]
 
 

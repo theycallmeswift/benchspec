@@ -41,7 +41,8 @@ def _no_real_vm(monkeypatch: pytest.MonkeyPatch) -> None:
     # session_factory is faked separately per test.
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", "/nonexistent/benchspec-docker")
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: None
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": None,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"
@@ -685,7 +686,7 @@ def test_run_eval_arm_selects_agent_by_arm_harness(
 
     captured: dict[str, str | None] = {}
 
-    def fake_make_agent(harness: str | None = None) -> None:
+    def fake_make_agent(harness: str | None = None, provider: str = "default") -> None:
         """Fake make agent."""
         captured["harness"] = harness
         return None
@@ -1251,7 +1252,8 @@ def test_missing_judge_binary_marks_arm_errored(
     )
     agent = ClaudeCodeAgent(auth_value="test-key", version="test-version")
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
 
     def boom(*args: object, **kwargs: object) -> NoReturn:
@@ -1958,7 +1960,8 @@ def test_provenance_json_written_with_arm_and_guest_version(
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
@@ -2002,7 +2005,8 @@ def test_guest_probe_uses_live_sandbox_seam_not_host(
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
     live_sandbox = FakeSandbox()
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
@@ -2037,7 +2041,8 @@ def test_image_identity_failure_is_unavailable_but_run_completes(
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.unavailable("manifest read failed"))
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
@@ -2077,7 +2082,8 @@ def test_capture_error_on_real_arm_raises_loudly(
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
@@ -2116,7 +2122,8 @@ def test_provenance_json_survives_binder_failure_after_sandbox_use(
     agent = _FakeAgent()
     backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
@@ -2192,7 +2199,8 @@ def test_provenance_fingerprint_uses_environment_that_selected_snapshot(
         return next(environments)
 
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: agent
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
