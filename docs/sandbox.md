@@ -195,28 +195,35 @@ install runs. `environment_script` runs too late for that.
 
 ### Claude Code on the web
 
-The cloud VM is one such host, and the repo's SessionStart hook
-(`.claude/hooks/session-start.sh`) prepares it: it starts `dockerd`, builds
+The cloud VM is one such host. [`scripts/cloud-env-setup.sh`](../scripts/cloud-env-setup.sh)
+is the environment's setup script: paste it into the **Setup script** field of
+the cloud environment at claude.ai/code. It installs the Codex judge, writes the
+dotenv file described below, starts `dockerd`, and builds
 `benchspec-base:proxy-ca` from `ubuntu:latest` with the proxy CA installed and
-`NODE_EXTRA_CA_CERTS` pointing at it, and exports `BENCHSPEC_BASE_IMAGE` for the
-session. The hook is a no-op outside the cloud.
+`NODE_EXTRA_CA_CERTS` pointing at it. The script runs once; the environment
+snapshot keeps its files and images for later sessions.
 
-Credentials need one more step there. Claude Code strips its own auth variables
-(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from every command it runs, so
-a value set under either name in the cloud environment never reaches
-`make e2e`. Store the token under a name Claude Code doesn't strip, such as
-`BENCHSPEC_CLAUDE_OAUTH_TOKEN`, and have the environment's setup script write a
-dotenv file above the clone that maps it back; benchspec's dotenv loader walks
-up from the repo and expands the reference at run time, so the file holds no
-secret:
+Two things the snapshot can't carry:
 
-```bash
-printf 'CLAUDE_CODE_OAUTH_TOKEN=${BENCHSPEC_CLAUDE_OAUTH_TOKEN}\n' > /home/user/.env
-```
+- **A running daemon.** Sessions after the first start with `dockerd` stopped.
+  Start it before `make e2e`:
 
-`GEMINI_API_KEY` and `OPENAI_API_KEY` pass through untouched. The Codex judge
-also needs `npm install -g @openai/codex` in the setup script and
-`api.openai.com` added to the environment's allowed domains.
+  ```bash
+  setsid nohup dockerd >/tmp/benchspec-dockerd.log 2>&1 </dev/null &
+  ```
+
+- **The Claude credential.** Claude Code strips its own auth variables
+  (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from every command it runs,
+  so a value under either name in the cloud environment never reaches
+  `make e2e`. Store the token as `BENCHSPEC_CLAUDE_OAUTH_TOKEN` instead. The
+  setup script writes `/home/user/.env`, above the clone, mapping it back;
+  benchspec's dotenv loader walks up from the repo and expands the reference at
+  run time, so the file holds no secret. The same file carries
+  `BENCHSPEC_BASE_IMAGE`.
+
+`GEMINI_API_KEY` and the Codex credential pass through untouched. The Codex
+judge also needs `api.openai.com` in the environment's allowed domains; the
+Trusted default list doesn't include it.
 
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
