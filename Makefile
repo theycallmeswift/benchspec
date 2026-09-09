@@ -14,7 +14,7 @@ test:  ## Run the unit test suite
 # each e2e cell reserves a 2 GB sandbox, and binder fan-out past ~12 trips the
 # Gemini call's ~60s timeout.
 WORKERS ?= 6
-e2e:  ## Run the end-to-end suite across WORKERS sandboxes (default 6, 2 GB each; needs claude+codex CLIs, a Claude credential, GEMINI_API_KEY, OPENAI_API_KEY for the Codex judge, and a running Docker daemon); EVAL_ARGS appends pytest args
+e2e:  ## Run the end-to-end suite across WORKERS sandboxes (default 6, 2 GB each; needs claude+codex CLIs, a Claude credential, GEMINI_API_KEY, OPENAI_API_KEY for the Codex judge, and a running Docker daemon); EVAL_ARGS appends pytest args, EVAL_ARGS="--collect-only -q" dry-runs collection for free
 	uv run benchspec run --set e2e -- -n $(WORKERS) $(EVAL_ARGS)
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection

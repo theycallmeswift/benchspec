@@ -46,8 +46,8 @@ CLAUDE_CODE_OAUTH_TOKEN=...    # from `claude setup-token`; or ANTHROPIC_API_KEY
 The repo's [`.env.example`](../.env.example) lists every variable benchspec
 reads, including the other harnesses' credentials. Nothing in `.env` reaches the
 guest — the staged repo the guest sees has every dotenv file removed. If anything
-is missing, preflight fails with a remediation message before any sandbox boots
-or any paid call is made.
+is missing, preflight fails with one message naming every missing piece, before
+any sandbox boots or any paid call is made.
 
 ## Step 1 — Create the project
 
