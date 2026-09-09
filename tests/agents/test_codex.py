@@ -510,6 +510,55 @@ def test_parse_codex_jsonl_explicit_error_event_sets_is_error() -> None:
     assert "auth failed" in res.result_text
 
 
+def test_parse_codex_jsonl_error_events_before_turn_completed_are_recovered() -> None:
+    """Reconnect `error` events that Codex recovers from do not fail a completed turn."""
+    stream = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "thread-6"}),
+            json.dumps({"type": "turn.started"}),
+            json.dumps(
+                {
+                    "type": "error",
+                    "message": "Reconnecting... 2/5 (stream disconnected before completion)",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "error",
+                    "message": "Reconnecting... 3/5 (stream disconnected before completion)",
+                }
+            ),
+            json.dumps({"type": "item.completed", "item": {"type": "error"}}),
+            json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "OK"}}
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
+
+    assert res.is_error is False
+    assert res.result_text == "OK"
+    assert "Reconnecting... 2/5" in res.raw
+
+
+def test_parse_codex_jsonl_turn_failed_sets_is_error() -> None:
+    """A `turn.failed` event is a failed turn, with its nested message as the result."""
+    stream = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "thread-7"}),
+            json.dumps({"type": "turn.started"}),
+            json.dumps({"type": "turn.failed", "error": {"message": "rate limited"}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
+
+    assert res.is_error is True
+    assert res.result_text == "rate limited"
+
+
 def test_parse_codex_jsonl_carries_normalized_trajectory() -> None:
     """Verify parse codex jsonl carries normalized trajectory."""
     res = parse_codex_jsonl(

@@ -569,7 +569,14 @@ def parse_codex_jsonl(
     config: str,
     detect_skill: str | None,
 ) -> RunResult:
-    """Parse codex jsonl."""
+    """Parse a `codex exec --json` stream into a RunResult.
+
+    `is_error` means the turn did not complete: a `turn.failed` event, or an `error`
+    event with no `turn.completed` after it. Codex also emits `error` events for
+    transports it recovers from (a websocket that fails and falls back to HTTP logs
+    "Reconnecting..." and then completes the turn normally), so an `error` followed by
+    `turn.completed` is not a failure; the recovered messages stay in `raw`.
+    """
     events = list(iter_events(stdout))
     session_id = ""
     text_parts: list[str] = []
@@ -608,6 +615,9 @@ def parse_codex_jsonl(
             cache_read_tokens += _usage_int(usage, "cached_input_tokens", "cache_read_input_tokens")
             output_tokens += _usage_int(usage, "output_tokens")
             reasoning_tokens += _usage_int(usage, "reasoning_tokens", "reasoning_output_tokens")
+            # The turn finished, so every `error` before it was recovered from.
+            is_error = False
+            error_text = ""
         elif etype in {"turn.failed", "error"}:
             is_error = True
             error_text = _error_message(event) or error_text
