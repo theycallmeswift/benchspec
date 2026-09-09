@@ -824,3 +824,109 @@ def test_invoke_returns_error_when_auth_json_copy_fails() -> None:
 
     assert res.is_error is True
     assert "copy failed" in res.result_text
+
+
+_OPENROUTER_OVERRIDES = [
+    "-c", 'model_provider="openrouter"',
+    "-c", 'model_providers.openrouter.name="OpenRouter"',
+    "-c", 'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+    "-c", 'model_providers.openrouter.wire_api="responses"',
+]
+
+
+def _openrouter_agent() -> CodexAgent:
+    """Build an arm agent routed through OpenRouter with a known key."""
+    return CodexAgent(
+        auth_value="sk-or-test", auth_env="OPENROUTER_API_KEY", provider="openrouter"
+    )
+
+
+def test_build_command_under_openrouter_appends_the_provider_overrides() -> None:
+    """The benchspec-owned `-c` overrides declare the provider; user args still follow."""
+    cmd = _openrouter_agent().build_command(
+        "do the thing",
+        plugin_dir=None,
+        model="openai/gpt-5.5",
+        effort="medium",
+        resume_session_id=None,
+        detect_skill=None,
+        harness_args=["--full-auto"],
+    )
+
+    assert cmd == [
+        "/usr/local/bin/codex",
+        "exec",
+        "--json",
+        "-m",
+        "openai/gpt-5.5",
+        "-c",
+        "model_reasoning_effort=medium",
+        *_OPENROUTER_OVERRIDES,
+        "-C",
+        "/root",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check",
+        "--full-auto",
+        "do the thing",
+    ]
+
+
+def test_build_command_under_openrouter_still_reserves_c_for_users() -> None:
+    """Benchspec owning `-c` tokens does not open `-c` to `harness_args`."""
+    with pytest.raises(ValueError, match="reserved harness arg"):
+        _openrouter_agent().build_command(
+            "p", plugin_dir=None, model="openai/gpt-5.5", effort="medium",
+            resume_session_id=None, detect_skill=None,
+            harness_args=["-c", 'model_provider="mine"'],
+        )
+
+
+def test_build_command_under_default_carries_no_provider_overrides() -> None:
+    """The `default` command is byte-identical to today's: no `model_provider` at all."""
+    cmd = _agent().build_command(
+        "p", plugin_dir=None, model="gpt-5.4", effort="medium",
+        resume_session_id=None, detect_skill=None,
+    )
+
+    assert not any("model_provider" in token for token in cmd)
+
+
+def test_from_env_under_openrouter_reads_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under `openrouter` the credential is OPENROUTER_API_KEY, scoped to the gateway host."""
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex-ignored")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    agent = CodexAgent.from_env("openrouter")
+
+    assert agent.provider == "openrouter"
+    assert agent.secrets() == [Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",))]
+
+
+def test_credential_error_under_openrouter_needs_only_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Codex credential neither satisfies nor is named by the OpenRouter check."""
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    error = CodexAgent.credential_error("openrouter")
+
+    assert error is not None
+    assert "OPENROUTER_API_KEY" in error
+    assert "CODEX_API_KEY" not in error
+
+
+def test_credential_error_under_openrouter_passes_with_only_that_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an OpenRouter arm needs no OpenAI credential or auth.json at all."""
+    for env_name in (
+        "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON_PATH"
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    assert CodexAgent.credential_error("openrouter") is None

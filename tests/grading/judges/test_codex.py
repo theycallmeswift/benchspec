@@ -273,3 +273,87 @@ def test_host_credential_error_when_host_is_logged_out(monkeypatch: pytest.Monke
     assert error is not None
     assert "codex login" in error
     assert "CODEX_API_KEY" in error
+
+
+def test_judge_under_openrouter_declares_the_provider_by_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host judge gets the same `-c` provider overrides as the guest; no config file."""
+    stdout = _stream(
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "{}"}},
+        {"type": "turn.completed", "usage": {}},
+    )
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Capture the command and return a successful process."""
+        captured["command"] = command
+        return _fake_proc(stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    asyncio.run(CodexAgent.for_host("openrouter").judge("grade this", JudgeConfig(
+        harness="codex", provider="openrouter", model="openai/gpt-5.5",
+        harness_args=["--sandbox", "read-only"],
+    )))
+
+    command = captured["command"]
+    assert command[:5] == ["codex", "exec", "--json", "-m", "openai/gpt-5.5"]
+    overrides = [command[index + 1] for index, token in enumerate(command) if token == "-c"]
+    assert overrides == [
+        "model_reasoning_effort=medium",
+        'model_provider="openrouter"',
+        'model_providers.openrouter.name="OpenRouter"',
+        'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+        'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+        'model_providers.openrouter.wire_api="responses"',
+    ]
+    assert command[-3:] == ["--sandbox", "read-only", "grade this"]
+
+
+def test_judge_under_default_declares_no_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `default` judge command carries only the effort override, as today."""
+    stdout = _stream({"type": "turn.completed", "usage": {}})
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Capture the command and return a successful process."""
+        captured["command"] = command
+        return _fake_proc(stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _judge("p", JudgeConfig(harness="codex", model="gpt-5.5"))
+
+    assert captured["command"].count("-c") == 1
+
+
+def test_host_credential_error_under_openrouter_never_probes_the_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the key set, the host check passes without asking `codex login status`."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-host")
+
+    def must_not_run(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if the login probe runs under OpenRouter."""
+        raise AssertionError("codex login status must not run under openrouter")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+
+    assert CodexAgent.for_host("openrouter").host_credential_error() is None
+
+
+def test_host_credential_error_under_openrouter_ignores_a_host_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ChatGPT login cannot stand in for the missing OpenRouter key."""
+    _without_codex_env(monkeypatch)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout="Logged in using ChatGPT\n")
+    )
+
+    error = CodexAgent.for_host("openrouter").host_credential_error()
+
+    assert error is not None
+    assert "OPENROUTER_API_KEY" in error
