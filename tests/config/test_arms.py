@@ -629,3 +629,88 @@ def test_microsandbox_fixture_parses_and_resolves() -> None:
     resolved = resolve_set(rawsets, default)
 
     assert resolved.sandbox == "microsandbox"
+
+
+def test_parse_sets_provider_defaults_inherits_and_overrides() -> None:
+    """A set-level `provider` reaches every arm; an arm overrides it; absent means `default`."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "harness": "claude-code",
+                    "provider": "openrouter",
+                    "model": "anthropic/claude-sonnet-4.6",
+                    "arms": [
+                        {"name": "routed"},
+                        {"name": "direct", "provider": "default", "model": "sonnet"},
+                    ],
+                },
+                "plain": {
+                    "harness": "claude-code",
+                    "model": "sonnet",
+                    "arms": [{"name": "only"}],
+                },
+            }
+        )
+    )
+
+    routed, direct = resolve_set(rawsets, default, environ={}).arms
+    plain = resolve_set(rawsets, default, set_name="plain", environ={}).arms[0]
+
+    assert routed.provider == "openrouter"
+    assert direct.provider == "default"
+    assert plain.provider == "default"
+    assert plain == Arm("only", "claude-code", "sonnet")
+
+
+@pytest.mark.parametrize("level", ["set", "arm"])
+def test_parse_sets_rejects_unknown_provider_naming_it(level: str) -> None:
+    """An unknown provider at either level is a SchemaError naming the bad value."""
+    body: dict = {"harness": "claude-code", "model": "sonnet", "arms": [{"name": "alpha"}]}
+    if level == "set":
+        body["provider"] = "bedrock"
+    else:
+        body["arms"][0]["provider"] = "bedrock"
+
+    with pytest.raises(SchemaError, match=r"unknown provider `bedrock`.*openrouter"):
+        parse_sets(_sets_table({"default": body}))
+
+
+def test_resolve_set_rejects_unqualified_model_under_openrouter() -> None:
+    """A bare alias like `sonnet` cannot ride through OpenRouter; the arm is named."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "harness": "claude-code",
+                    "model": "sonnet",
+                    "arms": [{"name": "alpha", "provider": "openrouter"}],
+                }
+            }
+        )
+    )
+
+    with pytest.raises(SchemaError, match=r"arm `alpha`.*vendor-qualified.*`sonnet`"):
+        resolve_set(rawsets, default, environ={})
+
+
+def test_resolve_set_models_sweep_inherits_set_provider() -> None:
+    """A `--models` sweep keeps the set's provider on every generated arm."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "harness": "claude-code",
+                    "provider": "openrouter",
+                    "model": "anthropic/claude-sonnet-4.6",
+                    "arms": [{"name": "alpha"}],
+                }
+            }
+        )
+    )
+
+    resolved = resolve_set(
+        rawsets, default, models=["anthropic/claude-opus-4.6", "openai/gpt-5.5"], environ={}
+    )
+
+    assert [arm.provider for arm in resolved.arms] == ["openrouter", "openrouter"]

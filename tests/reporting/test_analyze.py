@@ -218,7 +218,8 @@ def test_activation_fixture_grades_both_polarities_end_to_end(
     """
     workspace.set_current_iteration("iteration_01")
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: None
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": None,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"

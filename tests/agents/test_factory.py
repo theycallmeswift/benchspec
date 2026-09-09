@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from benchspec.agents import make_agent
+from benchspec.agents import credential_preflight_error, known_providers, make_agent
+from benchspec.agents.claude import ClaudeCodeAgent
 
 
 def test_make_agent_explicit_harness_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,3 +46,37 @@ def test_make_agent_default_reads_codex_env(monkeypatch: pytest.MonkeyPatch) -> 
     agent = make_agent()
 
     assert agent.id == "codex"
+
+
+def test_known_providers_are_default_and_openrouter() -> None:
+    """Verify the provider enum is exactly the two transports the config accepts."""
+    assert known_providers() == frozenset({"default", "openrouter"})
+
+
+def test_make_agent_binds_the_arm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the arm's provider lands on the built agent; the default stays `default`."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    routed = make_agent("claude-code", provider="openrouter")
+    direct = make_agent("claude-code")
+
+    assert routed.provider == "openrouter"
+    assert direct.provider == "default"
+
+
+def test_credential_preflight_error_hands_the_provider_to_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the preflight asks the adapter about the pair's provider, not a default."""
+    seen: list[str] = []
+
+    def fake_credential_error(provider: str = "default", environ: object = None) -> None:
+        """Record the provider the preflight asked about."""
+        seen.append(provider)
+        return None
+
+    monkeypatch.setattr(ClaudeCodeAgent, "credential_error", staticmethod(fake_credential_error))
+
+    credential_preflight_error("claude-code", "openrouter")
+
+    assert seen == ["openrouter"]

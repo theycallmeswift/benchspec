@@ -55,6 +55,7 @@ def test_e2e_set_resolves_to_three_arms_with_declared_config() -> None:
     assert arms_by_name["trial-overrides"].harness == "claude-code"
     assert arms_by_name["trial-overrides"].model == "opus"
     assert arms_by_name["trial-overrides"].effort == "high"
+    assert all(arm.provider == "default" for arm in resolved.arms)
 
 
 def test_e2e_trial_overrides_env_inherits_style_and_overrides_locale() -> None:
@@ -88,6 +89,7 @@ def test_e2e_judge_is_codex_and_distinct_from_the_task_harness() -> None:
     judge = resolve_judge_config(pyproject_table=table.get("judge"))
 
     assert judge.harness == "codex"
+    assert judge.provider == "default"
     assert judge.model == "gpt-5.5"
     assert judge.harness != resolved.arms[0].harness
 

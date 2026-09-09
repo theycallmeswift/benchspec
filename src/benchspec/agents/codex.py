@@ -5,11 +5,11 @@ from __future__ import annotations
 import datetime
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import DEFAULT_PROVIDER, AgentCapabilities, BaseAgent, Credential
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
@@ -89,9 +89,10 @@ def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
     return harness_args
 
 
-def _auth_json_from_env() -> str | None:
+def _auth_json_from_env(environ: Mapping[str, str] | None = None) -> str | None:
     """Read Codex auth JSON from environment variables."""
-    path = os.environ.get("CODEX_AUTH_JSON_PATH")
+    environ = os.environ if environ is None else environ
+    path = environ.get("CODEX_AUTH_JSON_PATH")
     if not path:
         return None
     try:
@@ -144,6 +145,7 @@ class CodexAgent(BaseAgent):
         version: str = "latest",
         auth_json_path: str = "",
         agent_bin: str = "/usr/local/bin/codex",  # default binding: the guest install path
+        provider: str = DEFAULT_PROVIDER,
     ) -> None:
         """Initialize the instance."""
         self._auth_value = auth_value
@@ -151,39 +153,45 @@ class CodexAgent(BaseAgent):
         self._auth_json_path = auth_json_path
         self._version = version
         self.agent_bin = agent_bin
+        self.provider = provider
 
     @classmethod
-    def for_host(cls) -> CodexAgent:
+    def for_host(cls, provider: str = DEFAULT_PROVIDER) -> CodexAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `codex`."""
-        return cls(agent_bin="codex")
+        return cls(agent_bin="codex", provider=provider)
 
     @classmethod
-    def from_env(cls) -> CodexAgent:
+    def from_env(cls, provider: str = DEFAULT_PROVIDER) -> CodexAgent:
         """Build an agent instance from host environment settings."""
         version = os.environ.get("BENCHSPEC_CODEX_VERSION", "latest")
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
-                return cls(auth_value=value, auth_env=env_name, version=version)
+                return cls(
+                    auth_value=value, auth_env=env_name, version=version, provider=provider
+                )
         auth_json_path = _auth_json_from_env()
         if auth_json_path:
-            return cls(auth_json_path=auth_json_path, version=version)
-        return cls(version=version)
+            return cls(auth_json_path=auth_json_path, version=version, provider=provider)
+        return cls(version=version, provider=provider)
 
     @staticmethod
-    def credential_error() -> str | None:
+    def credential_error(
+        provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
         """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(env_name) for env_name in AUTH_ENV_VARS):
+        environ = os.environ if environ is None else environ
+        if any(environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
-        if _auth_json_from_env():
+        if _auth_json_from_env(environ):
             return None
         return f"no Codex credential - {_CREDENTIAL_REMEDY}"
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
         """Accept an env credential, else ask `codex login status` whether the host is logged in."""
-        if self.credential_error() is None:
+        if self.credential_error(self.provider, environ) is None:
             return None
-        proc = self.host_probe("login", "status")
+        proc = self.host_probe("login", "status", env=environ)
         if proc is not None and proc.returncode == 0:
             return None
         return f"Codex is not logged in on the host - run `codex login`, or {_CREDENTIAL_REMEDY}"

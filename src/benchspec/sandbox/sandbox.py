@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from benchspec.agents import (
+    DEFAULT_PROVIDER,
     CodingAgent,
     credential_preflight_error,
     make_agent,
@@ -65,33 +66,44 @@ def format_preflight_failure(heading: str, errors: Iterable[str]) -> str:
     return f"{heading}:\n  - " + "\n  - ".join(errors)
 
 
+def _harness_label(harness: str, provider: str) -> str:
+    """Name a (harness, provider) pair in a preflight message; the default provider is silent."""
+    if provider == DEFAULT_PROVIDER:
+        return f"harness `{harness}`"
+    return f"harness `{harness}` via provider `{provider}`"
+
+
 def preflight_errors(
-    backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()
+    backend: SandboxBackend | None = None, *, harness_providers: Iterable[tuple[str, str]] = ()
 ) -> list[str]:
     """Return every reason the host can't run sandboxed evals, empty when it can.
 
     Host-readiness checks come from the resolved backend (the default one when none is
-    passed). The credential check covers the selected agent plus every harness in
-    `harnesses` (a set's arm harnesses), naming each one that fails.
+    passed). The credential check covers the selected agent plus every `(harness,
+    provider)` pair in `harness_providers` (a set's arms), naming each one that fails.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errors: list[str] = list(backend.preflight())
-    # dict.fromkeys dedupes while preserving order, so a harness is reported once even
-    # when it is both the selected agent and an arm's harness.
-    for harness in dict.fromkeys((resolve_agent_name(), *harnesses)):
-        credential_error = credential_preflight_error(harness)
+    # dict.fromkeys dedupes while preserving order, so a pair is reported once even when
+    # it is both the selected agent and an arm's harness, while a set mixing providers
+    # on one harness reports each missing credential.
+    selected = (resolve_agent_name(), DEFAULT_PROVIDER)
+    for harness, provider in dict.fromkeys((selected, *harness_providers)):
+        credential_error = credential_preflight_error(harness, provider)
         if credential_error:
-            errors.append(f"harness `{harness}`: {credential_error}")
+            errors.append(f"{_harness_label(harness, provider)}: {credential_error}")
     return errors
 
 
-def preflight(backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()) -> None:
+def preflight(
+    backend: SandboxBackend | None = None, *, harness_providers: Iterable[tuple[str, str]] = ()
+) -> None:
     """Fail fast if the host can't run sandboxed evals.
 
     Raises RuntimeError (the exit-2 signal) listing every failure `preflight_errors`
-    reports for the same backend and harnesses.
+    reports for the same backend and harness/provider pairs.
     """
-    errors = preflight_errors(backend, harnesses=harnesses)
+    errors = preflight_errors(backend, harness_providers=harness_providers)
     if errors:
         raise RuntimeError(format_preflight_failure("benchspec sandbox preflight failed", errors))
 
@@ -621,12 +633,15 @@ def cli_build(
         rawsets, default_set = parse_sets(table)
         resolved = resolve_set(rawsets, default_set, set_name=set_name)
         backend = resolve_sandbox(resolved.sandbox)
-        arm_harnesses = [resolved_arm.harness for resolved_arm in resolved.arms]
-        preflight(backend, harnesses=arm_harnesses)
+        preflight(
+            backend,
+            harness_providers=[(arm.harness, arm.provider) for arm in resolved.arms],
+        )
         env = resolve_environment_config(root)
         # dict.fromkeys dedupes while preserving first-seen order — two arms sharing a
-        # harness build once.
-        for harness in dict.fromkeys(arm_harnesses):
+        # harness build once. Snapshots are provider-neutral, so the provider is not part
+        # of the key.
+        for harness in dict.fromkeys(arm.harness for arm in resolved.arms):
             _build_or_reuse_snapshot(make_agent(harness), env, backend)
     else:
         backend = resolve_sandbox(DEFAULT_SANDBOX)

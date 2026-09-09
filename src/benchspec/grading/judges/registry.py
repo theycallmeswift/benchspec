@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from benchspec.agents import agent_class, known_harnesses
 from benchspec.config.arms import expand_env
+from benchspec.specs.schema import SchemaError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
@@ -52,11 +53,20 @@ def preflight_verify_judge_credential(config: JudgeConfig) -> None:
     """RuntimeError if the selected judge harness cannot authenticate on the host.
 
     The judge runs on the host through `for_host()`, so the adapter's host check decides:
-    an env credential, or the CLI's own login where it can report one. Environment-
-    dependent like `preflight_verify_judge_binary`, and meant to run after it, so a missing
-    binary is reported as such rather than as a failed login probe.
+    an env credential, or the CLI's own login where it can report one. The check sees the
+    environment the judge itself will run with — the host environment with `config.env`
+    expanded and merged over it, exactly as `Host.exec` builds it — so a judge that
+    authenticates purely through its own `env` table passes. Environment-dependent like
+    `preflight_verify_judge_binary`, and meant to run after it, so a missing binary is
+    reported as such rather than as a failed login probe.
     """
-    error = agent_class(config.harness).for_host().host_credential_error()
+    try:
+        judge_env = expand_env(config.env, os.environ)
+    except SchemaError as error:
+        raise RuntimeError(f"judge harness `{config.harness}`: {error}") from error
+    adapter = agent_class(config.harness).for_host(config.provider)
+
+    error = adapter.host_credential_error({**os.environ, **judge_env})
     if error:
         raise RuntimeError(f"judge harness `{config.harness}`: {error}")
 
@@ -71,7 +81,7 @@ def run_judge(prompt: str, *, config: JudgeConfig) -> str:
     infra failures.
     """
     expanded = replace(config, env=expand_env(config.env, os.environ))
-    agent = agent_class(config.harness).for_host()
+    agent = agent_class(config.harness).for_host(config.provider)
 
     return asyncio.run(agent.judge(prompt, expanded))
 

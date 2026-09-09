@@ -12,12 +12,18 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from benchspec.agents import OPENROUTER_PROVIDER
+from benchspec.grading.binder_config import (
+    GEMINI_BINDER_MODEL,
+    GEMINI_PROVIDER,
+    BinderConfig,
+)
 from benchspec.grading.judge import _balanced_objects
 from benchspec.specs.schema import SchemaError, _validate_checker_obj
 
-GEMINI_BINDER_MODEL = "gemini-3.5-flash-lite"
-
 GEMINI_API_PATH = "generativelanguage.googleapis.com/v1beta"
+OPENROUTER_API_PATH = "openrouter.ai/api/v1"
+_API_PATHS = {GEMINI_PROVIDER: GEMINI_API_PATH, OPENROUTER_PROVIDER: OPENROUTER_API_PATH}
 _GEMINI_URL = f"https://{GEMINI_API_PATH}/models/{{model}}:generateContent"
 _GEMINI_TIMEOUT_SECONDS = 60.0
 _AUTH_HTTP_CODES = {401, 403}
@@ -309,16 +315,21 @@ def preflight_verify_gemini_key() -> None:
         )
 
 
-def binder_identity() -> dict:
+def binder_identity(config: BinderConfig | None = None) -> dict:
     """Return the configured binder's transport identity for artifact metadata.
 
-    Fixed and run-level — describes the assertion binder, not the grader. Never
-    reads or includes `GEMINI_API_KEY` or any other key material.
+    Run-level — describes the assertion binder, not the grader: the resolved provider,
+    its model, and the API path that provider posts to. Never reads or includes any
+    key material.
+
+    Args:
+        config: The run's resolved binder config; the built-in default when None.
     """
+    config = config or BinderConfig()
     return {
-        "provider": "gemini",
-        "model": GEMINI_BINDER_MODEL,
-        "api_path": GEMINI_API_PATH,
+        "provider": config.provider,
+        "model": config.model,
+        "api_path": _API_PATHS[config.provider],
     }
 
 
