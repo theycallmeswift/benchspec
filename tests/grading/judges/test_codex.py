@@ -154,3 +154,54 @@ def test_binary_version_best_effort_none_on_failure(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(subprocess, "run", raise_not_found)
 
     assert CodexAgent.for_host().binary_version() is None
+
+
+def _without_codex_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every env credential so only the host login probe can pass the check."""
+    for env_name in ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_AUTH_JSON_PATH"):
+        monkeypatch.delenv(env_name, raising=False)
+
+
+def test_host_credential_error_none_when_env_credential_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An env credential satisfies the host check without probing the CLI."""
+    monkeypatch.setenv("CODEX_API_KEY", "api-key")
+
+    def must_not_run(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if the probe is spawned despite an env credential."""
+        raise AssertionError("codex login status must not run when CODEX_API_KEY is set")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+
+    assert CodexAgent.for_host().host_credential_error() is None
+
+
+def test_host_credential_error_none_when_host_is_logged_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without an env credential, a passing `codex login status` means the host can judge."""
+    _without_codex_env(monkeypatch)
+    probed: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Record the probe and report a logged-in host."""
+        probed.append(command)
+        return _fake_proc(stdout="Logged in using ChatGPT\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert CodexAgent.for_host().host_credential_error() is None
+    assert probed == [["codex", "login", "status"]]
+
+
+def test_host_credential_error_when_host_is_logged_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failing `codex login status` yields a message naming both remedies."""
+    _without_codex_env(monkeypatch)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: _fake_proc(returncode=1, stdout="Not logged in")
+    )
+
+    error = CodexAgent.for_host().host_credential_error()
+
+    assert error is not None
+    assert "codex login" in error
+    assert "CODEX_API_KEY" in error

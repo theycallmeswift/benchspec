@@ -93,6 +93,15 @@ def _raise_for_is_error_envelope(stdout: str) -> None:
         raise RuntimeError(f"host claude CLI returned is_error=true: {msg[:1000]}")
 
 
+def _reports_logged_in(auth_status_json: str) -> bool:
+    """Whether a `claude auth status` JSON envelope reports an active login."""
+    try:
+        status = json.loads(auth_status_json)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(status, dict) and status.get("loggedIn") is True
+
+
 class ClaudeCodeAgent(BaseAgent):
     """Store claude code agent data."""
 
@@ -145,6 +154,18 @@ class ClaudeCodeAgent(BaseAgent):
         return (
             "no Claude credential — set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) "
             "or ANTHROPIC_API_KEY"
+        )
+
+    def host_credential_error(self) -> str | None:
+        """Accept an env credential, else ask `claude auth status` whether the host is logged in."""
+        if self.credential_error() is None:
+            return None
+        proc = self.host_probe("auth", "status")
+        if proc is not None and proc.returncode == 0 and _reports_logged_in(proc.stdout):
+            return None
+        return (
+            "Claude Code is not logged in on the host — run `claude login`, or set "
+            "CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY"
         )
 
     def version(self) -> str:

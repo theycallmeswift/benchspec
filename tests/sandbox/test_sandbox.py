@@ -188,6 +188,24 @@ def test_preflight_credential_error_surfaces_with_no_backend_errors(
     assert "credential" in str(exc_info.value)
 
 
+def test_preflight_checks_every_arm_harness_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A set whose arms span harnesses preflights each one, naming the harness that fails."""
+    monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "preflight", lambda self: [])
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # the selected agent is fine
+    for codex_env_name in ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_AUTH_JSON_PATH"):
+        monkeypatch.delenv(codex_env_name, raising=False)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        sandbox.preflight(
+            registry.resolve_sandbox("microsandbox"), harnesses=["claude-code", "codex"]
+        )
+
+    message = str(exc_info.value)
+    assert "harness `codex`: no Codex credential" in message
+    assert "claude-code" not in message
+
+
 def test_preflight_passes_on_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     """A supported host with a credential set passes without raising."""
     monkeypatch.setattr(microsandbox_mod.platform, "system", lambda: "Darwin")
@@ -261,7 +279,7 @@ def test_cli_build_resolves_environment_from_repo_root(
 ) -> None:
     """Bare cli_build reads its environment config from the given repo_root, not cwd."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(DockerBackend, "build_snapshot", lambda self, agent, name, env: None)
@@ -291,7 +309,7 @@ def test_cli_build_with_microsandbox_set_resolves_and_builds(
         'arms = [{ name = "baseline", harness = "claude-code" }]\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
@@ -333,7 +351,7 @@ def test_cli_build_with_set_builds_once_per_distinct_harness(
         "]\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     make_agent_calls: list[str | None] = []
 
     def fake_make_agent(harness: str | None = None) -> CodingAgent:
@@ -377,7 +395,7 @@ def test_cli_build_with_set_dedupes_shared_harness(
         "]\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     make_agent_calls: list[str | None] = []
 
     def fake_make_agent(harness: str | None = None) -> CodingAgent:
@@ -424,7 +442,7 @@ def test_cli_build_multi_harness_propagates_second_build_failure(
         "]\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", _agent_for_harness)
     monkeypatch.setattr(
         microsandbox_mod.MicrosandboxBackend, "snapshot_exists", lambda self, name: False
@@ -452,7 +470,7 @@ def test_cli_build_reports_image_identity_available(
 ) -> None:
     """Every built/reused snapshot's image-identity status is reported."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(
@@ -469,7 +487,7 @@ def test_cli_build_reports_image_identity_unavailable(
 ) -> None:
     """An unavailable image-identity lookup surfaces its error, never a bare null."""
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", _claude_agent)
     monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
     monkeypatch.setattr(
@@ -497,7 +515,7 @@ def test_cli_build_bare_path_requires_no_sets_table(
         return _claude_agent()
 
     monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(sandbox, "make_agent", fake_make_agent)
     monkeypatch.setattr(DockerBackend, "snapshot_exists", lambda self, name: True)
 
@@ -522,7 +540,7 @@ def test_cli_build_unknown_sandbox_set_raises_schema_error(
     )
     called_preflight: list[bool] = []
     monkeypatch.setattr(
-        sandbox, "preflight", lambda backend=None: called_preflight.append(True)
+        sandbox, "preflight", lambda backend=None, **kwargs: called_preflight.append(True)
     )
 
     with pytest.raises(SchemaError):

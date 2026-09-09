@@ -259,19 +259,25 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(
     from benchspec.orchestration import cases
 
     fake_set = Set(
-        "s", [Arm("a", "claude-code", "opus")], baseline=None, sandbox="custombackend"
+        "s",
+        [Arm("a", "claude-code", "opus"), Arm("b", "codex", "gpt-5.5")],
+        baseline=None,
+        sandbox="custombackend",
     )
     monkeypatch.setattr(cases, "session_run_set", lambda config: fake_set)
     monkeypatch.setattr(cases, "resolve_sandbox", lambda name: f"backend:{name}")
-    preflighted_backends: list[str | None] = []
+    preflight_calls: list[tuple[str | None, list[str]]] = []
     monkeypatch.setattr(
-        cases.sandbox, "preflight", lambda backend=None: preflighted_backends.append(backend)
+        cases.sandbox,
+        "preflight",
+        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
     )
 
     # The options go unread — `session_run_set` is stubbed — so an empty adapter suffices.
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    assert preflighted_backends == ["backend:custombackend"]
+    # Every arm harness rides along, so a set spanning harnesses preflights each credential.
+    assert preflight_calls == [("backend:custombackend", ["claude-code", "codex"])]
 
 
 def test_preflight_session_sandbox_trigger_only_uses_default(
@@ -281,14 +287,17 @@ def test_preflight_session_sandbox_trigger_only_uses_default(
     from benchspec.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
-    preflighted_backends: list[str | None] = []
+    preflight_calls: list[tuple[str | None, list[str]]] = []
     monkeypatch.setattr(
-        cases.sandbox, "preflight", lambda backend=None: preflighted_backends.append(backend)
+        cases.sandbox,
+        "preflight",
+        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
     )
 
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    assert preflighted_backends == [None]  # None => preflight resolves DEFAULT_SANDBOX itself
+    # None => preflight resolves DEFAULT_SANDBOX itself; no set => no arm harnesses.
+    assert preflight_calls == [(None, [])]
 
 
 def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
@@ -308,9 +317,10 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
         return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
 
     # Neutralize the environment-dependent preflights so the body reaches run_eval_arm.
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     monkeypatch.setattr(binder, "preflight_gemini_key", lambda: None)
     monkeypatch.setattr(cases, "preflight_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_judge_credential", lambda config: None)
     monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
     monkeypatch.setattr(cases, "run_eval_arm", capture)
 
@@ -988,7 +998,7 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     # Neither the Gemini key preflight (which judge_config runs first) nor the sandbox
     # preflight may fail for unrelated reasons and mask the judge-binary assertion below.
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     # Deliberately NO positional target here (unlike `_collect`'s "test_cases.py::
     # test_eval"): `pytest_configure` only self-registers the real `benchspec/cases.py`
     # (whose `judge_config` fixture runs the binary preflight under test) when
@@ -1022,7 +1032,7 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude")  # binary IS present
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
     # A repo-root .env can otherwise repopulate GEMINI_API_KEY inside the inner run
     # (the plugin loads .env in pytest_load_initial_conftests) — no-op the load so this
     # test is deterministic regardless of where pytest was invoked from.
@@ -1049,7 +1059,7 @@ def test_gemini_key_preflight_skipped_under_collect_only(
 
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None: None)
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
 
     result = pytester.runpytest(
         "-p",
