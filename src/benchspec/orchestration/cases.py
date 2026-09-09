@@ -30,7 +30,10 @@ from benchspec.config.sets import (
 )
 from benchspec.grading import binder
 from benchspec.grading.judges import JudgeConfig
-from benchspec.grading.judges.registry import preflight_judge_binary, preflight_judge_credential
+from benchspec.grading.judges.registry import (
+    preflight_verify_judge_binary,
+    preflight_verify_judge_credential,
+)
 from benchspec.orchestration import results
 from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
@@ -103,13 +106,13 @@ def _grading_environment_errors(judge: JudgeConfig) -> list[str]:
     errors: list[str] = []
 
     try:
-        binder.preflight_gemini_key()
+        binder.preflight_verify_gemini_key()
     except RuntimeError as error:
         errors.append(str(error))
 
     try:
-        preflight_judge_binary(judge)
-        preflight_judge_credential(judge)
+        preflight_verify_judge_binary(judge)
+        preflight_verify_judge_credential(judge)
     except RuntimeError as error:
         errors.append(str(error))
 

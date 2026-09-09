@@ -88,7 +88,7 @@ def run(repo_root: Path) -> int:
     Returns:
         0 once the suite is classified.
     """
-    binder.preflight_gemini_key()
+    binder.preflight_verify_gemini_key()
     classifications = analyze_repo(repo_root)
 
     current = None

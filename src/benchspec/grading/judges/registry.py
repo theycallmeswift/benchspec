@@ -34,7 +34,7 @@ def judge_binary(harness: str) -> str:
     return agent_class(harness).for_host().agent_bin
 
 
-def preflight_judge_binary(config: JudgeConfig) -> None:
+def preflight_verify_judge_binary(config: JudgeConfig) -> None:
     """RuntimeError if the selected judge harness's binary is missing from PATH.
 
     Environment-dependent — call only when tests actually execute (from the
@@ -48,12 +48,12 @@ def preflight_judge_binary(config: JudgeConfig) -> None:
         )
 
 
-def preflight_judge_credential(config: JudgeConfig) -> None:
+def preflight_verify_judge_credential(config: JudgeConfig) -> None:
     """RuntimeError if the selected judge harness cannot authenticate on the host.
 
     The judge runs on the host through `for_host()`, so the adapter's host check decides:
     an env credential, or the CLI's own login where it can report one. Environment-
-    dependent like `preflight_judge_binary`, and meant to run after it, so a missing
+    dependent like `preflight_verify_judge_binary`, and meant to run after it, so a missing
     binary is reported as such rather than as a failed login probe.
     """
     error = agent_class(config.harness).for_host().host_credential_error()

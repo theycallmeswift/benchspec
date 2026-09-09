@@ -317,9 +317,9 @@ def test_preflight_grading_reports_binder_and_judge_failures_together(
         raise RuntimeError(f"judge harness `{config.harness}`: not logged in")
 
     monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
-    monkeypatch.setattr(binder, "preflight_gemini_key", reject_gemini)
-    monkeypatch.setattr(cases, "preflight_judge_binary", lambda config: None)
-    monkeypatch.setattr(cases, "preflight_judge_credential", reject_judge)
+    monkeypatch.setattr(binder, "preflight_verify_gemini_key", reject_gemini)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", reject_judge)
 
     with pytest.raises(RuntimeError) as exc_info:
         cases.preflight_grading(PluginOptions(values={}, rootpath=tmp_path))
@@ -349,9 +349,9 @@ def test_preflight_grading_skips_the_credential_probe_when_the_judge_binary_is_m
         raise AssertionError("credential probe ran without a judge binary")
 
     monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
-    monkeypatch.setattr(binder, "preflight_gemini_key", lambda: None)
-    monkeypatch.setattr(cases, "preflight_judge_binary", reject_binary)
-    monkeypatch.setattr(cases, "preflight_judge_credential", must_not_probe)
+    monkeypatch.setattr(binder, "preflight_verify_gemini_key", lambda: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", reject_binary)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", must_not_probe)
 
     with pytest.raises(RuntimeError, match="binary `codex` not found on PATH"):
         cases.preflight_grading(PluginOptions(values={}, rootpath=tmp_path))
@@ -375,9 +375,9 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
 
     # Neutralize the environment-dependent preflights so the body reaches run_eval_arm.
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
-    monkeypatch.setattr(binder, "preflight_gemini_key", lambda: None)
-    monkeypatch.setattr(cases, "preflight_judge_binary", lambda config: None)
-    monkeypatch.setattr(cases, "preflight_judge_credential", lambda config: None)
+    monkeypatch.setattr(binder, "preflight_verify_gemini_key", lambda: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
     monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
     monkeypatch.setattr(cases, "run_eval_arm", capture)
 
