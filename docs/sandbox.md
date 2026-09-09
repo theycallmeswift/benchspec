@@ -187,6 +187,37 @@ installs glibc-linked CLIs. `environment_script` is for suite-wide system
 dependencies; per-eval and per-arm setup belongs in the eval's own `setup.sh`,
 which can branch on `BENCHSPEC_ARM` and `BENCHSPEC_SET`.
 
+`BENCHSPEC_BASE_IMAGE` in the host environment overrides `base_image` for that
+host only. It exists for hosts whose base must carry something the shared config
+shouldn't: the provision step fetches the agent CLI over HTTPS, so a host behind
+a TLS-intercepting proxy needs its CA trusted inside the guest before the
+install runs. `environment_script` runs too late for that.
+
+### Claude Code on the web
+
+The cloud VM is one such host, and the repo's SessionStart hook
+(`.claude/hooks/session-start.sh`) prepares it: it starts `dockerd`, builds
+`benchspec-base:proxy-ca` from `ubuntu:latest` with the proxy CA installed and
+`NODE_EXTRA_CA_CERTS` pointing at it, and exports `BENCHSPEC_BASE_IMAGE` for the
+session. The hook is a no-op outside the cloud.
+
+Credentials need one more step there. Claude Code strips its own auth variables
+(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from every command it runs, so
+a value set under either name in the cloud environment never reaches
+`make e2e`. Store the token under a name Claude Code doesn't strip, such as
+`BENCHSPEC_CLAUDE_OAUTH_TOKEN`, and have the environment's setup script write a
+dotenv file above the clone that maps it back; benchspec's dotenv loader walks
+up from the repo and expands the reference at run time, so the file holds no
+secret:
+
+```bash
+printf 'CLAUDE_CODE_OAUTH_TOKEN=${BENCHSPEC_CLAUDE_OAUTH_TOKEN}\n' > /home/user/.env
+```
+
+`GEMINI_API_KEY` and `OPENAI_API_KEY` pass through untouched. The Codex judge
+also needs `npm install -g @openai/codex` in the setup script and
+`api.openai.com` added to the environment's allowed domains.
+
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
 `benchspec.sandbox.docker` and `benchspec.sandbox.microsandbox` (the two backend

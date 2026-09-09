@@ -464,6 +464,37 @@ def test_env_config_base_image_empty_string_raises(tmp_path: Path) -> None:
         resolve_environment_config(tmp_path)
 
 
+def test_env_config_base_image_env_var_wins_over_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify BENCHSPEC_BASE_IMAGE overrides the pyproject base_image."""
+    _write_pyproject(tmp_path, 'base_image = "python:3.12-slim"\n')
+    monkeypatch.setenv("BENCHSPEC_BASE_IMAGE", "benchspec-base:proxy-ca")
+    fake_config = resolve_environment_config(tmp_path)
+    assert fake_config.base_image == "benchspec-base:proxy-ca"
+
+
+def test_env_config_base_image_env_var_without_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify BENCHSPEC_BASE_IMAGE alone selects a base image and keys the digest."""
+    monkeypatch.setenv("BENCHSPEC_BASE_IMAGE", "benchspec-base:proxy-ca")
+    fake_config = resolve_environment_config(tmp_path)  # no pyproject.toml at all
+    assert bool(fake_config) is True
+    assert fake_config.base_image == "benchspec-base:proxy-ca"
+    assert len(fake_config.digest()) == 8
+
+
+def test_env_config_base_image_empty_env_var_falls_back_to_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an empty BENCHSPEC_BASE_IMAGE counts as unset."""
+    _write_pyproject(tmp_path, 'base_image = "python:3.12-slim"\n')
+    monkeypatch.setenv("BENCHSPEC_BASE_IMAGE", "")
+    fake_config = resolve_environment_config(tmp_path)
+    assert fake_config.base_image == "python:3.12-slim"
+
+
 def test_env_config_environment_script_wrong_type_raises(tmp_path: Path) -> None:
     """Verify env config environment script wrong type raises."""
     _write_pyproject(tmp_path, "environment_script = true\n")

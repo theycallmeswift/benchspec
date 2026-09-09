@@ -146,13 +146,17 @@ class EnvConfig:
 def resolve_environment_config(repo_root: Path) -> EnvConfig:
     """Read + validate the optional `base_image` / `environment_script` keys.
 
+    `BENCHSPEC_BASE_IMAGE` in the host environment wins over `[tool.benchspec]
+    base_image`, the same precedence the harness version pins use, so a host that needs
+    its own base (a proxy CA baked in, say) can select it without editing the config.
+
     Fails fast with `schema.SchemaError` at config-read time on a bad type, an empty
     string, or an unreadable `environment_script`. Absent keys ⇒ an empty config (falsy,
     empty digest), reproducing the default snapshot name and behavior.
     """
     table = pyproject_table(repo_root)
 
-    base_image = table.get("base_image")
+    base_image = os.environ.get("BENCHSPEC_BASE_IMAGE") or table.get("base_image")
     if base_image is not None and not (isinstance(base_image, str) and base_image):
         raise schema.SchemaError("[tool.benchspec] base_image must be a non-empty string")
 
