@@ -61,6 +61,27 @@ def test_judge_wraps_final_agent_message_in_result_envelope(
     assert captured["command"][-1] == "grade this"  # trailing positional prompt
 
 
+def test_judge_returns_the_verdict_when_codex_recovers_from_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A websocket that fails and falls back to HTTP logs `error` events, then completes."""
+    verdict = '{"assertions": [{"text": "a", "passed": true, "evidence": "ok"}]}'
+    stdout = _stream(
+        {"type": "thread.started", "thread_id": "t1"},
+        {"type": "turn.started"},
+        {"type": "error", "message": "Reconnecting... 2/5 (invalid peer certificate)"},
+        {"type": "error", "message": "Reconnecting... 3/5 (invalid peer certificate)"},
+        {"type": "item.completed", "item": {"type": "error"}},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": verdict}},
+        {"type": "turn.completed", "usage": {"input_tokens": 10}},
+    )
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: _fake_proc(stdout=stdout))
+
+    out = _judge("grade this", JudgeConfig(harness="codex", model="gpt-5.5"))
+
+    assert json.loads(out)["result"] == verdict
+
+
 def test_judge_hands_openai_api_key_to_codex_under_its_own_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
