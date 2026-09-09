@@ -113,7 +113,7 @@ model    = "google/gemini-3.5-flash-lite"   # optional; each provider has a defa
 
 [tool.benchspec.judge]
 harness  = "codex"
-provider = "openrouter"                     # default "native"
+provider = "openrouter"                     # default "default"
 model    = "openai/gpt-5.5"
 
 [tool.benchspec.sets.e2e]
@@ -123,11 +123,11 @@ model    = "anthropic/claude-sonnet-4.6"
 baseline = "baseline"
 arms = [
   { name = "baseline" },
-  { name = "direct", provider = "native", model = "sonnet" },   # mixed-vendor sets are fine
+  { name = "direct", provider = "default", model = "sonnet" },   # mixed-vendor sets are fine
 ]
 ```
 
-Provider values: `native` (the vendor's own API or CLI login, today's
+Provider values: `default` (the vendor's own API or CLI login, today's
 behavior) or `openrouter` for judge and arms; `gemini` or `openrouter` for the
 binder. Model strings are passed through unvalidated, as today; under
 `openrouter` an unqualified model (no `/`) is a config error, mirroring the
@@ -198,13 +198,13 @@ from pyproject > `--config` scratch > CLI):
 **OpenCode adapter** (`agents/opencode.py`), `provider == "openrouter"`:
 
 - Force the credential to `OPENROUTER_API_KEY` rather than "first of four
-  set"; require the `openrouter/` model prefix. `native` keeps today's
+  set"; require the `openrouter/` model prefix. `default` keeps today's
   fallback chain.
 
 **Config and preflight plumbing**:
 
 - `config/arms.py`: `Arm.provider`, `provider` in `_SET_DEFAULT_KEYS`,
-  validated against `{"native", "openrouter"}`.
+  validated against `{"default", "openrouter"}`.
 - `grading/judges/config.py`: `JudgeConfig.provider`, same validation, plus
   the unqualified-model check under `openrouter`.
 - `agents/__init__.py`: `make_agent(harness, provider=...)`,
@@ -225,7 +225,7 @@ from pyproject > `--config` scratch > CLI):
 ### Order of work
 
 1. Config surface + preflight plumbing (arms, judge, binder config, factory,
-   manifest). Pure refactor with `native`/`gemini` defaults; no behavior
+   manifest). Pure refactor with `default`/`gemini` defaults; no behavior
    change.
 2. Binder OpenRouter transport + tests + corpus wiring.
 3. Claude Code adapter + judge path.
