@@ -13,7 +13,7 @@ Three components, three different distances from "works today":
 | Harness `claude-code` | Half works via the documented `via-openrouter` arm `env`, but only if an Anthropic credential is *also* set. | Preflight demands `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`; doc example has the wrong base URL; key leaks into the guest as plain env. | S |
 | Harness `codex` | Does not work. | `-c` is a reserved harness arg; Codex ignores `OPENAI_BASE_URL`; provider must be declared in `~/.codex/config.toml`, which benchspec never writes. | M |
 | Judge (any harness) | `opencode` judge works. `claude-code`/`codex` judges fail preflight. | `host_credential_error()` checks `os.environ` and CLI login, never the judge's `env`. | S |
-| Binder | Hard-wired to Gemini's native REST API. | Needs an OpenAI-compatible transport plus an OpenRouter preflight. | M |
+| Binder | Hard-wired to Gemini's native REST API. | Needs an OpenAI-compatible transport plus an OpenRouter preflight. Same Gemini models are on OpenRouter; only the request shape changes. | M |
 
 The binder is the only piece that needs a new transport. Everything else is
 credential plumbing and preflight.
@@ -98,79 +98,158 @@ credential plumbing and preflight.
 - Out of scope but same key family: `make lint:houserules` needs
   `GEMINI_API_KEY` for a dev-side tool, unrelated to benchspec's runtime.
 
-## Options
+## Design: `provider` per binder, judge, and arm
 
-### A. Run-level `provider = "openrouter"` switch (recommended)
+Decision (Swift, 2026-09-09): configure the provider separately for each
+component rather than one run-level switch. Same Gemini models are on
+OpenRouter; the binder only has to name the model in the request.
 
-One knob, e.g. `[tool.benchspec] provider = "openrouter"` (or
-`BENCHSPEC_PROVIDER`), consumed by the binder, the judge, and every adapter.
-`OPENROUTER_API_KEY` becomes the one required credential; the Gemini/Anthropic/
-OpenAI keys become unnecessary. Model names are OpenRouter slugs everywhere.
+### Config shape
 
-Work:
+```toml
+[tool.benchspec.binder]
+provider = "openrouter"                     # default "gemini"
+model    = "google/gemini-3.5-flash-lite"   # optional; each provider has a default
 
-1. **Binder**: add `_call_openrouter` beside `_call_gemini` (OpenAI chat shape,
-   JSON mode, temperature 0, provider pinned to `google-ai-studio`,
-   `require_parameters`). Map 401/402 to `BinderAuthError` (a run must stop,
-   not degrade to judge grading), 403 to `RuntimeError` (moderation), and
-   treat `choices[0].error` on a 200 as a failure. `preflight_verify_binder_key`
-   picks the env var by provider and can hit `/api/v1/key`. `binder_identity()`
-   reports `provider: "openrouter"`, `model: "google/gemini-3.5-flash-lite"`.
-   Corpus conftest: pick the transport by provider, keep the label as the
-   upstream model. Mirror the transport tests.
-2. **Claude adapter**: under the switch, `secrets()` yields
-   `Credential("ANTHROPIC_AUTH_TOKEN", key, ("openrouter.ai",))`, `guest_env()`
-   adds `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and `ANTHROPIC_API_KEY=""`,
-   `credential_error()` accepts `OPENROUTER_API_KEY`. Pass the arm's `model`
-   through unchanged as a slug, or map `sonnet`/`opus`/`haiku` to
-   `ANTHROPIC_DEFAULT_*_MODEL`. Judge path: same env in `judge()`.
-3. **Codex adapter**: under the switch, write `[model_providers.openrouter]`
-   (base_url, `env_key = "OPENROUTER_API_KEY"`, `wire_api = "responses"`) into
-   `$CODEX_HOME/config.toml` at provision and add `-c model_provider=openrouter`
-   to `build_command()` and `judge()`. Credential scoped to `openrouter.ai`.
-   Host judge: write the same table to a benchspec-owned `CODEX_HOME` so the
-   user's own config is untouched.
-4. **OpenCode adapter**: no transport change. Optionally prefix `openrouter/`
-   when the switch is on and the model lacks it.
-5. **Judge preflight**: evaluate `host_credential_error()` against
-   `{**os.environ, **config.env}` and accept the provider's credential name;
-   skip the CLI login probe when the provider is OpenRouter (Codex reports
-   "Not logged in" by design there).
-6. **Docs**: README "What you need", `docs/configuration.md` env table and the
-   base-URL fix, `docs/harnesses.md` credential row, `docs/sandbox.md`
-   credentials, quickstart.
+[tool.benchspec.judge]
+harness  = "codex"
+provider = "openrouter"                     # default "native"
+model    = "openai/gpt-5.5"
 
-Rough size: binder ~1 day, Codex adapter ~1 day, Claude adapter + preflight
-~half a day, docs/tests ~half a day.
+[tool.benchspec.sets.e2e]
+harness  = "claude-code"
+provider = "openrouter"                     # set-level default, arm override
+model    = "anthropic/claude-sonnet-4.6"
+baseline = "baseline"
+arms = [
+  { name = "baseline" },
+  { name = "direct", provider = "native", model = "sonnet" },   # mixed-vendor sets are fine
+]
+```
 
-### B. Per-component knobs, no global switch
+Provider values: `native` (the vendor's own API or CLI login, today's
+behavior) or `openrouter` for judge and arms; `gemini` or `openrouter` for the
+binder. Model strings are passed through unvalidated, as today; under
+`openrouter` an unqualified model (no `/`) is a config error, mirroring the
+existing OpenCode check.
 
-Keep the existing `env` escape hatches, and only fix what blocks them:
-preflight reading the judge's `env`, `credential_error()` accepting
-`ANTHROPIC_AUTH_TOKEN`, a `[tool.benchspec.binder]` table with
-`provider`/`model`, and a Codex `config.toml` mechanism. More flexible, more
-surface, and the OpenRouter key stays a leaky arm env var under microsandbox
-rather than a scoped secret.
+Single-key runs set all three to `openrouter` and export only
+`OPENROUTER_API_KEY`. Nothing forces that: a run can judge natively and bind
+through OpenRouter, or the reverse.
 
-### C. Auto-detect from the environment
+### Wiring per component
 
-If only `OPENROUTER_API_KEY` is set, every component routes to OpenRouter.
-Least config, but the run's transport becomes implicit, which is the wrong
-trade for a benchmark whose `meta.json` is supposed to say exactly what ran.
+All OpenRouter wiring happens at exec time (guest env, per-cell secret, CLI
+flags). Snapshots stay provider-neutral: the fingerprint covers installer
+inputs only, and `make_agent` already runs per arm, so a per-arm `provider`
+adds no snapshot builds.
 
-## Risks to carry into the decision
+**Binder** (`grading/binder.py`, new `BinderConfig` resolved like `JudgeConfig`
+from pyproject > `--config` scratch > CLI):
 
-- **Binder accuracy** was tuned against direct Gemini Flash-Lite. Through
-  OpenRouter the model is the same, but the route must be pinned to
-  `google-ai-studio` and `require_parameters` set, or `temperature: 0` can be
-  silently dropped. Re-run the binder corpus before switching the default.
-- **Codex on OpenRouter** has a track record of intermittent Responses-schema
-  rejections on `codex exec`. Expect some infra-error cells until upstream
-  settles; the arm error taxonomy already records these as infra, not misses.
-- **Claude Code on non-Anthropic models** is unsupported by both vendors.
-  Anthropic ToS is fine with an API-key gateway path; OAuth subscription
-  tokens through a gateway are not permitted.
-- **Judge vendor independence**: the repo's own suite judges Claude arms with
-  Codex to avoid grading with the graded vendor. One key does not change that;
-  pick the judge slug from a different vendor than the arms.
-- **Cost**: OpenRouter charges the provider's rate plus a 5.5% credit fee.
+- `_call_openrouter`: `POST https://openrouter.ai/api/v1/chat/completions`,
+  `Authorization: Bearer $OPENROUTER_API_KEY`, `temperature: 0`,
+  `response_format: {"type": "json_object"}`, `model` from config, and
+  `provider: {"require_parameters": true}` so a route that would drop
+  `temperature` is refused rather than silently used. Reply → the existing
+  `GeminiReply` shape (rename to `BinderReply`): `choices[0].message.content`,
+  `usage.prompt_tokens`, `usage.completion_tokens`.
+- Failure taxonomy: 401 and 402 → `BinderAuthError` (run stops; never degrade
+  to paid judge grading). 403 is moderation on OpenRouter, 429, 5xx, and a 200
+  carrying `choices[0].error` or `finish_reason == "error"` → `RuntimeError`.
+- `preflight_verify_binder_key(config)` picks the env var by provider;
+  optionally `GET /api/v1/key` to fail on a dead key before any arm runs.
+- `binder_identity()` becomes config-driven: `{provider, model, api_path}`.
+- `bind()` takes the transport from config; `call_model` injection stays.
+- Corpus (`evals/binder/conftest.py`): choose the transport by the same
+  config, keep `source` as the model label rather than `"gemini"`, pricing by
+  provider.
+
+**Claude Code adapter** (`agents/claude.py`), `provider == "openrouter"`:
+
+- `secrets()` → `Credential("ANTHROPIC_AUTH_TOKEN", key, ("openrouter.ai",))`.
+  microsandbox then scopes the key to OpenRouter at the network boundary
+  instead of it riding as a readable arm env var.
+- `guest_env()` adds `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and
+  `ANTHROPIC_API_KEY=""` (must be explicitly empty per OpenRouter's cookbook).
+- `credential_error()` / `host_credential_error()` accept `OPENROUTER_API_KEY`
+  and skip the `claude auth status` probe.
+- Judge: `judge()` merges the same two env vars plus the token over
+  `config.env`. `-p` mode always uses an env credential when present.
+- Model: pass the slug through (`anthropic/claude-sonnet-4.6`). Aliases like
+  `sonnet` resolve client-side to Anthropic IDs and OpenRouter does not
+  document mapping them, so reject unqualified models under `openrouter`.
+
+**Codex adapter** (`agents/codex.py`), `provider == "openrouter"`:
+
+- `build_command()` and `judge()` add `-c` overrides, no config file written
+  anywhere:
+  `-c model_provider="openrouter"`,
+  `-c model_providers.openrouter.name="OpenRouter"`,
+  `-c model_providers.openrouter.base_url="https://openrouter.ai/api/v1"`,
+  `-c model_providers.openrouter.env_key="OPENROUTER_API_KEY"`,
+  `-c model_providers.openrouter.wire_api="responses"`.
+  `-c` stays reserved for user `harness_args`; benchspec owns these tokens.
+- `secrets()` → `Credential("OPENROUTER_API_KEY", key, ("openrouter.ai",))`.
+- Credential checks accept `OPENROUTER_API_KEY` and skip `codex login status`
+  (it reports "Not logged in" by design with a custom provider).
+- Model: vendor-prefixed slug required (`openai/gpt-5.5`).
+
+**OpenCode adapter** (`agents/opencode.py`), `provider == "openrouter"`:
+
+- Force the credential to `OPENROUTER_API_KEY` rather than "first of four
+  set"; require the `openrouter/` model prefix. `native` keeps today's
+  fallback chain.
+
+**Config and preflight plumbing**:
+
+- `config/arms.py`: `Arm.provider`, `provider` in `_SET_DEFAULT_KEYS`,
+  validated against `{"native", "openrouter"}`.
+- `grading/judges/config.py`: `JudgeConfig.provider`, same validation, plus
+  the unqualified-model check under `openrouter`.
+- `agents/__init__.py`: `make_agent(harness, provider=...)`,
+  `agent_class(harness).for_host(provider=...)`,
+  `credential_preflight_error(harness, provider)`. `sandbox.preflight_errors`
+  dedupes on `(harness, provider)` so a mixed set reports each credential once.
+- `grading/judges/registry.py`: `preflight_verify_judge_credential` evaluates
+  against `{**os.environ, **config.env}` so a judge authenticated through its
+  own `env` table can pass.
+- `reporting/manifest.py` and `report.planned_arms`: record `provider` on the
+  binder, the judge, and each arm in `meta.json`.
+
+**Docs**: README "What you need" and the credential table, `configuration.md`
+(binder table, judge and arm `provider` keys, env table, and the
+`https://openrouter.ai/api` base-URL fix), `harnesses.md` credential row,
+`sandbox.md` credentials, quickstart.
+
+### Order of work
+
+1. Config surface + preflight plumbing (arms, judge, binder config, factory,
+   manifest). Pure refactor with `native`/`gemini` defaults; no behavior
+   change.
+2. Binder OpenRouter transport + tests + corpus wiring.
+3. Claude Code adapter + judge path.
+4. Codex adapter + judge path.
+5. OpenCode tightening.
+6. Docs, then an e2e run with all three set to `openrouter` and only
+   `OPENROUTER_API_KEY` exported.
+
+Rough size: about three days. Binder one day, Codex one day, Claude and
+plumbing half a day each, docs and e2e half a day.
+
+## Risks
+
+- **Codex on OpenRouter** has intermittent Responses-schema rejections on
+  `codex exec` (openai/codex #12114, #18228). The arm error taxonomy already
+  records these as infra, not misses, but expect some retries.
+- **Claude Code on non-Anthropic models** is unsupported by both vendors;
+  OpenRouter guarantees the Anthropic skin only for Anthropic-provider
+  routing. An API-key gateway path is within Anthropic's ToS; OAuth
+  subscription tokens through a gateway are not.
+- **Routing**: `require_parameters` is what keeps `temperature: 0` honest for
+  the binder. Without it OpenRouter silently drops unsupported parameters on
+  fallback endpoints.
+- **Judge vendor independence** is unchanged: one key does not remove the
+  reason the in-repo suite judges Claude arms with Codex. Pick the judge slug
+  from a different vendor than the arms.
+- **Cost**: provider rate plus OpenRouter's 5.5% credit fee.
