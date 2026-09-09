@@ -193,7 +193,9 @@ def test_preflight_checks_every_arm_harness_credential(monkeypatch: pytest.Monke
     monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "preflight", lambda self: [])
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # the selected agent is fine
-    for codex_env_name in ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_AUTH_JSON_PATH"):
+    for codex_env_name in (
+        "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON_PATH"
+    ):
         monkeypatch.delenv(codex_env_name, raising=False)
 
     with pytest.raises(RuntimeError) as exc_info:

@@ -40,7 +40,7 @@ arms = [
 | Model names | Aliases: `sonnet`, `opus`, `haiku` | What `codex exec -m` accepts (e.g. `gpt-5.4`) | Provider-qualified: `anthropic/claude-sonnet-4-6` |
 | How effort is passed | `--effort <value>`, unvalidated | `-c model_reasoning_effort=<value>`, unvalidated | `--variant`: `low` → `fast`, `medium` → `default`, `high` → `thorough` (anything else → `default`) |
 | Token split (input/output) | yes | yes | no; totals only |
-| Credentials | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
+| Credentials | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
 | Version pin | `BENCHSPEC_CLAUDE_VERSION` | `BENCHSPEC_CODEX_VERSION` | `BENCHSPEC_OPENCODE_VERSION`, then `[tool.benchspec] opencode_version` |
 | Guest install | `curl -fsSL https://claude.ai/install.sh \| bash` | `npm i -g @openai/codex@<version>` | `npm i -g opencode-ai@<version>` |
 | Skill directory (linked to `/home/benchspec/skills`) | `/root/.claude/skills` | `/root/.codex/skills` | `/root/.config/opencode/skills` |
@@ -61,9 +61,10 @@ Notes that matter in practice:
   and never readable in the guest; Docker injects it as a plain container
   environment variable the agent and `setup.sh` can read (see
   [`sandbox.md`](sandbox.md#credentials)). Either way, `CODEX_AUTH_JSON_PATH` is
-  a read-only mount of the `auth.json`, not an env var. OpenCode's quirk: a host
-  `GEMINI_API_KEY` is injected under the SDK's expected
-  `GOOGLE_GENERATIVE_AI_API_KEY` name.
+  a read-only mount of the `auth.json`, not an env var. Two renames, to the
+  names the CLIs actually read: OpenCode injects a host `GEMINI_API_KEY` as
+  `GOOGLE_GENERATIVE_AI_API_KEY`; Codex, as arm or judge, injects
+  `OPENAI_API_KEY` as `CODEX_API_KEY`.
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
   your tokens to its invocation but rejects flags benchspec owns (model, effort,
   prompt delivery, output format, session, and permission controls) including

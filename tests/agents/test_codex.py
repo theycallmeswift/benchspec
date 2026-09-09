@@ -196,6 +196,7 @@ def test_from_env_prefers_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_from_env_falls_back_to_access_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env falls back to access token."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_ACCESS_TOKEN", "token")
 
     agent = CodexAgent.from_env()
@@ -203,6 +204,31 @@ def test_from_env_falls_back_to_access_token(monkeypatch: pytest.MonkeyPatch) ->
     assert agent.secrets() == [
         Credential("CODEX_ACCESS_TOKEN", "token", ("chatgpt.com", "auth.openai.com"))
     ]
+
+
+def test_from_env_falls_back_to_openai_api_key_under_codex_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host with only `OPENAI_API_KEY` still authenticates, under the name Codex reads."""
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+    agent = CodexAgent.from_env()
+
+    assert agent.secrets() == [Credential("CODEX_API_KEY", "sk-openai", ("api.openai.com",))]
+
+
+def test_from_env_prefers_codex_api_key_over_openai_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex's own name wins when both keys are exported."""
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+    agent = CodexAgent.from_env()
+
+    assert agent.secrets() == [Credential("CODEX_API_KEY", "sk-codex", ("api.openai.com",))]
 
 
 def test_from_env_reads_auth_json_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -218,6 +244,7 @@ def test_from_env_reads_auth_json_path(monkeypatch: pytest.MonkeyPatch, tmp_path
     )
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_AUTH_JSON_PATH", str(auth))
 
     agent = CodexAgent.from_env()
@@ -230,6 +257,7 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch: pytest.Mo
     """Verify credential error message when no credentials set."""
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_AUTH_JSON_PATH", raising=False)
 
     msg = CodexAgent.credential_error()
@@ -237,12 +265,22 @@ def test_credential_error_message_when_no_credentials_set(monkeypatch: pytest.Mo
     assert msg is not None
     assert "CODEX_AUTH_JSON_PATH" in msg
     assert "CODEX_API_KEY" in msg
+    assert "OPENAI_API_KEY" in msg
     assert "CODEX_ACCESS_TOKEN" in msg
 
 
 def test_credential_error_none_when_api_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify credential error none when api key set."""
     monkeypatch.setenv("CODEX_API_KEY", "api-key")
+
+    assert CodexAgent.credential_error() is None
+
+
+def test_credential_error_none_when_openai_api_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OpenAI-wide name satisfies the preflight on its own."""
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
 
     assert CodexAgent.credential_error() is None
 
@@ -262,6 +300,7 @@ def test_credential_error_none_when_auth_json_path_is_valid(
     )
     monkeypatch.delenv("CODEX_API_KEY", raising=False)
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("CODEX_AUTH_JSON_PATH", str(auth))
 
     assert CodexAgent.credential_error() is None
