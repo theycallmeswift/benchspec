@@ -162,6 +162,18 @@ class CodexAgent(BaseAgent):
             "no Codex credential - set CODEX_AUTH_JSON_PATH, CODEX_API_KEY, or CODEX_ACCESS_TOKEN"
         )
 
+    def host_credential_error(self) -> str | None:
+        """Accept an env credential, else ask `codex login status` whether the host is logged in."""
+        if self.credential_error() is None:
+            return None
+        proc = self.host_probe("login", "status")
+        if proc is not None and proc.returncode == 0:
+            return None
+        return (
+            "Codex is not logged in on the host - run `codex login`, or set "
+            "CODEX_AUTH_JSON_PATH, CODEX_API_KEY, or CODEX_ACCESS_TOKEN"
+        )
+
     def version(self) -> str:
         """Return the agent CLI version string."""
         return self._version

@@ -48,6 +48,19 @@ def preflight_judge_binary(config: JudgeConfig) -> None:
         )
 
 
+def preflight_judge_credential(config: JudgeConfig) -> None:
+    """RuntimeError if the selected judge harness cannot authenticate on the host.
+
+    The judge runs on the host through `for_host()`, so the adapter's host check decides:
+    an env credential, or the CLI's own login where it can report one. Environment-
+    dependent like `preflight_judge_binary`, and meant to run after it, so a missing
+    binary is reported as such rather than as a failed login probe.
+    """
+    error = agent_class(config.harness).for_host().host_credential_error()
+    if error:
+        raise RuntimeError(f"judge harness `{config.harness}`: {error}")
+
+
 def run_judge(prompt: str, *, config: JudgeConfig) -> str:
     """Expand config.env like an arm's env, then judge with the harness's own adapter.
 

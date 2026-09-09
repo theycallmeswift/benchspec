@@ -118,3 +118,66 @@ def test_binary_version_returns_stripped_stdout(monkeypatch: pytest.MonkeyPatch)
     """Verify binary_version returns stripped stdout."""
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout="2.1.0\n"))
     assert ClaudeCodeAgent.for_host().binary_version() == "2.1.0"
+
+
+def _without_claude_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every env credential so only the host login probe can pass the check."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
+def test_host_credential_error_none_when_env_credential_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An env credential satisfies the host check without probing the CLI."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    def must_not_run(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if the probe is spawned despite an env credential."""
+        raise AssertionError("claude auth status must not run when ANTHROPIC_API_KEY is set")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+
+    assert ClaudeCodeAgent.for_host().host_credential_error() is None
+
+
+def test_host_credential_error_none_when_host_is_logged_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an env credential, a `claude auth status` login means the host can judge."""
+    _without_claude_env(monkeypatch)
+    probed: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Record the probe and report a logged-in host."""
+        probed.append(command)
+        return _fake_proc(stdout=json.dumps({"loggedIn": True, "authMethod": "oauth_token"}))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert ClaudeCodeAgent.for_host().host_credential_error() is None
+    assert probed == [["claude", "auth", "status"]]
+
+
+def test_host_credential_error_when_host_is_logged_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`claude auth status` reporting no login yields a message naming both remedies."""
+    _without_claude_env(monkeypatch)
+    logged_out = json.dumps({"loggedIn": False})
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout=logged_out))
+
+    error = ClaudeCodeAgent.for_host().host_credential_error()
+
+    assert error is not None
+    assert "claude login" in error
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in error
+
+
+def test_host_credential_error_when_auth_status_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Output that cannot confirm a login (an unknown subcommand, say) counts as logged out."""
+    _without_claude_env(monkeypatch)
+    unknown_command = _fake_proc(returncode=1, stderr="unknown command")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: unknown_command)
+
+    assert ClaudeCodeAgent.for_host().host_credential_error() is not None

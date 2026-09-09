@@ -177,15 +177,28 @@ class BaseAgent(ABC):
         """
         return ""
 
-    def binary_version(self) -> str | None:
-        """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
+    def host_credential_error(self) -> str | None:
+        """Judge-mode credential check for an instance bound to the host (`for_host()`).
+
+        The judge runs on the host with whatever its CLI can authenticate with, so an env
+        credential is sufficient but not necessary. Adapters whose CLI can report its own
+        login state override this to ask it; the base accepts the env credential alone.
+        """
+        return self.credential_error()
+
+    def host_probe(self, *args: str) -> subprocess.CompletedProcess[str] | None:
+        """Run `agent_bin *args` on the host; None when it cannot run at all (absent, hung)."""
         try:
-            proc = subprocess.run(
-                [self.agent_bin, "--version"], capture_output=True, text=True, timeout=10
+            return subprocess.run(
+                [self.agent_bin, *args], capture_output=True, text=True, timeout=10
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             return None
-        if proc.returncode != 0:
+
+    def binary_version(self) -> str | None:
+        """Best-effort `agent_bin --version` probe — never raises, never fails the run."""
+        proc = self.host_probe("--version")
+        if proc is None or proc.returncode != 0:
             return None
         return proc.stdout.strip() or None
 
@@ -336,6 +349,10 @@ class CodingAgent(Protocol):
 
     def binary_version(self) -> str | None:
         """Return this instance's CLI version, or None on any failure (best effort)."""
+        ...
+
+    def host_credential_error(self) -> str | None:
+        """Return a remediation message when this host-bound instance cannot authenticate."""
         ...
 
     def detect_dispatch(self, line: str, skill_name: str | None) -> bool:

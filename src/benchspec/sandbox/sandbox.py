@@ -7,12 +7,17 @@ import contextlib
 import fcntl
 import os
 import shlex
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
-from benchspec.agents import CodingAgent, credential_preflight_error, make_agent
+from benchspec.agents import (
+    CodingAgent,
+    credential_preflight_error,
+    make_agent,
+    resolve_agent_name,
+)
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.trigger import RoutingError
 from benchspec.orchestration import workspace
@@ -55,18 +60,22 @@ def snapshot_name(
     return f"{NAME_PREFIX}{backend.id}-{agent.id}-{agent.version()}-{fingerprint}"
 
 
-def preflight(backend: SandboxBackend | None = None) -> None:
+def preflight(backend: SandboxBackend | None = None, *, harnesses: Iterable[str] = ()) -> None:
     """Fail fast if the host can't run sandboxed evals.
 
     Host-readiness checks come from the resolved backend (the default one when none is
-    passed); the credential check is shared across backends. Raises RuntimeError (the
-    exit-2 signal) listing every failure.
+    passed). The credential check covers the selected agent plus every harness in
+    `harnesses` (a set's arm harnesses), naming each one that fails. Raises RuntimeError
+    (the exit-2 signal) listing every failure.
     """
     backend = backend or resolve_sandbox(DEFAULT_SANDBOX)
     errs: list[str] = list(backend.preflight())
-    cred_err = credential_preflight_error()
-    if cred_err:
-        errs.append(cred_err)
+    # dict.fromkeys dedupes while preserving order, so a harness is reported once even
+    # when it is both the selected agent and an arm's harness.
+    for harness in dict.fromkeys((resolve_agent_name(), *harnesses)):
+        cred_err = credential_preflight_error(harness)
+        if cred_err:
+            errs.append(f"harness `{harness}`: {cred_err}")
     if errs:
         raise RuntimeError("benchspec sandbox preflight failed:\n  - " + "\n  - ".join(errs))
 
@@ -596,11 +605,12 @@ def cli_build(
         rawsets, default_set = parse_sets(table)
         resolved = resolve_set(rawsets, default_set, set_name=set_name)
         backend = resolve_sandbox(resolved.sandbox)
-        preflight(backend)
+        arm_harnesses = [resolved_arm.harness for resolved_arm in resolved.arms]
+        preflight(backend, harnesses=arm_harnesses)
         env = resolve_environment_config(root)
         # dict.fromkeys dedupes while preserving first-seen order — two arms sharing a
         # harness build once.
-        for harness in dict.fromkeys(resolved_arm.harness for resolved_arm in resolved.arms):
+        for harness in dict.fromkeys(arm_harnesses):
             _build_or_reuse_snapshot(make_agent(harness), env, backend)
     else:
         backend = resolve_sandbox(DEFAULT_SANDBOX)

@@ -99,9 +99,12 @@ def make_agent(harness: str | None = None) -> CodingAgent:
     return _selected_agent_class().from_env()
 
 
-def credential_preflight_error() -> str | None:
-    """None if a usable credential is configured for the selected agent, else a.
+def credential_preflight_error(harness: str | None = None) -> str | None:
+    """None if a usable credential is configured for a harness, else a remediation message.
 
-    remediation message for preflight.
+    With no `harness`, checks the run-level selected agent; with one (an arm's
+    `harness`), checks that adapter, so a set whose arms span harnesses preflights each
+    of them rather than only the selected agent.
     """
-    return _selected_agent_class().credential_error()
+    adapter = agent_class(harness) if harness is not None else _selected_agent_class()
+    return adapter.credential_error()

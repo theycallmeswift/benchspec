@@ -30,7 +30,7 @@ from benchspec.config.sets import (
 )
 from benchspec.grading import binder
 from benchspec.grading.judges import JudgeConfig
-from benchspec.grading.judges.registry import preflight_judge_binary
+from benchspec.grading.judges.registry import preflight_judge_binary, preflight_judge_credential
 from benchspec.orchestration import results
 from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
@@ -95,10 +95,10 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
     """Preflight everything grading needs and return the run's judge config.
 
     Environment-dependent, in the order that fails cheapest and most specifically:
-    the binder's Gemini credential (an env read), the judge config (structural), then
-    the judge binary on PATH. Shared by the `judge_config` fixture and the `run` CLI,
-    so what the CLI refuses before spawning pytest is exactly what pytest would refuse
-    at grading time.
+    the binder's Gemini credential (an env read), the judge config (structural), the
+    judge binary on PATH, then the judge's host credential. Shared by the `judge_config`
+    fixture and the `run` CLI, so what the CLI refuses before spawning pytest is exactly
+    what pytest would refuse at grading time.
 
     Args:
         config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
@@ -107,20 +107,22 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
         The resolved `JudgeConfig`.
 
     Raises:
-        RuntimeError: `GEMINI_API_KEY` missing or empty, or the judge binary absent.
+        RuntimeError: `GEMINI_API_KEY` missing or empty, the judge binary absent, or the
+            judge harness unable to authenticate on the host.
         pytest.UsageError: a structural defect in the judge config.
     """
     binder.preflight_gemini_key()
 
     judge = resolved_judge_config(config)
     preflight_judge_binary(judge)
+    preflight_judge_credential(judge)
 
     return judge
 
 
 @pytest.fixture
 def judge_config(request: pytest.FixtureRequest) -> JudgeConfig:
-    """Resolve the run's judge and preflight its binary and the binder's Gemini credential."""
+    """Resolve the run's judge; preflight its binary and credential and the binder's key."""
     # Only test_eval requests this fixture, so the environment-dependent preflights fire
     # exactly when a run will grade. Fixture setup is skipped under --collect-only, so
     # this stays collection-safe without an autouse gate.
@@ -164,11 +166,13 @@ def preflight_session_sandbox(config: RunOptions) -> None:
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
     sets table degrades instead of raising) and drives `sandbox.preflight` with that
-    set's backend. No eval set ⇒ pass None, so preflight resolves the default backend.
+    set's backend and arm harnesses, so every harness the arms will run under has its
+    credential checked. No eval set ⇒ pass None, so preflight resolves the default backend.
     """
     run_set = session_run_set(config)
     backend = resolve_sandbox(run_set.sandbox) if run_set else None
-    sandbox.preflight(backend)
+    harnesses = [arm.harness for arm in run_set.arms] if run_set else []
+    sandbox.preflight(backend, harnesses=harnesses)
 
 
 @pytest.fixture(scope="session", autouse=True)
