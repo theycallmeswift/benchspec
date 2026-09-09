@@ -181,3 +181,112 @@ def test_host_credential_error_when_auth_status_is_not_json(
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: unknown_command)
 
     assert ClaudeCodeAgent.for_host().host_credential_error() is not None
+
+
+def _openrouter_judge(config: JudgeConfig) -> str:
+    """Run the OpenRouter-bound judge to completion in the default Host environment."""
+    return asyncio.run(ClaudeCodeAgent.for_host("openrouter").judge("grade this", config))
+
+
+def test_judge_under_openrouter_routes_through_the_gateway_with_the_host_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The judge env carries the base URL, an empty API key, and the host key as the token."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-host")
+    payload = json.dumps({"result": "{}", "is_error": False})
+    captured_env: dict[str, str] = {}
+
+    def fake_run(
+        command: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture the env and return a fake process."""
+        captured_env.update(env)
+        return _fake_proc(stdout=payload)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _openrouter_judge(JudgeConfig(provider="openrouter", model="anthropic/claude-sonnet-4.6"))
+
+    assert captured_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert captured_env["ANTHROPIC_API_KEY"] == ""
+    assert captured_env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-host"
+
+
+def test_judge_under_openrouter_reads_the_key_from_the_judge_env_and_lets_it_win(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key that lives only in the judge's `env` is used, and a user override is kept."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    payload = json.dumps({"result": "{}", "is_error": False})
+    captured_env: dict[str, str] = {}
+
+    def fake_run(
+        command: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture the env and return a fake process."""
+        captured_env.update(env)
+        return _fake_proc(stdout=payload)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _openrouter_judge(JudgeConfig(
+        provider="openrouter", model="anthropic/claude-sonnet-4.6",
+        env={"OPENROUTER_API_KEY": "sk-or-judge", "ANTHROPIC_BASE_URL": "https://proxy.test"},
+    ))
+
+    assert captured_env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-judge"
+    assert captured_env["ANTHROPIC_BASE_URL"] == "https://proxy.test"  # user env wins
+
+
+def test_judge_under_default_adds_no_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `default` judge adds nothing over the host env and `config.env`: no gateway keys."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-host")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    payload = json.dumps({"result": "{}", "is_error": False})
+    captured_env: dict[str, str] = {}
+
+    def fake_run(
+        command: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture the env and return a fake process."""
+        captured_env.update(env)
+        return _fake_proc(stdout=payload)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _judge(JudgeConfig(model="sonnet", env={"FOO": "bar"}))
+
+    assert captured_env["FOO"] == "bar"
+    assert "ANTHROPIC_BASE_URL" not in captured_env
+    assert "ANTHROPIC_AUTH_TOKEN" not in captured_env
+
+
+def test_host_credential_error_under_openrouter_never_probes_the_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the key set, the host check passes without asking `claude auth status`."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-host")
+
+    def must_not_run(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if the login probe runs under OpenRouter."""
+        raise AssertionError("claude auth status must not run under openrouter")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+
+    assert ClaudeCodeAgent.for_host("openrouter").host_credential_error() is None
+
+
+def test_host_credential_error_under_openrouter_ignores_a_host_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A logged-in host cannot stand in for the missing OpenRouter key."""
+    _without_claude_env(monkeypatch)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    logged_in = json.dumps({"loggedIn": True})
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: _fake_proc(stdout=logged_in))
+
+    error = ClaudeCodeAgent.for_host("openrouter").host_credential_error()
+
+    assert error is not None
+    assert "OPENROUTER_API_KEY" in error
