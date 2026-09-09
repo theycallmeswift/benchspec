@@ -1,4 +1,4 @@
-Follow-through on the research in `docs/research/2026-09-09-openrouter-unified-provider.md`. Builds on the backend-neutral `Credential` seam from #75 and the preflight consolidation in PR #97. Related: #95 (Codex accepts `OPENAI_API_KEY`), #94 (judge host-credential preflight).
+Tracked in #101 (sub-issues #102–#107). Follow-through on the research in `docs/research/2026-09-09-openrouter-unified-provider.md`. Builds on the backend-neutral `Credential` seam from #75 and the preflight consolidation in PR #97. Related: #95 (Codex accepts `OPENAI_API_KEY`), #94 (judge host-credential preflight).
 
 **TL;DR** — Add a `provider` key to the binder, the judge, and each arm (`default` or `openrouter`; `gemini` or `openrouter` for the binder), so any combination of the three can run through OpenRouter and a run that sets all three needs exactly one credential, `OPENROUTER_API_KEY`.
 
