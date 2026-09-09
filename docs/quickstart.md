@@ -97,7 +97,9 @@ arms = [
 An eval is one self-contained Markdown file under a discovered search path
 (`skills`, `tests`, `evals`, and `benchmarks` by default). Its parent folder is
 the eval's **group**; a file named `<stem>.eval.md` gets the stem as its id.
-Create `skills/hello/evals/hello/greets-by-name.eval.md`:
+Keep evals beside the skill they exercise rather than inside it, as
+`evals/<skill>/*.eval.md`, so the skill folder holds only what `setup.sh`
+installs. Create `evals/hello/greets-by-name.eval.md`:
 
 ```markdown
 ---
@@ -125,7 +127,7 @@ on paths so they read as workspace facts (the linter warns otherwise).
 
 The skill reaches the trial arm through the eval's own setup script, which runs
 inside the sandbox before the prompt with `$BENCHSPEC_ARM` set to the arm's name.
-Create `skills/hello/evals/hello/setup.sh`:
+Create `evals/hello/setup.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -134,14 +136,14 @@ if [ "$BENCHSPEC_ARM" = "baseline" ]; then
   exit 0   # baseline installs nothing — measures what the agent already knows
 fi
 mkdir -p /home/benchspec/skills/hello
-cp ../../SKILL.md /home/benchspec/skills/hello/SKILL.md
+cp ../../skills/hello/SKILL.md /home/benchspec/skills/hello/SKILL.md
 ```
 
 `/home/benchspec/skills` is the fixed skills home every harness's skill
 directory is linked to, so the same `setup.sh` works whether the arm runs Claude
 Code, Codex, or OpenCode. The script's working directory is the eval folder
 itself, inside the read-only `/project` mount of your repo, which is why
-`../../SKILL.md` resolves.
+`../../skills/hello/SKILL.md` resolves.
 
 ## Step 4 — Lint and preview
 
@@ -163,8 +165,8 @@ You should see two collected items, one per arm, each filed under the eval file
 that produced it:
 
 ```
-skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-baseline]
-skills/hello/evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-trial]
+evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-baseline]
+evals/hello/greets-by-name.eval.md::test_eval[hello-greets-by-name-trial]
 ```
 
 A malformed eval fails here, loudly, with the offending path quoted.
@@ -182,9 +184,9 @@ under their eval file's progress line, grade, and the session ends with the
 benchmark table:
 
 ```
-skills/hello/evals/hello/greets-by-name.eval.md ..                       [100%]
+evals/hello/greets-by-name.eval.md ..                                     [100%]
 
-============================ benchspec benchmark ============================
+============================= benchspec benchmark ==============================
 Eval                  baseline   trial
 hello/greets-by-name        0%    100%
 --------------------------------------
