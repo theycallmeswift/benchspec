@@ -29,6 +29,20 @@ transcript, trust the vibe. benchspec turns that guess into a measurement.
 Write the goal once, run it across the configurations you care about, and read
 off — in percentage points — how good each one actually is at accomplishing it.
 
+## What you need
+
+| | |
+|---|---|
+| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in. Python 3.11+. |
+| Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
+| `GEMINI_API_KEY` | The binder: a fixed Gemini call that classifies each assertion. Required for every `analyze` and `run`. |
+| Judge credential | The judge runs on the host through an agent CLI, using either its env credential or the CLI's own login (`claude login`, `codex login`); the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |
+
+Credentials can live in a repo-root `.env`. A graded run can touch up to three
+vendors: the agent's, Gemini for the binder, and the judge's. `lint` is free;
+`analyze` and `run` spend API calls, and `run` also boots sandboxes. Preflight
+lists every missing piece and exits before anything is spent.
+
 ## Getting Started
 
 ```bash
@@ -89,19 +103,9 @@ benchspec analyze   # which assertions grade deterministically, which go to the 
 benchspec run       # every (eval × arm) in its own sandbox, graded, reported
 ```
 
-## What you need
-
-| | |
-|---|---|
-| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in. Python 3.11+. |
-| Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
-| `GEMINI_API_KEY` | The binder: a fixed Gemini call that classifies each assertion. Required for every `analyze` and `run`. |
-| Judge credential | The judge runs on the host through an agent CLI, using either its env credential or the CLI's own login (`claude login`, `codex login`); the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |
-
-Credentials can live in a repo-root `.env`. A graded run can touch up to three
-vendors: the agent's, Gemini for the binder, and the judge's. `lint` is free;
-`analyze` and `run` spend API calls, and `run` also boots sandboxes. Preflight
-lists every missing piece and exits before anything is spent.
+The `` Skill `hello` invoked `` line needs a skill for the trial arm to install
+and a `setup.sh` that installs it; the [quickstart](docs/quickstart.md) writes
+both and takes an empty directory to that first graded report.
 
 ## How a run works
 
@@ -175,7 +179,25 @@ sequentially.
 | [`docs/results.md`](docs/results.md) | Reading `benchmark.md` and the machine-readable artifacts. |
 | [`docs/harnesses.md`](docs/harnesses.md) | `claude-code`, `codex`, `opencode`, and adding your own. |
 
-## Contributing
+## Development
+
+```bash
+git clone https://github.com/theycallmeswift/benchspec && cd benchspec
+cp .env.example .env    # fill in the credentials below
+make install            # uv sync
+make test               # unit suite: no credentials, no sandbox
+make lint               # ruff, ty, houserules (needs GEMINI_API_KEY)
+make e2e                # the in-repo hello suite, end to end
+```
+
+`make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/): two evals across three
+Claude Code arms, judged by Codex. It needs `claude` and `codex` on `PATH`, a
+running Docker daemon, and three credentials in `.env`: a Claude credential
+(`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) for the arms, `GEMINI_API_KEY`
+for the binder, and `OPENAI_API_KEY` for the judge. Preflight names whatever is
+missing and exits before anything is spent. The first run builds the sandbox
+snapshot (about a minute); `make e2e WORKERS=1 EVAL_ARGS="-k greets-by-name"`
+runs one eval sequentially.
 
 Issues and pull requests are welcome at
 [github.com/theycallmeswift/benchspec](https://github.com/theycallmeswift/benchspec).

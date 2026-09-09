@@ -198,15 +198,18 @@ install runs. `environment_script` runs too late for that.
 The cloud VM is one such host. [`scripts/cloud-env-setup.sh`](../scripts/cloud-env-setup.sh)
 is the environment's setup script: paste it into the **Setup script** field of
 the cloud environment at claude.ai/code. It installs the Codex judge, writes the
-dotenv file described below, starts `dockerd`, and builds
-`benchspec-base:proxy-ca` from `ubuntu:latest` with the proxy CA installed and
-`NODE_EXTRA_CA_CERTS` pointing at it. The script runs once; the environment
-snapshot keeps its files and images for later sessions.
+dotenv file described below, starts `dockerd`, builds `benchspec-base:proxy-ca`
+from `ubuntu:latest` with the proxy CA installed and `NODE_EXTRA_CA_CERTS`
+pointing at it, and writes the session hook described below. The script runs
+once; the environment snapshot keeps its files and images for later sessions.
 
 Two things the snapshot can't carry:
 
 - **A running daemon.** Sessions after the first start with `dockerd` stopped.
-  Start it before `make e2e`:
+  The setup script writes a gitignored `.claude/settings.local.json` in the clone
+  whose `SessionStart` hook starts `dockerd` whenever `docker info` fails, so a
+  session can run `make e2e` with no manual step. Without the hook, start it by
+  hand:
 
   ```bash
   setsid nohup dockerd >/tmp/benchspec-dockerd.log 2>&1 </dev/null &
