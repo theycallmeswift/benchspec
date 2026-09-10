@@ -25,6 +25,14 @@ I'm Swift. I value directness, bias to action, and learning by doing. Lead with 
 - Follow existing patterns in whatever file you're touching.
 - Verify changes with `make test` and `make lint` before claiming work is done. Show the output.
 
+## Landing changes
+
+- Every PR lands on `main` as one squash commit, through GitHub's merge only. Never
+  push to or rewrite `main`. A stack says whether it is one feature (one commit) or
+  separate features (one per PR). Details in
+  [`docs/style/development.md`](docs/style/development.md#landing-changes).
+- No Claude attribution anywhere: no footer, no `Co-Authored-By`, no session URL.
+
 ## Directory Structure
 
 - Put plans, specs, and research in `docs/{plans,specs,research}/`.
