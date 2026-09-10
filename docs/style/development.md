@@ -196,12 +196,11 @@ def test_multi_sample_reports_zero_stdev(tmp_path):
 - **Linter/formatter-driven.** Defer to the tool; encode rules in the linter
   rather than policing by hand.
 - **Conventional-commit messages** (`feat:` / `fix:` / `chore:`).
-- **Rebase workflow; curate into a few well-scoped commits.** Interactively
-  rebase a branch into a few cohesive commits (each a self-contained,
-  reviewable change), then fast-forward onto `main` (`git merge --ff-only`).
-  Avoid merge commits. Don't squash a branch to a single commit by default —
-  the *commit* is the unit of history, and a well-scoped commit tells its own
-  story.
+- **Rebase workflow on branches; squash to land.** Curate a branch into a few
+  cohesive commits for review (rebase, never merge commits), but every PR
+  lands on `main` as one squash commit whose title is the PR title. On `main`
+  the *PR* is the unit of history; the branch commits tell the story inside the
+  PR. Landing rules, including how a stack lands, are in `CLAUDE.md`.
 
 ## Project documentation
 

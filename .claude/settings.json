@@ -14,6 +14,13 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin +:*)",
+      "Bash(git merge --ff-only:*)"
     ]
   }
 }
