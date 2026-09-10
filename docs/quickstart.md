@@ -32,7 +32,10 @@ cat tmp/evals/iteration_01/benchmark.md
   `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. This walkthrough
   uses Claude Code for both the arms and the judge.
 - **`GEMINI_API_KEY`**, the binder's credential. It is required for every graded
-  run and is unrelated to the agent credential above.
+  run and is unrelated to the agent credential above. (The binder, the judge, and
+  the arms can each run through OpenRouter instead, on one `OPENROUTER_API_KEY`;
+  see [`configuration.md`](configuration.md#providers). This walkthrough stays on
+  the defaults.)
 
 Credentials can live in a repo-root `.env`; every subcommand loads it first, and
 exported variables win over `.env` values. For this walkthrough that file is two
@@ -154,7 +157,8 @@ Two commands catch problems before you spend sandbox or model time:
 .venv/bin/benchspec analyze   # binds each assertion: deterministic or judge-backed?
 ```
 
-`analyze` uses the real binder, so it needs `GEMINI_API_KEY` (exported or in `.env`). To
+`analyze` uses the real binder, so it needs the binder's credential, `GEMINI_API_KEY`
+here (exported or in `.env`). To
 confirm discovery without running anything, forward `--collect-only` to pytest:
 
 ```bash
@@ -217,7 +221,8 @@ shows a delta rather than a lone score.
 > (`gemini-3.5-flash-lite`, temperature 0) that decides how an assertion is
 > graded, not whether it passed. It is deliberately separate from both the agent
 > under test and the judge, so the grading path is identical whatever harness or
-> judge you configure.
+> judge you configure. The same model is available through OpenRouter, which is
+> what `[tool.benchspec.binder] provider = "openrouter"` selects.
 
 ## Step 6 — Look at what you got
 
@@ -255,7 +260,8 @@ each arm ran on. Alongside it:
 - **Preflight: no Claude credential.** Run `claude setup-token` or export
   `ANTHROPIC_API_KEY`; a repo-root `.env` works too.
 - **`GEMINI_API_KEY is required`.** The binder classifies every assertion via the
-  Gemini API. An empty value counts as missing.
+  Gemini API. An empty value counts as missing. (With `[tool.benchspec.binder]
+  provider = "openrouter"` the message names `OPENROUTER_API_KEY` instead.)
 - **The trial arm fails `` Skill `hello` invoked ``.** The skill was installed but
   the agent hand-rolled the task instead of dispatching it: a real routing
   finding, not an infra error. Sharpen the skill's `description` or the prompt.

@@ -1,7 +1,7 @@
 # Configuring benchmarks
 
 This is the configuration reference: the `[tool.benchspec]` tables in
-`pyproject.toml` (eval sets, arms, the judge), the `benchspec` command line,
+`pyproject.toml` (eval sets, arms, the judge, the binder), the `benchspec` command line,
 how the layers combine, exit codes, and environment variables. It is for someone
 who has run the [quickstart](quickstart.md) and wants to shape a benchmark; the
 terms (eval set, arm, baseline, judge, cell) are defined in
@@ -36,8 +36,9 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 
 | Key | Type | Notes |
 |---|---|---|
-| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `model` / `effort` / `env` / `harness_args`. |
+| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `provider` / `model` / `effort` / `env` / `harness_args`. |
 | `harness` | string | Default harness: `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
+| `provider` | string | Default transport the harness reaches its model through: `default` (the vendor's own API or CLI login; the default) or `openrouter` (every request through OpenRouter on `OPENROUTER_API_KEY`). Under `openrouter` the model must be a vendor-qualified slug (`anthropic/claude-sonnet-4.6`; `openrouter/anthropic/...` for OpenCode). See [Providers](#providers). |
 | `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
 | `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for how each CLI receives it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
@@ -50,8 +51,9 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 > agents are chosen per arm via `harness`. Both `runner` and `sandbox` are
 > set-level only: no arm override, no CLI override.
 
-Validation is structural and fail-fast: unknown harnesses, duplicate arm names, a
-`baseline` or `default-set` naming an undeclared thing, a non-table `env`. Each
+Validation is structural and fail-fast: unknown harnesses or providers, duplicate arm
+names, a bare model alias under `openrouter`, a `baseline` or `default-set` naming an
+undeclared thing, a non-table `env`. Each
 raises at config-read time (a pytest `UsageError` at collection, exit `2` from
 the CLI), never a silent no-op mid-run. What benchspec deliberately does *not*
 validate is harness × model semantics; models change too fast for an allow-list,
@@ -62,15 +64,20 @@ so a wrong model surfaces as a loud error from the agent CLI.
 An `env` value of the form `$VAR` or `${VAR}` expands from the host environment
 when the arm *executes*, never at collection, and an unset referenced variable
 raises rather than expanding to an empty string. Literals pass through. This is
-how an arm borrows a host secret without committing it:
+how an arm borrows a host secret without committing it, for a gateway benchspec
+has no `provider` for:
 
 ```toml
 arms = [
-  { name = "via-openrouter", env = {
-      ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1",
-      ANTHROPIC_AUTH_TOKEN = "$OPENROUTER_API_KEY" } },
+  { name = "via-my-gateway", env = {
+      ANTHROPIC_BASE_URL = "https://gateway.example.com/api",
+      ANTHROPIC_AUTH_TOKEN = "$MY_GATEWAY_TOKEN" } },
 ]
 ```
+
+Under Docker that token is a plain container variable the agent can read; for
+OpenRouter, prefer `provider = "openrouter"` ([Providers](#providers)), which
+injects the key as a host-scoped credential instead.
 
 ### Common set shapes
 
@@ -99,7 +106,8 @@ model   = "gpt-5.5"
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `harness` | string | `claude-code` | `claude-code`, `codex`, or `opencode`. Validated at collection. |
-| `model` | string | `sonnet` | Harness-specific, like an arm's model. One structural check: an `opencode` judge needs a provider-qualified model (`anthropic/...`), enforced at collection. |
+| `provider` | string | `default` | `default` (the harness vendor's own API or CLI login) or `openrouter` (grade through OpenRouter on `OPENROUTER_API_KEY`; no CLI login involved). See [Providers](#providers). |
+| `model` | string | `sonnet` | Harness-specific, like an arm's model. Structural checks at collection: an `opencode` judge needs a provider-qualified model (`anthropic/...`), and any judge under `openrouter` needs a vendor-qualified slug (`openrouter/...` for OpenCode). |
 | `effort` | string | `medium` | Passed to the judge harness the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, a `--variant` mapping for OpenCode. |
 | `timeout` | integer | `300` | Judge subprocess timeout, seconds. |
 | `harness_args` | array of strings | `[]` | Pass-through CLI tokens; benchspec-owned flags are rejected per harness. |
@@ -112,10 +120,82 @@ model   = "gpt-5.5"
 > Codex judge over Claude arms.
 
 The judge harness's CLI must be installed on the host with its credential (the
-harness's own; see [`harnesses.md`](harnesses.md#the-in-tree-harnesses)). The
-`run` command preflights both before spawning pytest; inside pytest they are
-checked again when tests actually execute, not at collection. Funding is not
-preflighted: an unfunded key fails at grading, after the arms have run.
+harness's own under `default`, `OPENROUTER_API_KEY` under `openrouter`; see
+[`harnesses.md`](harnesses.md#the-in-tree-harnesses)). The credential may live in
+the host environment or in the judge's own `env` table; preflight evaluates the
+same merged view the judge runs with. The `run` command preflights both before
+spawning pytest; inside pytest they are checked again when tests actually
+execute, not at collection. Funding is not preflighted: an unfunded key fails at
+grading, after the arms have run.
+
+## The binder
+
+The binder is the fixed classifier that decides, per assertion, whether a line
+grades deterministically or goes to the judge ([`writing-evals.md`](writing-evals.md#how-assertions-are-graded)).
+It is not a harness: it is one direct API call per non-trivial assertion, to the
+same Gemini Flash-Lite model whichever transport carries it. Declare it
+top-level:
+
+```toml
+[tool.benchspec.binder]
+provider = "openrouter"                     # default "gemini"
+model    = "google/gemini-3.5-flash-lite"   # optional; each provider has a default
+```
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `provider` | string | `gemini` | `gemini` (Gemini's own API on `GEMINI_API_KEY`) or `openrouter` (OpenRouter's chat-completions API on `OPENROUTER_API_KEY`, with `temperature: 0`, JSON mode, and `require_parameters` so a route that would drop either is refused). |
+| `model` | string | per provider | `gemini-3.5-flash-lite` under `gemini`, `google/gemini-3.5-flash-lite` under `openrouter`. Under `openrouter` the slug must be vendor-qualified. Recorded in `meta.json` under `binder.model`. |
+
+A rejected or unfunded key stops the run outright on either provider (never a
+silent degrade to judge grading); a transient failure reroutes that assertion to
+the judge and is reported as `binder_degraded`.
+
+## Providers
+
+`provider` appears on three surfaces, each chosen independently: the binder
+(`gemini` | `openrouter`), the judge, and every arm (`default` | `openrouter`).
+`default` is today's behavior, the vendor's own API or CLI login. `openrouter`
+routes that component through OpenRouter on `OPENROUTER_API_KEY`, applied at
+execution time only (the guest env, a per-cell credential scoped to
+`openrouter.ai`, or CLI flags), so snapshots stay provider-neutral and a mixed
+set builds no extra images. Set all three and a run needs exactly one credential:
+
+```toml
+[tool.benchspec.binder]
+provider = "openrouter"
+
+[tool.benchspec.judge]
+harness  = "codex"
+provider = "openrouter"
+model    = "google/gemini-3.5-flash"
+
+[tool.benchspec.sets.single-key]
+harness  = "claude-code"
+provider = "openrouter"
+model    = "anthropic/claude-sonnet-4.6"
+baseline = "baseline"
+arms = [
+  { name = "baseline" },
+  { name = "trial" },
+  { name = "direct", provider = "default", model = "sonnet" },   # mixed sets are fine
+]
+```
+
+```bash
+OPENROUTER_API_KEY=sk-or-... benchspec run --set single-key   # the only credential read
+benchspec run --set single-key                                # preflight names it once per component, exit 2
+```
+
+Per harness, `openrouter` means: Claude Code gets `ANTHROPIC_BASE_URL=https://openrouter.ai/api`,
+an empty `ANTHROPIC_API_KEY`, and the key as `ANTHROPIC_AUTH_TOKEN`; Codex gets
+benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*`
+overrides (no `config.toml` written anywhere); OpenCode takes the key directly
+and needs an `openrouter/`-prefixed model. Bare aliases (`sonnet`, `opus`) are a
+config error under `openrouter`: OpenRouter does not map them, so every model
+must be a vendor-qualified slug. `meta.json` records `provider` on the binder,
+the judge, and every arm. Cross-family judging still applies: this repo's
+`make e2e` puts Anthropic and OpenAI arms under a Codex judge on a Google slug.
 
 ## Top-level `[tool.benchspec]` keys
 
@@ -124,6 +204,7 @@ preflighted: an unfunded key fails at grading, after the arms have run.
 | `default-set` | string | The set a plain run resolves. Required once any set is declared; must name a declared set. |
 | `sets.<name>` | table | One eval set (above). |
 | `judge` | table | The run's judge (above). |
+| `binder` | table | The run's binder (above). |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
@@ -160,7 +241,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | Flag | Forwards to | Effect |
 |---|---|---|
 | `--set NAME` | `--benchspec-set` | Run this set instead of `default-set`. Unknown names fail fast. |
-| `--config FILE` | `--benchspec-config` | Layer an untracked TOML's `[tool.benchspec.sets.*]` (and `judge`) over pyproject: a scratch set for a one-off comparison. Same table shape as pyproject. |
+| `--config FILE` | `--benchspec-config` | Layer an untracked TOML's `[tool.benchspec.sets.*]` (and `judge` / `binder`) over pyproject: a scratch set for a one-off comparison. Same table shape as pyproject. |
 | `--model M` | `--benchspec-model` | Override the set's `model` default. Arms that declared their own model keep it. |
 | `--models M1,M2` | `--benchspec-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
 | `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
@@ -168,7 +249,8 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
-| `--judge-harness` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
+| `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
+| `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
 Everything after a standalone `--` passes to pytest verbatim:
 
@@ -207,7 +289,7 @@ computable delta are exempt.
 |---|---|
 | `0` | Success. |
 | `1` | A finding: lint warnings, a failed cell, a tripped `--fail-under` gate, or a sandbox build failure. |
-| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, or a failed preflight: an unready host, a missing agent credential, a missing judge binary, a missing or empty `GEMINI_API_KEY`, or (`analyze` only) a rejected key or binder transport failure. Printed as a single `error: ...` line on stderr. |
+| `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, an unknown `provider`, or a failed preflight: an unready host, a missing agent credential, a missing judge binary, a missing or empty binder key (`GEMINI_API_KEY` or `OPENROUTER_API_KEY`, by provider), or (`analyze` only) a rejected key or binder transport failure. Printed as a single `error: ...` line on stderr. |
 | `5` | Nothing to do: no evals discovered under `root` (`run` only; `lint`/`analyze` exit `0` on an empty root). |
 
 > **Edge case:** `run` checks for emptiness *first*. With no evals discovered it
@@ -223,8 +305,9 @@ at configure time:
 CLI flag  >  environment variable  >  pyproject.toml  >  built-in default
 ```
 
-Judge knobs insert the scratch file into that chain: CLI flag > `--config` file's
-`[tool.benchspec.judge]` > pyproject's > built-in default. Not every knob has
+Judge and binder knobs insert the scratch file into that chain: CLI flag > `--config`
+file's `[tool.benchspec.judge]` / `[tool.benchspec.binder]` > pyproject's > built-in
+default. Not every knob has
 every channel: `eval_paths` has no env var, and `--fail-under` is flag-only by
 design (it is a CI decision, made where CI is configured).
 
@@ -237,10 +320,10 @@ guest (see [`sandbox.md`](sandbox.md#credentials)).
 
 | Variable | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | The binder. Required for every graded run and for `analyze`; empty counts as missing. |
-| `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude Code credential (OAuth token preferred; from `claude setup-token`). |
-| `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `OPENAI_API_KEY` / `CODEX_AUTH_JSON_PATH` | Codex credential, in preference order; see [`harnesses.md`](harnesses.md). |
-| `OPENROUTER_API_KEY` | OpenCode's preferred provider credential (falls back to `ANTHROPIC_API_KEY`, then `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`). |
+| `GEMINI_API_KEY` | The binder under its default `gemini` provider. Required for every graded run and for `analyze` unless the binder is on `openrouter`; empty counts as missing. |
+| `OPENROUTER_API_KEY` | Every component set to `provider = "openrouter"`: the binder, the judge, and any arm, on any harness. With all three set, the only credential a run reads. Under `default` it is also OpenCode's preferred credential (falling back to `ANTHROPIC_API_KEY`, then `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`). |
+| `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude Code credential under `default` (OAuth token preferred; from `claude setup-token`). |
+| `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` / `OPENAI_API_KEY` / `CODEX_AUTH_JSON_PATH` | Codex credential under `default`, in preference order; see [`harnesses.md`](harnesses.md). |
 | `BENCHSPEC_CLAUDE_VERSION` / `BENCHSPEC_CODEX_VERSION` / `BENCHSPEC_OPENCODE_VERSION` | Select a harness CLI version instead of `latest`; each value keys its own sandbox snapshot. Codex and OpenCode install exactly that version; the Claude Code installer always fetches the latest release, so its value only names the snapshot (the version that ran is recorded in `meta.json`). |
 | `BENCHSPEC_BASE_IMAGE` | OCI image the sandbox snapshot builds from, above `[tool.benchspec] base_image`. For a host whose base needs something the config shouldn't carry, such as a proxy CA; see [`sandbox.md`](sandbox.md#customizing-the-image). |
 | `PROJECT_ROOT` | Repo-root override (below `--benchspec-repo-root`, above the pytest rootdir). |
@@ -250,6 +333,7 @@ Inside the sandbox, each cell's `setup.sh` additionally sees `BENCHSPEC_ARM`,
 [`writing-evals.md`](writing-evals.md#setupsh-what-differs-per-arm).
 
 The authoritative parsers are `benchspec.config.arms` (sets and arms),
-`benchspec.grading.judges.config` (the judge), `benchspec.runners.pytest`
-(plugin options), and `benchspec.exit_codes`. If this page and those modules
-ever disagree, the modules are right.
+`benchspec.grading.judges.config` (the judge), `benchspec.grading.binder_config`
+(the binder), `benchspec.runners.pytest` (plugin options), and
+`benchspec.exit_codes`. If this page and those modules ever disagree, the
+modules are right.

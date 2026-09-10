@@ -11,10 +11,12 @@ from typing import NotRequired, TypedDict
 
 import pytest
 import yaml
-from conftest import DrawRecord, _latency_cost_summary, _recording_call_model
+from conftest import DrawRecord, _latency_cost_summary, _recording_call_model, binder_config_for
 
 from benchspec.grading import binder
+from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.checkers import derive_text
+from benchspec.specs.schema import SchemaError
 
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.yaml"
 
@@ -355,45 +357,93 @@ def test_semantic_compound_punts_with_decomposed_children(
 def test_latency_cost_summary_excludes_regex_fast_path_rows() -> None:
     """Verify regex-sourced rows are excluded from latency/token/cost aggregates."""
     rows: list[DrawRecord] = [
-        {"test": "fields", "source": "regex", "attempts": 0, "latency_ms": None,
-         "prompt_tokens": None, "output_tokens": None},
-        {"test": "fields", "source": "gemini", "attempts": 1, "latency_ms": 120.0,
-         "prompt_tokens": 500, "output_tokens": 20},
-        {"test": "fields", "source": "gemini", "attempts": 1, "latency_ms": 140.0,
-         "prompt_tokens": 500, "output_tokens": 20},
+        {"test": "fields", "source": "regex", "model": None, "attempts": 0,
+         "latency_ms": None, "prompt_tokens": None, "output_tokens": None},
+        {"test": "fields", "source": "gemini", "model": "gemini-3.5-flash-lite", "attempts": 1,
+         "latency_ms": 120.0, "prompt_tokens": 500, "output_tokens": 20},
+        {"test": "fields", "source": "gemini", "model": "gemini-3.5-flash-lite", "attempts": 1,
+         "latency_ms": 140.0, "prompt_tokens": 500, "output_tokens": 20},
     ]
 
     summary = _latency_cost_summary(rows)
 
     assert summary["regex_fast_path_count"] == 1
-    assert summary["gemini_count"] == 2
+    assert summary["model_call_count"] == 2
     assert summary["latency_ms_mean"] == pytest.approx(130.0)
     assert summary["total_prompt_tokens"] == 1000
     assert summary["total_output_tokens"] == 40
+    assert summary["estimated_cost_usd"] == pytest.approx(1.0 * 0.0003 + 0.04 * 0.0025)
 
 
-def test_recording_call_model_honors_benchspec_binder_model_env_override(
+def test_latency_cost_summary_prices_openrouter_rows_and_leaves_unknown_models_unpriced() -> None:
+    """Verify cost follows the resolved model: OpenRouter's slug is priced, a stranger is not."""
+    priced: list[DrawRecord] = [
+        {"test": "fields", "source": "openrouter", "model": "google/gemini-3.5-flash-lite",
+         "attempts": 1, "latency_ms": 100.0, "prompt_tokens": 1000, "output_tokens": 0},
+    ]
+    unpriced: list[DrawRecord] = [
+        *priced,
+        {"test": "fields", "source": "openrouter", "model": "google/gemini-3.5-flash",
+         "attempts": 1, "latency_ms": 100.0, "prompt_tokens": 1000, "output_tokens": 0},
+    ]
+
+    assert _latency_cost_summary(priced)["estimated_cost_usd"] == pytest.approx(0.0003)
+    assert _latency_cost_summary(unpriced)["estimated_cost_usd"] is None
+    assert _latency_cost_summary(unpriced)["model_call_count"] == 2
+
+
+def test_recording_call_model_delegates_to_the_configured_transport_and_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify the corpus's recording call_model reads BENCHSPEC_BINDER_MODEL, not `_call_gemini`.
-
-    This is where the model env-override behavior lives — `_call_gemini` itself takes
-    `model` as a plain keyword with no env fallback; only this corpus-side wrapper
-    reads the variable, and only this wrapper needs a test for it.
-    """
+    """Verify the corpus's recording call_model routes by the resolved config, recording replies."""
     captured: dict[str, str] = {}
 
     def fake_call_gemini(
         prompt: str, *, timeout: float = 60, model: str = binder.GEMINI_BINDER_MODEL
-    ) -> binder.GeminiReply:
+    ) -> binder.BinderReply:
         """Stand in for the transport, recording the model it was asked for."""
         captured["model"] = model
-        return binder.GeminiReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
+        return binder.BinderReply(text="{}", prompt_tokens=0, output_tokens=0, latency_ms=0.0)
 
-    monkeypatch.setenv("BENCHSPEC_BINDER_MODEL", "gemini-3.1-flash")
     monkeypatch.setattr(binder, "_call_gemini", fake_call_gemini)
+    sink: list[binder.BinderReply] = []
 
-    call_model = _recording_call_model([])
+    call_model = _recording_call_model(sink, BinderConfig(model="gemini-3.1-flash"))
     call_model("prompt", timeout=60)
 
     assert captured["model"] == "gemini-3.1-flash"
+    assert len(sink) == 1
+
+
+def test_binder_config_for_reads_pyproject_and_honors_the_model_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the corpus resolves `[tool.benchspec.binder]` and lets BENCHSPEC_BINDER_MODEL win.
+
+    This is where the model env-override behavior lives — the production transports take
+    `model` as a plain keyword with no env fallback; only this corpus-side resolver reads
+    the variable.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.benchspec.binder]\nprovider = "openrouter"\n'
+    )
+
+    resolved = binder_config_for(tmp_path)
+    monkeypatch.setenv("BENCHSPEC_BINDER_MODEL", "google/gemini-3.5-flash")
+    overridden = binder_config_for(tmp_path)
+
+    assert resolved == BinderConfig(provider="openrouter", model="google/gemini-3.5-flash-lite")
+    assert overridden == BinderConfig(provider="openrouter", model="google/gemini-3.5-flash")
+
+
+def test_binder_config_for_rejects_an_unqualified_override_under_openrouter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the env override is validated like any other layer."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.benchspec.binder]\nprovider = "openrouter"\n'
+    )
+    monkeypatch.setenv("BENCHSPEC_BINDER_MODEL", "gemini-3.5-flash")
+
+    with pytest.raises(SchemaError, match="vendor-qualified"):
+        binder_config_for(tmp_path)

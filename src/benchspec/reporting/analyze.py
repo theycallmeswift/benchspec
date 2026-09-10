@@ -3,8 +3,9 @@
 `benchspec analyze` binds each assertion the same way a live run does and reports the
 evidence domain it grades against: a `deterministic` workdir check, a process-fact
 `activation` check, or an LLM `judge-backed` verdict. The local fast paths keep
-existence and activation lines free; every other assertion pays one Gemini punt-or-bind
-call, so an author sees where each assertion lands before spending on a full run.
+existence and activation lines free; every other assertion pays one binder punt-or-bind
+call through the provider `[tool.benchspec.binder]` selects, so an author sees where
+each assertion lands before spending on a full run.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from benchspec.grading import binder
+from benchspec.grading.binder_config import BinderConfig, resolve_binder_config
 from benchspec.specs import discovery
 
 
@@ -44,7 +46,7 @@ def classify_assertion(text: str, *, bind: Callable[[str], dict | None] = binder
         `"deterministic"` if the binder binds it, else `"judge-backed"`.
 
     Raises:
-        BinderAuthError: the Gemini credential was rejected — analyze cannot classify
+        BinderAuthError: the binder credential was rejected — analyze cannot classify
             a suite whose binder is down, so this propagates instead of mislabeling.
         RuntimeError: the binder transport failed, for the same reason.
     """
@@ -71,11 +73,22 @@ def analyze_repo(
     return classifications
 
 
+def binder_config_for(repo_root: Path) -> BinderConfig:
+    """The binder `analyze` classifies with: the repo's `[tool.benchspec.binder]` table.
+
+    `analyze` takes no `--config` scratch file or binder flags, so pyproject is the only
+    layer. Raises SchemaError on a malformed table, which the CLI reports as a usage error.
+    """
+    table = discovery.pyproject_table(repo_root).get("binder")
+
+    return resolve_binder_config(pyproject_table=table)
+
+
 def run(repo_root: Path) -> int:
     """Print each assertion's grading classification grouped by file.
 
-    Preflights the Gemini key (the binder calls Gemini for assertions past the local
-    fast paths), classifies every discovered assertion, and prints a per-file table.
+    Preflights the binder key (the binder calls its provider for assertions past the
+    local fast paths), classifies every discovered assertion, and prints a per-file table.
 
     A fully-classified suite always returns 0 — a classification is a report, not a
     warning, so unlike `lint.run` this never exits nonzero on a non-empty suite.
@@ -88,8 +101,9 @@ def run(repo_root: Path) -> int:
     Returns:
         0 once the suite is classified.
     """
-    binder.preflight_verify_gemini_key()
-    classifications = analyze_repo(repo_root)
+    config = binder_config_for(repo_root)
+    binder.preflight_verify_binder_key(config)
+    classifications = analyze_repo(repo_root, bind=binder.binder_for(config))
 
     current = None
     for classification in classifications:

@@ -11,6 +11,11 @@ there is NO terminal `result` event. A skill dispatch is
 `{"type":"tool_use","part":{"tool":"skill","state":{"input":{"name":"<skill>"}}}}`;
 the final message concatenates every non-empty `part.text` (blank-line joined); totals
 are `step_finish.part.tokens.total`.
+
+OpenCode reaches OpenRouter natively (`OPENROUTER_API_KEY` plus an `openrouter/<slug>`
+model), so `provider = "openrouter"` only makes that path deterministic: the credential
+is forced to `OPENROUTER_API_KEY` instead of "first of four keys set", and the model must
+carry the `openrouter/` prefix. `default` keeps the fallback chain untouched.
 """
 
 from __future__ import annotations
@@ -18,12 +23,18 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, Credential
+from benchspec.agents.base import (
+    DEFAULT_PROVIDER,
+    OPENROUTER_PROVIDER,
+    AgentCapabilities,
+    BaseAgent,
+    Credential,
+)
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult
@@ -42,6 +53,9 @@ AUTH_ENV_VARS = (
     "GEMINI_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
 )
+OPENROUTER_AUTH_ENV = "OPENROUTER_API_KEY"
+OPENROUTER_MODEL_PREFIX = "openrouter/"
+_OPENROUTER_CREDENTIAL_REMEDY = "no OpenRouter credential — set OPENROUTER_API_KEY"
 _PROVIDER_HOSTS = {
     "OPENROUTER_API_KEY": "openrouter.ai",
     "ANTHROPIC_API_KEY": "api.anthropic.com",
@@ -74,6 +88,21 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 }
 # Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
 _EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
+
+
+def openrouter_model_error(model: str) -> str | None:
+    """Why `model` cannot be routed through OpenRouter by OpenCode, or None when it can.
+
+    OpenCode selects the provider from the model's own prefix, so under `openrouter` the
+    slug must be `openrouter/<vendor>/<model>`; any other prefix would route directly to
+    that vendor with the wrong key.
+    """
+    if model.startswith(OPENROUTER_MODEL_PREFIX):
+        return None
+    return (
+        f"provider `{OPENROUTER_PROVIDER}` needs an `{OPENROUTER_MODEL_PREFIX}`-prefixed model "
+        f"(e.g. 'openrouter/anthropic/claude-sonnet-4.6'), got {model!r}"
+    )
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
@@ -243,34 +272,47 @@ class OpenCodeAgent(BaseAgent):
         version: str = "latest",
         # Default binding: the guest install path (npm i -g installs the symlink here).
         agent_bin: str = "/usr/local/bin/opencode",
+        provider: str = DEFAULT_PROVIDER,
     ) -> None:
         """Initialize the instance."""
         self.agent_bin = agent_bin
         self._auth_value = auth_value
         self._auth_env = auth_env
         self._version = version
+        self.provider = provider
 
     @classmethod
-    def for_host(cls) -> OpenCodeAgent:
+    def for_host(cls, provider: str = DEFAULT_PROVIDER) -> OpenCodeAgent:
         """An instance bound to the host environment (judge mode): PATH resolves `opencode`."""
-        return cls(agent_bin="opencode")
+        return cls(agent_bin="opencode", provider=provider)
 
     @classmethod
-    def from_env(cls) -> OpenCodeAgent:
+    def from_env(cls, provider: str = DEFAULT_PROVIDER) -> OpenCodeAgent:
         """Build the agent from the host env: pinned version (env var > pyproject >.
 
-        'latest') + the preferred credential.
+        'latest') + the credential. Under `openrouter` that is `OPENROUTER_API_KEY` and
+        nothing else; under `default` it is the first of `AUTH_ENV_VARS` set. Either way
+        a missing credential is left for preflight to report.
         """
         version = (
             os.environ.get("BENCHSPEC_OPENCODE_VERSION")
             or cls._pinned_version_from_pyproject()
             or "latest"
         )
+        if provider == OPENROUTER_PROVIDER:
+            return cls(
+                auth_value=os.environ.get(OPENROUTER_AUTH_ENV, ""),
+                auth_env=OPENROUTER_AUTH_ENV,
+                version=version,
+                provider=provider,
+            )
         for env_name in AUTH_ENV_VARS:
             value = os.environ.get(env_name)
             if value:
-                return cls(auth_value=value, auth_env=env_name, version=version)
-        return cls(version=version)  # no credential set; preflight gates this
+                return cls(
+                    auth_value=value, auth_env=env_name, version=version, provider=provider
+                )
+        return cls(version=version, provider=provider)  # no credential set; preflight gates this
 
     @staticmethod
     def _pinned_version_from_pyproject() -> str | None:
@@ -296,9 +338,18 @@ class OpenCodeAgent(BaseAgent):
         return None
 
     @staticmethod
-    def credential_error() -> str | None:
-        """Return a credential preflight error message when credentials are missing."""
-        if any(os.environ.get(env_name) for env_name in AUTH_ENV_VARS):
+    def credential_error(
+        provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
+        """Return a credential preflight error message when credentials are missing.
+
+        Under `openrouter` only `OPENROUTER_API_KEY` counts, even when another key in
+        `AUTH_ENV_VARS` is set — that is the determinism the provider buys.
+        """
+        environ = os.environ if environ is None else environ
+        if provider == OPENROUTER_PROVIDER:
+            return None if environ.get(OPENROUTER_AUTH_ENV) else _OPENROUTER_CREDENTIAL_REMEDY
+        if any(environ.get(env_name) for env_name in AUTH_ENV_VARS):
             return None
         return "no OpenCode provider credential — set one of " + ", ".join(AUTH_ENV_VARS)
 
@@ -342,6 +393,10 @@ class OpenCodeAgent(BaseAgent):
                 f"got {model!r}. The --benchspec-model default 'sonnet' is a Claude-only alias; "
                 f"pass --benchspec-model explicitly under BENCHSPEC_AGENT=opencode."
             )
+        if self.provider == OPENROUTER_PROVIDER:
+            model_error = openrouter_model_error(model)
+            if model_error:
+                raise ValueError(f"OpenCode: {model_error}")
         # Map the agent-neutral effort tier to OpenCode's --variant.
         variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
@@ -443,8 +498,14 @@ class OpenCodeAgent(BaseAgent):
         uses — that parser treats a run that spent zero tokens as an error (the
         harness never reached the model: auth, quota, or launch failure), so infra
         detection is the same structured signal as the arm, never a stderr scan.
-        Wraps the final text in the {"result": ...} envelope judge.py parses.
+        Wraps the final text in the {"result": ...} envelope judge.py parses. Under
+        `openrouter` a model without the `openrouter/` prefix is refused before any
+        process spawns, as a RuntimeError like every other judge infra failure.
         """
+        if self.provider == OPENROUTER_PROVIDER:
+            model_error = openrouter_model_error(config.model)
+            if model_error:
+                raise RuntimeError(f"opencode judge: {model_error}")
         variant = _EFFORT_TO_VARIANT.get(config.effort, "default")
         command = [
             self.agent_bin, "run", "--format", "json", "--variant", variant,

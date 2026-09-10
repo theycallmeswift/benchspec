@@ -15,6 +15,7 @@ from textwrap import dedent
 import pytest
 
 from benchspec.config.arms import Arm
+from benchspec.grading import binder
 from benchspec.grading.binder import _bind_bare_exists
 from benchspec.orchestration import workspace
 from benchspec.orchestration.execution import SessionFactory, run_eval_arm
@@ -125,6 +126,30 @@ def test_run_returns_zero_on_clean_suite(tmp_path: Path, monkeypatch: pytest.Mon
     assert exit_code == 0
 
 
+def test_run_binds_through_the_pyproject_binder_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `run` resolves `[tool.benchspec.binder]` and binds through that transport."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    (tmp_path / "pyproject.toml").write_text('[tool.benchspec.binder]\nprovider = "openrouter"\n')
+    _write_eval(tmp_path, ["The summary reads well"])
+    seen: list[str] = []
+
+    def fake_call_openrouter(prompt: str, *, timeout: float, model: str) -> binder.BinderReply:
+        """Stand in for the OpenRouter transport with a punt."""
+        seen.append(model)
+        return binder.BinderReply(text='{"punt":true}', prompt_tokens=0, output_tokens=0,
+                                  latency_ms=0.0)
+
+    monkeypatch.setattr(binder, "_call_openrouter", fake_call_openrouter)
+
+    exit_code = analyze.run(tmp_path)
+
+    assert exit_code == 0
+    assert seen == ["google/gemini-3.5-flash-lite"]
+
+
 def test_run_surfaces_schema_error_on_malformed_eval(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -218,7 +243,8 @@ def test_activation_fixture_grades_both_polarities_end_to_end(
     """
     workspace.set_current_iteration("iteration_01")
     monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent", lambda harness=None: None
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": None,
     )
     monkeypatch.setattr(
         "benchspec.orchestration.execution.ensure_snapshot", lambda agent, **kwargs: "snap"

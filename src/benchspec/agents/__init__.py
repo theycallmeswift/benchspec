@@ -12,12 +12,23 @@ from __future__ import annotations
 
 import os
 
-from benchspec.agents.base import AgentCapabilities, BaseAgent, CodingAgent
+from benchspec.agents.base import (
+    DEFAULT_PROVIDER,
+    HARNESS_PROVIDERS,
+    OPENROUTER_PROVIDER,
+    AgentCapabilities,
+    BaseAgent,
+    CodingAgent,
+    unqualified_openrouter_model_error,
+)
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 
 __all__ = [
+    "DEFAULT_PROVIDER",
+    "HARNESS_PROVIDERS",
+    "OPENROUTER_PROVIDER",
     "AgentCapabilities",
     "BaseAgent",
     "CodingAgent",
@@ -29,6 +40,8 @@ __all__ = [
     "credential_preflight_error",
     "resolve_agent_name",
     "known_harnesses",
+    "known_providers",
+    "unqualified_openrouter_model_error",
 ]
 
 _REGISTRY: dict[str, type[BaseAgent]] = {
@@ -43,6 +56,11 @@ _DEFAULT_AGENT = "claude-code"
 def known_harnesses() -> frozenset[str]:
     """Registered agent names — the authoritative set of valid harness values."""
     return frozenset(_REGISTRY)
+
+
+def known_providers() -> frozenset[str]:
+    """The transports a harness can reach its model through — valid `provider` values."""
+    return HARNESS_PROVIDERS
 
 
 def resolve_agent_name(flag: str | None = None, pyproject: str | None = None) -> str:
@@ -86,25 +104,29 @@ def agent_class(harness: str) -> type[BaseAgent]:
     return _REGISTRY[harness]
 
 
-def make_agent(harness: str | None = None) -> CodingAgent:
+def make_agent(harness: str | None = None, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
     """The agent for a run or a single arm.
 
     With no `harness`, reads the run-level agent from `BENCHSPEC_AGENT` (the plugin
     normalizes the precedence chain at configure time). With an explicit `harness` (an
     arm's `harness`), builds THAT agent so one run's columns can span harnesses. An
-    unknown `harness` raises.
+    unknown `harness` raises. `provider` is the arm's transport; it shapes exec-time
+    wiring (credential, guest env, CLI flags), never the snapshot.
     """
     if harness is not None:
-        return agent_class(harness).from_env()
-    return _selected_agent_class().from_env()
+        return agent_class(harness).from_env(provider)
+    return _selected_agent_class().from_env(provider)
 
 
-def credential_preflight_error(harness: str | None = None) -> str | None:
+def credential_preflight_error(
+    harness: str | None = None, provider: str = DEFAULT_PROVIDER
+) -> str | None:
     """None if a usable credential is configured for a harness, else a remediation message.
 
     With no `harness`, checks the run-level selected agent; with one (an arm's
     `harness`), checks that adapter, so a set whose arms span harnesses preflights each
-    of them rather than only the selected agent.
+    of them rather than only the selected agent. `provider` picks which credential the
+    adapter needs: its vendor's own under `default`, OpenRouter's under `openrouter`.
     """
     adapter = agent_class(harness) if harness is not None else _selected_agent_class()
-    return adapter.credential_error()
+    return adapter.credential_error(provider)

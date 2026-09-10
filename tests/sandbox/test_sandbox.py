@@ -200,12 +200,38 @@ def test_preflight_checks_every_arm_harness_credential(monkeypatch: pytest.Monke
 
     with pytest.raises(RuntimeError) as exc_info:
         sandbox.preflight(
-            registry.resolve_sandbox("microsandbox"), harnesses=["claude-code", "codex"]
+            registry.resolve_sandbox("microsandbox"),
+            harness_providers=[("claude-code", "default"), ("codex", "default")],
         )
 
     message = str(exc_info.value)
     assert "harness `codex`: no Codex credential" in message
     assert "claude-code" not in message
+
+
+def test_preflight_reports_each_missing_credential_per_harness_provider_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One harness under two providers is two credentials, so a mixed set reports both."""
+    monkeypatch.setattr(microsandbox_mod.MicrosandboxBackend, "preflight", lambda self: [])
+    monkeypatch.setenv("BENCHSPEC_AGENT", "codex")
+    monkeypatch.setenv("CODEX_API_KEY", "sk-test")  # the selected agent is fine
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    errors = sandbox.preflight_errors(
+        registry.resolve_sandbox("microsandbox"),
+        harness_providers=[
+            ("claude-code", "default"),
+            ("claude-code", "openrouter"),
+            ("claude-code", "default"),
+        ],
+    )
+
+    assert len(errors) == 2
+    assert errors[0].startswith("harness `claude-code`: ")
+    assert errors[1].startswith("harness `claude-code` via provider `openrouter`: ")
 
 
 def test_preflight_passes_on_supported(monkeypatch: pytest.MonkeyPatch) -> None:

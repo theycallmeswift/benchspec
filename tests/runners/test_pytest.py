@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from benchspec.agents.base import AgentCapabilities
+from benchspec.grading.binder_config import BinderConfig
 from benchspec.orchestration import workspace
 from benchspec.orchestration.execution import ArmOutcome
 from benchspec.reporting import report
@@ -266,18 +267,23 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(
     )
     monkeypatch.setattr(cases, "session_run_set", lambda config: fake_set)
     monkeypatch.setattr(cases, "resolve_sandbox", lambda name: f"backend:{name}")
-    preflight_calls: list[tuple[str | None, list[str]]] = []
+    preflight_calls: list[tuple[str | None, list[tuple[str, str]]]] = []
     monkeypatch.setattr(
         cases.sandbox,
         "preflight",
-        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
+        lambda backend=None, harness_providers=(): preflight_calls.append(
+            (backend, list(harness_providers))
+        ),
     )
 
     # The options go unread — `session_run_set` is stubbed — so an empty adapter suffices.
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    # Every arm harness rides along, so a set spanning harnesses preflights each credential.
-    assert preflight_calls == [("backend:custombackend", ["claude-code", "codex"])]
+    # Every arm's (harness, provider) pair rides along, so a set spanning harnesses
+    # preflights each credential.
+    assert preflight_calls == [
+        ("backend:custombackend", [("claude-code", "default"), ("codex", "default")])
+    ]
 
 
 def test_preflight_session_sandbox_trigger_only_uses_default(
@@ -287,16 +293,18 @@ def test_preflight_session_sandbox_trigger_only_uses_default(
     from benchspec.orchestration import cases
 
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
-    preflight_calls: list[tuple[str | None, list[str]]] = []
+    preflight_calls: list[tuple[str | None, list[tuple[str, str]]]] = []
     monkeypatch.setattr(
         cases.sandbox,
         "preflight",
-        lambda backend=None, harnesses=(): preflight_calls.append((backend, list(harnesses))),
+        lambda backend=None, harness_providers=(): preflight_calls.append(
+            (backend, list(harness_providers))
+        ),
     )
 
     cases.preflight_session_sandbox(PluginOptions(values={}, rootpath=tmp_path))
 
-    # None => preflight resolves DEFAULT_SANDBOX itself; no set => no arm harnesses.
+    # None => preflight resolves DEFAULT_SANDBOX itself; no set => no arm pairs.
     assert preflight_calls == [(None, [])]
 
 
@@ -308,7 +316,7 @@ def test_preflight_grading_reports_binder_and_judge_failures_together(
     from benchspec.grading.judges import JudgeConfig
     from benchspec.orchestration import cases
 
-    def reject_gemini() -> None:
+    def reject_gemini(config: BinderConfig) -> None:
         """Reject the binder credential the way the real check does."""
         raise RuntimeError("GEMINI_API_KEY is required")
 
@@ -317,7 +325,7 @@ def test_preflight_grading_reports_binder_and_judge_failures_together(
         raise RuntimeError(f"judge harness `{config.harness}`: not logged in")
 
     monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
-    monkeypatch.setattr(binder, "preflight_verify_gemini_key", reject_gemini)
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", reject_gemini)
     monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
     monkeypatch.setattr(cases, "preflight_verify_judge_credential", reject_judge)
 
@@ -349,7 +357,7 @@ def test_preflight_grading_skips_the_credential_probe_when_the_judge_binary_is_m
         raise AssertionError("credential probe ran without a judge binary")
 
     monkeypatch.setattr(cases, "resolved_judge_config", lambda config: JudgeConfig(harness="codex"))
-    monkeypatch.setattr(binder, "preflight_verify_gemini_key", lambda: None)
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
     monkeypatch.setattr(cases, "preflight_verify_judge_binary", reject_binary)
     monkeypatch.setattr(cases, "preflight_verify_judge_credential", must_not_probe)
 
@@ -375,7 +383,7 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
 
     # Neutralize the environment-dependent preflights so the body reaches run_eval_arm.
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
-    monkeypatch.setattr(binder, "preflight_verify_gemini_key", lambda: None)
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
     monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
     monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
     monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
@@ -665,6 +673,7 @@ arms = [
     assert meta["set"] == "default"
     assert meta["runner"] == "pytest"
     assert [arm["name"] for arm in meta["arms"]] == ["baseline", "trial"]
+    assert [arm["provider"] for arm in meta["arms"]] == ["default", "default"]
     assert meta["arms"][0]["harness_args"] == ["--set-flag"]
     assert meta["arms"][1]["harness_args"] == ["--set-flag", "--plugin-dir", "/project"]
     assert meta["arms"][1]["model"] == "opus"  # trial arm declared its own model
@@ -675,6 +684,7 @@ arms = [
     assert meta["observed_arms"] == {}
     assert "judge_model" not in meta
     assert meta["judge"]["harness"] == "claude-code"
+    assert meta["judge"]["provider"] == "default"
     assert meta["judge"]["model"] == "sonnet"
     assert meta["judge"]["effort"] == "medium"
     assert meta["judge"]["timeout"] == 300
@@ -738,6 +748,7 @@ def test_sessionfinish_writes_nested_judge_object(
     meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
     assert "judge_model" not in meta
     assert meta["judge"]["harness"] == "claude-code"
+    assert meta["judge"]["provider"] == "default"
     assert meta["judge"]["model"] == "sonnet"
     assert meta["judge"]["effort"] == "medium"
     assert meta["judge"]["timeout"] == 300
@@ -984,6 +995,44 @@ def test_judge_model_flag_is_accepted(pytester: pytest.Pytester) -> None:
     assert result.ret == 0
 
 
+def test_judge_provider_flag_is_accepted_with_a_qualified_model(pytester: pytest.Pytester) -> None:
+    """Verify the judge provider flag is accepted alongside a vendor-qualified model."""
+    _make_project(pytester)
+
+    result = _collect(
+        pytester,
+        "--benchspec-judge-provider", "openrouter",
+        "--benchspec-judge-model", "anthropic/claude-sonnet-4.6",
+    )
+
+    assert result.ret == 0
+
+
+def test_judge_provider_flag_rejects_unqualified_model_at_collection(
+    pytester: pytest.Pytester,
+) -> None:
+    """Verify `openrouter` with the default `sonnet` judge model fails before any arm runs."""
+    _make_project(pytester)
+
+    result = _collect(pytester, "--benchspec-judge-provider", "openrouter")
+
+    assert result.ret != 0
+    assert "vendor-qualified" in result.stderr.str() + result.stdout.str()
+
+
+def test_binder_provider_flag_is_accepted(pytester: pytest.Pytester) -> None:
+    """Verify the binder provider and model flags are accepted."""
+    _make_project(pytester)
+
+    result = _collect(
+        pytester,
+        "--benchspec-binder-provider", "openrouter",
+        "--benchspec-binder-model", "google/gemini-3.5-flash",
+    )
+
+    assert result.ret == 0
+
+
 def test_judge_harness_flag_is_accepted(pytester: pytest.Pytester) -> None:
     """Verify judge harness flag is accepted."""
     _make_project(pytester)
@@ -1196,6 +1245,43 @@ def test_non_dict_scratch_judge_table_fails_loudly(pytester: pytest.Pytester) ->
     out = result.stderr.str() + result.stdout.str()
     assert "[tool.benchspec.judge] must be a table" in out
     assert "--benchspec-config" in out
+
+
+def test_scratch_binder_table_reaches_meta_json(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scratch `[tool.benchspec.binder]` resolves and lands as the manifest's binder entry."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    scratch = tmp_path / "scratch.toml"
+    scratch.write_text('[tool.benchspec.binder]\nprovider = "openrouter"\n')
+    config = _configured_plugin(pytester, tmp_path, "--benchspec-config", str(scratch))
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=1, total=1)
+
+    _finish_and_summarize(config)
+
+    meta = json.loads((skill_results_dir.parent.parent / "meta.json").read_text())
+    assert meta["binder"] == {
+        "provider": "openrouter",
+        "model": "google/gemini-3.5-flash-lite",
+        "api_path": "openrouter.ai/api/v1",
+    }
+
+
+def test_non_dict_pyproject_binder_table_fails_loudly(pytester: pytest.Pytester) -> None:
+    """A present-but-non-dict [tool.benchspec.binder] raises instead of falling to defaults."""
+    project_toml = ARMS_TOML.replace(
+        'default-set = "default"',
+        'default-set = "default"\nbinder = "openrouter"',
+    )
+    _make_project(pytester, arms_toml=project_toml)
+
+    result = _collect(pytester)
+
+    assert result.ret != 0
+    assert "[tool.benchspec.binder] must be a table" in result.stderr.str() + result.stdout.str()
 
 
 def test_sessionfinish_writes_index_jsonl(

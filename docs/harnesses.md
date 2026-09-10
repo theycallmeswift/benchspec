@@ -40,7 +40,8 @@ arms = [
 | Model names | Aliases: `sonnet`, `opus`, `haiku` | What `codex exec -m` accepts (e.g. `gpt-5.4`) | Provider-qualified: `anthropic/claude-sonnet-4-6` |
 | How effort is passed | `--effort <value>`, unvalidated | `-c model_reasoning_effort=<value>`, unvalidated | `--variant`: `low` → `fast`, `medium` → `default`, `high` → `thorough` (anything else → `default`) |
 | Token split (input/output) | yes | yes | no; totals only |
-| Credentials | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
+| Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
+| `provider = "openrouter"` | `OPENROUTER_API_KEY`, injected as `ANTHROPIC_AUTH_TOKEN` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and an empty `ANTHROPIC_API_KEY`; model is a vendor slug (`anthropic/claude-sonnet-4.6`) | `OPENROUTER_API_KEY`, with benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*` overrides on every invocation; model is a vendor slug (`openai/gpt-5.5`) | `OPENROUTER_API_KEY` only; model is `openrouter/<vendor>/<model>` |
 | Version pin | `BENCHSPEC_CLAUDE_VERSION` | `BENCHSPEC_CODEX_VERSION` | `BENCHSPEC_OPENCODE_VERSION`, then `[tool.benchspec] opencode_version` |
 | Guest install | `curl -fsSL https://claude.ai/install.sh \| bash` | `npm i -g @openai/codex@<version>` | `npm i -g opencode-ai@<version>` |
 | Skill directory (linked to `/home/benchspec/skills`) | `/root/.claude/skills` | `/root/.codex/skills` | `/root/.config/opencode/skills` |
@@ -61,10 +62,17 @@ Notes that matter in practice:
   and never readable in the guest; Docker injects it as a plain container
   environment variable the agent and `setup.sh` can read (see
   [`sandbox.md`](sandbox.md#credentials)). Either way, `CODEX_AUTH_JSON_PATH` is
-  a read-only mount of the `auth.json`, not an env var. Two renames, to the
+  a read-only mount of the `auth.json`, not an env var. Three renames, to the
   names the CLIs actually read: OpenCode injects a host `GEMINI_API_KEY` as
   `GOOGLE_GENERATIVE_AI_API_KEY`; Codex, as arm or judge, injects
-  `OPENAI_API_KEY` as `CODEX_API_KEY`.
+  `OPENAI_API_KEY` as `CODEX_API_KEY`; Claude Code under `provider = "openrouter"`
+  injects `OPENROUTER_API_KEY` as `ANTHROPIC_AUTH_TOKEN`.
+- **`provider` is per arm and per judge.** `openrouter` changes only what happens
+  at execution time (the credential, the guest env, CLI flags), never the
+  snapshot, so mixing providers in one set builds nothing extra. Under
+  `openrouter` no CLI login is consulted: `claude auth status` and `codex login
+  status` are skipped, and only `OPENROUTER_API_KEY` counts. See
+  [`configuration.md`](configuration.md#providers).
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
   your tokens to its invocation but rejects flags benchspec owns (model, effort,
   prompt delivery, output format, session, and permission controls) including
@@ -79,7 +87,10 @@ fresh process *on the host*, with the host's own credentials. That is why any of
 the three harnesses can judge (configure `[tool.benchspec.judge]`; see
 [`configuration.md`](configuration.md#the-judge)), why the judge CLI must be
 installed on the host, and why an `opencode` judge needs a provider-qualified
-model. The binder is not a harness call at all: it is a direct Gemini API call,
+model. The judge's `provider` is chosen independently of the arms', so it can
+grade through OpenRouter while the arms run natively, or the reverse. The binder
+is not a harness call at all: it is a direct API call to a fixed Gemini model,
+through Gemini's own API or OpenRouter by `[tool.benchspec.binder] provider`,
 unaffected by either the task or judge harness.
 
 ## Custom harnesses

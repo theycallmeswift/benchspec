@@ -20,7 +20,7 @@ import hashlib
 import re
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -30,6 +30,13 @@ if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
     from benchspec.orchestration.environments import ExecutionEnv
     from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
+
+# The transport a harness reaches its model through. `default` is the vendor's own API
+# or CLI login; `openrouter` routes every request through OpenRouter on one key. An enum,
+# not a plugin seam: a third value is a deliberate follow-up, not a registry entry.
+DEFAULT_PROVIDER = "default"
+OPENROUTER_PROVIDER = "openrouter"
+HARNESS_PROVIDERS = frozenset({DEFAULT_PROVIDER, OPENROUTER_PROVIDER})
 
 # The agent-neutral home every per-cell `setup.sh` copies skills into. Each agent
 # symlinks its own load dir here once at provision, so the install path is identical
@@ -45,6 +52,27 @@ _VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
 # command must not block the run forever, so the await is bounded and a timeout becomes
 # an explained-unavailable result like any other probe failure.
 GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
+
+
+def unqualified_openrouter_model_error(model: str) -> str | None:
+    """Why `model` cannot be sent through OpenRouter, or None when it can.
+
+    OpenRouter slugs carry a vendor prefix (`anthropic/...`, `openai/...`, `google/...`).
+    A bare alias such as `sonnet` resolves client-side to a vendor ID that OpenRouter does
+    not document mapping, so it is refused at config-read time instead of guessed at.
+
+    Args:
+        model: The configured model string.
+
+    Returns:
+        A message naming the model, or None when it carries a vendor prefix.
+    """
+    if "/" in model:
+        return None
+    return (
+        f"provider `{OPENROUTER_PROVIDER}` needs a vendor-qualified model slug "
+        f"(e.g. 'anthropic/claude-sonnet-4.6'), got `{model}`"
+    )
 
 
 def _parse_version_token(output: str) -> str | None:
@@ -147,21 +175,31 @@ class BaseAgent(ABC):
     # environment: the default binding is the guest install path (task arms);
     # for_host() rebinds to the name PATH resolves on the host (judge mode).
     agent_bin: str
+    # The transport this instance reaches its model through (`HARNESS_PROVIDERS`).
+    provider: str
 
     @classmethod
     @abstractmethod
-    def from_env(cls) -> CodingAgent:
+    def from_env(cls, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """Build an instance from host environment settings (credential, pinned version)."""
 
     @classmethod
     @abstractmethod
-    def for_host(cls) -> CodingAgent:
+    def for_host(cls, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """An instance bound to the host environment: agent_bin resolves from PATH."""
 
     @staticmethod
     @abstractmethod
-    def credential_error() -> str | None:
-        """Return a credential preflight error message when credentials are missing."""
+    def credential_error(
+        provider: str = DEFAULT_PROVIDER, environ: Mapping[str, str] | None = None
+    ) -> str | None:
+        """Return a credential preflight error message when credentials are missing.
+
+        Args:
+            provider: The transport the credential must serve.
+            environ: The environment to read credentials from; the process environment
+                when None.
+        """
 
     @abstractmethod
     def guest_env(self) -> dict[str, str]:
@@ -177,20 +215,32 @@ class BaseAgent(ABC):
         """
         return ""
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
         """Judge-mode credential check for an instance bound to the host (`for_host()`).
 
         The judge runs on the host with whatever its CLI can authenticate with, so an env
         credential is sufficient but not necessary. Adapters whose CLI can report its own
         login state override this to ask it; the base accepts the env credential alone.
-        """
-        return self.credential_error()
 
-    def host_probe(self, *args: str) -> subprocess.CompletedProcess[str] | None:
-        """Run `agent_bin *args` on the host; None when it cannot run at all (absent, hung)."""
+        Args:
+            environ: The environment the judge will run with (the host environment plus
+                the judge's own `env`); the process environment when None.
+        """
+        return self.credential_error(self.provider, environ)
+
+    def host_probe(
+        self, *args: str, env: Mapping[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Run `agent_bin *args` on the host; None when it cannot run at all (absent, hung).
+
+        Args:
+            *args: The CLI arguments after the binary.
+            env: The process environment for the probe; inherited when None.
+        """
         try:
             return subprocess.run(
-                [self.agent_bin, *args], capture_output=True, text=True, timeout=10
+                [self.agent_bin, *args], capture_output=True, text=True, timeout=10,
+                env=None if env is None else dict(env),
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             return None
@@ -247,6 +297,7 @@ class CodingAgent(Protocol):
     guest_home: str  # the agent's HOME inside the guest (where skills are staged, runs cwd)
     skill_load_dir: str  # absolute guest path the agent loads skills from
     agent_bin: str  # the binary this instance runs (guest install path; for_host() rebinds)
+    provider: str  # the transport this instance reaches its model through
     capabilities: AgentCapabilities
 
     def version(self) -> str:
@@ -343,7 +394,7 @@ class CodingAgent(Protocol):
         ...
 
     @classmethod
-    def for_host(cls) -> CodingAgent:
+    def for_host(cls, provider: str = DEFAULT_PROVIDER) -> CodingAgent:
         """An instance bound to the host environment: agent_bin resolves from PATH."""
         ...
 
@@ -351,7 +402,7 @@ class CodingAgent(Protocol):
         """Return this instance's CLI version, or None on any failure (best effort)."""
         ...
 
-    def host_credential_error(self) -> str | None:
+    def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
         """Return a remediation message when this host-bound instance cannot authenticate."""
         ...
 

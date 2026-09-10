@@ -12,9 +12,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from benchspec.agents import (
+    DEFAULT_PROVIDER,
+    OPENROUTER_PROVIDER,
+    known_providers,
+    unqualified_openrouter_model_error,
+)
 from benchspec.agents.claude import _validate_harness_args as _validate_claude_code_harness_args
 from benchspec.agents.codex import _validate_harness_args as _validate_codex_harness_args
 from benchspec.agents.opencode import _validate_harness_args as _validate_opencode_harness_args
+from benchspec.agents.opencode import openrouter_model_error as _opencode_openrouter_model_error
 from benchspec.grading.judges.registry import known_judge_harnesses
 from benchspec.specs.schema import SchemaError
 
@@ -45,6 +52,15 @@ def _validated_str_list(where: str, key: str, value: object) -> list[str]:
     return value
 
 
+def _validated_provider(where: str, key: str, value: object) -> str:
+    """Return value when it names a known provider, else raise SchemaError naming it."""
+    if not isinstance(value, str) or value not in known_providers():
+        raise SchemaError(
+            f"{where}: unknown `{key}` `{value}` (known: {sorted(known_providers())})"
+        )
+    return value
+
+
 def _validated_str_dict(where: str, key: str, value: object) -> dict[str, str]:
     """Return value when it is a table with string values, else raise SchemaError."""
     if not isinstance(value, dict) or not all(
@@ -58,6 +74,7 @@ def _validated_str_dict(where: str, key: str, value: object) -> dict[str, str]:
 # cleaned value; the keys double as the set of recognized judge keys.
 _FIELD_VALIDATORS = {
     "harness": _validated_non_empty_str,
+    "provider": _validated_provider,
     "model": _validated_non_empty_str,
     "effort": _validated_non_empty_str,
     "timeout": _validated_positive_int,
@@ -70,12 +87,13 @@ _FIELD_VALIDATORS = {
 class JudgeConfig:
     """The resolved, run-level judge: which harness grades.
 
-    With what model/effort/timeout/pass-through args/env, independent from every task
-    arm's own harness/model/effort/env — resolving this must never mutate or read arm
-    config.
+    With what provider/model/effort/timeout/pass-through args/env, independent from every
+    task arm's own harness/provider/model/effort/env — resolving this must never mutate or
+    read arm config.
     """
 
     harness: str = DEFAULT_HARNESS
+    provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_MODEL
     effort: str = DEFAULT_EFFORT
     timeout: int = DEFAULT_TIMEOUT
@@ -126,11 +144,19 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
         raise SchemaError(
             f"[tool.benchspec.judge] harness_args invalid for `{config.harness}`: {error}"
         ) from error
+    if config.provider == OPENROUTER_PROVIDER:
+        model_error = unqualified_openrouter_model_error(config.model)
+        if model_error:
+            raise SchemaError(f"[tool.benchspec.judge] {model_error}")
     if config.harness == "opencode" and "/" not in config.model:
         raise SchemaError(
             "judge harness `opencode` needs a provider-qualified model "
             f"(e.g. 'anthropic/claude-sonnet-4-6'), got `{config.model}`"
         )
+    if config.harness == "opencode" and config.provider == OPENROUTER_PROVIDER:
+        model_error = _opencode_openrouter_model_error(config.model)
+        if model_error:
+            raise SchemaError(f"judge harness `opencode`: {model_error}")
 
 
 def resolve_judge_config(
@@ -146,8 +172,8 @@ def resolve_judge_config(
     any paid task arm runs.
     """
     resolved: dict = {
-        "harness": DEFAULT_HARNESS, "model": DEFAULT_MODEL, "effort": DEFAULT_EFFORT,
-        "timeout": DEFAULT_TIMEOUT, "harness_args": [], "env": {},
+        "harness": DEFAULT_HARNESS, "provider": DEFAULT_PROVIDER, "model": DEFAULT_MODEL,
+        "effort": DEFAULT_EFFORT, "timeout": DEFAULT_TIMEOUT, "harness_args": [], "env": {},
     }
     for label, table in (
         ("[tool.benchspec.judge]", pyproject_table),

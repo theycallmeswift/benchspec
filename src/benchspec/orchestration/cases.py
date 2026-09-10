@@ -23,12 +23,14 @@ import pytest
 from benchspec.config.arms import Arm
 from benchspec.config.options import RunOptions, option_str
 from benchspec.config.sets import (
+    resolved_binder_config,
     resolved_judge_config,
     resolved_run_set,
     run_set_when_needed,
     session_run_set,
 )
 from benchspec.grading import binder
+from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.judges.registry import (
     preflight_verify_judge_binary,
@@ -59,10 +61,11 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
     run_set = run_set_when_needed(config, needs_set=bool(cases))
     arms = run_set.arms if run_set else []
     if cases:
-        # Structural judge preflight — before ANY paid task arm runs. Raises
-        # pytest.UsageError at collection on a bad config; binary-on-PATH is
-        # checked separately, later, only when tests actually execute.
+        # Structural judge and binder preflight — before ANY paid task arm runs. Raises
+        # pytest.UsageError at collection on a bad config; binary-on-PATH and credentials
+        # are checked separately, later, only when tests actually execute.
         resolved_judge_config(config)
+        resolved_binder_config(config)
     pairs: list[tuple[EvalCase, Arm]] = []
     ids: list[str] = []
     for case in cases:
@@ -95,18 +98,18 @@ def eval_set_name(request: pytest.FixtureRequest) -> str:
     return option_str(request.config, "benchspec_set") or ""
 
 
-def _grading_environment_errors(judge: JudgeConfig) -> list[str]:
-    """Return every environment failure grading would hit with `judge`, empty when none.
+def _grading_environment_errors(judge: JudgeConfig, binder_config: BinderConfig) -> list[str]:
+    """Return every environment failure grading would hit, empty when none.
 
-    Two independent checks, each reported so one run surfaces both: the binder's Gemini
-    credential (an env read), then the judge binary on PATH followed by the judge's host
-    credential. The credential probe runs only when the binary exists, so a missing
-    binary is reported as such rather than as a failed login.
+    Two independent checks, each reported so one run surfaces both: the binder
+    provider's credential (an env read), then the judge binary on PATH followed by the
+    judge's host credential. The credential probe runs only when the binary exists, so a
+    missing binary is reported as such rather than as a failed login.
     """
     errors: list[str] = []
 
     try:
-        binder.preflight_verify_gemini_key()
+        binder.preflight_verify_binder_key(binder_config)
     except RuntimeError as error:
         errors.append(str(error))
 
@@ -129,18 +132,20 @@ def grading_preflight_errors(config: RunOptions) -> list[str]:
         The failures, empty when grading can proceed.
 
     Raises:
-        pytest.UsageError: a structural defect in the judge config.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
-    return _grading_environment_errors(resolved_judge_config(config))
+    return _grading_environment_errors(
+        resolved_judge_config(config), resolved_binder_config(config)
+    )
 
 
 def preflight_grading(config: RunOptions) -> JudgeConfig:
     """Preflight everything grading needs and return the run's judge config.
 
-    The judge config is resolved first (structural), then the environment checks run and
-    every failure is reported together. Shared by the `judge_config` fixture and the
-    `run` CLI, so what the CLI refuses before spawning pytest is exactly what pytest
-    would refuse at grading time.
+    The judge and binder configs are resolved first (structural), then the environment
+    checks run and every failure is reported together. Shared by the `judge_config`
+    fixture and the `run` CLI, so what the CLI refuses before spawning pytest is exactly
+    what pytest would refuse at grading time.
 
     Args:
         config: A pytest config, or anything exposing the plugin's `getoption`/`rootpath`.
@@ -149,13 +154,13 @@ def preflight_grading(config: RunOptions) -> JudgeConfig:
         The resolved `JudgeConfig`.
 
     Raises:
-        RuntimeError: `GEMINI_API_KEY` missing or empty, the judge binary absent, or the
-            judge harness unable to authenticate on the host; every failure listed.
-        pytest.UsageError: a structural defect in the judge config.
+        RuntimeError: the binder provider's key missing or empty, the judge binary absent,
+            or the judge harness unable to authenticate on the host; every failure listed.
+        pytest.UsageError: a structural defect in the judge or binder config.
     """
     judge = resolved_judge_config(config)
 
-    errors = _grading_environment_errors(judge)
+    errors = _grading_environment_errors(judge, resolved_binder_config(config))
     if errors:
         raise RuntimeError(
             sandbox.format_preflight_failure("benchspec grading preflight failed", errors)
@@ -171,6 +176,13 @@ def judge_config(request: pytest.FixtureRequest) -> JudgeConfig:
     # exactly when a run will grade. Fixture setup is skipped under --collect-only, so
     # this stays collection-safe without an autouse gate.
     return preflight_grading(request.config)
+
+
+@pytest.fixture
+def binder_config(request: pytest.FixtureRequest) -> BinderConfig:
+    """Resolve the run's binder: the provider and model every assertion binds through."""
+    # Structural only; the provider's key was preflighted with the judge above.
+    return resolved_binder_config(request.config)
 
 
 @pytest.fixture
@@ -205,33 +217,35 @@ def seeded_workdir(
     return workdir, pre_run_shas
 
 
-def _session_sandbox_target(config: RunOptions) -> tuple[SandboxBackend | None, list[str]]:
-    """Return the resolved set's sandbox backend and arm harnesses, for its preflight.
+def _session_sandbox_target(
+    config: RunOptions,
+) -> tuple[SandboxBackend | None, list[tuple[str, str]]]:
+    """Return the resolved set's sandbox backend and arm (harness, provider) pairs.
 
     Resolves the selected set from `config` (guarded so a trigger-only project with no
     sets table degrades instead of raising). No eval set ⇒ a None backend, so preflight
-    resolves the default one, and no arm harnesses.
+    resolves the default one, and no arm pairs.
     """
     run_set = session_run_set(config)
     backend = resolve_sandbox(run_set.sandbox) if run_set else None
-    harnesses = [arm.harness for arm in run_set.arms] if run_set else []
-    return backend, harnesses
+    harness_providers = [(arm.harness, arm.provider) for arm in run_set.arms] if run_set else []
+    return backend, harness_providers
 
 
 def sandbox_preflight_errors(config: RunOptions) -> list[str]:
     """Return every reason the resolved set's sandbox can't run, empty when it can."""
-    backend, harnesses = _session_sandbox_target(config)
-    return sandbox.preflight_errors(backend, harnesses=harnesses)
+    backend, harness_providers = _session_sandbox_target(config)
+    return sandbox.preflight_errors(backend, harness_providers=harness_providers)
 
 
 def preflight_session_sandbox(config: RunOptions) -> None:
     """Preflight the resolved eval set's sandbox backend before any arm runs.
 
-    Drives `sandbox.preflight` with the set's backend and arm harnesses, so every harness
-    the arms will run under has its credential checked.
+    Drives `sandbox.preflight` with the set's backend and arm (harness, provider) pairs,
+    so every credential the arms will run under is checked.
     """
-    backend, harnesses = _session_sandbox_target(config)
-    sandbox.preflight(backend, harnesses=harnesses)
+    backend, harness_providers = _session_sandbox_target(config)
+    sandbox.preflight(backend, harness_providers=harness_providers)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -282,6 +296,7 @@ def test_eval(
     eval_set_name: str,
     project_marker: str,
     judge_config: JudgeConfig,
+    binder_config: BinderConfig,
     sample_index: int,
     eval_sandbox: str,
 ) -> None:
@@ -306,6 +321,7 @@ def test_eval(
         project_marker=project_marker,
         judge_config=judge_config,
         sandbox_name=eval_sandbox,
+        bind=binder.binder_for(binder_config),
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a

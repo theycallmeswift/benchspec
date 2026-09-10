@@ -138,3 +138,65 @@ def test_resolve_judge_config_opencode_accepts_provider_qualified_model() -> Non
         pyproject_table={"harness": "opencode", "model": "anthropic/claude-sonnet-4-6"},
     )
     assert config.harness == "opencode"
+
+
+def test_judge_config_provider_defaults_to_default() -> None:
+    """Verify the judge provider defaults to the harness vendor's own transport."""
+    assert JudgeConfig().provider == "default"
+
+
+def test_validate_judge_table_accepts_provider() -> None:
+    """Verify `provider` is a recognized judge key."""
+    validated = _validate_judge_table("[tool.benchspec.judge]", {"provider": "openrouter"})
+
+    assert validated == {"provider": "openrouter"}
+
+
+def test_validate_judge_table_rejects_unknown_provider_naming_it() -> None:
+    """Verify an unknown provider fails naming the value and the known ones."""
+    with pytest.raises(SchemaError, match=r"unknown `provider` `bedrock`.*openrouter"):
+        _validate_judge_table("[tool.benchspec.judge]", {"provider": "bedrock"})
+
+
+def test_resolve_judge_config_openrouter_requires_vendor_qualified_model() -> None:
+    """Verify an unqualified model under `openrouter` fails for every harness."""
+    with pytest.raises(SchemaError, match=r"\[tool.benchspec.judge\].*vendor-qualified.*`sonnet`"):
+        resolve_judge_config(pyproject_table={"harness": "claude-code", "provider": "openrouter"})
+
+
+def test_resolve_judge_config_openrouter_accepts_vendor_qualified_model() -> None:
+    """Verify a vendor-prefixed slug passes under `openrouter`."""
+    config = resolve_judge_config(
+        pyproject_table={"harness": "codex", "provider": "openrouter", "model": "openai/gpt-5.5"},
+    )
+
+    assert config.provider == "openrouter"
+    assert config.model == "openai/gpt-5.5"
+
+
+def test_resolve_judge_config_cli_provider_beats_pyproject() -> None:
+    """Verify the CLI layer overrides the pyproject provider like every other field."""
+    config = resolve_judge_config(
+        pyproject_table={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.6"},
+        cli_table={"provider": "default"},
+    )
+
+    assert config.provider == "default"
+
+
+def test_resolve_judge_config_opencode_under_openrouter_requires_the_openrouter_prefix() -> None:
+    """An OpenCode judge routed through OpenRouter must name an `openrouter/` slug."""
+    with pytest.raises(SchemaError, match="openrouter/"):
+        resolve_judge_config(pyproject_table={
+            "harness": "opencode", "provider": "openrouter", "model": "anthropic/claude-sonnet-4.6",
+        })
+
+
+def test_resolve_judge_config_opencode_under_openrouter_accepts_the_openrouter_prefix() -> None:
+    """Verify the prefixed slug passes the OpenCode-under-OpenRouter check."""
+    config = resolve_judge_config(pyproject_table={
+        "harness": "opencode", "provider": "openrouter",
+        "model": "openrouter/anthropic/claude-sonnet-4.6",
+    })
+
+    assert config.model == "openrouter/anthropic/claude-sonnet-4.6"

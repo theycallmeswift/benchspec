@@ -348,7 +348,7 @@ def test_analyze_command_maps_preflight_error_to_usage(
     """Verify a binder-preflight RuntimeError from analyze.run maps to a clean exit 2."""
 
     def failing_run(root: Path) -> int:
-        """Reject the environment the way `binder.preflight_verify_gemini_key` does."""
+        """Reject the environment the way `binder.preflight_verify_binder_key` does."""
         raise RuntimeError("GEMINI_API_KEY is required")
 
     monkeypatch.setattr(__main__.analyze, "run", failing_run)

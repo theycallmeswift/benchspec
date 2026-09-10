@@ -9,6 +9,7 @@ set and its Codex judge) and the real `evals/e2e/hello/` suite against the live 
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ from textwrap import dedent
 import pytest
 
 from benchspec.config.arms import parse_sets, resolve_set
+from benchspec.grading.binder_config import resolve_binder_config
 from benchspec.grading.judges.config import resolve_judge_config
 from benchspec.specs.discovery import discover_eval_cases, pyproject_table
 
@@ -55,6 +57,7 @@ def test_e2e_set_resolves_to_three_arms_with_declared_config() -> None:
     assert arms_by_name["trial-overrides"].harness == "claude-code"
     assert arms_by_name["trial-overrides"].model == "opus"
     assert arms_by_name["trial-overrides"].effort == "high"
+    assert all(arm.provider == "default" for arm in resolved.arms)
 
 
 def test_e2e_trial_overrides_env_inherits_style_and_overrides_locale() -> None:
@@ -88,6 +91,7 @@ def test_e2e_judge_is_codex_and_distinct_from_the_task_harness() -> None:
     judge = resolve_judge_config(pyproject_table=table.get("judge"))
 
     assert judge.harness == "codex"
+    assert judge.provider == "default"
     assert judge.model == "gpt-5.5"
     assert judge.harness != resolved.arms[0].harness
 
@@ -227,7 +231,7 @@ def test_make_e2e_runs_the_e2e_set() -> None:
 
     assert result.returncode == 0, result.stderr
     output = result.stdout
-    assert "uv run benchspec run --set e2e" in output
+    assert "uv run benchspec run --set e2e " in output
     assert "verify_e2e_artifacts" not in output
 
 
@@ -265,3 +269,82 @@ def test_removed_binder_make_alias_has_no_active_references() -> None:
     )
 
     assert references == [], failure_message
+
+
+def _make_e2e_commands() -> list[list[str]]:
+    """The `benchspec run` argv lines `make e2e` executes, split like a shell would."""
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-n", "e2e"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [shlex.split(line) for line in result.stdout.splitlines() if "benchspec run" in line]
+
+
+def _flag_value(argv: list[str], flag: str) -> str:
+    """The value following `flag` in `argv`, whichever of `--flag value` or `--flag=value`."""
+    for index, token in enumerate(argv):
+        if token == flag:
+            return argv[index + 1]
+        if token.startswith(f"{flag}="):
+            return token.split("=", 1)[1]
+    raise AssertionError(f"{flag} not passed in {argv}")
+
+
+def test_e2e_openrouter_set_puts_every_harness_on_openrouter() -> None:
+    """Verify the OpenRouter set spans all three harnesses, every arm on the gateway."""
+    table = pyproject_table(REPO_ROOT)
+    rawsets, default_set = parse_sets(table)
+
+    resolved = resolve_set(rawsets, default_set, set_name="e2e-openrouter")
+
+    assert default_set == "e2e"  # the native set stays the plain-run default
+    assert resolved.baseline == "baseline"
+    arms_by_name = {arm.name: arm for arm in resolved.arms}
+    assert {arm.harness for arm in resolved.arms} == {"claude-code", "codex", "opencode"}
+    assert all(arm.provider == "openrouter" for arm in resolved.arms)
+    assert all("/" in arm.model for arm in resolved.arms)
+    assert arms_by_name["baseline"].harness == "claude-code"
+    assert arms_by_name["trial"].model == arms_by_name["baseline"].model
+    assert arms_by_name["trial-codex"].model.startswith("openai/")
+    assert arms_by_name["trial-opencode"].model.startswith("openrouter/")
+    assert all(
+        arm.env == {"GREETING_STYLE": "formal", "GREETING_LOCALE": "en-US"}
+        for arm in resolved.arms
+    )
+
+
+def test_make_e2e_runs_the_openrouter_set_with_judge_and_binder_on_openrouter() -> None:
+    """Verify the second `make e2e` run resolves to OpenRouter everywhere, via the real parsers.
+
+    Reads the flags off `make -n e2e` itself so the Makefile and this test cannot drift:
+    the judge and binder overrides it passes are fed to the same resolvers the CLI uses.
+    """
+    table = pyproject_table(REPO_ROOT)
+    commands = _make_e2e_commands()
+    openrouter_run = next(
+        argv for argv in commands if _flag_value(argv, "--set") == "e2e-openrouter"
+    )
+
+    judge = resolve_judge_config(
+        pyproject_table=table.get("judge"),
+        cli_table={
+            "provider": _flag_value(openrouter_run, "--judge-provider"),
+            "model": _flag_value(openrouter_run, "--judge-model"),
+        },
+    )
+    binder = resolve_binder_config(
+        cli_table={"provider": _flag_value(openrouter_run, "--binder-provider")}
+    )
+    rawsets, default_set = parse_sets(table)
+    arms = resolve_set(rawsets, default_set, set_name="e2e-openrouter").arms
+
+    assert [_flag_value(argv, "--set") for argv in commands] == ["e2e", "e2e-openrouter"]
+    assert judge.harness == "codex"
+    assert judge.provider == "openrouter"
+    assert judge.model.startswith("google/")  # cross-family from the Anthropic and OpenAI arms
+    assert binder.provider == "openrouter"
+    assert binder.model == "google/gemini-3.5-flash-lite"
+    assert all(arm.provider == "openrouter" for arm in arms)

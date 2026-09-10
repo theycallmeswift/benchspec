@@ -163,7 +163,7 @@ Each harness declares its credential once; the backends expose it differently:
 
 | Backend | Exposure |
 |---|---|
-| microsandbox | A scoped **secret**, injected at the network boundary and usable only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward `api.anthropic.com`). Not readable by the agent or by `setup.sh`. |
+| microsandbox | A scoped **secret**, injected at the network boundary and usable only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward `api.anthropic.com`; under `provider = "openrouter"` the key works only toward `openrouter.ai`). Not readable by the agent or by `setup.sh`. |
 | Docker | A plain container environment variable (`-e ANTHROPIC_API_KEY=...`), readable by the agent and by `setup.sh`. No per-credential host scoping. |
 
 The one file-shaped exception, on both backends: Codex subscription auth,
@@ -226,9 +226,10 @@ Two things the snapshot can't carry:
   run time, so the file holds no secret. The same file carries
   `BENCHSPEC_BASE_IMAGE`.
 
-`GEMINI_API_KEY` and the Codex credential (`CODEX_API_KEY` or `OPENAI_API_KEY`)
-pass through untouched. The Codex judge also needs `api.openai.com` in the
-environment's allowed domains; the Trusted default list doesn't include it.
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, and the Codex credential (`CODEX_API_KEY`
+or `OPENAI_API_KEY`) pass through untouched. The Codex judge also needs
+`api.openai.com` in the environment's allowed domains, and `make e2e`'s
+OpenRouter run needs `openrouter.ai`; the Trusted default list includes neither.
 
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
