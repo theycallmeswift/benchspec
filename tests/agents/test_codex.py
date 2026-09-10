@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from benchspec.agents.base import Credential
-from benchspec.agents.codex import CodexAgent, parse_codex_jsonl
+from benchspec.agents.codex import CodexAgent, _skill_dispatch_name, parse_codex_jsonl
+from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
 from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
@@ -36,6 +37,16 @@ def _agent(auth_env: str = "CODEX_API_KEY", auth_json_path: str = "") -> CodexAg
         version="latest",
         auth_json_path=auth_json_path,
     )
+
+
+_COMMANDS_NOT_READING_SKILL_MD = [
+    "/bin/bash -lc 'cat /home/benchspec/skills/core-data-model/SPONSORS.md'",
+    "/bin/bash -lc 'cat /tmp/other/SKILL.md'",
+    "/bin/bash -lc 'cat /home/benchspec/skills/hello/SKILL.md.bak'",
+    "/bin/bash -lc 'cat /opt/home/benchspec/skills/hello/SKILL.md'",
+    "/bin/bash -lc 'cat /home/benchspec/skills/../SKILL.md'",
+    "ls",
+]
 
 
 def test_build_command_shape_for_exec_json() -> None:
@@ -413,6 +424,198 @@ def test_codex_detect_fired_true_on_our_skill() -> None:
 def test_codex_detect_fired_false_on_other_tool() -> None:
     """Verify codex detect fired false on other tool."""
     assert _agent().detect_fired(_lines("codex_route_nofire.jsonl"), "archive") is False
+
+
+@pytest.mark.parametrize("skills_home", ["/home/benchspec/skills", "/root/.codex/skills"])
+def test_skill_dispatch_name_resolves_command_reading_skill_md(skills_home: str) -> None:
+    """Verify a command_execution reading a skill's SKILL.md resolves to that skill's name."""
+    item = {
+        "type": "command_execution",
+        "command": f"/bin/bash -lc 'cat {skills_home}/core-data-model/SKILL.md'",
+    }
+
+    assert _skill_dispatch_name(item) == "core-data-model"
+
+
+def test_codex_detect_fired_true_on_namespaced_skill_md_read() -> None:
+    """Verify detect fired matches a namespaced skill directory against the bare name."""
+    line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": (
+                    "/bin/bash -lc 'cat /home/benchspec/skills/knowledge-base:archive/SKILL.md'"
+                ),
+            },
+        }
+    )
+
+    assert _agent().detect_fired([line], "archive") is True
+
+
+@pytest.mark.parametrize("command", _COMMANDS_NOT_READING_SKILL_MD)
+def test_skill_dispatch_name_none_for_command_not_reading_skill_md(command: str) -> None:
+    """Verify a sibling file, an out-of-home SKILL.md, and a plain command are not dispatches."""
+    item = {"type": "command_execution", "command": command}
+
+    assert _skill_dispatch_name(item) is None
+
+
+@pytest.mark.parametrize("command", _COMMANDS_NOT_READING_SKILL_MD)
+def test_codex_detect_fired_false_for_command_not_reading_skill_md(command: str) -> None:
+    """Verify detect fired stays false for commands that do not read a skill's SKILL.md."""
+    line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {"type": "command_execution", "command": command},
+        }
+    )
+
+    assert _agent().detect_fired([line], "core-data-model") is False
+
+
+def test_detect_dispatch_early_stops_on_other_skill_md_read() -> None:
+    """Verify detect dispatch early stops on a command reading a different skill's SKILL.md."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {
+                "type": "command_execution",
+                "command": "/bin/bash -lc 'cat /home/benchspec/skills/bootstrap/SKILL.md'",
+            },
+        }
+    )
+
+    assert _agent().detect_dispatch(line, "archive") is True
+
+
+def test_codex_detect_fired_false_for_other_skill_md_read() -> None:
+    """Verify detect fired stays false when the command reads a different skill's SKILL.md."""
+    line = json.dumps(
+        {
+            "type": "item.started",
+            "item": {
+                "type": "command_execution",
+                "command": "/bin/bash -lc 'cat /home/benchspec/skills/bootstrap/SKILL.md'",
+            },
+        }
+    )
+
+    assert _agent().detect_fired([line], "archive") is False
+
+
+def test_parse_codex_jsonl_fired_true_when_command_reads_skill_md() -> None:
+    """Verify parse codex jsonl reports fired when a command reads the expected SKILL.md."""
+    stream = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "t1"}),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "i1",
+                        "type": "command_execution",
+                        "command": "/bin/bash -lc 'cat /home/benchspec/skills/hello/SKILL.md'",
+                    },
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill="hello")
+
+    assert res.fired is True
+
+
+def test_parse_codex_jsonl_fired_false_without_skill_md_read() -> None:
+    """Verify parse codex jsonl reports not fired when no command reads the SKILL.md."""
+    stream = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "t1"}),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "i1", "type": "command_execution", "command": "ls"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill="hello")
+
+    assert res.fired is False
+
+
+def test_parse_codex_jsonl_trajectory_records_skill_md_read_as_skill_dispatch() -> None:
+    """Verify the trajectory records a SKILL.md read as a Skill call and other commands plainly."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "i1",
+                        "type": "command_execution",
+                        "command": "/bin/bash -lc 'cat /home/benchspec/skills/hello/SKILL.md'",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "i2", "type": "command_execution", "command": "ls"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
+
+    assert {
+        "kind": "tool_call",
+        "id": "i1",
+        "name": "Skill",
+        "arguments": {"skill": "hello"},
+    } in res.trajectory
+    assert {
+        "kind": "tool_call",
+        "id": "i2",
+        "name": "command_execution",
+        "arguments": {"command": "ls"},
+    } in res.trajectory
+
+
+def test_skills_dispatched_reports_codex_skill_md_read() -> None:
+    """Verify skills_dispatched sees a Codex SKILL.md read as a dispatched skill end to end."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "i1",
+                        "type": "command_execution",
+                        "command": "/bin/bash -lc 'cat /home/benchspec/skills/hello/SKILL.md'",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "i2", "type": "command_execution", "command": "ls"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ]
+    )
+
+    res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
+
+    assert skills_dispatched(res.trajectory) == ["hello"]
 
 
 def test_codex_streamed_activity_true_when_turn_began() -> None:

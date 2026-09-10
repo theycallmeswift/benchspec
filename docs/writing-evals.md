@@ -222,6 +222,8 @@ Practical wording consequences:
   `` Skill `X` not invoked `` bind to the activation checkers; a longer sentence
   that also claims a file was written is compound and punts. A namespaced dispatch
   (`plugin:summarize`) satisfies an assertion written against `summarize`.
+  "Invoked" means the harness's native skill dispatch or, on Codex, a read of
+  the skill's `SKILL.md`.
 
 Activation deserves one more note: it is an ordinary assertion, graded
 symmetrically across arms. There is no separate trigger-eval format and no
