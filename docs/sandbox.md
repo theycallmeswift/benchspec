@@ -6,7 +6,9 @@ in [concepts.md](concepts.md).
 
 The agent under test runs arbitrary commands, so every cell gets its own sandbox:
 a known image, only the files the eval seeded, no reach into your machine, your
-credentials, or earlier runs' artifacts. A set picks its backend with the
+credentials, or earlier runs' artifacts. The sandbox, not any harness's own
+permission prompts, is the containment boundary: every harness runs with its
+approvals bypassed inside the guest. A set picks its backend with the
 `sandbox` key: `docker` (the default), where each cell is a container driven
 through the `docker` CLI, or `microsandbox`, where each cell boots its own
 **microVM** — its own kernel, booted in about a second.

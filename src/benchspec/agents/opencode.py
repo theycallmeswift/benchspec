@@ -7,7 +7,10 @@ documented in `docs/harnesses.md`.
 
 Event shape: JSONL, one event per line, nested
 under `part`. Turn events are `step_start` / `text` / `tool_use` / `step_finish`;
-there is NO terminal `result` event. A skill dispatch is
+there is NO terminal `result` event. A tool call the guest could not approve is a
+`tool_use` whose `part.state` is `{"status":"error","error":"The user rejected permission
+to use this specific tool call."}`; a run that ends on one with no final text is
+classified as errored, not as a clean failure. A skill dispatch is
 `{"type":"tool_use","part":{"tool":"skill","state":{"input":{"name":"<skill>"}}}}`;
 the final message concatenates every non-empty `part.text` (blank-line joined); totals
 are `step_finish.part.tokens.total`.
@@ -88,6 +91,9 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 }
 # Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
 _EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
+# Substring of the `state.error` OpenCode attaches to a tool call it could not get
+# permission for ("The user rejected permission to use this specific tool call.").
+_PERMISSION_REJECTED_MARKER = "rejected permission"
 
 
 def openrouter_model_error(model: str) -> str | None:
@@ -218,10 +224,14 @@ _BOOTSTRAP_PACKAGE_JSON = json.dumps(
     {"name": "benchspec-bootstrap", "version": "0.0.0", "type": "module", "main": "index.js"},
     separators=_COMPACT_SEPARATORS,
 )
+# `opencode run` inside the guest is headless and cannot answer permission prompts, so
+# every tool call is pre-approved. The sandbox is the isolation boundary, the same way the
+# Claude Code and Codex arms run with their approval bypass flags.
 _OPENCODE_CONFIG_JSON = json.dumps(
     {
         "$schema": "https://opencode.ai/config.json",
         "plugin": ["/root/.config/opencode/plugins/benchspec-bootstrap"],
+        "permission": "allow",
     },
     separators=_COMPACT_SEPARATORS,
 )
@@ -608,8 +618,22 @@ def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
     return bool(skill_name) and (tool == skill_name or tool.endswith(f":{skill_name}"))
 
 
+def _tool_call_was_rejected(part: dict) -> bool:
+    """True when a tool_use `part` errored because the guest could not grant permission."""
+    state = dict_or_empty(part.get("state"))
+    if state.get("status") != "error":
+        return False
+    error = state.get("error")
+    return isinstance(error, str) and _PERMISSION_REJECTED_MARKER in error
+
+
 def _opencode_trajectory(events: list[dict]) -> list[dict]:
-    """Canonical trajectory from OpenCode events."""
+    """Canonical trajectory from OpenCode events.
+
+    Completed tool calls are recorded as-is; a call the guest could not approve is kept
+    with `"status": "rejected"` so the judge sees what the agent tried. Running and
+    pending frames are skipped.
+    """
     traj: list[dict] = []
     for event in events:
         if event.get("type") != "tool_use":
@@ -619,9 +643,20 @@ def _opencode_trajectory(events: list[dict]) -> list[dict]:
         if not isinstance(tool, str):
             continue
         state = dict_or_empty(part.get("state"))
+        inp = dict_or_empty(state.get("input"))
+        if _tool_call_was_rejected(part):
+            traj.append(
+                {
+                    "kind": "tool_call",
+                    "id": "",
+                    "name": tool,
+                    "arguments": inp,
+                    "status": "rejected",
+                }
+            )
+            continue
         if state.get("status") != "completed":
             continue
-        inp = dict_or_empty(state.get("input"))
         if tool == "skill":
             skill = _skill_dispatch_name(part)
             traj.append(
@@ -652,13 +687,19 @@ def parse_opencode_jsonl(
     config: str,
     detect_skill: str | None,
 ) -> RunResult:
-    """Parse OpenCode's JSONL event stream into a RunResult."""
+    """Parse OpenCode's JSONL event stream into a RunResult.
+
+    A run is errored when it spent no tokens (the harness never reached the model) or
+    when its last tool call was rejected for permission and no final text followed: the
+    stream was cut short by a prompt the guest cannot answer, not by the agent finishing.
+    """
     events = list(iter_events(stdout))
 
     text_parts: list[str] = []
     total_tokens = 0
     session_id = ""
     fired = False
+    last_tool_rejected = False
     first_ts: int | None = None
     last_ts: int | None = None
 
@@ -683,16 +724,20 @@ def parse_opencode_jsonl(
             text_value = part.get("text")
             if isinstance(text_value, str) and text_value.strip():
                 text_parts.append(text_value)
-        elif event_type == "tool_use" and detect_skill:
-            # Gate on completed frames so `fired` agrees with the process-facts trajectory.
+        elif event_type == "tool_use":
             state = dict_or_empty(part.get("state"))
 
-            if state.get("status") == "completed" and _tool_dispatches_skill(part, detect_skill):
-                fired = True
+            if _tool_call_was_rejected(part):
+                last_tool_rejected = True
+            elif state.get("status") == "completed":
+                last_tool_rejected = False
+                # Gate on completed frames so `fired` agrees with the process-facts trajectory.
+                if detect_skill and _tool_dispatches_skill(part, detect_skill):
+                    fired = True
 
     duration_ms = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else 0
     result_text = "\n\n".join(text_parts) or _debug_tail(events)
-    is_error = total_tokens == 0
+    is_error = total_tokens == 0 or (last_tool_rejected and not text_parts)
 
     return RunResult(
         eval_id=eval_id,

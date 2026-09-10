@@ -83,7 +83,8 @@ so a human does not ship a noisy win.
 > **Key concept: errored is not failed.** A *failed* assertion is a measurement:
 > the agent ran and the claim did not hold. An *errored* sample is
 > infrastructure: the agent CLI crashed or timed out, `setup.sh` exited
-> non-zero, the judge failed at the transport level. Errored samples are
+> non-zero, a harness ended the turn on a rejected permission prompt, the judge
+> failed at the transport level. Errored samples are
 > excluded from pass rates, but counted and surfaced in the report and in
 > `grading.json`'s `errored` flag, so a half-crashed run cannot read like a
 > clean one.
