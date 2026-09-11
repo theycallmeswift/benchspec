@@ -40,7 +40,7 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
-from benchspec.orchestration.results import RunResult
+from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
@@ -487,9 +487,10 @@ class OpenCodeAgent(BaseAgent):
                 0,
                 is_error=True,
             )
+        result = parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
         if res.exit_code != 0:
-            return RunResult(eval_id, config, res.stderr[-2000:], 0, 0, is_error=True)
-        return parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
+            return mark_errored_by_nonzero_exit(result, res.stderr)
+        return result
 
     async def judge(
         self,
