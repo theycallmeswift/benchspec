@@ -916,6 +916,69 @@ def test_invoke_nonzero_exit_is_error() -> None:
     assert "bad" in res.result_text
 
 
+def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
+    """A crash after a real stream keeps raw, trajectory and tokens; stderr is the headline."""
+    stream = _text("codex_parse_success.jsonl")
+    sandbox = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=1, stdout_text=stream, stderr_text="segfault at exit\n")
+        ]
+    )
+
+    res = asyncio.run(
+        _agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    parsed = parse_codex_jsonl(stream, "e1", "trial", None)
+    assert res.is_error is True
+    assert res.result_text == "segfault at exit"
+    assert res.raw == stream
+    assert res.trajectory
+    assert res.total_tokens == parsed.total_tokens
+    assert res.duration_ms == parsed.duration_ms
+
+
+def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:
+    """With nothing on stderr, the errored result keeps the parser's own text."""
+    stream = _text("codex_parse_success.jsonl")
+    sandbox = FakeSandbox(
+        exec_outputs=[FakeExecOutput(exit_code=1, stdout_text=stream, stderr_text="  \n")]
+    )
+
+    res = asyncio.run(
+        _agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    parsed = parse_codex_jsonl(stream, "e1", "trial", None)
+    assert res.is_error is True
+    assert res.result_text == parsed.result_text
+    assert res.raw == stream
+    assert res.trajectory
+    assert res.total_tokens == parsed.total_tokens
+
+
 def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     """A SandboxError from the guest's exec is recorded as an is_error result, not raised."""
 

@@ -10,7 +10,7 @@ import pytest
 
 from benchspec.agents.base import Credential
 from benchspec.agents.claude import ClaudeCodeAgent
-from benchspec.orchestration.results import parse_run_json
+from benchspec.orchestration.results import parse_run_json, parse_stream_run
 from benchspec.sandbox.errors import SandboxError
 from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
@@ -430,6 +430,102 @@ def test_invoke_nonzero_exit_is_error() -> None:
     )
     assert res.is_error is True
     assert "bad" in res.result_text
+
+
+def _completed_stream() -> str:
+    """A stream-json run with one tool call and a healthy-looking `result` event."""
+    return "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "t1",
+                                "name": "Bash",
+                                "input": {"command": "ls"},
+                            }
+                        ]
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": "done",
+                    "is_error": False,
+                    "session_id": "s1",
+                    "duration_ms": 1500,
+                    "usage": {"input_tokens": 20, "output_tokens": 9},
+                }
+            ),
+        ]
+    )
+
+
+def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
+    """A crash after a complete-looking stream is still errored; stderr is the headline."""
+    stream = _completed_stream()
+    sandbox = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(exit_code=1, stdout_text=stream, stderr_text="segfault at exit\n")
+        ]
+    )
+
+    res = asyncio.run(
+        _agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="without_skill",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="sonnet",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    parsed = parse_stream_run(stream, "e1", "without_skill", None)
+    assert res.is_error is True
+    assert res.result_text == "segfault at exit"
+    assert res.raw == stream
+    assert res.trajectory
+    assert res.total_tokens == parsed.total_tokens
+    assert res.duration_ms == parsed.duration_ms
+
+
+def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:
+    """With nothing on stderr, the errored result keeps the parser's own text."""
+    stream = _completed_stream()
+    sandbox = FakeSandbox(
+        exec_outputs=[FakeExecOutput(exit_code=1, stdout_text=stream, stderr_text="  \n")]
+    )
+
+    res = asyncio.run(
+        _agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="without_skill",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="sonnet",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    parsed = parse_stream_run(stream, "e1", "without_skill", None)
+    assert res.is_error is True
+    assert res.result_text == parsed.result_text
+    assert res.raw == stream
+    assert res.trajectory
+    assert res.total_tokens == parsed.total_tokens
 
 
 def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
