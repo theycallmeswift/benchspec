@@ -27,7 +27,7 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
-from benchspec.orchestration.results import RunResult, errored_by_exit
+from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
@@ -472,7 +472,7 @@ class CodexAgent(BaseAgent):
             )
         result = parse_codex_jsonl(res.stdout, eval_id, config, detect_skill)
         if res.exit_code != 0:
-            return errored_by_exit(result, res.stderr)
+            return mark_errored_by_nonzero_exit(result, res.stderr)
         return result
 
     async def judge(

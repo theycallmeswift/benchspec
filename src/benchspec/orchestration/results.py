@@ -146,7 +146,7 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
     )
 
 
-def errored_by_exit(result: RunResult, stderr: str) -> RunResult:
+def mark_errored_by_nonzero_exit(result: RunResult, stderr: str) -> RunResult:
     """Mark a parsed run errored because its harness exited non-zero.
 
     A non-zero exit is a crash even when the stream looks complete, so the run is errored

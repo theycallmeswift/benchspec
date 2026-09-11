@@ -27,7 +27,11 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
-from benchspec.orchestration.results import RunResult, errored_by_exit, parse_stream_run
+from benchspec.orchestration.results import (
+    RunResult,
+    mark_errored_by_nonzero_exit,
+    parse_stream_run,
+)
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
@@ -430,5 +434,5 @@ class ClaudeCodeAgent(BaseAgent):
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
         result = parse_stream_run(res.stdout, eval_id, config, detect_skill)
         if res.exit_code != 0:
-            return errored_by_exit(result, res.stderr)
+            return mark_errored_by_nonzero_exit(result, res.stderr)
         return result
