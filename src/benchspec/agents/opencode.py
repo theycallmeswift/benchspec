@@ -91,8 +91,6 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 }
 # Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
 _EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
-# Substring of the `state.error` OpenCode attaches to a tool call it could not get
-# permission for ("The user rejected permission to use this specific tool call.").
 _PERMISSION_REJECTED_MARKER = "rejected permission"
 
 
@@ -224,9 +222,7 @@ _BOOTSTRAP_PACKAGE_JSON = json.dumps(
     {"name": "benchspec-bootstrap", "version": "0.0.0", "type": "module", "main": "index.js"},
     separators=_COMPACT_SEPARATORS,
 )
-# `opencode run` inside the guest is headless and cannot answer permission prompts, so
-# every tool call is pre-approved. The sandbox is the isolation boundary, the same way the
-# Claude Code and Codex arms run with their approval bypass flags.
+# Headless `opencode run` cannot answer permission prompts; the sandbox is the boundary.
 _OPENCODE_CONFIG_JSON = json.dumps(
     {
         "$schema": "https://opencode.ai/config.json",
@@ -621,8 +617,10 @@ def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
 def _tool_call_was_rejected(part: dict) -> bool:
     """True when a tool_use `part` errored because the guest could not grant permission."""
     state = dict_or_empty(part.get("state"))
+
     if state.get("status") != "error":
         return False
+
     error = state.get("error")
     return isinstance(error, str) and _PERMISSION_REJECTED_MARKER in error
 

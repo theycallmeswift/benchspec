@@ -113,7 +113,7 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
     assert identities == {
         ("hello", "greets-by-name"),
         ("hello-file", "writes-greeting-file"),
-        ("hello-outside", "reads-outside-workspace"),
+        ("hello-outside", "allows-filesystem-traversal"),
     }
     for case in cases:
         assert case.prompt
