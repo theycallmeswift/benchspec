@@ -174,6 +174,36 @@ def test_negative_matchers_bind_present() -> None:
             )
 
 
+def test_regex_entries_that_name_a_regex_pin_the_pattern_verbatim() -> None:
+    """Every regex bind whose text names a regex pins `pattern`, verbatim from the text.
+
+    The binder punts when a named regex drifts from the assertion, so the corpus must carry
+    enough such entries to exercise the guard, each pinning the pattern it expects.
+    """
+    named_regex_entries = [
+        entry
+        for entry in CORPUS
+        if entry["gold"] == "bind"
+        and entry["expect_checker"] == "regex"
+        and binder._names_regex(entry["text"])
+    ]
+
+    assert len(named_regex_entries) >= 3, (
+        f"regex has {len(named_regex_entries)} bind entries naming a regex; expected >=3"
+    )
+    for entry in named_regex_entries:
+        assert "expect" in entry, (
+            f"regex entry {entry['text'][:50]}... names a regex but pins no expect block"
+        )
+        assert "pattern" in entry["expect"], (
+            f"regex entry {entry['text'][:50]}... names a regex but pins no expect.pattern"
+        )
+        assert str(entry["expect"]["pattern"]) in entry["text"], (
+            f"regex entry {entry['text'][:50]}... pins pattern "
+            f"{entry['expect']['pattern']!r} that is not verbatim in its text"
+        )
+
+
 def test_has_persistence_and_semantic_punts() -> None:
     """Ensure punt examples cover persistence and semantic assertions."""
     punt_cohorts = {entry["cohort"] for entry in CORPUS if entry["gold"] == "punt"}

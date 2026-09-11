@@ -198,7 +198,7 @@ The checkers the binder can emit:
 |---|---|
 | `file_exists` / `not_file_exists` | A path exists / no longer exists (files and directories alike). |
 | `glob_count` | Exactly `count` (or at least `min`) files match a glob. |
-| `regex` | A file's content matches a pattern. |
+| `regex` | A file's content matches a pattern. When the assertion names a regex, the bound pattern is the assertion's own regex, verbatim; a draw that returns anything else punts. |
 | `frontmatter_has` | A file's YAML frontmatter has a key (optionally a value). |
 | `sha256_match` | A file is byte-identical to a named pre-run file or a literal SHA-256. |
 | `skill_invoked` / `not_skill_invoked` | The arm did / did not dispatch a skill (a process fact, not a file). |
@@ -218,6 +218,10 @@ Practical wording consequences:
   binds, and the accuracy claim can stand alone as a judged line.
 - **Full paths, `./`-anchored.** The binder copies paths exactly as written, and
   the pre-run SHA map is keyed by full path; a basename will not resolve.
+- **Quote regexes verbatim.** Write `matches the regex "<pattern>"`; the binder
+  copies the pattern character for character, and a draw that returns anything
+  else punts to the judge rather than grading against a pattern you did not
+  write.
 - **Activation lines are exact by convention.** `` Skill `X` invoked `` and
   `` Skill `X` not invoked `` bind to the activation checkers; a longer sentence
   that also claims a file was written is compound and punts. A namespaced dispatch

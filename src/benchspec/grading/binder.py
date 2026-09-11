@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import os
 import re
 import textwrap
@@ -55,6 +56,9 @@ _COMPOUND_AFTER_EXISTS_RE = re.compile(
     r"\b(?:exists?|created)\b\s*(?:,|;|\band\b|\bwith\b|\bcontaining\b|\bcontains?\b)",
     re.IGNORECASE,
 )
+_NAMES_REGEX_RE = re.compile(r"\b(?:regexp?|regular expression)\b", re.IGNORECASE)
+
+logger = logging.getLogger(__name__)
 
 # Prompt wording is part of binder accuracy. The semantic and conjunction rules below keep
 # surface checks from accepting wrong output.
@@ -105,8 +109,10 @@ _BINDING_PROMPT = textwrap.dedent(
       explicit "byte-identical" / sha256 claim, which binds to sha256_match.
 
     Copy paths exactly as written — full workdir-relative, `./` and `{{TODAY}}` included,
-    never a basename or label. When a file is byte-identical to its own pre-run content,
-    `original` is the same path as `path`.
+    never a basename or label. Patterns too, character for character, without the
+    surrounding quotes — when the assertion hands you a regex, the `pattern` is that regex
+    verbatim. When a file is byte-identical to its own pre-run content, `original` is the
+    same path as `path`.
     </rules>
 
     <examples>
@@ -149,6 +155,9 @@ _BINDING_PROMPT = textwrap.dedent(
     to its pre-run content — the collision did not overwrite it
     {{"checker":"sha256_match","path":"9. Archive/Sources/2099-01-01/notes.md",
       "original":"9. Archive/Sources/2099-01-01/notes.md"}}
+
+    Assertion: ./x matches the regex "(?i)foo\\s+'bar'"
+    {{"checker":"regex","path":"./x","pattern":"(?i)foo\\\\s+'bar'"}}
 
     Assertion: the ./build/ directory now exists and contains all the compiled assets
     {{"punt": true, "reason": "compound — bare existence binds, but 'contains all the assets'
@@ -494,7 +503,7 @@ def bind(
         call_model = call_model_for(config or BinderConfig())
     prompt = _BINDING_PROMPT.format(assertion=assertion_text)
     reply = call_model(prompt, timeout=_BINDER_TIMEOUT_SECONDS)
-    return _parse_binding(reply.text)
+    return _parse_binding(reply.text, assertion_text)
 
 
 def binder_for(config: BinderConfig) -> Callable[[str], dict | None]:
@@ -529,8 +538,43 @@ def _bind_bare_exists(assertion_text: str) -> dict | None:
     return spec
 
 
-def _parse_binding(text: str) -> dict | None:
-    """Parse a binder reply's text into a checker spec or punt."""
+def _names_regex(assertion_text: str) -> bool:
+    """Return whether the assertion hands the binder a literal regex."""
+    return _NAMES_REGEX_RE.search(assertion_text) is not None
+
+
+def _is_drifted_regex(spec: dict, assertion_text: str) -> bool:
+    """Return whether a regex spec's pattern is not a verbatim copy of the assertion's regex.
+
+    Only assertions that name a regex are checked: prose like "has a line beginning
+    'aliases:'" legitimately binds to a translated pattern such as `^aliases:`. The
+    match is a substring test because the assertion wraps the pattern in quotes.
+
+    Args:
+        spec: A validated checker spec.
+        assertion_text: The assertion prose the spec was bound from.
+
+    Returns:
+        True when the spec is a regex checker, the assertion names a regex, and the
+        pattern does not appear verbatim in the assertion.
+    """
+    if spec["checker"] != "regex" or not _names_regex(assertion_text):
+        return False
+    return spec["pattern"] not in assertion_text
+
+
+def _parse_binding(text: str, assertion_text: str) -> dict | None:
+    """Parse a binder reply's text into a checker spec or punt.
+
+    Args:
+        text: The binder model's reply text, expected to carry one JSON object.
+        assertion_text: The assertion prose the reply was bound from.
+
+    Returns:
+        The validated checker spec, or None to punt — on an explicit punt, unparseable
+        or schema-invalid output, or a regex pattern that drifted from the one the
+        assertion spells out.
+    """
     for candidate in _balanced_objects(text):
         try:
             obj = json.loads(candidate)
@@ -546,5 +590,14 @@ def _parse_binding(text: str) -> dict | None:
                 _validate_checker_obj(spec, "binder")
             except SchemaError:
                 return None  # malformed/hallucinated args → punt, never a false-positive
+            # The author wrote the regex, so anything but a verbatim copy is a mangled
+            # draw: punting costs nothing, a false negative fails a correct file.
+            if _is_drifted_regex(spec, assertion_text):
+                logger.info(
+                    "binder punted regex for %r: pattern %s is not verbatim in the assertion",
+                    assertion_text,
+                    spec["pattern"],
+                )
+                return None
             return spec
     return None  # no object / unparseable → punt

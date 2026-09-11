@@ -12,6 +12,7 @@ import email.message
 import inspect
 import io
 import json
+import logging
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -186,6 +187,84 @@ def test_returned_spec_is_dispatchable(tmp_path: Path) -> None:
     assert run_assertion(spec, tmp_path, {})["passed"] is True
 
 
+def test_verbatim_regex_pattern_binds() -> None:
+    """Verify a regex spec whose pattern is copied verbatim from the assertion binds."""
+    assertion = "./answer.sql matches the regex \"(?i)title\\s+ILIKE\\s+'%gemini%'\""
+    reply = _reply(
+        '{"checker":"regex","path":"./answer.sql","pattern":"(?i)title\\\\s+ILIKE\\\\s+\'%gemini%\'"}'
+    )
+
+    spec = bind(assertion, call_model=reply)
+
+    assert spec is not None
+    assert spec["checker"] == "regex"
+    assert spec["pattern"] == r"(?i)title\s+ILIKE\s+'%gemini%'"
+
+
+def test_regex_pattern_with_appended_quote_punts() -> None:
+    """Verify a regex pattern that grew a trailing quote is not a verbatim copy and punts."""
+    assertion = "./answer.sql matches the regex \"(?i)title\\s+ILIKE\\s+'%gemini%'\""
+    reply = _reply(
+        '{"checker":"regex","path":"./answer.sql","pattern":"(?i)title\\\\s+ILIKE\\\\s+\'%gemini%\'\'"}'
+    )
+
+    spec = bind(assertion, call_model=reply)
+
+    assert spec is None
+
+
+def test_regex_pattern_with_dropped_backslash_punts() -> None:
+    """Verify a regex pattern that lost a backslash is not a verbatim copy and punts."""
+    assertion = "./answer.sql matches the regex \"(?i)title\\s+ILIKE\\s+'%gemini%'\""
+    reply = _reply(
+        '{"checker":"regex","path":"./answer.sql","pattern":"(?i)titles+ILIKE\\\\s+\'%gemini%\'"}'
+    )
+
+    spec = bind(assertion, call_model=reply)
+
+    assert spec is None
+
+
+def test_prose_line_without_a_named_regex_binds_a_translated_pattern() -> None:
+    """Verify prose that names no regex still binds the model's anchored translation."""
+    assertion = "./.meta/templates/entity-person.md has a line beginning 'aliases:'"
+    reply = _reply(
+        '{"checker":"regex","path":"./.meta/templates/entity-person.md","pattern":"^aliases:"}'
+    )
+
+    spec = bind(assertion, call_model=reply)
+
+    assert spec == {
+        "type": "deterministic",
+        "checker": "regex",
+        "path": "./.meta/templates/entity-person.md",
+        "pattern": "^aliases:",
+    }
+
+
+def test_verbatim_guard_leaves_other_checkers_alone() -> None:
+    """Verify a file_exists path absent from the assertion text still binds as before."""
+    reply = _reply('{"checker":"file_exists","path":"report.md"}')
+
+    spec = bind("the report file was written", call_model=reply)
+
+    assert spec == {"type": "deterministic", "checker": "file_exists", "path": "report.md"}
+
+
+def test_drifted_regex_punt_logs_the_pattern_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify the drifted-regex punt logs one info line naming the rejected pattern."""
+    caplog.set_level(logging.INFO, logger="benchspec.grading.binder")
+    assertion = "./answer.sql matches the regex \"(?i)title\\s+ILIKE\\s+'%gemini%'\""
+    reply = _reply(
+        '{"checker":"regex","path":"./answer.sql","pattern":"(?i)title\\\\s+ILIKE\\\\s+\'%gemini%\'\'"}'
+    )
+
+    bind(assertion, call_model=reply)
+
+    assert r"(?i)title\s+ILIKE\s+'%gemini%''" in caplog.text
+    assert "not verbatim" in caplog.text
+
+
 def test_prompt_carries_load_bearing_pieces() -> None:
     """Verify prompt carries load bearing pieces."""
     prompt = _BINDING_PROMPT.format(assertion="MY ASSERTION")
@@ -200,6 +279,15 @@ def test_prompt_carries_load_bearing_pieces() -> None:
     ):
         assert name in prompt
     assert "not duplicated" in prompt  # A9 rule encoded
+
+
+def test_prompt_carries_the_verbatim_regex_rule_and_example() -> None:
+    """Verify the rendered prompt spells out the verbatim-pattern rule with a quoted example."""
+    prompt = _BINDING_PROMPT.format(assertion="MY ASSERTION")
+
+    assert "character for character" in prompt
+    assert "Assertion: ./x matches the regex \"(?i)foo\\s+'bar'\"" in prompt
+    assert '{"checker":"regex","path":"./x","pattern":"(?i)foo\\\\s+\'bar\'"}' in prompt
 
 
 def test_infra_error_propagates() -> None:
