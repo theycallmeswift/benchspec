@@ -13,6 +13,7 @@ import pytest
 
 from benchspec.agents import CodingAgent
 from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.agents.codex import parse_codex_jsonl
 from benchspec.config.arms import Arm
 from benchspec.grading.binder import BinderAuthError
 from benchspec.grading.judges import JudgeConfig
@@ -30,6 +31,10 @@ from benchspec.testing import FakeSandbox
 
 TRIAL = Arm("trial", "claude-code", "opus")
 BASELINE = Arm("baseline", "claude-code", "opus")
+TRIAL_CODEX = Arm("trial-codex", "codex", "openai/gpt-5.5")
+CODEX_SKILL_MD_READ_STREAM = (
+    Path(__file__).resolve().parents[1] / "agents" / "fixtures" / "codex_skill_md_read.jsonl"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -417,6 +422,133 @@ def test_run_eval_arm_baseline_grades_activation_false_and_judges_semantic(
     assert baseline_results["Skill `ingest` invoked"] is False
     assert judged == [["the summary reflects the facts"]]
     assert "gated" not in baseline.grading
+
+
+def test_run_eval_arm_grades_codex_skill_md_read_as_activation(tmp_path: Path) -> None:
+    """Verify a real Codex stream that reads the skill's SKILL.md grades activation True."""
+    # Codex loads a skill by reading its SKILL.md instead of emitting a skill_invocation
+    # item, so the whole chain -- real parser, run_eval_arm, skill_invoked checker -- must
+    # agree that this captured stream counts as a dispatch of `hello`.
+    workspace.set_current_iteration("iteration_01")
+
+    def bind(text: str) -> dict | None:
+        """Bind."""
+        if text == "Skill `hello` invoked":
+            return {"type": "deterministic", "checker": "skill_invoked", "skill": "hello"}
+        return None
+
+    judged: list[list[str]] = []
+
+    def grade(texts: list[str], *args: object, **kwargs: object) -> dict:
+        """Grade."""
+        judged.append(list(texts))
+        return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
+
+    workdir = tmp_path / "codex"
+    workdir.mkdir()
+    eval_case = _case(
+        tmp_path,
+        {
+            "id": "greets-by-name",
+            "prompt": "greet Alice",
+            "assertions": ["Skill `hello` invoked"],
+        },
+        skill="hello",
+    )
+    codex_result = parse_codex_jsonl(
+        CODEX_SKILL_MD_READ_STREAM.read_text(),
+        "greets-by-name",
+        "trial-codex",
+        detect_skill="hello",
+    )
+
+    outcome = run_eval_arm(
+        eval_case,
+        TRIAL_CODEX,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=_RecordedSession(codex_result),
+        grade=grade,
+        bind=bind,
+    )
+
+    graded = {
+        assertion["text"]: assertion for assertion in outcome.grading["assertions"]
+    }
+    assert graded["Skill `hello` invoked"]["passed"] is True
+    assert "hello" in graded["Skill `hello` invoked"]["evidence"]
+    assert judged == []
+
+
+def test_run_eval_arm_grades_codex_stream_without_skill_md_read_as_no_activation(
+    tmp_path: Path,
+) -> None:
+    """Verify a Codex stream that runs commands but never opens SKILL.md grades no activation."""
+    # The baseline must stay honest: shell activity alone is not a skill dispatch.
+    workspace.set_current_iteration("iteration_01")
+
+    def bind(text: str) -> dict | None:
+        """Bind."""
+        if text == "Skill `hello` invoked":
+            return {"type": "deterministic", "checker": "skill_invoked", "skill": "hello"}
+        if text == "Skill `hello` not invoked":
+            return {"type": "deterministic", "checker": "not_skill_invoked", "skill": "hello"}
+        return None
+
+    judged: list[list[str]] = []
+
+    def grade(texts: list[str], *args: object, **kwargs: object) -> dict:
+        """Grade."""
+        judged.append(list(texts))
+        return {"assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in texts]}
+
+    workdir = tmp_path / "codex"
+    workdir.mkdir()
+    eval_case = _case(
+        tmp_path,
+        {
+            "id": "greets-by-name",
+            "prompt": "greet Alice",
+            "assertions": ["Skill `hello` invoked", "Skill `hello` not invoked"],
+        },
+        skill="hello",
+    )
+    stream_without_skill_md_read = "\n".join(
+        line
+        for line in CODEX_SKILL_MD_READ_STREAM.read_text().splitlines()
+        if "SKILL.md" not in line
+    )
+    codex_result = parse_codex_jsonl(
+        stream_without_skill_md_read,
+        "greets-by-name",
+        "trial-codex",
+        detect_skill="hello",
+    )
+
+    outcome = run_eval_arm(
+        eval_case,
+        TRIAL_CODEX,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=_RecordedSession(codex_result),
+        grade=grade,
+        bind=bind,
+    )
+
+    graded = {
+        assertion["text"]: assertion["passed"] for assertion in outcome.grading["assertions"]
+    }
+    assert graded["Skill `hello` invoked"] is False
+    assert graded["Skill `hello` not invoked"] is True
+    assert judged == []
 
 
 def test_run_eval_arm_no_fired_gate(tmp_path: Path) -> None:

@@ -73,6 +73,13 @@ Notes that matter in practice:
   `openrouter` no CLI login is consulted: `claude auth status` and `codex login
   status` are skipped, and only `OPENROUTER_API_KEY` counts. See
   [`configuration.md`](configuration.md#providers).
+- **Every harness runs with its own approvals bypassed.** Claude Code gets
+  `--permission-mode bypassPermissions`, Codex
+  `--dangerously-bypass-approvals-and-sandbox`, and OpenCode a
+  `permission = "allow"` in the guest `opencode.json` the adapter bakes into the
+  snapshot. A headless run cannot answer a permission prompt, so one would end
+  the turn with nothing written; the sandbox, not harness approvals, is the
+  boundary (see [`sandbox.md`](sandbox.md)).
 - **`harness_args` are pass-through with a reserved list.** Each adapter appends
   your tokens to its invocation but rejects flags benchspec owns (model, effort,
   prompt delivery, output format, session, and permission controls) including
@@ -129,7 +136,10 @@ integration surface. An adapter declares:
   reserved flags here) and `invoke(...)`, which parses the CLI's stream into a
   `RunResult`, surfacing agent failures as `is_error=True`, not exceptions.
 - **Detection**: `detect_dispatch` / `detect_fired` / `streamed_activity`, the
-  stream probes behind skill-activation grading.
+  stream probes behind skill-activation grading. A dispatch is whatever the CLI
+  observably does to load a skill: its native skill event where it has one,
+  otherwise a read of `<skill_load_dir>/<name>/SKILL.md` (the Codex adapter
+  works this way).
 - **Judging**: `judge(...)`, the host-side grading entry point.
 
 The steps:

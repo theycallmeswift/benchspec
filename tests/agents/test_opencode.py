@@ -395,6 +395,132 @@ def test_parse_opencode_jsonl_no_tokens_marks_errored() -> None:
     assert res.fired is False
 
 
+def test_parse_opencode_jsonl_rejected_final_tool_call_marks_errored() -> None:
+    """A run cut short by a permission prompt the guest cannot answer is errored."""
+    # OpenCode answers an unapprovable tool call with a tool error and ends the step
+    # on `reason: "tool-calls"`; tokens were spent, but the agent never got to finish.
+    stream = "\n".join(
+        [
+            json.dumps({"type": "step_start", "part": {"type": "step-start"}}),
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "glob",
+                        "state": {
+                            "status": "error",
+                            "input": {"pattern": "*", "path": "/"},
+                            "error": "The user rejected permission to use this specific tool call.",
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {
+                        "type": "step-finish",
+                        "reason": "tool-calls",
+                        "tokens": {"total": 10673},
+                    },
+                }
+            ),
+        ]
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "without_skill", detect_skill=None)
+
+    assert res.is_error is True
+    assert res.total_tokens == 10673
+    assert "rejected permission" in res.result_text
+
+
+def test_parse_opencode_jsonl_rejection_followed_by_text_is_not_errored() -> None:
+    """A rejected tool call the agent talked past is a finished run, not an error."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "glob",
+                        "state": {
+                            "status": "error",
+                            "input": {"pattern": "*", "path": "/"},
+                            "error": "The user rejected permission to use this specific tool call.",
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "text",
+                    "part": {"type": "text", "text": "I could not list /, so I worked in cwd."},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {"type": "step-finish", "tokens": {"total": 300}},
+                }
+            ),
+        ]
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "without_skill", detect_skill=None)
+
+    assert res.is_error is False
+    assert res.result_text == "I could not list /, so I worked in cwd."
+
+
+def test_parse_opencode_jsonl_rejection_followed_by_completed_tool_is_not_errored() -> None:
+    """A rejected tool call followed by a completed one means the agent recovered."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "glob",
+                        "state": {
+                            "status": "error",
+                            "input": {"pattern": "*", "path": "/"},
+                            "error": "The user rejected permission to use this specific tool call.",
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "write",
+                        "state": {
+                            "status": "completed",
+                            "input": {"filePath": "notes.md", "content": "hello"},
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {"type": "step-finish", "tokens": {"total": 300}},
+                }
+            ),
+        ]
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "without_skill", detect_skill=None)
+
+    assert res.is_error is False
+    assert res.total_tokens == 300
+
+
 def test_parse_opencode_jsonl_tool_only_run_not_errored_when_tokens_present() -> None:
     """Verify parse opencode jsonl tool only run not errored when tokens present."""
     # Some models (e.g., Gemini Flash) execute tools and exit without a wrap-up
@@ -605,6 +731,19 @@ def test_provision_script_verifies_warmed_db() -> None:
     assert "opencode.db" in script
     # the warm step must be followed by an existence check, not just fire-and-forget
     assert "test -f /root/.local/share/opencode/opencode.db" in script
+
+
+def test_provision_script_pre_approves_every_permission() -> None:
+    """The baked opencode.json allows every tool call alongside the plugin registration."""
+    # `opencode run` in the guest cannot answer permission prompts; the sandbox is the
+    # isolation boundary, as it is for the Claude Code and Codex arms.
+    script = OpenCodeAgent().provision_script()
+
+    config_heredoc = script.split("opencode.json <<'EOF_CFG'\n", 1)[1].split("\nEOF_CFG", 1)[0]
+    config = json.loads(config_heredoc)
+
+    assert config["permission"] == "allow"
+    assert config["plugin"] == ["/root/.config/opencode/plugins/benchspec-bootstrap"]
 
 
 def test_invoke_nonzero_exit_is_error() -> None:
@@ -1056,6 +1195,82 @@ def test_parse_opencode_jsonl_skips_non_completed_tool_frames() -> None:
     )
     res = parse_opencode_jsonl(stream, "e1", "with_skill", detect_skill=None)
     assert [e["name"] for e in res.trajectory] == ["bash"]  # only the completed frame
+
+
+def test_parse_opencode_jsonl_trajectory_keeps_rejected_tool_calls() -> None:
+    """A permission-rejected call is kept in the trajectory, flagged as rejected."""
+    stream = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "glob",
+                        "state": {
+                            "status": "error",
+                            "input": {"pattern": "*", "path": "/"},
+                            "error": "The user rejected permission to use this specific tool call.",
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "bash",
+                        "state": {"status": "completed", "input": {"command": "ls"}},
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {"type": "step-finish", "tokens": {"total": 5}},
+                }
+            ),
+        ]
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "without_skill", detect_skill=None)
+
+    assert res.trajectory == [
+        {
+            "kind": "tool_call",
+            "id": "",
+            "name": "glob",
+            "arguments": {"pattern": "*", "path": "/"},
+            "status": "rejected",
+        },
+        {"kind": "tool_call", "id": "", "name": "bash", "arguments": {"command": "ls"}},
+    ]
+
+
+def test_parse_opencode_jsonl_rejected_tool_call_feeds_shared_consumers() -> None:
+    """A rejected entry passes through the agent-agnostic trajectory helpers."""
+    from benchspec.grading.trajectory import render_process_facts, skills_dispatched
+
+    stream = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "glob",
+                "state": {
+                    "status": "error",
+                    "input": {"pattern": "*", "path": "/"},
+                    "error": "The user rejected permission to use this specific tool call.",
+                },
+            },
+        }
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "without_skill", detect_skill=None)
+
+    assert skills_dispatched(res.trajectory) == []
+    assert render_process_facts([res.trajectory]) == "Turn 1: glob"
 
 
 def test_opencode_skill_load_dir_is_config_path() -> None:

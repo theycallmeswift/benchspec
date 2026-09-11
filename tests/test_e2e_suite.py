@@ -97,7 +97,7 @@ def test_e2e_judge_is_codex_and_distinct_from_the_task_harness() -> None:
 
 
 def test_hello_evals_are_discovered_with_expected_identities() -> None:
-    """Verify both hello evals are discovered with a non-empty prompt and assertions.
+    """Verify every hello eval is discovered with a non-empty prompt and assertions.
 
     Calls `discover_eval_cases(REPO_ROOT)` with no `eval_paths` override — the same call
     shape production uses — so this test exercises the real `eval_paths = ["evals"]` in
@@ -113,6 +113,7 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
     assert identities == {
         ("hello", "greets-by-name"),
         ("hello-file", "writes-greeting-file"),
+        ("hello-outside", "allows-filesystem-traversal"),
     }
     for case in cases:
         assert case.prompt
@@ -138,7 +139,7 @@ def test_hello_evals_exercise_history_and_seeded_workspace() -> None:
     assert greeting_case.workspace_dir is None
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file"])
+@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
 def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     """Verify setup.sh parses as valid bash without executing any of it."""
     setup_sh = REPO_ROOT / "evals/e2e/hello/evals" / group / "setup.sh"
@@ -150,7 +151,7 @@ def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file"])
+@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
 def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: str) -> None:
     """Verify the baseline branch exits without running an install command."""
     eval_dir = REPO_ROOT / "evals/e2e/hello/evals" / group
@@ -180,7 +181,7 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: s
     assert not command_log.exists()
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file"])
+@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
 def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
     tmp_path: Path, group: str
 ) -> None:
