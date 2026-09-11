@@ -12,12 +12,14 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 from collections.abc import Iterable, Mapping
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
     DEFAULT_PROVIDER,
+    FIXED_SKILLS_HOME,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
     BaseAgent,
@@ -99,6 +101,15 @@ _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.sta
 _RESERVED_HARNESS_SHORT_FLAGS = {
     arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
 }
+_CODEX_SKILL_LOAD_DIR = "/root/.codex/skills"
+# Codex has no native skill-dispatch event: it loads a skill by shelling out to read its
+# `SKILL.md`. The match keys on the skill's own path under either skills home plus the
+# literal `SKILL.md` leaf, so any read verb (`cat`, `sed`, `head`, a `<` redirect) counts
+# while a sibling reference file or a `SKILL.md` outside the skills home does not.
+_SKILL_MD_READ_RE = re.compile(
+    rf"(?<![\w.\-/])(?:{re.escape(FIXED_SKILLS_HOME)}|{re.escape(_CODEX_SKILL_LOAD_DIR)})"
+    r"/((?!\.\.?/)[^/\s'\"]+)/SKILL\.md(?![\w.\-/])"
+)
 
 
 def _validate_harness_args(harness_args: list[str] | None) -> list[str]:
@@ -161,7 +172,7 @@ class CodexAgent(BaseAgent):
     id = "codex"
     AUTH_JSON_GUEST_SOURCE = "/benchspec-codex-auth/auth.json"
     guest_home = "/root"
-    skill_load_dir = "/root/.codex/skills"
+    skill_load_dir = _CODEX_SKILL_LOAD_DIR
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
 
     def provision_script(self) -> str:
@@ -528,7 +539,11 @@ def _skill_name_matches(actual: str, expected: str) -> bool:
 
 
 def _skill_dispatch_name(item: dict) -> str | None:
-    """Extract the dispatched skill name from a Codex event item."""
+    """Extract the dispatched skill name from a Codex event item.
+
+    A `command_execution` resolves to the first `SKILL.md` read it names: the contract
+    is one name per item, and every consumer treats an item as one dispatch.
+    """
     item_type = item.get("type")
     if item_type == "skill_invocation":
         name = item.get("name") or item.get("skill")
@@ -541,6 +556,9 @@ def _skill_dispatch_name(item: dict) -> str | None:
             return skill if isinstance(skill, str) and skill else None
         if isinstance(name, str) and name:
             return name
+    if item_type == "command_execution":
+        match = _SKILL_MD_READ_RE.search(str(item.get("command") or ""))
+        return match.group(1) if match else None
     return None
 
 
@@ -632,16 +650,27 @@ def _codex_trajectory(events: list[dict]) -> list[dict]:
                     }
                 )
         elif item_type == "command_execution":
-            command = item.get("command")
-            args = {"command": command} if isinstance(command, str) else {}
-            traj.append(
-                {
-                    "kind": "tool_call",
-                    "id": item_id,
-                    "name": "command_execution",
-                    "arguments": args,
-                }
-            )
+            skill = _skill_dispatch_name(item)
+            if skill:
+                traj.append(
+                    {
+                        "kind": "tool_call",
+                        "id": item_id,
+                        "name": "Skill",
+                        "arguments": {"skill": skill},
+                    }
+                )
+            else:
+                command = item.get("command")
+                args = {"command": command} if isinstance(command, str) else {}
+                traj.append(
+                    {
+                        "kind": "tool_call",
+                        "id": item_id,
+                        "name": "command_execution",
+                        "arguments": args,
+                    }
+                )
     return traj
 
 

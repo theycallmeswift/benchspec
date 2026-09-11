@@ -136,7 +136,10 @@ integration surface. An adapter declares:
   reserved flags here) and `invoke(...)`, which parses the CLI's stream into a
   `RunResult`, surfacing agent failures as `is_error=True`, not exceptions.
 - **Detection**: `detect_dispatch` / `detect_fired` / `streamed_activity`, the
-  stream probes behind skill-activation grading.
+  stream probes behind skill-activation grading. A dispatch is whatever the CLI
+  observably does to load a skill: its native skill event where it has one,
+  otherwise a read of `<skill_load_dir>/<name>/SKILL.md` (the Codex adapter
+  works this way).
 - **Judging**: `judge(...)`, the host-side grading entry point.
 
 The steps:
