@@ -57,12 +57,6 @@ Notes that matter in practice:
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.
-- **Codex skill activation is a file read.** Codex has no native skill-dispatch
-  event; it loads a skill by reading its `SKILL.md` through a shell command.
-  benchspec counts a `command_execution` that reads
-  `<skills home>/<name>/SKILL.md` as the dispatch of `<name>`, so
-  `` Skill `X` invoked `` grades the same on Codex as on Claude Code and
-  OpenCode.
 - **Credentials ride differently per backend.** microsandbox injects each
   credential at the sandbox's network boundary, scoped to the provider's hosts
   and never readable in the guest; Docker injects it as a plain container

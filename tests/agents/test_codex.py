@@ -421,6 +421,11 @@ def test_codex_detect_fired_true_on_our_skill() -> None:
     assert _agent().detect_fired(_lines("codex_route_fired.jsonl"), "archive") is True
 
 
+def test_codex_detect_fired_true_on_real_skill_md_read_stream() -> None:
+    """Verify detect fired sees the SKILL.md read in a captured Codex 0.154.0 stream."""
+    assert _agent().detect_fired(_lines("codex_skill_md_read.jsonl"), "hello") is True
+
+
 def test_codex_detect_fired_false_on_other_tool() -> None:
     """Verify codex detect fired false on other tool."""
     assert _agent().detect_fired(_lines("codex_route_nofire.jsonl"), "archive") is False
