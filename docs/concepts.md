@@ -53,7 +53,9 @@ A fixed, deliberately conservative classifier (one call to
 through OpenRouter on `OPENROUTER_API_KEY`, by `[tool.benchspec.binder]
 provider`) that decides, at grade time, whether an assertion can be checked
 mechanically. It either **binds** the line to one checker or **punts** it to the
-judge. It never grades anything itself. Reference:
+judge. Binding validates the reply against the assertion, not only against the
+checker schema: a `regex` bound from an assertion that names one must carry that
+regex verbatim, or the line punts. It never grades anything itself. Reference:
 [writing-evals.md](writing-evals.md#how-assertions-are-graded).
 
 ## Cell

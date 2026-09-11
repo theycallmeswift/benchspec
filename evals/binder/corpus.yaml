@@ -88,6 +88,15 @@ binds:
   - text: ./docs/specs/{TODAY}-<slug>.md has a line matching '## Problem'
     expect:
       path: ./docs/specs/{TODAY}-<slug>.md
+  - text: ./answer.sql matches the regex "(?i)title\s+ILIKE\s+'%gemini%'"
+    expect:
+      pattern: (?i)title\s+ILIKE\s+'%gemini%'
+  - text: ./answer.sql matches the regex "(?i)type\s*=\s*'Email'"
+    expect:
+      pattern: (?i)type\s*=\s*'Email'
+  - text: ./answer.sql matches the regex '(?i)"primary"\s*=\s*true'
+    expect:
+      pattern: (?i)"primary"\s*=\s*true
   frontmatter_has:
   - text: ./1. Profile/whoami.md frontmatter has a 'created' key
     expect:
