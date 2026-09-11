@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterable, Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
@@ -28,7 +27,7 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
-from benchspec.orchestration.results import RunResult, parse_stream_run
+from benchspec.orchestration.results import RunResult, errored_by_exit, parse_stream_run
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
@@ -430,8 +429,6 @@ class ClaudeCodeAgent(BaseAgent):
             message = f"<sandbox-error> {error}"[-2000:]
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
         result = parse_stream_run(res.stdout, eval_id, config, detect_skill)
-        # Non-zero exit with no result event = a crash; its diagnostic is on stderr, not in
-        # the empty stream. Surface stderr, keeping the raw/trajectory already captured.
-        if res.exit_code != 0 and result.is_error and res.stderr.strip():
-            return replace(result, result_text=res.stderr[-2000:])
+        if res.exit_code != 0:
+            return errored_by_exit(result, res.stderr)
         return result

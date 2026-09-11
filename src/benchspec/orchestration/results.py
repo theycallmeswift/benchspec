@@ -146,6 +146,26 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
     )
 
 
+def errored_by_exit(result: RunResult, stderr: str) -> RunResult:
+    """Mark a parsed run errored because its harness exited non-zero.
+
+    A non-zero exit is a crash even when the stream looks complete, so the run is errored
+    regardless of what the parser concluded. The parsed raw stream, trajectory, tokens,
+    and duration stay as evidence of what the agent did before the harness died. The
+    diagnostic lives on stderr, which headlines the result when it has content; otherwise
+    the parser's own text stands.
+
+    Args:
+        result: The run parsed from the harness stream.
+        stderr: Everything the harness wrote to stderr.
+
+    Returns:
+        `result` with `is_error` forced and `result_text` swapped for the stderr tail.
+    """
+    text = stderr[-2000:].strip() or result.result_text
+    return replace(result, result_text=text, is_error=True)
+
+
 def parse_stream_run(stdout: str, eval_id: str, config: str, skill_name: str | None) -> RunResult:
     """Parse a streamed JSON run and preserve raw trajectory evidence."""
     lines = stdout.splitlines()

@@ -180,8 +180,10 @@ provenance pair as `meta.json`. Note the naming: `arms` here is *result stats*;
   into `observed_arms`.
 - `session.jsonl`: the lossless raw stream, each turn behind a `{"turn": N}`
   marker line. Everything else is derivable from it; it is the artifact to reach
-  for when a grade looks wrong. To get the structured tool-call trajectory, feed
-  its text to `benchspec.grading.trajectory.trajectory_from_session`; events
+  for when a grade looks wrong. A sample whose harness exited non-zero keeps its
+  stream too, and its transcript `result` is the harness's stderr when it wrote
+  any. To get the structured tool-call trajectory, feed its text to
+  `benchspec.grading.trajectory.trajectory_from_session`; events
   follow the OpenTelemetry GenAI naming (`gen_ai.tool.name`,
   `gen_ai.tool.call.id`, and so on).
 

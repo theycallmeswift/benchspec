@@ -226,6 +226,12 @@ def test_errored_sample_keeps_its_stream_and_tokens(
     ("harness", "agent", "stream"),
     [
         pytest.param(
+            "claude-code",
+            ClaudeCodeAgent(auth_value="sk-test", version="latest"),
+            CLAUDE_STREAM,
+            id="claude-code",
+        ),
+        pytest.param(
             "codex",
             CodexAgent(auth_value="sk-test", auth_env="CODEX_API_KEY", version="latest"),
             (FIXTURES / "codex_parse_success.jsonl").read_text(),
