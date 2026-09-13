@@ -333,11 +333,14 @@ def report_lines() -> list[TerminalLine]:
     return [
         TerminalLine([Span(rule, color=TERMINAL_MUTED)], gap_before=REPORT_GAP),
         header,
-        matrix_line(Span("hello/greets-by-name"), [rate_cell(33), rate_cell(100, 67)]),
-        matrix_line(Span("hello-file/writes-greeting-file"), [rate_cell(50), rate_cell(50, 0)]),
+        matrix_line(Span("hello/greets-by-name"), [rate_cell(50), rate_cell(100, 50)]),
+        matrix_line(Span("hello-file/writes-greeting-file"), [rate_cell(0), rate_cell(100, 100)]),
+        matrix_line(
+            Span("hello-outside/allows-filesystem-traversal"), [rate_cell(0), rate_cell(100, 100)]
+        ),
         TerminalLine([Span("-" * TERMINAL_COLUMNS, color=TERMINAL_MUTED)]),
         matrix_line(
-            Span("All evals", bold=True), [rate_cell(40), rate_cell(80, 40, bold_rate=True)]
+            Span("All evals", bold=True), [rate_cell(17), rate_cell(100, 83, bold_rate=True)]
         ),
         TerminalLine([Span("Report: tmp/evals/iteration_01/benchmark.md", color=TERMINAL_MUTED)]),
     ]
@@ -408,13 +411,13 @@ def terminal_storyboard() -> list[tuple[list[TerminalLine], int]]:
     The command is typed a couple of characters per frame, the progress line lands in
     two beats, then the report is revealed one line at a time and held on the last frame.
     """
-    command = f"{PROJECT_NAME} run"
+    command = f"{PROJECT_NAME} run -- --count 3"
     typed_lengths = [*range(0, len(command), TYPING_CHARS_PER_FRAME), len(command)]
     frames = [([prompt_line(command[:length])], TYPING_FRAME_MS) for length in typed_lengths]
 
     prompt = prompt_line(command)
-    frames.append(([prompt, progress_line(1, complete=False)], FIRST_PROGRESS_FRAME_MS))
-    progress = progress_line(2, complete=True)
+    frames.append(([prompt, progress_line(3, complete=False)], FIRST_PROGRESS_FRAME_MS))
+    progress = progress_line(6, complete=True)
     frames.append(([prompt, progress], SECOND_PROGRESS_FRAME_MS))
 
     report = report_lines()

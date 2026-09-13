@@ -345,6 +345,7 @@ def test_make_e2e_runs_the_openrouter_set_with_judge_and_binder_on_openrouter() 
     arms = resolve_set(rawsets, default_set, set_name="e2e-openrouter").arms
 
     assert [_flag_value(argv, "--set") for argv in commands] == ["e2e", "e2e-openrouter"]
+    assert all(_flag_value(argv, "--count") == "3" for argv in commands)
     assert judge.harness == "codex"
     assert judge.provider == "openrouter"
     assert judge.model.startswith("google/")  # cross-family from the Anthropic and OpenAI arms
