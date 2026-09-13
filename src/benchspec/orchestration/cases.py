@@ -42,6 +42,7 @@ from benchspec.orchestration.room import seed_room
 from benchspec.sandbox import sandbox
 from benchspec.sandbox.backend import SandboxBackend
 from benchspec.sandbox.registry import resolve_sandbox
+from benchspec.specs import scope
 from benchspec.specs.discovery import (
     EvalCase,
     discover_eval_cases,
@@ -72,7 +73,31 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
         for arm in arms:
             pairs.append((case, arm))
             ids.append(f"{case.param_id}-{arm.name}")
+
+    if run_set is not None:
+        _resolve_scope_clauses(pairs, run_set.baseline, _eval_set_name(config))
+
     return pairs, ids
+
+
+def _resolve_scope_clauses(
+    pairs: list[tuple[EvalCase, Arm]], baseline: str | None, eval_set: str
+) -> None:
+    """Resolve every clause for every pair so an authoring defect fails collection.
+
+    Raises:
+        pytest.UsageError: a clause that cannot be resolved for some arm.
+    """
+    for case, arm in pairs:
+        try:
+            scope.applicable(case, arm, baseline=baseline, eval_set=eval_set)
+        except scope.ScopeError as error:
+            raise pytest.UsageError(str(error)) from error
+
+
+def _eval_set_name(config: RunOptions) -> str:
+    """The raw `--benchspec-set` value; empty on a default-set run."""
+    return option_str(config, "benchspec_set") or ""
 
 
 @pytest.fixture
@@ -95,7 +120,7 @@ def eval_set_name(request: pytest.FixtureRequest) -> str:
     # The raw `--benchspec-set` / `make evals SET=` value (empty on a default-set run, which
     # never sets the flag). Stamped into BENCHSPEC_SET for setup.sh branching — it does NOT
     # carry the resolved default-set name.
-    return option_str(request.config, "benchspec_set") or ""
+    return _eval_set_name(request.config)
 
 
 def _grading_environment_errors(judge: JudgeConfig, binder_config: BinderConfig) -> list[str]:
@@ -268,6 +293,12 @@ def eval_sandbox(request: pytest.FixtureRequest) -> str:
     return resolved_run_set(request.config).sandbox
 
 
+@pytest.fixture
+def baseline_arm(request: pytest.FixtureRequest) -> str | None:
+    """Return the set's baseline arm name (`BENCHSPEC_BASELINE`), or None when it has none."""
+    return resolved_run_set(request.config).baseline
+
+
 def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
@@ -299,6 +330,7 @@ def test_eval(
     binder_config: BinderConfig,
     sample_index: int,
     eval_sandbox: str,
+    baseline_arm: str | None,
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -322,6 +354,7 @@ def test_eval(
         judge_config=judge_config,
         sandbox_name=eval_sandbox,
         bind=binder.binder_for(binder_config),
+        baseline=baseline_arm,
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a

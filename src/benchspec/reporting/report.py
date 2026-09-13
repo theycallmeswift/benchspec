@@ -7,6 +7,9 @@ index.jsonl). Rows are keyed `group/eval_id`; columns are the run's arms. Errore
 (infra failures) are excluded from pass rates but counted and surfaced — a half-crashed
 run must not read like a clean one.
 
+A line recorded as `skipped` in any arm is pooled in no arm; it goes to the `scoped`
+table instead.
+
 Layout: `<group>/eval-<id>/<arm>/sample-<k>/{grading,timing}.json` where arm names are
 arbitrary strings discovered from disk (the per-eval subdirs are the arm names). Evals
 sort lexically by dir name (`eval-10` before `eval-2`). The `baseline` arm — when one
@@ -102,8 +105,102 @@ def _sample_dirs(parent: Path) -> list[Path]:
     )
 
 
-def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
-    """Compute aggregate pass-rate and token statistics for an arm."""
+def _eval_key(eval_dir: Path) -> tuple[str, str]:
+    """The `(group, eval_id)` pair an `<group>/eval-<id>` directory names."""
+    return eval_dir.parent.name, eval_dir.name.removeprefix("eval-")
+
+
+def _graded_samples(eval_dir: Path, arm: str) -> list[dict]:
+    """Every `grading.json` of `arm` under `eval_dir`, in sample order (errored included)."""
+    arm_dir = eval_dir / arm
+    if not arm_dir.is_dir():
+        return []
+
+    gradings = (_load_json(sample_dir / "grading.json") for sample_dir in _sample_dirs(arm_dir))
+    return [grading for grading in gradings if grading is not None]
+
+
+def _excluded_indices(
+    eval_dirs: list[Path], arm_names: list[str]
+) -> dict[tuple[str, str], set[int]]:
+    """Per eval, the assertion indices any sample of any arm (errored included) skipped."""
+    excluded: dict[tuple[str, str], set[int]] = {}
+    for eval_dir in eval_dirs:
+        skipped: set[int] = set()
+        for arm in arm_names:
+            for grading in _graded_samples(eval_dir, arm):
+                skipped.update(
+                    index
+                    for index, assertion in enumerate(grading.get("assertions", []))
+                    if assertion.get("skipped")
+                )
+
+        excluded[_eval_key(eval_dir)] = skipped
+
+    return excluded
+
+
+def _scoped_cell(gradings: list[dict], index: int) -> dict | str | None:
+    """One arm's cell for a scoped line: `skipped`, `{passed, total}`, or None if never graded."""
+    entries = [
+        grading["assertions"][index]
+        for grading in gradings
+        if not grading.get("errored") and index < len(grading.get("assertions", []))
+    ]
+    if any(entry.get("skipped") for entry in entries):
+        return "skipped"
+    if not entries:
+        return None
+
+    return {
+        "passed": sum(1 for entry in entries if entry.get("passed")),
+        "total": len(entries),
+    }
+
+
+def _scoped_rows(
+    eval_dirs: list[Path],
+    arm_names: list[str],
+    excluded: dict[tuple[str, str], set[int]],
+) -> list[dict]:
+    """One row per line skipped in at least one arm, with each arm's cell."""
+    rows: list[dict] = []
+    for eval_dir in eval_dirs:
+        group, eval_id = _eval_key(eval_dir)
+        indices = excluded[(group, eval_id)]
+        if not indices:
+            continue
+
+        per_arm = {arm: _graded_samples(eval_dir, arm) for arm in arm_names}
+        texts = {
+            index: assertion["text"]
+            for gradings in per_arm.values()
+            for grading in gradings
+            for index, assertion in enumerate(grading.get("assertions", []))
+            if index in indices
+        }
+
+        for index in sorted(indices):
+            rows.append(
+                {
+                    "group": group,
+                    "eval_id": eval_id,
+                    "index": index,
+                    "text": texts[index],
+                    "arms": {arm: _scoped_cell(per_arm[arm], index) for arm in arm_names},
+                }
+            )
+
+    return rows
+
+
+def _arm_stats(
+    eval_dirs: list[Path], arm: str, excluded: dict[tuple[str, str], set[int]]
+) -> dict:
+    """Compute aggregate pass-rate and token statistics for an arm.
+
+    `excluded` holds, per eval, the assertion indices left out of every rate.
+    """
     per_eval: list[dict] = []
     # Pooled with equal weight per (eval × sample) pair — sample-weighted, not a
     # per-eval macro-mean.
@@ -122,6 +219,7 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
         passed_total = 0
         total_total = 0
         errored_count = 0
+        pooled_out = excluded.get(_eval_key(eval_dir), set())
 
         for sample_dir in _sample_dirs(arm_dir):
             grading = _load_json(sample_dir / "grading.json")
@@ -133,9 +231,15 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
-            assertions = grading.get("assertions", [])
+
+            assertions = [
+                assertion
+                for index, assertion in enumerate(grading.get("assertions", []))
+                if index not in pooled_out
+            ]
             if not assertions:
                 continue
+
             passed = sum(1 for assertion in assertions if assertion.get("passed"))
             sample_rates.append(passed / len(assertions))
             passed_total += passed
@@ -154,10 +258,11 @@ def _arm_stats(eval_dirs: list[Path], arm: str) -> dict:
 
         pass_rate_stdev = statistics.stdev(sample_rates) if len(sample_rates) > 1 else None
 
+        group, eval_id = _eval_key(eval_dir)
         per_eval.append(
             {
-                "group": eval_dir.parent.name,
-                "eval_id": eval_dir.name.removeprefix("eval-"),
+                "group": group,
+                "eval_id": eval_id,
                 "samples": len(sample_rates),
                 "errored_samples": errored_count,
                 "passed_total": passed_total,
@@ -262,7 +367,9 @@ def index_rows(
                         "sample": int(sample_dir.name.removeprefix("sample-")),
                         "errored": bool(grading.get("errored")),
                         "passed": sum(1 for assertion in assertions if assertion.get("passed")),
-                        "total": len(assertions),
+                        "total": sum(1 for assertion in assertions if not assertion.get("skipped")),
+                        "scoped": sum(1 for assertion in assertions if assertion.get("scoped")),
+                        "skipped": sum(1 for assertion in assertions if assertion.get("skipped")),
                         "duration_ms": timing.get("duration_ms"),
                         "judge_ms": timing.get("judge_ms"),
                         "total_tokens": timing.get("total_tokens"),
@@ -346,20 +453,27 @@ def _rate_cell(rate: float | None, delta_pp: float | None) -> str:
     return f"{rate:.0%} ({delta_pp:+.0f}pp)"
 
 
+def _column_order(benchmark: dict) -> list[str]:
+    """Return the arm column order: the baseline first, then the rest in declared order."""
+    arms = benchmark["arms"]
+    baseline = benchmark.get("baseline")
+
+    return ([baseline] if baseline in arms else []) + [
+        arm_name for arm_name in arms if arm_name != baseline
+    ]
+
+
 def _matrix_cells(benchmark: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:
     """Return the matrix's arm column order and its `(label, cells)` rows, footer last.
 
-    Columns are the baseline first, then the remaining arms in declared order. Rows come
-    from the roster, not the per-eval union, so an all-errored eval (which has no
-    per-eval row in any arm) still renders a row of — cells; the `All evals` footer
+    Rows come from the roster, not the per-eval union, so an all-errored eval (which has
+    no per-eval row in any arm) still renders a row of — cells; the `All evals` footer
     carries each arm's pooled rate. The Markdown and terminal renderers both consume
     this, so their cells never disagree.
     """
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
-    names = ([baseline] if baseline in arms else []) + [
-        arm_name for arm_name in arms if arm_name != baseline
-    ]
+    names = _column_order(benchmark)
     if not names:
         return [], []
 
@@ -400,6 +514,43 @@ def _matrix_table(benchmark: dict) -> list[str]:
         "|------|" + "|".join(["------"] * len(names)) + "|",
     ]
     for label, cells in rows:
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+
+    lines.append("")
+    return lines
+
+
+def _scoped_cell_text(cell: dict | str | None) -> str:
+    """Render one scoped-table cell: `skipped`, `pass`, `fail`, `k/n`, or `—` for None."""
+    if cell is None:
+        return "—"
+    if isinstance(cell, str):
+        return cell
+    if cell["passed"] == cell["total"]:
+        return "pass"
+    if cell["passed"] == 0:
+        return "fail"
+    return f"{cell['passed']}/{cell['total']}"
+
+
+def _scoped_table(benchmark: dict) -> list[str]:
+    """Return the scoped-assertions table: one row per line left out of the pooled rates."""
+    rows = benchmark["scoped"]
+    names = _column_order(benchmark)
+    if not rows or not names:
+        return []
+
+    lines = [
+        "## Scoped assertions",
+        "",
+        "Graded where their clause holds; not in the rates above.",
+        "",
+        "| Eval / assertion | " + " | ".join(names) + " |",
+        "|------|" + "|".join(["------"] * len(names)) + "|",
+    ]
+    for row in rows:
+        label = f"{row['group']}/{row['eval_id']} · {row['text']}"
+        cells = [_scoped_cell_text(row["arms"].get(name)) for name in names]
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
     lines.append("")
@@ -572,6 +723,7 @@ def _format_markdown(benchmark: dict) -> str:
 
     lines += [*_headline_lines(benchmark), ""]
     lines += _matrix_table(benchmark)
+    lines += _scoped_table(benchmark)
 
     for arm, stats in arms.items():
         if stats["n"] == 0 and not stats["errored_samples"]:
@@ -676,10 +828,11 @@ def build_benchmark(
 
     Returns:
         The benchmark dict: format_version, label, baseline, max_samples, unbanded,
-        roster, arms, runner, binder, planned_arms, observed_arms. Each non-baseline
-        arm's `delta_noise_pp` is None at one sample per cell, however many evals ran.
-        `unbanded` is True when a baseline exists and some arm carries a Δ against it
-        but no arm's Δ has a noise band — a comparison the reader can't weigh.
+        roster, arms, scoped, runner, binder, planned_arms, observed_arms. Each
+        non-baseline arm's `delta_noise_pp` is None at one sample per cell, however many
+        evals ran. `unbanded` is True when a baseline exists and some arm carries a Δ
+        against it but no arm's Δ has a noise band — a comparison the reader can't weigh.
+        `scoped` holds, per line some arm skipped, each arm's own verdict.
     """
     configured = list(arm_meta) if arm_meta else []
     # Require a graded sample so a stray subdir (__pycache__, editor temp) never becomes
@@ -693,7 +846,9 @@ def build_benchmark(
         }
     )
     arm_names = configured + [name for name in discovered if name not in configured]
-    arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name) for arm_name in arm_names}
+
+    excluded = _excluded_indices(eval_dirs, arm_names)
+    arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name, excluded) for arm_name in arm_names}
 
     # A declared baseline with no rate on disk (never ran, or all samples errored) coerces
     # to None, so arms score absolutely instead of against an absent baseline.
@@ -758,6 +913,7 @@ def build_benchmark(
         "unbanded": unbanded,
         "roster": roster,
         "arms": arm_stats,
+        "scoped": _scoped_rows(eval_dirs, arm_names, excluded),
         "runner": runner,
         "binder": binder,
         # Planned config vs observed execution, mirroring meta.json v2: `planned_arms` is

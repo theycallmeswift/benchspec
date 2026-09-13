@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -389,7 +390,7 @@ def test_arm_stats_sums_binder_degraded_across_samples(tmp_path: Path) -> None:
     seed_arm(eval_root, "alpha", "trial", passes=1, total=1, sample=0, binder_degraded=2)
     seed_arm(eval_root, "alpha", "trial", passes=1, total=1, sample=1, binder_degraded=1)
 
-    stats = report._arm_stats([eval_root / "eval-alpha"], "trial")
+    stats = report._arm_stats([eval_root / "eval-alpha"], "trial", excluded={})
 
     assert stats["binder_degraded"] == 3
     assert stats["per_eval"][0]["group"] == "archive"
@@ -904,6 +905,8 @@ def test_index_rows_flatten_evals(tmp_path: Path) -> None:
         "errored": False,
         "passed": 2,
         "total": 2,
+        "scoped": 0,
+        "skipped": 0,
         "duration_ms": 1000,
         "judge_ms": 200,
         "total_tokens": 500,
@@ -1322,3 +1325,153 @@ def test_planned_arms_carry_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         "requested_version",
         "capabilities",
     ]
+
+
+def test_pooled_rates_exclude_a_line_skipped_in_any_arm(tmp_path: Path) -> None:
+    """Verify a line the baseline skipped leaves both arms' rates, so the delta is honest."""
+    # Three lines; the trial passes all three, the baseline passes its two graded lines
+    # and skips line 1 — pooled over lines 0 and 2, both arms sit at 100%.
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=3, total=3, skipped={1})
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=3, total=3)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["baseline"]["pass_rate"] == 1.0
+    assert bench["arms"]["trial"]["pass_rate"] == 1.0
+    assert bench["arms"]["trial"]["delta_pp"] == 0
+    assert bench["arms"]["trial"]["per_eval"][0]["total_total"] == 2
+    assert bench["arms"]["baseline"]["per_eval"][0]["total_total"] == 2
+
+
+def test_scoped_line_graded_in_every_arm_pools_and_is_not_listed(tmp_path: Path) -> None:
+    """Verify a clause that holds everywhere changes nothing: no exclusion, no scoped row."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    for sample_dir in (tmp_path / "archive" / "eval-alpha").glob("*/sample-0"):
+        grading = json.loads((sample_dir / "grading.json").read_text())
+        grading["assertions"][1]["scoped"] = True
+        (sample_dir / "grading.json").write_text(json.dumps(grading))
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["scoped"] == []
+    assert bench["arms"]["baseline"]["pass_rate"] == 0.5
+    assert bench["arms"]["trial"]["pass_rate"] == 1.0
+
+
+def test_scoped_rows_render_each_arm_cell(tmp_path: Path) -> None:
+    """Verify per-arm cells: `skipped`, pass, fail, `k/n` over samples, and — when absent."""
+    root = tmp_path / "archive"
+    seed_arm(root, "alpha", "baseline", passes=0, total=2, skipped={0})
+    seed_arm(root, "alpha", "trial", passes=2, total=2, sample=0)
+    seed_arm(root, "alpha", "trial", passes=0, total=2, sample=1)
+    seed_arm(root, "alpha", "other", passes=0, total=2, sample=0)
+    seed_arm(root, "alpha", "never", passes=0, total=2, errored=True)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        "label",
+        baseline="baseline",
+        arm_meta={"baseline": {}, "trial": {}, "other": {}, "never": {}},
+    )
+
+    assert bench["scoped"] == [
+        {
+            "group": "archive",
+            "eval_id": "alpha",
+            "index": 0,
+            "text": "a0",
+            "arms": {
+                "baseline": "skipped",
+                "trial": {"passed": 1, "total": 2},
+                "other": {"passed": 0, "total": 1},
+                "never": None,
+            },
+        }
+    ]
+
+    markdown = report._format_markdown(bench)
+
+    assert "## Scoped assertions" in markdown
+    assert "| archive/alpha · a0 | skipped | 1/2 | fail | — |" in markdown
+
+
+def test_scoped_table_renders_pass_when_every_sample_passed(tmp_path: Path) -> None:
+    """Verify a fully passing arm cell renders as `pass`."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=1, skipped={0})
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    markdown = report._format_markdown(bench)
+
+    assert "| archive/alpha · a0 | skipped | pass |" in markdown
+
+
+def test_no_scoped_lines_means_no_scoped_section(tmp_path: Path) -> None:
+    """Verify an unscoped run writes no `## Scoped assertions` heading."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=1)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    markdown = report._format_markdown(bench)
+
+    assert bench["scoped"] == []
+    assert "## Scoped assertions" not in markdown
+
+
+def test_multi_sample_pooling_keeps_the_noise_band_over_pooled_lines(tmp_path: Path) -> None:
+    """Verify a skipped line leaves every sample's rate, so the band covers pooled lines only."""
+    root = tmp_path / "archive"
+    for sample in (0, 1):
+        seed_arm(root, "alpha", "baseline", passes=2, total=2, sample=sample, skipped={1})
+        seed_arm(root, "alpha", "trial", passes=2, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["baseline"]["pass_rate"] == 1.0
+    assert bench["arms"]["trial"]["pass_rate"] == 1.0
+    assert bench["arms"]["trial"]["delta_pp"] == 0
+    assert bench["arms"]["trial"]["delta_noise_pp"] == 0.0
+    assert bench["scoped"][0]["arms"] == {
+        "baseline": "skipped",
+        "trial": {"passed": 2, "total": 2},
+    }
+
+
+def test_every_line_skipped_yields_no_rate_but_keeps_the_roster_row(tmp_path: Path) -> None:
+    """Verify an arm whose every line is skipped renders `—`, like an all-errored cell."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2, skipped={0, 1})
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["baseline"]["pass_rate"] is None
+    assert bench["arms"]["trial"]["pass_rate"] is None
+    assert {"group": "archive", "eval_id": "alpha"} in bench["roster"]
+    assert "| archive/alpha | — | — |" in report._format_markdown(bench)
+
+
+def test_index_rows_count_graded_scoped_and_skipped_lines(tmp_path: Path) -> None:
+    """Verify `total` counts graded lines only, beside `scoped` and `skipped` counts."""
+    seed_arm(tmp_path, "alpha", "baseline", passes=3, total=3, skipped={2})
+
+    rows = report.index_rows(tmp_path, "demo")
+
+    row = rows[0]
+    keys = list(row)
+    keys_after_total = keys[keys.index("total") + 1 :]
+    assert (row["passed"], row["total"]) == (2, 2)
+    assert (row["scoped"], row["skipped"]) == (1, 1)
+    assert keys_after_total[:2] == ["scoped", "skipped"]

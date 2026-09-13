@@ -26,7 +26,7 @@ class EvalCase:
     group: str  # the evals/<group>/ folder name; also the artifact-path slot
     eval_dir: Path  # evals/<group>/ — holds the eval file(s), workspace/, setup.sh
     eval_file: Path  # eval.md or <stem>.eval.md
-    eval: dict  # {id, prompt, assertions, history?} from parse_eval_md
+    eval: dict  # {id, prompt, assertions, clauses, history?} from parse_eval_md
 
     @property
     def skill(self) -> str:
@@ -52,6 +52,11 @@ class EvalCase:
     def assertions(self) -> list[str]:
         """Return assertion text for this discovered case."""
         return self.eval["assertions"]
+
+    @property
+    def clauses(self) -> list[dict | None]:
+        """Return the scope clause beside each assertion (None where a line carries none)."""
+        return self.eval.get("clauses") or [None] * len(self.assertions)
 
     @property
     def history(self) -> list[dict]:

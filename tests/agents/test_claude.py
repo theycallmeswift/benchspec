@@ -691,12 +691,15 @@ def test_claude_bridge_script_symlinks_fixed_home() -> None:
 
 def test_claude_cell_env_carries_benchspec_vars() -> None:
     """Verify claude cell env carries benchspec vars."""
-    env = ClaudeCodeAgent().cell_env(arm="trial", model="opus", eval_set="popular-harnesses")
+    env = ClaudeCodeAgent().cell_env(
+        arm="trial", model="opus", eval_set="popular-harnesses", baseline="baseline"
+    )
 
     assert env["BENCHSPEC_ARM"] == "trial"
     assert env["BENCHSPEC_MODEL"] == "opus"
     assert env["BENCHSPEC_HARNESS"] == "claude-code"
     assert env["BENCHSPEC_SET"] == "popular-harnesses"
+    assert env["BENCHSPEC_BASELINE"] == "baseline"
     assert env["HOME"] == "/root"  # guest_env merged in
 
 

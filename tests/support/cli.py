@@ -54,15 +54,22 @@ def run_benchspec(
     )
 
 
-def write_eval(repo_root: Path, assertions: list[str], *, slug: str = "greets") -> Path:
+def write_eval(repo_root: Path, assertions: list[str] | str, *, slug: str = "greets") -> Path:
     """Write a minimal eval under `skills/demo/evals/<slug>/eval.md` and return its path.
 
-    A non-kebab `slug` makes the eval malformed, which is how the usage-error tests
-    trigger a `SchemaError` at discovery.
+    `assertions` is one prose line per list entry, or — as a string — the raw
+    `## Assertions` checklist Markdown written verbatim, for evals whose items carry
+    indented sub-bullets. A non-kebab `slug` makes the eval malformed, which is how the
+    usage-error tests trigger a `SchemaError` at discovery.
     """
     eval_file = repo_root / "skills" / "demo" / "evals" / slug / "eval.md"
     eval_file.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
+
+    if isinstance(assertions, str):
+        body = assertions
+    else:
+        body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
+
     header = dedent("""\
         ---
         ---
@@ -74,5 +81,6 @@ def write_eval(repo_root: Path, assertions: list[str], *, slug: str = "greets") 
         ## Assertions
 
     """)
+
     eval_file.write_text(header + body)
     return eval_file

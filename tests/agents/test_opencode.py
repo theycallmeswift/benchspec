@@ -1356,13 +1356,14 @@ def test_opencode_bridge_script_symlinks_fixed_home() -> None:
 def test_opencode_cell_env_carries_benchspec_vars() -> None:
     """Verify opencode cell env carries benchspec vars."""
     env = OpenCodeAgent(version="1.2.3").cell_env(
-        arm="trial", model="google/gemini-3.5-flash", eval_set="default"
+        arm="trial", model="google/gemini-3.5-flash", eval_set="default", baseline="baseline"
     )
 
     assert env["BENCHSPEC_ARM"] == "trial"
     assert env["BENCHSPEC_MODEL"] == "google/gemini-3.5-flash"
     assert env["BENCHSPEC_HARNESS"] == "opencode"
     assert env["BENCHSPEC_SET"] == "default"
+    assert env["BENCHSPEC_BASELINE"] == "baseline"
     assert env["HOME"] == "/root"  # guest_env merged in
 
 

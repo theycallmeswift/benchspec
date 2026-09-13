@@ -80,3 +80,75 @@ def test_run_without_gemini_key_exits_two_before_spawning_pytest(tmp_path: Path)
     assert "GEMINI_API_KEY" in result.stderr
     assert "Traceback" not in result.stderr
     assert "test session starts" not in result.stdout
+
+
+def test_run_collects_scoped_eval_same_cells_as_unscoped(tmp_path: Path) -> None:
+    """Verify a clause-bearing eval still parametrizes one cell per arm at collection, exit 0."""
+    repo_root = tmp_path / "repo"
+    write_eval(
+        repo_root,
+        dedent("""\
+            - [ ] Skill `hello` invoked
+              - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+            - [ ] ./out.md exists
+        """),
+    )
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec(
+        "run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "test_eval[greets-greets-baseline]" in result.stdout
+    assert "test_eval[greets-greets-trial]" in result.stdout
+    assert "2 tests collected" in result.stdout
+
+
+def test_run_rejects_unknown_clause_variable_at_collection(tmp_path: Path) -> None:
+    """Verify an unknown `{VAR}` in a clause fails collection naming the eval, clause, and arm."""
+    repo_root = tmp_path / "repo"
+    eval_file = write_eval(
+        repo_root,
+        dedent("""\
+            - [ ] ./out.md exists
+              - if: {NOPE} == 1
+        """),
+    )
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec(
+        "run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert str(eval_file.resolve()) in output
+    assert "if: {NOPE} == 1" in output
+    assert "baseline" in output  # the first (case × arm) pair the plugin resolves
+    assert "NOPE" in output
+
+
+def test_run_rejects_malformed_clause_at_collection(tmp_path: Path) -> None:
+    """Verify a second clause on one item is one `error:` line naming the eval and line, exit 2."""
+    repo_root = tmp_path / "repo"
+    eval_file = write_eval(
+        repo_root,
+        dedent("""\
+            - [ ] ./out.md exists
+              - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+              - if: {BENCHSPEC_ARM} == "trial"
+        """),
+    )
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec(
+        "run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.stderr.startswith("error:")
+    assert str(eval_file.resolve()) in result.stderr
+    assert 'if: {BENCHSPEC_ARM} == "trial"' in result.stderr
+    assert "already carries a clause" in result.stderr
+    assert "test session starts" not in result.stdout
