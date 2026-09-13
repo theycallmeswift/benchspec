@@ -123,8 +123,7 @@ Greet Alice by name.
 The empty `---`/`---` frontmatter is required even when the eval has no
 `history:`. Each `- [ ]` line is one plain-prose assertion. Keep the `./` anchor
 on paths so they read as workspace facts (the linter warns otherwise). The
-indented `- if:` sub-bullet keeps the trigger line out of the baseline's rate,
-so the delta is the skill's lift rather than the set's shape
+`- if:` sub-bullet keeps the trigger line out of the baseline's rate
 ([scoping](writing-evals.md#scoping-an-assertion-to-arms)).
 
 > **Key concept:** the agent runs with its working directory set to `/workspace`,
@@ -250,12 +249,11 @@ Rendered, the report's headline and matrix for this walkthrough look like:
 | All evals | 0% | 100% (+100pp) |
 
 The band is zero here because every sample agreed; a real run's band is wider,
-and a delta inside it is labeled `within noise`. The scoped `` Skill `hello`
-invoked `` line is pooled in neither column; it gets its own row in the
-report's "Scoped assertions" table, `skipped` under `baseline`. The full report
-continues with per-arm detail (timing, tokens, per-eval rates) and a provenance
-section recording which agent version and sandbox snapshot each arm ran on.
-Alongside it:
+and a delta inside it is labeled `within noise`. The scoped trigger line is in
+neither column; it has its own row under "Scoped assertions", `skipped` for
+`baseline`. The full report continues with per-arm detail (timing, tokens,
+per-eval rates) and a provenance section recording which agent version and
+sandbox snapshot each arm ran on. Alongside it:
 
 - `meta.json`: the run manifest (identity, planned arms, observed provenance).
 - `index.jsonl`: one row per `(eval × arm × sample)`, for aggregation.
