@@ -255,9 +255,9 @@ plugin option, so the same knobs work when driving pytest directly:
 Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
-benchspec run -- -k greets-by-name     # one eval (substring match on the test id)
+benchspec run -- --count 3             # 3 samples per cell (pytest-repeat) so deltas carry a noise band
 benchspec run -- -n 8                  # fan cells across 8 sandboxes (pytest-xdist)
-benchspec run -- --count 5             # 5 samples per cell (pytest-repeat)
+benchspec run -- -k greets-by-name     # one eval (substring match on the test id)
 benchspec run -- --collect-only -q     # list the cells without running
 ```
 
@@ -278,8 +278,18 @@ A few plugin options have no curated `run` flag and are reached the same way:
 falls below the threshold fails the run with exit `1`. The gate is **per group**
 even though the report is pooled, so a regression in one group is never averaged
 away by another group's win. `--fail-under 0` means "every arm must at least
-match baseline in every group". The gate uses the raw delta; check the
-`within noise` label in `benchmark.md` before trusting small numbers
+match baseline in every group":
+
+```bash
+benchspec run --fail-under 0 -- --count 3 -n 6
+```
+
+The gate uses the raw delta, and a banded (multi-sample) run is the
+precondition for reading it: a single-sample gate on a three-assertion eval
+moves in 33pp steps and flaps. Before trusting small numbers, read the run's
+own flags: a one-sample run prints `WARN samples:` under the terminal matrix
+and its `benchmark.md` headline says `single sample, no noise band`; a banded
+run labels a delta `within noise` when it sits inside its band
 ([`results.md`](results.md#noise-samples-and-flakiness)). Groups with no
 computable delta are exempt.
 

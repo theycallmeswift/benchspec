@@ -149,12 +149,12 @@ credential at the network boundary, Docker as a plain container environment
 variable the agent can read. [`sandbox.md`](docs/sandbox.md) has the tradeoff.
 
 `benchspec run` is pytest underneath, and everything after `--` goes to
-pytest verbatim: `benchspec run -- -k greets-by-name` (equivalently
-`pytest -k greets-by-name`) runs one eval, `-n 8` fans cells across eight
-sandboxes, and `--count 5` samples each cell five times so the report can flag a
-delta that sits within noise. The repo's own `make e2e` defaults to six
-workers through the `WORKERS` variable; `make e2e WORKERS=1` runs the cells
-sequentially.
+pytest verbatim. The normal run is `benchspec run -- --count 3`: three samples
+per cell (pytest-repeat), so every delta carries a noise band; a one-sample run
+is flagged in the report. `-n 8` fans cells across eight sandboxes to keep it
+fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
+eval. The repo's own `make e2e` defaults to six workers through the `WORKERS`
+variable; `make e2e WORKERS=1` runs the cells sequentially.
 
 ## Why benchspec
 
