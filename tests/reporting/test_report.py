@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -1475,3 +1476,128 @@ def test_index_rows_count_graded_scoped_and_skipped_lines(tmp_path: Path) -> Non
     assert (row["passed"], row["total"]) == (2, 2)
     assert (row["scoped"], row["skipped"]) == (1, 1)
     assert keys_after_total[:2] == ["scoped", "skipped"]
+
+
+def test_noise_band_pairs_by_eval_so_difficulty_spread_cannot_hide_a_delta(
+    tmp_path: Path,
+) -> None:
+    """Verify a delta that reproduces exactly is not labeled within noise."""
+    # Two evals of very different difficulty, zero rerun variance: every sample of a
+    # cell agrees with every other, so rerunning the suite gives the same +12.5pp.
+    # Pooling the rates across evals first would count that difficulty spread twice
+    # and yield a ±28pp band, burying a perfectly reproducible lift.
+    root = tmp_path / "archive"
+    for sample in range(3):
+        seed_arm(root, "easy", "baseline", passes=0, total=4, sample=sample)
+        seed_arm(root, "easy", "trial", passes=1, total=4, sample=sample)
+        seed_arm(root, "hard", "baseline", passes=4, total=4, sample=sample)
+        seed_arm(root, "hard", "trial", passes=4, total=4, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial = bench["arms"]["trial"]
+
+    assert trial["delta_pp"] == pytest.approx(12.5)
+    assert trial["delta_noise_pp"] == pytest.approx(0.0)
+    assert trial["delta_noise_basis"] == "paired"
+    assert "within noise" not in "\n".join(report._headline_lines(bench))
+
+
+def test_noise_band_at_one_eval_matches_the_pooled_formula(tmp_path: Path) -> None:
+    """Verify the band is unchanged where only one eval is paired."""
+    # A single eval has no eval-to-eval spread to cancel, so its pooled stdev *is* its
+    # rerun stdev and the paired band is algebraically the old one. Pinned so the
+    # quickstart walkthrough and the per-group `--fail-under` rebuild, both single-eval,
+    # keep the numbers they printed before the pairing change.
+    root = tmp_path / "archive"
+    for sample, (base_passes, trial_passes) in enumerate(((0, 2), (1, 1), (0, 2))):
+        seed_arm(root, "alpha", "baseline", passes=base_passes, total=2, sample=sample)
+        seed_arm(root, "alpha", "trial", passes=trial_passes, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial, baseline = bench["arms"]["trial"], bench["arms"]["baseline"]
+    pooled = 100 * math.sqrt(
+        trial["pass_rate_stdev"] ** 2 / trial["n"]
+        + baseline["pass_rate_stdev"] ** 2 / baseline["n"]
+    )
+
+    assert trial["delta_noise_pp"] == pytest.approx(pooled)
+    assert trial["delta_noise_basis"] == "unpaired"
+
+
+def test_noise_band_still_widens_with_rerun_noise(tmp_path: Path) -> None:
+    """Verify real sample-to-sample scatter still produces a band."""
+    # Pairing removes eval-to-eval spread, not rerun noise: arms that disagree with
+    # themselves between samples must still be banded.
+    root = tmp_path / "archive"
+    for sample, passes in enumerate((2, 0, 2)):
+        seed_arm(root, "alpha", "trial", passes=passes, total=2, sample=sample)
+        seed_arm(root, "beta", "trial", passes=2 - passes, total=2, sample=sample)
+    for sample in range(3):
+        seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(root, "beta", "baseline", passes=1, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["trial"]["delta_noise_pp"] > 0
+
+
+def test_noise_band_skips_an_eval_only_one_arm_graded(tmp_path: Path) -> None:
+    """Verify an eval missing from one arm drops out of the pair set."""
+    # Every sample of `orphan` errored in the baseline, so that arm has no per-eval row
+    # and the eval carries no delta. It must not contribute a one-sided term.
+    root = tmp_path / "archive"
+    for sample in range(2):
+        seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(root, "alpha", "trial", passes=2, total=2, sample=sample)
+        seed_arm(root, "orphan", "baseline", passes=0, total=2, sample=sample, errored=True)
+        seed_arm(root, "orphan", "trial", passes=2, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial, baseline = bench["arms"]["trial"], bench["arms"]["baseline"]
+
+    paired = report._paired_evals(trial, baseline)
+    assert [row_a["eval_id"] for row_a, _ in paired] == ["alpha"]
+    assert trial["delta_noise_pp"] is not None
+    assert trial["delta_noise_basis"] == "unpaired"
+
+
+def test_noise_band_none_when_no_eval_is_paired(tmp_path: Path) -> None:
+    """Verify a run whose arms share no eval reports no band and reads as unbanded."""
+    root = tmp_path / "archive"
+    for sample in range(2):
+        seed_arm(root, "only-baseline", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(root, "only-trial", "trial", passes=2, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial = bench["arms"]["trial"]
+
+    assert trial["delta_pp"] is not None
+    assert trial["delta_noise_pp"] is None
+    assert trial["delta_noise_basis"] is None
+    assert bench["unbanded"] is True
+
+
+def test_headline_states_the_band_coverage(tmp_path: Path) -> None:
+    """Verify the rendered band names its coverage, so it is not read as a 95% interval."""
+    root = tmp_path / "archive"
+    for sample in range(3):
+        seed_arm(root, "alpha", "baseline", passes=0, total=2, sample=sample)
+        seed_arm(root, "alpha", "trial", passes=2, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert report._headline_lines(bench) == [
+        "**trial:** baseline 0% → trial 100% (**+100pp**) — noise band ±0pp (1 SE)"
+    ]
