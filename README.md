@@ -29,6 +29,14 @@ transcript, trust the vibe. benchspec turns that guess into a measurement.
 Write the goal once, run it across the configurations you care about, and read
 off — in percentage points — how good each one actually is at accomplishing it.
 
+> **When to use benchspec.** If the question is only whether one plugin helps
+> Claude Code, Claude Code's built-in `claude plugin eval` answers it with one
+> credential and no sandbox. benchspec is for the next questions: which harness,
+> which model, which configuration; tasks that start from real files; and checks
+> on what the workspace looks like afterward, including that seeded files were
+> left alone. [benchspec vs. the alternatives](#benchspec-vs-the-alternatives)
+> places it against four other tools.
+
 ## What you need
 
 | | |
@@ -156,19 +164,36 @@ fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
 eval. The repo's own `make e2e` defaults to six workers through the `WORKERS`
 variable; `make e2e WORKERS=1` runs the cells sequentially.
 
-## Why benchspec
+## benchspec vs. the alternatives
 
-- **Comparison is first-class.** A single pass rate is a number without a
-  reference point. Arms and a baseline make the headline a delta; skip the
-  baseline when absolute rates are what you want.
-- **Deterministic where possible, judged where necessary.** The binder is tuned
-  so a false positive, a surface check passing on wrong output, is the one
-  unacceptable error; anything doubtful goes to the judge, which sees the
-  collected evidence and never grades from recall.
-- **Self-describing artifacts.** Every run writes `meta.json` (planned config
-  plus observed provenance, down to the agent version inside the guest),
-  `index.jsonl` (one row per sample), and `benchmark.json`, so other tools can
-  aggregate runs without knowing the directory layout.
+benchspec is not the only way to measure an agent, and for a narrow enough
+question it is not the fastest. Four things it does that the others do not:
+
+- **Any arms, not two.** Harness, model, effort, env, and provider per arm;
+  three harnesses in one set; a `--models` sweep. The report is the matrix.
+- **A real workspace.** The eval's `workspace/` seed is copied into a clean room
+  and hashed before the agent starts, so `left unchanged` is a decidable claim
+  and not just `was created`.
+- **Prose assertions, deterministic where possible.** No grader DSL: the binder
+  binds each line to a mechanical checker where it can do so without risk and
+  punts the rest to a judge that can be a different vendor from the arms.
+- **Honest numbers.** Errored is not failed, every delta at two or more samples
+  carries a noise band, and `meta.json` records the agent version observed
+  inside the guest next to the config that was planned.
+
+Where each alternative is the better answer:
+
+| | Reach for it when | What benchspec adds |
+|---|---|---|
+| [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals) | The question is whether one plugin helps Claude Code. It is built into Claude Code, needs one credential and no container, and interviews you to write the suite. | A second harness, arms other than with-and-without, a seeded and hashed workspace, and a judge from another vendor. |
+| [Inspect AI](https://inspect.aisi.org.uk/) | You write Python, and you want off-the-shelf evals, remote execution at scale, or `pass@k` reducers. | The eval is a Markdown file of prose claims rather than a scorer you implement, and the report is an arms-versus-baseline delta without assembling one. |
+| [Harbor](https://www.harborframework.com/) / Terminal-Bench | You want to rank agents on a standard published benchmark, with a long list of agent CLIs already integrated. | Your tasks and your baseline. The question is whether your change helped, not where an agent sits on a leaderboard. |
+| [Coder Eval](https://github.com/UiPath/coder_eval) | You want typed YAML criteria with weights and fractional credit, or its GitHub Action. | Prose assertions with no criterion schema to learn, pre-run hashes behind `left unchanged`, and a noise band on the delta. |
+| [promptfoo](https://www.promptfoo.dev/) | What you are grading is a prompt and the reply it produced. | Grading of the workspace the agent left behind, rather than the sentence it wrote about what it did. |
+
+A longer, sourced comparison — what each one's unit of evaluation, isolation,
+and statistics actually are — is in
+[`docs/research/2026-09-13-alternatives-landscape.md`](docs/research/2026-09-13-alternatives-landscape.md).
 
 ## Documentation
 
