@@ -19,7 +19,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from benchspec.agents import CodingAgent, make_agent
+from benchspec.agents import DEFAULT_AGENT_TIMEOUT, CodingAgent, make_agent
 from benchspec.agents.base import probe_guest_version
 from benchspec.config.arms import Arm, expand_env
 from benchspec.grading import binder, checkers
@@ -253,6 +253,7 @@ async def _run_arm_turns(
     arm_env: dict[str, str] | None = None,
     eval_set: str = "",
     harness_args: list[str] | None = None,
+    timeout: int = DEFAULT_AGENT_TIMEOUT,
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm."""
     # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
@@ -274,6 +275,7 @@ async def _run_arm_turns(
         arm_env=arm_env,
         eval_set=eval_set,
         harness_args=harness_args,
+        timeout=timeout,
         backend=backend,
     ) as run:
         # Probe the task-harness binary INSIDE the live snapshot before the task runs, so
@@ -459,6 +461,7 @@ def run_eval_arm(
             arm_env=expand_env(arm.env, os.environ),
             eval_set=eval_set,
             harness_args=arm.harness_args,
+            timeout=arm.timeout,
         )
     )
 

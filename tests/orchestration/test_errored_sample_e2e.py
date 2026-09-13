@@ -5,12 +5,15 @@ Each test drives the real adapter's `invoke` (Claude Code, Codex, OpenCode) thro
 that plays back a real harness stream on stdout and then exits non-zero, the way a harness
 that crashes after its last tool call does. The sample must still be recorded as errored,
 and it must keep its evidence: `session.jsonl`, a transcript with the tool calls it made,
-and the tokens it spent.
+and the tokens it spent. A guest that never answers is the other infra failure: the arm's
+timeout must cut the turn off and record the sample as errored rather than hang or score it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -113,6 +116,89 @@ class _CrashingHarnessSession:
             detect_skill=detect_skill,
             extra_env=None,
             harness_args=None,
+        )
+
+
+# How long the stalled guest would block if nothing cut it off; every test caps it far lower.
+STALL_SECONDS = 30
+
+
+class _StalledGuest(FakeSandbox):
+    """A guest whose exec never answers, bounded only by the caller's `timeout`.
+
+    Mirrors the live backends' exec contract: the await is capped with `asyncio.wait_for`,
+    and expiry surfaces as a `TimeoutError` naming the command and the cap, which the
+    adapter records as a `<sandbox-error>` turn.
+    """
+
+    async def exec(
+        self,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        stdin: bytes | None = None,
+    ) -> FakeExecOutput:
+        """Record the exec, then stall until `timeout` cuts it off."""
+        self.calls.append(
+            ("exec", cmd, args, {"cwd": cwd, "env": env, "timeout": timeout, "stdin": stdin})
+        )
+        try:
+            await asyncio.wait_for(asyncio.sleep(STALL_SECONDS), timeout)
+        except TimeoutError as error:
+            raise TimeoutError(f"exec of {cmd} timed out after {timeout}s") from error
+        return self.default_exec
+
+
+class _StalledHarnessSession:
+    """A session whose one turn runs the real adapter against a guest that never answers.
+
+    Mirrors `SandboxSession`: the `timeout` the factory is opened with is the one handed to
+    the adapter's `invoke`, so the arm's configured cap is what cuts the stalled turn off.
+    """
+
+    def __init__(self, agent: CodingAgent) -> None:
+        """Hold the adapter under test and the guest that stalls."""
+        self._agent = agent
+        self._sandbox = _StalledGuest()
+        self._timeout: int | None = None
+
+    def __call__(self, **kwargs: object) -> _StalledHarnessSession:
+        """Act as the session factory, keeping the `timeout` the orchestration passed."""
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, int)
+        self._timeout = timeout
+        return self
+
+    async def __aenter__(self) -> TurnRunner:
+        """Enter the session, exposing the per-turn runner."""
+        return self._run
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Exit the session; the fake guest needs no teardown."""
+        return None
+
+    async def _run(
+        self, prompt: str, *, resume_session_id: str | None, detect_skill: str | None
+    ) -> RunResult:
+        """Run the one turn through the real adapter under the session's timeout."""
+        assert self._timeout is not None
+        return await self._agent.invoke(
+            self._sandbox,
+            prompt,
+            eval_id="alpha",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="provider/model",
+            effort="medium",
+            resume_session_id=resume_session_id,
+            detect_skill=detect_skill,
+            extra_env=None,
+            harness_args=None,
+            timeout=self._timeout,
         )
 
 
@@ -258,3 +344,55 @@ def test_errored_sample_headlines_stderr_but_keeps_the_stream(
     assert transcript[0]["tool_call_count"] >= 1
     assert timing["total_tokens"] > 0
     assert (run_dir / "session.jsonl").is_file()
+
+
+@pytest.mark.parametrize(
+    ("harness", "agent"),
+    [
+        pytest.param(
+            "claude-code",
+            ClaudeCodeAgent(auth_value="sk-test", version="latest"),
+            id="claude-code",
+        ),
+        pytest.param(
+            "codex",
+            CodexAgent(auth_value="sk-test", auth_env="CODEX_API_KEY", version="latest"),
+            id="codex",
+        ),
+        pytest.param(
+            "opencode",
+            OpenCodeAgent(auth_value="sk-test", auth_env="ANTHROPIC_API_KEY", version="latest"),
+            id="opencode",
+        ),
+    ],
+)
+def test_timed_out_sample_is_recorded_as_errored(
+    tmp_path: Path, harness: str, agent: CodingAgent
+) -> None:
+    """A turn that outlives the arm's timeout is cut off and lands as an errored sample."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    outcome = run_eval_arm(
+        _eval_case(tmp_path),
+        Arm("trial", harness, "provider/model", timeout=1),
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=_StalledHarnessSession(agent),
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
+    grading = json.loads((run_dir / "grading.json").read_text())
+    transcript = json.loads((run_dir / "transcript.json").read_text())
+    assert outcome.errored is True
+    assert grading["errored"] is True
+    assert transcript[0]["is_error"] is True
+    assert transcript[0]["result"].startswith("<sandbox-error>")
+    assert "timed out after 1s" in transcript[0]["result"]

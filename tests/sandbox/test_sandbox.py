@@ -68,6 +68,14 @@ def _exec_stream_kwargs(fake: FakeSandbox) -> dict[str, object]:
     return kwargs
 
 
+def _first_exec_timeout(fake: FakeSandbox) -> object:
+    """The `timeout` keyword of the first `exec` call recorded on `fake`."""
+    exec_call = next(call for call in fake.calls if call[0] == "exec")
+    kwargs = exec_call[3]
+    assert isinstance(kwargs, dict)
+    return kwargs["timeout"]
+
+
 def _route_via_fake_vm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -648,6 +656,89 @@ def test_arm_session_runs_turn_and_tears_down(
     assert isinstance(response, RunResult)
     assert response.result_text == "ok"
     assert fake.stopped is True
+
+
+def test_arm_session_hands_timeout_to_invoke(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The session's `timeout` is the cap the agent's exec runs under."""
+    fake = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(
+                0,
+                '{"type":"result","result":"ok","is_error":false,"session_id":"s","usage":{}}',
+            ),
+        ]
+    )
+
+    async def fake_create(**kwargs: object) -> FakeSandbox:
+        """Fake create."""
+        return fake
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+
+    async def drive() -> RunResult:
+        """Drive."""
+        async with sandbox.arm_session(
+            agent=agent,
+            snapshot="snap",
+            eval_id="e1",
+            config="with_skill",
+            host_workdir=tmp_path / "wd",
+            host_repo_root=tmp_path,
+            model="sonnet",
+            effort="medium",
+            backend=microsandbox_backend,
+            timeout=42,
+        ) as run:
+            return await run("prompt", resume_session_id=None, detect_skill=None)
+
+    asyncio.run(drive())
+
+    assert _first_exec_timeout(fake) == 42
+
+
+def test_arm_session_defaults_timeout_to_agent_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A session opened without a `timeout` runs the agent under the built-in cap."""
+    fake = FakeSandbox(
+        exec_outputs=[
+            FakeExecOutput(
+                0,
+                '{"type":"result","result":"ok","is_error":false,"session_id":"s","usage":{}}',
+            ),
+        ]
+    )
+
+    async def fake_create(**kwargs: object) -> FakeSandbox:
+        """Fake create."""
+        return fake
+
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
+    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+
+    async def drive() -> RunResult:
+        """Drive."""
+        async with sandbox.arm_session(
+            agent=agent,
+            snapshot="snap",
+            eval_id="e1",
+            config="with_skill",
+            host_workdir=tmp_path / "wd",
+            host_repo_root=tmp_path,
+            model="sonnet",
+            effort="medium",
+            backend=microsandbox_backend,
+        ) as run:
+            return await run("prompt", resume_session_id=None, detect_skill=None)
+
+    asyncio.run(drive())
+
+    assert _first_exec_timeout(fake) == 600
 
 
 def test_arm_session_propagates_create_failure(

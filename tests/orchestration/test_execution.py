@@ -966,6 +966,38 @@ def test_run_eval_arm_threads_harness_args(tmp_path: Path) -> None:
     assert session_factory.calls[0]["harness_args"] == ["--plugin-dir", "/project"]
 
 
+def test_run_eval_arm_threads_arm_timeout(tmp_path: Path) -> None:
+    """The arm's turn timeout reaches the session factory unchanged."""
+    workspace.set_current_iteration("iteration_01")
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+
+    eval_case = _case(
+        tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
+    )
+    eval_arm = Arm("slow", "claude-code", "opus", timeout=1800)
+    session_factory = _RecordedSession(
+        RunResult("alpha", "slow", "done", 1, 1, False, session_id="session-alpha", fired=True),
+    )
+
+    run_eval_arm(
+        eval_case,
+        eval_arm,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=session_factory,
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert session_factory.calls[0]["timeout"] == 1800
+
+
 def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
