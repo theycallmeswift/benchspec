@@ -278,7 +278,8 @@ Activation deserves one more note: it is an ordinary assertion, graded
 symmetrically across arms. There is no separate trigger-eval format and no
 invocation gate. On a trial arm the positive form typically passes; on a baseline
 arm (no skill installed) it fails, and that asymmetry is part of the delta you are
-measuring. A trial arm that fails its own activation assertion is a routing
+measuring, unless the line is [scoped](#scoping-an-assertion-to-arms) off the
+baseline. A trial arm that fails its own activation assertion is a routing
 finding: the skill was there and the agent did not use it.
 
 ## The authoring loop: `lint`, then `analyze`
