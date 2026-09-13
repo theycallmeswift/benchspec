@@ -111,6 +111,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="scalar override of the selected set's `effort` default",
     )
     group.addoption(
+        "--benchspec-timeout",
+        type=int,
+        default=None,
+        help="scalar override of the selected set's `timeout` default: the wall-clock cap "
+        "on one agent turn, seconds (default: 600, or the set/arm `timeout`)",
+    )
+    group.addoption(
         "--benchspec-env",
         action="append",
         default=[],
@@ -368,6 +375,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                 "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
+                "timeout": arm.timeout,
                 "env": report.redact_env(arm.env),
                 "harness_args": arm.harness_args,
             }

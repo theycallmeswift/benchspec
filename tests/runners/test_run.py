@@ -74,6 +74,7 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
             "models",
             "harness",
             "effort",
+            "timeout",
             "eval_paths",
             "fail_under",
             "judge_harness",
@@ -148,6 +149,15 @@ def test_translates_config_model_harness_effort() -> None:
     assert "--benchspec-model=opus" in tokens
     assert "--benchspec-harness=claude-code" in tokens
     assert "--benchspec-effort=high" in tokens
+
+
+def test_translates_timeout_to_benchspec_timeout() -> None:
+    """Verify --timeout becomes a --benchspec-timeout token."""
+    args = _run_namespace(Path("repo"), timeout=5)
+
+    tokens = translate_run_flags(args)
+
+    assert "--benchspec-timeout=5" in tokens
 
 
 def test_translates_models_and_eval_paths_and_fail_under() -> None:

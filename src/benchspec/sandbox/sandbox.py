@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from benchspec.agents import (
+    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     CodingAgent,
     credential_preflight_error,
@@ -292,6 +293,7 @@ class SandboxSession:
         eval_set: str = "",
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
     ) -> None:
         """Initialize the instance."""
         self._agent = agent
@@ -307,6 +309,8 @@ class SandboxSession:
         self._arm_env = arm_env
         self._eval_set = eval_set
         self._harness_args = harness_args
+        # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
+        self._timeout = timeout
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
@@ -380,6 +384,7 @@ class SandboxSession:
             detect_skill=detect_skill,
             extra_env=self._arm_env,
             harness_args=self._harness_args,
+            timeout=self._timeout,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
@@ -412,6 +417,7 @@ def arm_session(
     eval_set: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
+    timeout: int = DEFAULT_AGENT_TIMEOUT,
 ) -> SandboxSession:
     """Open an async arm session around one sandboxed eval cell."""
     return SandboxSession(
@@ -430,6 +436,7 @@ def arm_session(
         eval_set=eval_set,
         project_marker=project_marker,
         harness_args=harness_args,
+        timeout=timeout,
     )
 
 

@@ -32,6 +32,7 @@ _SCALAR_OPTIONS = {
     "models": "--benchspec-models",
     "harness": "--benchspec-harness",
     "effort": "--benchspec-effort",
+    "timeout": "--benchspec-timeout",
     "eval_paths": "--benchspec-eval-paths",
     "fail_under": "--benchspec-fail-under",
     "judge_harness": "--benchspec-judge-harness",

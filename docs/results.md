@@ -56,11 +56,11 @@ assertion pass rate; every other cell shows its rate *and* delta:
 
 The `All evals` footer is each arm's pooled rate across every eval in the run.
 
-**Per-arm sections.** One per arm: pass rate, harness and model, pass-through
-args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, or
-`AUTH` have their values masked), time per sample (task + judge), tokens per
-sample, an errored-sample count, and a per-eval table with sample counts and
-flakiness (the stdev across samples).
+**Per-arm sections.** One per arm: pass rate, harness, model and turn timeout,
+pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
+`PASSWORD`, or `AUTH` have their values masked), time per sample (task + judge),
+tokens per sample, an errored-sample count, and a per-eval table with sample
+counts and flakiness (the stdev across samples).
 
 **Provenance.** One line per arm: the agent version observed *inside the guest*,
 the snapshot it ran from, and the pulled image digest. An arm that never produced
@@ -141,7 +141,7 @@ versus observed**:
 | `run_id` / `commit` / `config_hash` | Identity for cross-run joins. `config_hash` covers only planned selectors, never what happened to run or which binary versions were probed, so two runs of identical config hash identically. |
 | `iteration` / `started_at` / `benchspec_version` | Run bookkeeping. |
 | `set` / `runner` | The resolved set name and runner. |
-| `arms` | The **planned** roster: every configured arm (name, harness, model, effort, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
+| `arms` | The **planned** roster: every configured arm (name, harness, model, effort, timeout, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
 | `observed_arms` | The **observed** side, keyed by arm name: only arms with a persisted runtime record appear. Each carries the guest-probed `actual_version` and the sandbox identity (backend, snapshot, fingerprint and its inputs, pulled `image_digest`). Probes that fail record an explicit `*_status: "unavailable"` plus an error, never a silent null. |
 | `judge` | The resolved judge (harness, model, effort, timeout, redacted env, args) plus its host-probed `actual_version`. |
 | `binder` | The binder's transport identity: provider, model, API path. Never key material. |

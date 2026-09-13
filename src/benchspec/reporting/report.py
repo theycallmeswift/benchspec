@@ -66,6 +66,7 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
                 "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
+                "timeout": arm.timeout,
                 "env": redact_env(arm.env),
                 "harness_args": arm.harness_args,
                 "requested_version": agent.version(),
@@ -564,7 +565,10 @@ def _format_markdown(benchmark: dict) -> str:
         lines += [f"## {arm}", ""]
         lines.append(f"- Pass rate: **{_pct(stats['pass_rate'])}**")
         if stats.get("harness") or stats.get("model"):
-            lines.append(f"- Harness: {stats.get('harness')} · Model: `{stats.get('model')}`")
+            config_line = f"- Harness: {stats.get('harness')} · Model: `{stats.get('model')}`"
+            if stats.get("timeout") is not None:
+                config_line += f" · Timeout: {stats['timeout']}s"
+            lines.append(config_line)
         if stats.get("harness_args"):
             rendered_args = " ".join(_inline_code(arg) for arg in stats["harness_args"])
             lines.append(f"- Harness args: {rendered_args}")
@@ -643,8 +647,8 @@ def build_benchmark(
         label: Human-readable report label (the run/iteration name).
         baseline: Arm name every other arm's Δ is measured against, or None for
             absolute scoring. Coerced to None when the baseline has no rate on disk.
-        arm_meta: Per-arm run config (harness/model/effort/env/harness_args), keyed by
-            arm name. Its keys also declare the arm column order and force a
+        arm_meta: Per-arm run config (harness/model/effort/timeout/env/harness_args),
+            keyed by arm name. Its keys also declare the arm column order and force a
             configured-but-absent arm to appear as an empty column.
         planned: The complete configured arm roster in `planned_arms` shape — the same
             planned metadata carried by meta.json. Configured-but-unobserved arms are
@@ -688,6 +692,7 @@ def build_benchmark(
         stats["harness"] = metadata.get("harness")
         stats["model"] = metadata.get("model")
         stats["effort"] = metadata.get("effort")
+        stats["timeout"] = metadata.get("timeout")
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
 

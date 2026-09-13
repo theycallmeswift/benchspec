@@ -167,6 +167,39 @@ def test_build_manifest_config_hash_is_order_independent() -> None:
     assert manifest_a["config_hash"] == manifest_b["config_hash"]
 
 
+def test_build_manifest_config_hash_covers_arm_timeout() -> None:
+    """Verify two configs differing only in an arm's timeout hash differently."""
+    # The planned arm roster is part of the config, so changing one arm's turn timeout
+    # is a different plan and must not be mistaken for a rerun of the same one.
+    cfg_default = {
+        "set": "default",
+        "runner": "pytest",
+        "arms": [{"name": "baseline", "harness": "claude-code", "timeout": 600}],
+        "judge": {"harness": "claude-code"},
+        "binder": {"provider": "gemini"},
+    }
+    cfg_patient = {**cfg_default, "arms": [{**cfg_default["arms"][0], "timeout": 900}]}
+
+    manifest_default = manifest.build_manifest(
+        run_id="a" * 32,
+        started_at="t1",
+        commit="c1",
+        iteration="iteration_01",
+        cfg=cfg_default,
+        observed_arms={},
+    )
+    manifest_patient = manifest.build_manifest(
+        run_id="a" * 32,
+        started_at="t1",
+        commit="c1",
+        iteration="iteration_01",
+        cfg=cfg_patient,
+        observed_arms={},
+    )
+
+    assert manifest_default["config_hash"] != manifest_patient["config_hash"]
+
+
 def _seed_provenance(
     sample_dir: Path,
     arm: str,

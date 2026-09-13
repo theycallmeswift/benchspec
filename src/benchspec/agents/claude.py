@@ -19,6 +19,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
+    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
@@ -404,7 +405,7 @@ class ClaudeCodeAgent(BaseAgent):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
-        timeout: int = 600,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(

@@ -47,6 +47,132 @@ def test_parse_sets_basic_default_and_baseline() -> None:
     assert rs.defaults["model"] == "sonnet"
 
 
+def test_parse_sets_set_level_timeout_is_inherited_by_every_arm() -> None:
+    """Verify a set-level `timeout` reaches every arm that does not declare its own."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "timeout": 900,
+                    "arms": [
+                        {"name": "baseline", "harness": "claude-code"},
+                        {"name": "trial", "harness": "claude-code"},
+                    ],
+                },
+            }
+        )
+    )
+
+    resolved_set = resolve_set(rawsets, default, environ={})
+
+    assert rawsets["default"].defaults["timeout"] == 900
+    assert [arm.timeout for arm in resolved_set.arms] == [900, 900]
+
+
+def test_parse_sets_arm_level_timeout_wins_over_set_level() -> None:
+    """Verify an arm's own `timeout` overrides the set default."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "timeout": 900,
+                    "arms": [
+                        {"name": "baseline", "harness": "claude-code"},
+                        {"name": "trial", "harness": "claude-code", "timeout": 1800},
+                    ],
+                },
+            }
+        )
+    )
+
+    resolved_set = resolve_set(rawsets, default, environ={})
+
+    baseline, trial = resolved_set.arms
+    assert baseline.timeout == 900
+    assert trial.timeout == 1800
+
+
+def test_parse_sets_omitted_timeout_defaults_to_600() -> None:
+    """Verify an arm with no set or arm `timeout` gets the built-in 600 seconds."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "arms": [{"name": "baseline", "harness": "claude-code"}],
+                },
+            }
+        )
+    )
+
+    resolved_set = resolve_set(rawsets, default, environ={})
+
+    assert resolved_set.arms[0].timeout == 600
+
+
+def test_parse_sets_rejects_non_integer_set_level_timeout() -> None:
+    """Verify a string set-level `timeout` fails naming the set and the key."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "sonnet",
+                "timeout": "900",
+                "arms": [{"name": "baseline", "harness": "claude-code"}],
+            },
+        }
+    )
+
+    with pytest.raises(SchemaError) as excinfo:
+        parse_sets(table)
+
+    assert "[tool.benchspec.sets.default]" in str(excinfo.value)
+    assert "set-level" in str(excinfo.value)
+    assert "`timeout`" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -5], ids=["zero", "negative"])
+def test_parse_sets_rejects_non_positive_arm_level_timeout(bad_timeout: int) -> None:
+    """Verify a zero or negative arm-level `timeout` fails naming the arm and the key."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "sonnet",
+                "arms": [
+                    {"name": "baseline", "harness": "claude-code"},
+                    {"name": "trial", "harness": "claude-code", "timeout": bad_timeout},
+                ],
+            },
+        }
+    )
+
+    with pytest.raises(SchemaError) as excinfo:
+        parse_sets(table)
+
+    assert "[tool.benchspec.sets.default] arms[1]" in str(excinfo.value)
+    assert "arm-level" in str(excinfo.value)
+    assert "`timeout`" in str(excinfo.value)
+
+
+def test_parse_sets_rejects_boolean_timeout() -> None:
+    """Verify `timeout = true` is rejected even though bool is an int subclass."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "sonnet",
+                "arms": [{"name": "baseline", "harness": "claude-code", "timeout": True}],
+            },
+        }
+    )
+
+    with pytest.raises(SchemaError) as excinfo:
+        parse_sets(table)
+
+    assert "[tool.benchspec.sets.default] arms[0]" in str(excinfo.value)
+    assert "`timeout`" in str(excinfo.value)
+
+
 def test_parse_sets_rejects_legacy_flat_config() -> None:
     """Verify parse sets rejects legacy flat config."""
     # No [tool.benchspec.sets.*] but the old flat shape present → fail-fast pointer.
@@ -377,6 +503,31 @@ def test_resolve_set_scalar_overrides_replace_defaults() -> None:
 
     assert resolved_set.arms[0].model == "opus"
     assert resolved_set.arms[0].effort == "high"
+
+
+def test_resolve_set_timeout_override_replaces_set_default_only() -> None:
+    """Verify a CLI `timeout` overrides the set default but not an arm's own value."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "sonnet",
+                    "timeout": 900,
+                    "baseline": "base",
+                    "arms": [
+                        {"name": "base", "harness": "claude-code"},
+                        {"name": "slow", "harness": "claude-code", "timeout": 1800},
+                    ],
+                }
+            }
+        )
+    )
+
+    resolved_set = resolve_set(rawsets, default, timeout=300, environ={})
+
+    base, slow = resolved_set.arms
+    assert base.timeout == 300
+    assert slow.timeout == 1800
 
 
 def test_resolve_set_models_sweep_expands_one_arm_per_model() -> None:

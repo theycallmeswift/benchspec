@@ -25,6 +25,7 @@ class _SetConfig:
         model: str | None = None,
         harness: str | None = None,
         effort_level: str | None = None,
+        timeout: int | None = None,
         env: list[str] | None = None,
         models: str | None = None,
     ) -> None:
@@ -37,6 +38,7 @@ class _SetConfig:
             "benchspec_model": model,
             "benchspec_harness": harness,
             "benchspec_effort": effort_level,
+            "benchspec_timeout": timeout,
             "benchspec_env": env or [],
             "benchspec_models": models,
         }
@@ -87,6 +89,28 @@ def test_resolved_run_set_preserves_harness_args(tmp_path: Path) -> None:
 
     assert run_set.arms[0].harness_args == ["--set-flag"]
     assert run_set.arms[1].harness_args == ["--set-flag", "--plugin-dir", "/project"]
+
+
+def test_resolved_run_set_timeout_overrides_set_default_not_arm(tmp_path: Path) -> None:
+    """Verify --benchspec-timeout replaces the set default while an arm's own value stays."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.benchspec]\n"
+        'default-set = "default"\n'
+        "[tool.benchspec.sets.default]\n"
+        'harness = "claude-code"\n'
+        'model = "sonnet"\n'
+        "timeout = 900\n"
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  {name="baseline"},\n'
+        '  {name="slow", timeout=1800},\n'
+        "]\n"
+    )
+
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path, timeout=300))
+
+    assert run_set.arms[0].timeout == 300
+    assert run_set.arms[1].timeout == 1800
 
 
 def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: Path) -> None:
@@ -218,6 +242,7 @@ class _FakeConfig:
             "benchspec_config": None,
             "benchspec_harness": None,
             "benchspec_effort": None,
+            "benchspec_timeout": None,
             "benchspec_env": [],
             "benchspec_models": None,
             "benchspec_judge_harness": None,
