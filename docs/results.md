@@ -92,15 +92,21 @@ even across many evals — its `delta_noise_pp` is `null` — because eval-to-ev
 spread is not rerun noise.
 
 It is **paired by eval**: both arms run the same evals, so the band comes from
-each eval's own rerun variance, combined across the evals both arms graded.
-Pooling each arm's rates across evals first would count eval-to-eval difficulty
-spread twice — spread that cancels in the delta — and inflate the band until
-deltas that rerun exactly read as noise. An eval only one arm graded (every
-sample errored, or every line scoped out) drops out of the pair; with no paired
-eval there is no band at all. A single-eval run is unchanged: one eval's pooled
-stdev *is* its rerun stdev, so the number matches the old arithmetic exactly.
-`benchmark.json` names the arithmetic in `delta_noise_basis` — `paired`,
-`unpaired` at a single paired eval (where the two agree), or `null` with no band.
+each eval's own rerun variance, weighted by that eval's share of its arm's
+samples so it covers the same sample-weighted mean `delta_pp` reports. Pooling
+each arm's rates across evals first would count eval-to-eval difficulty spread
+twice — spread that cancels in the delta — and inflate the band until deltas
+that rerun exactly read as noise. `delta_noise_evals` counts the evals behind
+the band.
+
+Two shapes cost the band outright rather than skewing it, because `delta_pp`
+pools every eval an arm graded and a band has to cover the delta printed beside
+it: an eval only one arm graded (every sample errored, or every line scoped
+out), which would otherwise put the whole delta under a band computed from the
+evals the arms share; and a cell down to one surviving sample, whose rerun
+variance is unknown rather than zero. Both print `no noise band (uneven evals
+or a one-sample cell)` on the headline and set `unbanded`. A single-eval run is
+unchanged: one eval's pooled stdev *is* its rerun stdev.
 
 The band asks whether a delta would reproduce on a rerun of *this* suite, not
 whether it would generalize to other tasks: a skill that genuinely helps one
@@ -207,7 +213,7 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 `unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
-(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_basis`, errored and
+(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, errored and
 binder-degraded counts, per-eval rows), the `scoped` rows (`group`, `eval_id`,
 `index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
 `runner` and `binder` identity, and the same

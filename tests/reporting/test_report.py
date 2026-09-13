@@ -364,9 +364,11 @@ def test_delta_noise_pp_generalized(tmp_path: Path) -> None:
     )
 
     assert bench["arms"]["trial"]["delta_noise_pp"] >= 0
-    band = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
-    assert band is not None
+    banded = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
+    assert banded is not None
+    band, paired_evals = banded
     assert band >= 0
+    assert paired_evals == 1
 
 
 def test_errored_arm_excluded_from_stats(tmp_path: Path) -> None:
@@ -943,10 +945,10 @@ def test_noise_band_computed_from_arm_stdevs(tmp_path: Path) -> None:
     bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), label="alpha", baseline="baseline"
     )
-    band = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
+    banded = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
 
-    assert band is not None
-    assert band > 0
+    assert banded is not None
+    assert banded[0] > 0
 
 
 def test_noise_band_none_for_single_sample(tmp_path: Path) -> None:
@@ -1500,7 +1502,7 @@ def test_noise_band_pairs_by_eval_so_difficulty_spread_cannot_hide_a_delta(
 
     assert trial["delta_pp"] == pytest.approx(12.5)
     assert trial["delta_noise_pp"] == pytest.approx(0.0)
-    assert trial["delta_noise_basis"] == "paired"
+    assert trial["delta_noise_evals"] == 2
     assert "within noise" not in "\n".join(report._headline_lines(bench))
 
 
@@ -1525,7 +1527,7 @@ def test_noise_band_at_one_eval_matches_the_pooled_formula(tmp_path: Path) -> No
     )
 
     assert trial["delta_noise_pp"] == pytest.approx(pooled)
-    assert trial["delta_noise_basis"] == "unpaired"
+    assert trial["delta_noise_evals"] == 1
 
 
 def test_noise_band_still_widens_with_rerun_noise(tmp_path: Path) -> None:
@@ -1547,14 +1549,16 @@ def test_noise_band_still_widens_with_rerun_noise(tmp_path: Path) -> None:
     assert bench["arms"]["trial"]["delta_noise_pp"] > 0
 
 
-def test_noise_band_skips_an_eval_only_one_arm_graded(tmp_path: Path) -> None:
-    """Verify an eval missing from one arm drops out of the pair set."""
+def test_noise_band_refused_when_an_eval_only_one_arm_graded(tmp_path: Path) -> None:
+    """Verify an eval missing from one arm costs the band rather than skewing it."""
     # Every sample of `orphan` errored in the baseline, so that arm has no per-eval row
-    # and the eval carries no delta. It must not contribute a one-sided term.
+    # for it — but `delta_pp` still pools the trial's `orphan` rate, so the whole delta
+    # comes from an eval the baseline never graded. Banding the one eval the arms share
+    # would print that delta under a ±0pp band, which is worse than printing no band.
     root = tmp_path / "archive"
     for sample in range(2):
         seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
-        seed_arm(root, "alpha", "trial", passes=2, total=2, sample=sample)
+        seed_arm(root, "alpha", "trial", passes=1, total=2, sample=sample)
         seed_arm(root, "orphan", "baseline", passes=0, total=2, sample=sample, errored=True)
         seed_arm(root, "orphan", "trial", passes=2, total=2, sample=sample)
 
@@ -1565,8 +1569,13 @@ def test_noise_band_skips_an_eval_only_one_arm_graded(tmp_path: Path) -> None:
 
     paired = report._paired_evals(trial, baseline)
     assert [row_a["eval_id"] for row_a, _ in paired] == ["alpha"]
-    assert trial["delta_noise_pp"] is not None
-    assert trial["delta_noise_basis"] == "unpaired"
+    assert trial["delta_pp"] == pytest.approx(25.0)
+    assert trial["delta_noise_pp"] is None
+    assert trial["delta_noise_evals"] is None
+    assert bench["unbanded"] is True
+    assert "no noise band (uneven evals or a one-sample cell)" in "\n".join(
+        report._headline_lines(bench)
+    )
 
 
 def test_noise_band_none_when_no_eval_is_paired(tmp_path: Path) -> None:
@@ -1583,7 +1592,7 @@ def test_noise_band_none_when_no_eval_is_paired(tmp_path: Path) -> None:
 
     assert trial["delta_pp"] is not None
     assert trial["delta_noise_pp"] is None
-    assert trial["delta_noise_basis"] is None
+    assert trial["delta_noise_evals"] is None
     assert bench["unbanded"] is True
 
 
@@ -1601,3 +1610,99 @@ def test_headline_states_the_band_coverage(tmp_path: Path) -> None:
     assert report._headline_lines(bench) == [
         "**trial:** baseline 0% → trial 100% (**+100pp**) — noise band ±0pp (1 SE)"
     ]
+
+
+def test_noise_band_pins_the_combination_across_evals(tmp_path: Path) -> None:
+    """Verify the band's exact value at two evals with unequal, non-zero rerun spread."""
+    # A numeric pin, not an inequality: with every cell at three samples each eval enters
+    # at weight 3/6, so the band is 100·sqrt(Σ (n_i/n)²·sd_i²/n_i) over both arms —
+    # 0.25·(0.5774²/3) + 0.25·(0.2887²/3) + 0 + 0.25·(0.2887²/3), rooted, is 0.2041.
+    # Without this an estimator that divides by sqrt(k), or not at all, still passes.
+    root = tmp_path / "archive"
+    for sample, (alpha, beta) in enumerate(((2, 1), (0, 1), (2, 2))):
+        seed_arm(root, "alpha", "trial", passes=alpha, total=2, sample=sample)
+        seed_arm(root, "beta", "trial", passes=beta, total=2, sample=sample)
+    for sample, (alpha, beta) in enumerate(((1, 0), (1, 1), (1, 0))):
+        seed_arm(root, "alpha", "baseline", passes=alpha, total=2, sample=sample)
+        seed_arm(root, "beta", "baseline", passes=beta, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial = bench["arms"]["trial"]
+
+    assert trial["delta_pp"] == pytest.approx(33.333333333333336)
+    assert trial["delta_noise_pp"] == pytest.approx(20.41241452319315)
+    assert trial["delta_noise_evals"] == 2
+
+
+def test_noise_band_weights_evals_as_the_delta_does(tmp_path: Path) -> None:
+    """Verify a cell that lost a sample weighs the same in the band as in the delta."""
+    # `delta_pp` is a sample-weighted pooled mean, so an eval that lost a sample to an
+    # errored run contributes less to it. The band has to match that weighting or it
+    # describes an estimator the report never printed: weighting all four cells equally
+    # here gives ±22.44pp against the ±23.86pp that actually covers this delta.
+    root = tmp_path / "archive"
+    for sample, (alpha, beta) in enumerate(((2, 1), (0, 2), (2, None))):
+        seed_arm(root, "alpha", "trial", passes=alpha, total=2, sample=sample)
+        if beta is not None:
+            seed_arm(root, "beta", "trial", passes=beta, total=2, sample=sample)
+    seed_arm(root, "beta", "trial", passes=0, total=2, sample=2, errored=True)
+    for sample, (alpha, beta) in enumerate(((1, 0), (1, 1), (1, 0))):
+        seed_arm(root, "alpha", "baseline", passes=alpha, total=2, sample=sample)
+        seed_arm(root, "beta", "baseline", passes=beta, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    trial = bench["arms"]["trial"]
+
+    assert trial["delta_pp"] == pytest.approx(36.666666666666664)
+    assert trial["delta_noise_pp"] == pytest.approx(23.86303510546059)
+
+
+def test_noise_band_ignores_effect_heterogeneity(tmp_path: Path) -> None:
+    """Verify an effect that differs sharply between evals does not widen the band."""
+    # The band asks whether the delta reproduces on a rerun of this suite, not whether
+    # it generalizes to other tasks. A skill that helps one eval and hurts another is
+    # signal; with no rerun scatter the delta is exactly reproducible, so the band is 0.
+    root = tmp_path / "archive"
+    for sample in range(3):
+        seed_arm(root, "helped", "baseline", passes=0, total=2, sample=sample)
+        seed_arm(root, "helped", "trial", passes=2, total=2, sample=sample)
+        seed_arm(root, "hurt", "baseline", passes=2, total=2, sample=sample)
+        seed_arm(root, "hurt", "trial", passes=1, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["trial"]["delta_pp"] == pytest.approx(25.0)
+    assert bench["arms"]["trial"]["delta_noise_pp"] == pytest.approx(0.0)
+
+
+def test_noise_band_refused_when_a_cell_has_one_surviving_sample(tmp_path: Path) -> None:
+    """Verify a cell reduced to one sample costs the band and says so."""
+    # Two of `beta`'s three trial samples errored. One surviving sample leaves that
+    # cell's rerun variance unknown, not zero, so no band can cover the pooled delta —
+    # and the headline has to explain the absence at three samples, where the
+    # single-sample note does not fire.
+    root = tmp_path / "archive"
+    for sample in range(3):
+        seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(root, "alpha", "trial", passes=2, total=2, sample=sample)
+        seed_arm(root, "beta", "baseline", passes=1, total=2, sample=sample)
+    seed_arm(root, "beta", "trial", passes=2, total=2, sample=0)
+    for sample in (1, 2):
+        seed_arm(root, "beta", "trial", passes=0, total=2, sample=sample, errored=True)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+    headline = "\n".join(report._headline_lines(bench))
+
+    assert bench["max_samples"] == 3
+    assert bench["arms"]["trial"]["delta_pp"] is not None
+    assert bench["arms"]["trial"]["delta_noise_pp"] is None
+    assert "no noise band (uneven evals or a one-sample cell)" in headline
+    assert "single sample" not in headline
