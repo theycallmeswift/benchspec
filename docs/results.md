@@ -85,13 +85,28 @@ a runtime record is labeled `not observed`, never shown with fabricated identity
 
 A delta smaller than its sampling noise is a coin flip, not a lift. With at least
 two samples per arm (`--count N`), benchspec computes a noise band for each
-arm-vs-baseline delta (the standard error of the difference of the two arms'
-per-sample rates) and labels the headline **within noise** when `|Δ|` falls
-inside it. A one-sample run has no band even across many evals — its
-`delta_noise_pp` is `null` — because eval-to-eval spread is not rerun noise.
-Treat the band as a guardrail against over-reading small numbers, not
-a significance test: rates are pooled, sample-weighted means, not a paired
-analysis. The band, like the rates, covers pooled lines only.
+arm-vs-baseline delta and labels the headline **within noise** when `|Δ|` falls
+inside it. The band is one standard error (~68% coverage), printed as
+`— noise band ±Npp (1 SE)` — not a 95% interval. A one-sample run has no band
+even across many evals — its `delta_noise_pp` is `null` — because eval-to-eval
+spread is not rerun noise.
+
+It is **paired by eval**: both arms run the same evals, so the band comes from
+each eval's own rerun variance, combined across the evals both arms graded.
+Pooling each arm's rates across evals first would count eval-to-eval difficulty
+spread twice — spread that cancels in the delta — and inflate the band until
+deltas that rerun exactly read as noise. An eval only one arm graded (every
+sample errored, or every line scoped out) drops out of the pair; with no paired
+eval there is no band at all. A single-eval run is unchanged: one eval's pooled
+stdev *is* its rerun stdev, so the number matches the old arithmetic exactly.
+`benchmark.json` names the arithmetic in `delta_noise_basis` — `paired`,
+`unpaired` at a single paired eval (where the two agree), or `null` with no band.
+
+The band asks whether a delta would reproduce on a rerun of *this* suite, not
+whether it would generalize to other tasks: a skill that genuinely helps one
+eval more than another is signal, not noise, and widens nothing. Treat it as a
+guardrail against over-reading small numbers, not a significance test. The band,
+like the rates, covers pooled lines only.
 
 The `--fail-under` CI gate deliberately uses the **raw** delta
 ([`configuration.md`](configuration.md#the---fail-under-gate)); the label exists
@@ -192,10 +207,10 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 `unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
-(pass rate, stdev, `delta_pp`, `delta_noise_pp`, errored and binder-degraded
-counts, per-eval rows), the `scoped` rows (`group`, `eval_id`, `index`, `text`,
-a `{passed, total}` / `"skipped"` / `null` cell per arm), the `runner` and
-`binder` identity, and the same
+(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_basis`, errored and
+binder-degraded counts, per-eval rows), the `scoped` rows (`group`, `eval_id`,
+`index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
+`runner` and `binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
 `arms` here is *result stats*; `planned_arms` is configuration.
 

@@ -180,15 +180,15 @@ only for trivial tests (one setup line, one exercise-and-assert); anything past
 
 ```python
 def test_multi_sample_reports_zero_stdev(tmp_path):
-    iteration = tmp_path / "iteration-1"
-    iteration.mkdir()
-    seed_arm(iteration, "alpha", passes=2, total=2, sample=0)
-    seed_arm(iteration, "alpha", passes=2, total=2, sample=1)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=0)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=1)
 
-    benchmark = report.build_benchmark(iteration, label="iteration_01 · alpha")
+    benchmark = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01 · alpha"
+    )
 
-    assert benchmark["arms"]["alpha"]["pass_rate"] == 1.0
-    assert benchmark["arms"]["alpha"]["pass_rate_stdev"] == 0.0
+    assert benchmark["arms"]["trial"]["pass_rate"] == 1.0
+    assert benchmark["arms"]["trial"]["pass_rate_stdev"] == 0.0
 ```
 
 ## Tooling and version control
