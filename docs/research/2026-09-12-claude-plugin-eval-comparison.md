@@ -286,20 +286,31 @@ claude.ai artifact). What it settles:
   them together. Inspect AI separates `return None` (not applicable, no
   coverage count) from `Score.unscored()` (applicable, no verdict).
 
-Refined recommendation: option (a) with a property predicate rather than an
-arm name, trailing on the line:
+Refined recommendation: a property predicate rather than an arm name, as a
+`when:` sub-bullet under the assertion, the sibling-key shape Ansible,
+GitHub Actions and promptfoo use:
 
 ```markdown
-- [ ] Skill `hello` invoked @unless baseline
-- [ ] ./Greetings/Bob.md contains 'an absolute pleasure' @if GREETING_LOCALE=en-GB
-- [ ] Opens the note with Read, not Bash @if harness=claude-code
+- [ ] Skill `hello` invoked
+  - when: not baseline
+- [ ] ./Greetings/Bob.md contains 'an absolute pleasure'
+  - when: GREETING_LOCALE = en-GB
+- [ ] Opens the note with Read, not Bash
+  - when: harness = claude-code
 ```
 
 Keys are the variables `setup.sh` already receives (`arm`, `harness`,
-`model`, `set`, arm `env`), `baseline` resolves to the set's baseline arm,
-comma is OR within a key and AND across keys, as in Behave. The one open
-choice is the sigil: `@if`/`@unless` keeps the Gherkin look; `{if …}` reads
-as code. They parse identically.
+`model`, `set`, arm `env`); `baseline` resolves to the set's baseline arm;
+`and`, `or`, `not` as in Cucumber tag expressions. A `when:` under a
+display-only parent scopes all its children.
+
+Why the sub-bullet over a trailing `@if` token: an indented non-checkbox
+line is a hard error today (`specs/mdformat.py`), so the slot is unclaimed
+and no existing eval changes meaning; and the assertion text reaches the
+binder and judge untouched, so nothing has to be stripped before the
+binder's regex-drift guard compares a bound pattern verbatim against the
+line. The cost is two lines per scoped assertion and a second bullet kind
+inside the checklist. `when` should stay the only key.
 
 ### 2. Plumb the agent-turn timeout (#130)
 
