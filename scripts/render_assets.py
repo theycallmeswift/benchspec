@@ -411,13 +411,13 @@ def terminal_storyboard() -> list[tuple[list[TerminalLine], int]]:
     The command is typed a couple of characters per frame, the progress line lands in
     two beats, then the report is revealed one line at a time and held on the last frame.
     """
-    command = f"{PROJECT_NAME} run"
+    command = f"{PROJECT_NAME} run -- --count 3"
     typed_lengths = [*range(0, len(command), TYPING_CHARS_PER_FRAME), len(command)]
     frames = [([prompt_line(command[:length])], TYPING_FRAME_MS) for length in typed_lengths]
 
     prompt = prompt_line(command)
-    frames.append(([prompt, progress_line(1, complete=False)], FIRST_PROGRESS_FRAME_MS))
-    progress = progress_line(2, complete=True)
+    frames.append(([prompt, progress_line(3, complete=False)], FIRST_PROGRESS_FRAME_MS))
+    progress = progress_line(6, complete=True)
     frames.append(([prompt, progress], SECOND_PROGRESS_FRAME_MS))
 
     report = report_lines()

@@ -162,8 +162,9 @@ pytest verbatim. The normal run is `benchspec run -- --count 3`: three samples
 per cell (pytest-repeat), so every delta carries a noise band; a one-sample run
 is flagged in the report. `-n 8` fans cells across eight sandboxes to keep it
 fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
-eval. The repo's own `make e2e` defaults to six workers through the `WORKERS`
-variable; `make e2e WORKERS=1` runs the cells sequentially.
+eval. The repo's own `make e2e` defaults to three samples and six workers through
+the `COUNT` and `WORKERS` variables; `make e2e COUNT=1 WORKERS=1` is the quick
+sequential pass.
 
 ## benchspec vs. the alternatives
 
@@ -218,7 +219,7 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 2. **Confirm the suite collects.** Needs no credentials and no Docker:
 
    ```bash
-   make e2e EVAL_ARGS="--collect-only -q"   # 9 cells: 3 evals × 3 arms, then 12 through OpenRouter
+   make e2e EVAL_ARGS="--collect-only -q"   # 27 cells: 3 evals × 3 arms × 3 samples, then 36 through OpenRouter
    ```
 
 3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/)
@@ -244,8 +245,8 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 4. **Run it.** The cheapest real run is one eval, one sandbox:
 
    ```bash
-   make e2e WORKERS=1 EVAL_ARGS="-k greets-by-name"   # one eval, sequential
-   make e2e                                          # the whole suite, six sandboxes
+   make e2e COUNT=1 WORKERS=1 EVAL_ARGS="-k greets-by-name"   # one eval, one sample, sequential
+   make e2e                                                  # the whole suite, three samples, six sandboxes
    ```
 
    The first run builds the sandbox snapshot (about a minute); with the snapshot
