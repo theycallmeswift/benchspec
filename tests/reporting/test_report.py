@@ -1393,7 +1393,9 @@ def test_scoped_rows_render_each_arm_cell(tmp_path: Path) -> None:
             },
         }
     ]
+
     markdown = report._format_markdown(bench)
+
     assert "## Scoped assertions" in markdown
     assert "| archive/alpha · a0 | skipped | 1/2 | fail | — |" in markdown
 
@@ -1408,6 +1410,7 @@ def test_scoped_table_renders_pass_when_every_sample_passed(tmp_path: Path) -> N
     )
 
     markdown = report._format_markdown(bench)
+
     assert "| archive/alpha · a0 | skipped | pass |" in markdown
 
 
@@ -1420,8 +1423,10 @@ def test_no_scoped_lines_means_no_scoped_section(tmp_path: Path) -> None:
         report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
     )
 
+    markdown = report._format_markdown(bench)
+
     assert bench["scoped"] == []
-    assert "## Scoped assertions" not in report._format_markdown(bench)
+    assert "## Scoped assertions" not in markdown
 
 
 def test_multi_sample_pooling_keeps_the_noise_band_over_pooled_lines(tmp_path: Path) -> None:
@@ -1467,6 +1472,8 @@ def test_index_rows_count_graded_scoped_and_skipped_lines(tmp_path: Path) -> Non
     rows = report.index_rows(tmp_path, "demo")
 
     row = rows[0]
+    keys = list(row)
+    keys_after_total = keys[keys.index("total") + 1 :]
     assert (row["passed"], row["total"]) == (2, 2)
     assert (row["scoped"], row["skipped"]) == (1, 1)
-    assert list(row)[list(row).index("total") + 1 :][:2] == ["scoped", "skipped"]
+    assert keys_after_total[:2] == ["scoped", "skipped"]

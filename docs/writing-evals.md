@@ -136,20 +136,21 @@ every delta a structural lift. Scope such a line with one indented `- if:` or
 The line is graded in every arm where the clause holds and skipped in every arm
 where it does not: never bound, never judged, recorded in `grading.json` as
 `skipped` with the clause as its `reason`. `unless: X` is `if: not (X)`. One
-clause per item; under a display-only parent it applies to every child, and a
-child may carry its own (one indent deeper) only when the parent carries none.
+clause per item; a parent's clause sits directly under the parent line, before
+its children, and applies to every child; a child may carry its own (one indent
+deeper) only when the parent carries none.
 
-`{VAR}` reads the same variables `setup.sh` sees: `BENCHSPEC_ARM`,
+`{VAR}` reads the `BENCHSPEC_*` variables `setup.sh` sees — `BENCHSPEC_ARM`,
 `BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, `BENCHSPEC_BASELINE`
-(the set's baseline arm, empty when it declares none), plus the arm's own `env`
-keys. Every variable is a string. The clause `{BENCHSPEC_ARM} !=
-{BENCHSPEC_BASELINE}` is the canonical way to grade a trigger line off the
-baseline without naming it.
+(the set's baseline arm, empty when it declares none) — plus the arm's own `env`
+keys, and nothing else from the guest. Every variable is a string. The clause
+`{BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}` is the canonical way to grade a
+trigger line off the baseline without naming it.
 
 The expression language is small and typed: integer literals (`1`, `-3`),
 strings in double or single quotes, `true` / `false`, and `{VAR}` references;
 `==` and `!=` between two values of one type; `<`, `>`, `<=`, `>=` on integers
-only; `and`, `or`, `not` (in that order of increasing precedence) and
+only; `and`, `or`, `not` (`not` binds tightest, then `and`, then `or`) and
 parentheses. A bare word, a comparison across types (`{X} == 1` compares a
 string against an int), an ordering on a string or boolean, or an expression
 that is not a boolean is an error, never a silent `false`. Every such error, and

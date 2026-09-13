@@ -67,6 +67,12 @@ def test_bare_word_is_a_parse_error() -> None:
         scope.parse("{BENCHSPEC_HARNESS} == codex")
 
 
+def test_bare_word_beyond_ascii_is_reported_whole() -> None:
+    """Verify a bare word with non-ASCII letters is quoted whole, not cut at its first letter."""
+    with pytest.raises(scope.ScopeError, match="bare word `héllo`"):
+        scope.parse("{BENCHSPEC_HARNESS} == héllo")
+
+
 @pytest.mark.parametrize(
     "expr",
     [
@@ -129,13 +135,20 @@ def test_names_collects_every_reference() -> None:
     assert scope.names(expr) == {"A", "B", "C"}
 
 
+def test_applies_holds_for_if_when_the_expression_is_true() -> None:
+    """Verify `if: X` applies where X holds."""
+    variables = {"BENCHSPEC_HARNESS": "codex"}
+    clause = {"key": "if", "expr": '{BENCHSPEC_HARNESS} == "codex"'}
+
+    assert scope.applies(clause, variables) is True
+
+
 def test_applies_inverts_unless() -> None:
     """Verify `unless: X` is `if: not (X)`."""
     variables = {"BENCHSPEC_HARNESS": "codex"}
     clause = {"key": "unless", "expr": '{BENCHSPEC_HARNESS} == "codex"'}
 
     assert scope.applies(clause, variables) is False
-    assert scope.applies({**clause, "key": "if"}, variables) is True
 
 
 def test_applies_error_names_the_clause() -> None:
@@ -240,7 +253,7 @@ def test_applicable_unknown_name_names_the_eval_clause_and_arm(tmp_path: Path) -
     assert '`if: {NOPE} == "x"`' in message
     assert "arm `trial`" in message
     assert "{NOPE}" in message
-    assert "BENCHSPEC_BASELINE" in message  # the available names are listed
+    assert "BENCHSPEC_BASELINE" in message
 
 
 def test_arm_env_reference_expands_only_when_a_clause_reads_it(

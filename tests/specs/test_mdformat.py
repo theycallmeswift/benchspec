@@ -852,6 +852,63 @@ def test_parent_clause_applies_to_every_child(tmp_path: Path) -> None:
     ]
 
 
+def test_parent_clause_after_its_children_is_a_hard_error(tmp_path: Path) -> None:
+    """Verify a parent clause that arrives after the children raises, quoting that line."""
+    eval_path = _write_slug(
+        tmp_path,
+        "late-parent-clause",
+        """\
+        ---
+        {}
+        ---
+
+        ## Prompt
+
+        Scaffold the project.
+
+        ## Assertions
+
+        - [ ] the project was scaffolded:
+          - [ ] the ./src/ directory exists
+          - [ ] the ./tests/ directory exists
+          - if: {BENCHSPEC_ARM} == "trial"
+    """,
+    )
+
+    with pytest.raises(mdformat.MdFormatError, match="before its children") as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert 'if: {BENCHSPEC_ARM} == "trial"' in str(exc_info.value)
+
+
+def test_clause_without_a_space_after_the_colon_is_a_hard_error(tmp_path: Path) -> None:
+    """Verify a near-miss clause line names the exact `- if: <expr>` shape it needs."""
+    eval_path = _write_slug(
+        tmp_path,
+        "near-miss-clause",
+        """\
+        ---
+        {}
+        ---
+
+        ## Prompt
+
+        Do it.
+
+        ## Assertions
+
+        - [ ] ./out.md exists
+          - if:{BENCHSPEC_ARM} == "trial"
+    """,
+    )
+
+    with pytest.raises(mdformat.MdFormatError, match="reads `- if: <expr>`") as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert 'if:{BENCHSPEC_ARM} == "trial"' in str(exc_info.value)
+
+
 def test_child_under_an_unclaused_parent_may_carry_its_own_clause(tmp_path: Path) -> None:
     """Verify a child's clause, one indent deeper than the child, attaches to that child only."""
     eval_path = _write_slug(

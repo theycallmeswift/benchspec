@@ -187,7 +187,9 @@ environment_script = "evals/setup.sh"  # runs after the agent installs, before s
 `base_image` must be Debian/apt-family: the provision step uses `apt-get` and
 installs glibc-linked CLIs. `environment_script` is for suite-wide system
 dependencies; per-eval and per-arm setup belongs in the eval's own `setup.sh`,
-which can branch on `BENCHSPEC_ARM` and `BENCHSPEC_SET`.
+which can branch on `BENCHSPEC_ARM` and `BENCHSPEC_SET`. The full variable list,
+`BENCHSPEC_BASELINE` included, is in
+[writing-evals.md](writing-evals.md#setupsh-what-differs-per-arm).
 
 `BENCHSPEC_BASE_IMAGE` in the host environment overrides `base_image` for that
 host only. It exists for hosts whose base must carry something the shared config

@@ -9,8 +9,9 @@ only); a childless item is one assertion.
 
 An item may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet, its scope
 clause: the raw expression is kept beside the assertion (`clauses`, aligned by index)
-and the prose is left untouched. A clause on a display-only parent is copied onto every
-child; a child under an unclaused parent may carry its own, one indent deeper.
+and the prose is left untouched. A parent's clause sits directly under the parent line,
+before its children, and applies to every child; a child under an unclaused parent may
+carry its own, one indent deeper.
 
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
 (`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
@@ -33,7 +34,7 @@ _FENCE = re.compile(r"^(```|~~~)")
 _HEADER = re.compile(r"^(#{2,3}) +(.+?)\s*$")
 _CHECKBOX = re.compile(r"^- \[[ xX]\] +(.*\S)\s*$")
 _CLAUSE = re.compile(r"^- (if|unless): +(.*\S)\s*$")
-_EMPTY_CLAUSE = re.compile(r"^- (if|unless):\s*$")
+_CLAUSE_LIKE = re.compile(r"^- (?i:if|unless)\b")
 
 _EVAL_FM = {"history"}
 
@@ -100,17 +101,12 @@ def _prose(content_lines: list[str]) -> str:
 
 
 class _Item:
-    """One top-level `- [ ]` item being assembled: its prose, clause, and flattened children.
+    """One top-level `- [ ]` item being assembled: its prose, clause, and child indent."""
 
-    `child_start` is the index in the output lists where this item's children begin, so
-    a parent clause that arrives after its children can be copied back onto them.
-    """
-
-    def __init__(self, text: str, child_start: int) -> None:
+    def __init__(self, text: str) -> None:
         """Start a childless, unclaused item."""
         self.text = text
         self.clause: dict | None = None
-        self.child_start = child_start
         self.child_indent: int | None = None
         self.has_children = False
 
@@ -142,7 +138,7 @@ class _Checklist:
         checkbox_match = _CHECKBOX.match(line)
         if not checkbox_match:
             raise self._error("expected `- [ ] ...` items, got", line)
-        self._item = _Item(checkbox_match.group(1), child_start=len(self.items))
+        self._item = _Item(checkbox_match.group(1))
 
     def indented(self, line: str) -> None:
         """Attach an indented line to the pending item as a child or a clause."""
@@ -154,8 +150,8 @@ class _Checklist:
                 {"key": clause_match.group(1), "expr": clause_match.group(2)}, indent, line
             )
             return
-        if _EMPTY_CLAUSE.match(stripped):
-            raise self._error("clause has no expression", line)
+        if _CLAUSE_LIKE.match(stripped):
+            raise self._error("a clause reads `- if: <expr>` or `- unless: <expr>`", line)
         if self._item is None:
             raise self._error("indented `- [ ]` child with no parent item above it", line)
         checkbox_match = _CHECKBOX.match(stripped)
@@ -188,16 +184,14 @@ class _Checklist:
         if item.has_children and deeper_than_children:
             self._child_clause(item, clause, line)
             return
+        if item.has_children:
+            raise self._error(
+                "a parent clause must sit directly under its item, before its children", line
+            )
         if item.clause is not None:
             raise self._error("item already carries a clause", line)
         self._align(item, indent, line)
-        if any(child_clause is not None for child_clause in self.clauses[item.child_start :]):
-            raise self._error(
-                "a parent may not carry a clause once a child carries its own", line
-            )
         item.clause = clause
-        for child_index in range(item.child_start, len(self.clauses)):
-            self.clauses[child_index] = clause
 
     def _child_clause(self, item: _Item, clause: dict, line: str) -> None:
         """Attach a clause to the item's last child."""

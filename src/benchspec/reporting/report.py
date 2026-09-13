@@ -452,20 +452,26 @@ def _rate_cell(rate: float | None, delta_pp: float | None) -> str:
     return f"{rate:.0%} ({delta_pp:+.0f}pp)"
 
 
+def _column_order(benchmark: dict) -> list[str]:
+    """Return the arm column order: the baseline first, then the rest in declared order."""
+    arms = benchmark["arms"]
+    baseline = benchmark.get("baseline")
+    return ([baseline] if baseline in arms else []) + [
+        arm_name for arm_name in arms if arm_name != baseline
+    ]
+
+
 def _matrix_cells(benchmark: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:
     """Return the matrix's arm column order and its `(label, cells)` rows, footer last.
 
-    Columns are the baseline first, then the remaining arms in declared order. Rows come
-    from the roster, not the per-eval union, so an all-errored eval (which has no
-    per-eval row in any arm) still renders a row of — cells; the `All evals` footer
+    Rows come from the roster, not the per-eval union, so an all-errored eval (which has
+    no per-eval row in any arm) still renders a row of — cells; the `All evals` footer
     carries each arm's pooled rate. The Markdown and terminal renderers both consume
     this, so their cells never disagree.
     """
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
-    names = ([baseline] if baseline in arms else []) + [
-        arm_name for arm_name in arms if arm_name != baseline
-    ]
+    names = _column_order(benchmark)
     if not names:
         return [], []
 
@@ -528,7 +534,7 @@ def _scoped_cell_text(cell: dict | str | None) -> str:
 def _scoped_table(benchmark: dict) -> list[str]:
     """Return the scoped-assertions table: one row per line left out of the pooled rates."""
     rows = benchmark["scoped"]
-    names, _rows = _matrix_cells(benchmark)
+    names = _column_order(benchmark)
     if not rows or not names:
         return []
     lines = [

@@ -92,10 +92,14 @@ def _clause_rules(text: str, clause: dict | None) -> list[str]:
 
 
 def test_constant_clause_flagged() -> None:
-    """Verify a clause that reads no `{VAR}` warns, and one that does stays quiet."""
+    """Verify a clause that reads no `{VAR}` warns."""
+    assert _clause_rules("./out.md exists", {"key": "if", "expr": "true"}) == ["constant-clause"]
+
+
+def test_variable_clause_is_clean() -> None:
+    """Verify a clause that reads a `{VAR}` stays quiet."""
     variable_clause = {"key": "if", "expr": '{BENCHSPEC_ARM} == "trial"'}
 
-    assert _clause_rules("./out.md exists", {"key": "if", "expr": "true"}) == ["constant-clause"]
     assert _clause_rules("./out.md exists", variable_clause) == []
 
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -107,7 +107,7 @@ _TOKEN = re.compile(
   | (?P<operator>==|!=|<=|>=|<|>)
   | (?P<open>\()
   | (?P<close>\))
-  | (?P<word>[A-Za-z_][A-Za-z0-9_]*)
+  | (?P<word>[^\s(){}"'=!<>]+)
     """,
     re.VERBOSE,
 )
@@ -121,6 +121,11 @@ class _Token:
     text: str
 
 
+def _lexeme(match: re.Match[str]) -> str:
+    """The name of the `_TOKEN` alternative `match` took: its first participating named group."""
+    return next(name for name, text in match.groupdict().items() if text is not None)
+
+
 def _tokenize(expr: str) -> list[_Token]:
     """Split an expression into tokens, rejecting bare words and stray characters."""
     tokens: list[_Token] = []
@@ -130,13 +135,10 @@ def _tokenize(expr: str) -> list[_Token]:
         if match is None:
             raise ScopeError(f"unexpected character {expr[position]!r} at position {position}")
         position = match.end()
-        kind = match.lastgroup
-        if kind is None:
-            raise ScopeError(f"unexpected character {expr[position]!r} at position {position}")
+        kind = _lexeme(match)
         if kind == "space":
             continue
         if kind == "variable":
-            # `name` is the inner group of `variable`, so lastgroup reports the outer one.
             tokens.append(_Token("variable", match.group("name")))
         elif kind == "bad_variable":
             raise ScopeError(
@@ -296,8 +298,13 @@ def _compare(operator: str, left: Value, right: Value) -> bool:
         )
     if operator in _EQUALITY:
         return (left == right) if operator == "==" else (left != right)
-    if left_kind != "int" or not isinstance(left, int) or not isinstance(right, int):
+    if left_kind != "int" or not (isinstance(left, int) and isinstance(right, int)):
         raise ScopeError(f"`{operator}` orders ints only, got {left_kind} {left!r}")
+    return _ordering(operator, left, right)
+
+
+def _ordering(operator: str, left: int, right: int) -> bool:
+    """Apply one ordering operator to two ints."""
     if operator == "<":
         return left < right
     if operator == ">":
@@ -314,14 +321,20 @@ def _boolean(value: Value, *, where: str) -> bool:
     return value
 
 
+def _unknown_variables(unknown: Iterable[str], variables: Mapping[str, str]) -> ScopeError:
+    """The error for `{NAME}` references `variables` lacks, listing the names it has."""
+    missing = ", ".join(f"{{{name}}}" for name in sorted(unknown))
+    available = ", ".join(sorted(variables)) or "none"
+    return ScopeError(f"unknown variable {missing}; available: {available}")
+
+
 def _evaluate(expr: Expr, variables: Mapping[str, str]) -> Value:
     """Evaluate a subtree to its typed value."""
     if isinstance(expr, Literal):
         return expr.value
     if isinstance(expr, Variable):
         if expr.name not in variables:
-            available = ", ".join(sorted(variables)) or "none"
-            raise ScopeError(f"unknown variable {{{expr.name}}}; available: {available}")
+            raise _unknown_variables({expr.name}, variables)
         return variables[expr.name]
     if isinstance(expr, Compare):
         return _compare(
@@ -329,11 +342,10 @@ def _evaluate(expr: Expr, variables: Mapping[str, str]) -> Value:
         )
     if isinstance(expr, Not):
         return not _boolean(_evaluate(expr.operand, variables), where="not")
+    where = "and" if isinstance(expr, And) else "or"
     # Both sides are evaluated so a type error on the right surfaces on every arm.
-    left = _boolean(_evaluate(expr.left, variables), where="and" if isinstance(expr, And) else "or")
-    right = _boolean(
-        _evaluate(expr.right, variables), where="and" if isinstance(expr, And) else "or"
-    )
+    left = _boolean(_evaluate(expr.left, variables), where=where)
+    right = _boolean(_evaluate(expr.right, variables), where=where)
     return (left and right) if isinstance(expr, And) else (left or right)
 
 
@@ -407,10 +419,9 @@ def _resolve(
     referenced: set[str], variables: Mapping[str, str], environ: Mapping[str, str]
 ) -> dict[str, str]:
     """Expand exactly the referenced variables, failing on an unknown name."""
-    unknown = sorted(referenced - set(variables))
+    unknown = referenced - set(variables)
     if unknown:
-        missing = ", ".join(f"{{{name}}}" for name in unknown)
-        raise ScopeError(f"unknown variable {missing}; available: {', '.join(sorted(variables))}")
+        raise _unknown_variables(unknown, variables)
     return expand_env({name: variables[name] for name in referenced}, environ)
 
 

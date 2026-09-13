@@ -1172,8 +1172,8 @@ def test_run_setup_sh_passes_set_and_arm_env() -> None:
 
 
 def test_run_setup_sh_passes_baseline() -> None:
-    """Verify run setup sh exports the set's baseline arm, empty when the set has none."""
-    fake_sandbox = _QueuedShellSandbox(shell_queue=[FakeExecOutput(0), FakeExecOutput(0)])
+    """Verify run setup sh exports the set's baseline arm."""
+    fake_sandbox = _QueuedShellSandbox(shell_queue=[FakeExecOutput(0)])
 
     asyncio.run(
         sandbox.run_setup_sh(
@@ -1185,6 +1185,14 @@ def test_run_setup_sh_passes_baseline() -> None:
             baseline="baseline",
         )
     )
+
+    assert fake_sandbox.shell_calls[-1].env["BENCHSPEC_BASELINE"] == "baseline"
+
+
+def test_run_setup_sh_passes_empty_baseline_when_the_set_has_none() -> None:
+    """Verify run setup sh exports an empty baseline when the set declares none."""
+    fake_sandbox = _QueuedShellSandbox(shell_queue=[FakeExecOutput(0)])
+
     asyncio.run(
         sandbox.run_setup_sh(
             fake_sandbox,
@@ -1195,9 +1203,7 @@ def test_run_setup_sh_passes_baseline() -> None:
         )
     )
 
-    with_baseline, without_baseline = fake_sandbox.shell_calls[-2:]
-    assert with_baseline.env["BENCHSPEC_BASELINE"] == "baseline"
-    assert without_baseline.env["BENCHSPEC_BASELINE"] == ""
+    assert fake_sandbox.shell_calls[-1].env["BENCHSPEC_BASELINE"] == ""
 
 
 def test_run_setup_sh_nonzero_exit_raises() -> None:
