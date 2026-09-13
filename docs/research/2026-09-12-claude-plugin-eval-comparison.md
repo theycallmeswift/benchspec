@@ -242,7 +242,8 @@ Options:
 Size M for (a): the parser in `specs/mdformat.py` learns the tag, the
 orchestration skips scoped lines per arm, the report excludes unscored lines
 from `_arm_stats` and renders the extra table. The syntax and semantics were
-settled against the prior art below and filed as #136.
+settled against the prior art below and filed as #136, with the in-repo
+evals and README example adopting clauses in the follow-up #137.
 
 #### Prior art (2026-09-13)
 
@@ -306,8 +307,9 @@ receives: `BENCHSPEC_ARM`, `BENCHSPEC_HARNESS`, `BENCHSPEC_MODEL`,
 set's baseline arm name, exported to `setup.sh` as well) so the trigger case
 needs no keyword. Literals are typed: `1` is an int, `"en-GB"` or `'en-GB'`
 is a string, `true` and `false` are booleans; a bare word is a parse error.
-Operators are `==`, `!=`, `and`, `or`, `not`, parentheses. One `if:` or one
-`unless:` per item, never both; `unless: X` is `if: not (X)`. One
+Operators are `==` and `!=` on any one type, `<`, `>`, `<=`, `>=` on ints,
+`and`, `or`, `not`, parentheses. One `if:` or one `unless:` per item, never
+both; `unless: X` is `if: not (X)`. One
 vocabulary across `setup.sh`, the clause, and any later substitution into
 assertion text.
 
@@ -328,7 +330,8 @@ raise before any sandbox boots, the way an unresolved placeholder already
 does. The condition must evaluate to a boolean;
 `if: {GREETING_LOCALE}` is an error, there is no truthiness. A comparison
 across types is a collection error, never a silent false: `{X} == 1` fails,
-`{X} == "1"` is the way to say it. Resolve `{VAR}` at the token level after
+`{X} == "1"` is the way to say it; an ordering operator on a string or
+boolean fails the same way. Resolve `{VAR}` at the token level after
 parsing, never by splicing text and re-parsing, so a value containing a
 space or the word `and` cannot change the expression's shape. A name must
 resolve in every arm of the run or collection fails naming the arm that
