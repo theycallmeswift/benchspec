@@ -244,6 +244,63 @@ orchestration skips scoped lines per arm, the report excludes unscored lines
 from `_arm_stats` and renders the extra table. Not filed as an issue yet; the
 syntax is the decision to make first.
 
+#### Prior art (2026-09-13)
+
+A survey of how thirty-odd projects scope a check to a configuration, with
+verbatim snippets, is published as a comparison page (Arm Scoping Prior Art,
+claude.ai artifact). What it settles:
+
+- **No BDD dialect tags a step.** Cucumber's docs: "It is not possible to
+  place tags above Background or steps", and a conditional step is "probably
+  an anti-pattern". Tags sit above Feature, Scenario, or Examples and inherit
+  down. Karate's tagged `Examples` tables are the one precedent for
+  partitioning inside a scenario, and "there is no concept of a default".
+- **Two keyed-predicate precedents, both key=value.** Karate `@env=dev,qa` and
+  `@envnot=prod` against `karate.env`; Behave active tags
+  `@use.with_os=win32` and `@not.with_browser=safari` against a runtime dict,
+  with OR within a category and AND across categories. Both chose properties
+  over free tags once a runtime environment existed.
+- **Per-assertion scoping exists once.** JUnit's
+  `assumingThat(cond, () -> { assertEquals(...) })` scopes a group of
+  assertions inside a test while the rest still counts. Every other framework
+  scopes whole tests, files, or blocks.
+- **Trailing metadata on a checklist line has three precedents.** TAP's
+  `ok 14 - mung the gums # SKIP reason`, Obsidian Tasks'
+  `- [ ] text [due:: 2023-04-16]` (parsed "backwards from the end of the
+  line"), and todo.txt's `+project @context key:value`. Description first,
+  metadata last.
+- **Named-arm keying** is Bazel `select({":arm": …, "//conditions:default":
+  …})`, Playwright `--project` plus `{ tag }`, and plugin eval's
+  `arm: with-only`. All have fixed, known configurations; benchspec's arm
+  names come from `pyproject.toml` and `--models` sweeps.
+- **Four exclusion semantics, kept distinct everywhere.** Rust counts
+  `ignored` and `filtered out` separately; Robot documents `--exclude`
+  (absent from the report) against `--skip` (present, marked); TAP has SKIP
+  and TODO. For a scoped benchspec line: *skip* in arms where it does not
+  apply, *unscored* in arms where it does, both outside the pooled rate.
+- **Two eval frameworks solve the inflation directly.** plugin eval excludes
+  `tool_used: Skill` and `arm: with-only` graders from the score in both
+  arms, reports them as indicators, and scores them normally if nothing else
+  is left. SWE-bench keeps `PASS_TO_PASS` (must hold everywhere, gated at
+  100%) and `FAIL_TO_PASS` (the lift) as separate ratios and never averages
+  them together. Inspect AI separates `return None` (not applicable, no
+  coverage count) from `Score.unscored()` (applicable, no verdict).
+
+Refined recommendation: option (a) with a property predicate rather than an
+arm name, trailing on the line:
+
+```markdown
+- [ ] Skill `hello` invoked @unless baseline
+- [ ] ./Greetings/Bob.md contains 'an absolute pleasure' @if GREETING_LOCALE=en-GB
+- [ ] Opens the note with Read, not Bash @if harness=claude-code
+```
+
+Keys are the variables `setup.sh` already receives (`arm`, `harness`,
+`model`, `set`, arm `env`), `baseline` resolves to the set's baseline arm,
+comma is OR within a key and AND across keys, as in Behave. The one open
+choice is the sigil: `@if`/`@unless` keeps the Gherkin look; `{if …}` reads
+as code. They parse identically.
+
 ### 2. Plumb the agent-turn timeout (#130)
 
 Each adapter's `invoke` defaults `timeout: int = 600`, and `_run` in
