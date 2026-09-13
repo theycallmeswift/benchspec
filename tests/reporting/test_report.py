@@ -47,6 +47,7 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: Path) -> None:
                 "harness": "opencode",
                 "model": "test-model",
                 "effort": "high",
+                "timeout": 900,
                 "env": {"K": "***"},
                 "harness_args": ["--print-logs"],
             },
@@ -57,6 +58,8 @@ def test_build_benchmark_baseline_and_arm_meta(tmp_path: Path) -> None:
     assert bench["arms"]["trial"]["harness"] == "opencode"
     assert bench["arms"]["trial"]["model"] == "test-model"
     assert bench["arms"]["trial"]["effort"] == "high"
+    assert bench["arms"]["trial"]["timeout"] == 900
+    assert bench["arms"]["baseline"]["timeout"] is None
     assert bench["arms"]["trial"]["env"] == {"K": "***"}
     assert bench["arms"]["trial"]["harness_args"] == ["--print-logs"]
     assert bench["arms"]["baseline"]["harness_args"] == []
@@ -168,6 +171,39 @@ def test_format_markdown_omits_empty_harness_args(tmp_path: Path) -> None:
     md = report._format_markdown(bench)
 
     assert "Harness args:" not in md
+
+
+def test_format_markdown_renders_timeout_beside_harness_and_model(tmp_path: Path) -> None:
+    """Verify the per-arm section prints the turn timeout on the harness/model line."""
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        "label",
+        baseline=None,
+        arm_meta={"trial": {"harness": "claude-code", "model": "sonnet", "timeout": 900}},
+    )
+
+    md = report._format_markdown(bench)
+
+    assert "- Harness: claude-code · Model: `sonnet` · Timeout: 900s" in md
+
+
+def test_format_markdown_omits_timeout_when_absent(tmp_path: Path) -> None:
+    """Verify the per-arm section leaves the timeout off when arm meta carries none."""
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path),
+        "label",
+        baseline=None,
+        arm_meta={"trial": {"harness": "claude-code", "model": "sonnet"}},
+    )
+
+    md = report._format_markdown(bench)
+
+    assert "- Harness: claude-code · Model: `sonnet`\n" in md
+    assert "Timeout:" not in md
 
 
 def test_build_benchmark_computes_pass_rates(tmp_path: Path) -> None:
@@ -1076,4 +1112,37 @@ def test_planned_arms_carry_the_provider(monkeypatch: pytest.MonkeyPatch) -> Non
     assert [(arm["name"], arm["provider"]) for arm in planned] == [
         ("direct", "default"),
         ("routed", "openrouter"),
+    ]
+
+
+def test_planned_arms_carry_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify each planned arm records its agent-turn timeout beside effort."""
+    from benchspec.config.arms import Arm, Set
+
+    class _StubAgent:
+        """The slice of `CodingAgent` the planned-arm roster reads."""
+
+        capabilities = AgentCapabilities(multi_turn=True, token_split=True)
+
+        def version(self) -> str:
+            """Return a fixed install selector."""
+            return "latest"
+
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    run_set = Set("s", [Arm("patient", "claude-code", "sonnet", timeout=900)], baseline=None)
+
+    planned = report.planned_arms(run_set)
+
+    assert planned[0]["timeout"] == 900
+    assert list(planned[0]) == [
+        "name",
+        "harness",
+        "provider",
+        "model",
+        "effort",
+        "timeout",
+        "env",
+        "harness_args",
+        "requested_version",
+        "capabilities",
     ]

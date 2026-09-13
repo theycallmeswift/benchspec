@@ -36,11 +36,12 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 
 | Key | Type | Notes |
 |---|---|---|
-| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `provider` / `model` / `effort` / `env` / `harness_args`. |
+| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `provider` / `model` / `effort` / `timeout` / `env` / `harness_args`. |
 | `harness` | string | Default harness: `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
 | `provider` | string | Default transport the harness reaches its model through: `default` (the vendor's own API or CLI login; the default) or `openrouter` (every request through OpenRouter on `OPENROUTER_API_KEY`). Under `openrouter` the model must be a vendor-qualified slug (`anthropic/claude-sonnet-4.6`; `openrouter/anthropic/...` for OpenCode). See [Providers](#providers). |
 | `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
 | `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for how each CLI receives it. |
+| `timeout` | integer | Default wall-clock cap on one graded agent turn, seconds (default `600`). A turn that exceeds it is recorded as an errored sample, never a failed one. Arm-level `timeout` overrides it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
 | `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags benchspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional: without it, arms report absolute rates and no delta. Must name a declared arm. |
@@ -246,6 +247,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--models M1,M2` | `--benchspec-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
 | `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
 | `--effort E` | `--benchspec-effort` | Override the set's `effort` default. |
+| `--timeout S` | `--benchspec-timeout` | Override the set's `timeout` default (seconds). Arms that declared their own keep it. |
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
