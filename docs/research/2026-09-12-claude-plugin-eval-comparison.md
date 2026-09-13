@@ -307,13 +307,27 @@ to `setup.sh` as well) so the trigger case needs no keyword. Operators are
 `==`, `!=`, `and`, `or`, `not`, parentheses. One vocabulary across
 `setup.sh`, `when:`, and any later substitution into assertion text.
 
-Two rules keep it honest. Resolve `{VAR}` at the token level after parsing,
-never by splicing text and re-parsing, so a value containing a space or the
-word `and` cannot change the expression's shape; bare literals match
-`[A-Za-z0-9_./:-]+` and anything else is quoted. An unknown name fails at
-collection, as an unknown `{UPPERCASE}` placeholder already does, with the
-names available in that cell listed. A `when:` under a display-only parent
-scopes all its children.
+Scoring is a property of the run, not the line. A line is graded in every
+arm where its clause is true and skipped where it is false. The pooled rate
+and every delta cover the lines graded in every arm of the run; a line
+skipped in any arm is shown per arm in a scoped table and left out, so
+denominators match. No `when:` is a clause that is always true. So
+`when: 1 == 1` is a no-op, `when: 1 == 0` disables a line without deleting
+it, the trigger line is pooled in a set with no baseline and excluded in a
+set with one, and a harness clause in a single-harness set is pooled. This
+is plugin eval's rule (`--ablation none` excludes nothing) without a special
+case.
+
+Rules that keep it honest. Every value is a string; there are no numeric
+types and no `true`/`false` literals. Resolve `{VAR}` at the token level
+after parsing, never by splicing text and re-parsing, so a value containing
+a space or the word `and` cannot change the expression's shape; bare
+literals match `[A-Za-z0-9_./:-]+` and anything else is quoted. A name must
+resolve in every arm of the run or collection fails naming the arm that
+lacks it, which pushes env keys used in clauses to the set level;
+`BENCHSPEC_BASELINE` is always defined, empty when the set has none. `lint`
+warns on a clause with no `{VAR}` in it. A `when:` under a display-only
+parent scopes all its children.
 
 Why the sub-bullet over a trailing `@if` token: an indented non-checkbox
 line is a hard error today (`specs/mdformat.py`), so the slot is unclaimed
