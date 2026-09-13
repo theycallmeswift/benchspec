@@ -248,8 +248,9 @@ evals and README example adopting clauses in the follow-up #137.
 #### Prior art (2026-09-13)
 
 A survey of how thirty-odd projects scope a check to a configuration, with
-verbatim snippets, is published as a comparison page (Arm Scoping Prior Art,
-claude.ai artifact). What it settles:
+verbatim snippets and sources, is in
+[`2026-09-13-arm-scoping-prior-art.md`](2026-09-13-arm-scoping-prior-art.md).
+What it settles:
 
 - **No BDD dialect tags a step.** Cucumber's docs: "It is not possible to
   place tags above Background or steps", and a conditional step is "probably
