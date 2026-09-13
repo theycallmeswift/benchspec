@@ -33,24 +33,31 @@ cross-vendor judge, and a noise band on the delta.
 
 Six things are worth taking. In priority order:
 
-1. Stop counting `Skill X invoked` in the baseline rate. It inflates every
-   delta. `plugin eval` excludes such graders from scoring in both arms and
-   reports them as pass/fail indicators only.
+1. Let an assertion opt out of the lift. `Skill X invoked` can only fail on
+   a baseline that has no skill, so it inflates every delta, and the same
+   holds for any assertion one arm cannot pass by construction. `plugin eval`
+   excludes such graders from scoring in both arms and reports them as
+   pass/fail indicators only. Design options below; no issue yet.
 2. Make the agent-turn timeout configurable. It is hardcoded at 600 s in each
    adapter and never threaded from config; `plugin eval` has `timeout_seconds`
-   and `max_turns` per case.
+   and `max_turns` per case. Filed as #130.
 3. Default the quickstart and the report to multiple samples, and warn on a
    single-sample delta. `plugin eval` runs three by default and says why.
+   Filed as #131.
 4. Ship a benchspec skill for Claude Code so Claude can author and run
    benchspec evals from inside a session. `plugin eval init` does the
    interview-and-write step for its own format; benchspec has lint and
-   analyze but nothing that helps write the file.
+   analyze but nothing that helps write the file. Already tracked as #80.
 5. Add a `benchspec compare` between two iterations. `index.jsonl` and
    `benchmark.json` already exist for exactly this; `plugin eval`'s
    `baseline` grader and the docs' "catch regressions when a new model ships"
-   framing are the same need.
+   framing are the same need. Filed as #132.
 6. Reposition the README: say plainly when `claude plugin eval` is enough and
-   when benchspec is the step up.
+   when benchspec is the step up. Filed as #133.
+
+A seventh, format compatibility with `plugin eval`'s case directories, is
+analysed at the end: a one-way importer is worth building, a native reader and
+an exporter are not.
 
 Deliberately not taken: MCP mocks, a rubric-per-grader DSL, host-side
 isolation, an HTML report, USD cost estimates. Reasons below.
@@ -182,7 +189,7 @@ selling the upside.
 
 ## Recommendations
 
-### 1. Exclude skill-trigger assertions from the delta
+### 1. Let an assertion opt out of the lift
 
 `plugin eval` refuses to score `tool_used: Skill` in either arm by default
 because the without-arm can never pass it. benchspec has the same problem and
@@ -193,22 +200,51 @@ assertion's `passed` into the pooled rate, and `grading.json` records
 baseline arm is capped at 67% before the agent does anything and the delta
 carries a guaranteed +33pp from that line alone.
 
+Skills are only the common case. Any assertion that one arm cannot pass by
+construction does the same thing: a phrase that only an `en-GB` env profile
+produces (the in-repo `hello-file` eval has exactly this, aimed at the
+`trial-overrides` arm), a tool only one harness has, a file only one arm's
+`setup.sh` seeds. So the mechanism has to be authored per assertion, not
+inferred from the checker.
+
 Options:
 
-- **(a) Report trigger assertions separately.** When a baseline exists,
-  assertions bound to `skill_invoked` or `not_skill_invoked` are excluded from
-  every arm's pooled rate and shown in a per-arm "trigger rate" line and a
-  `scored: false` field in `grading.json`. Matches `plugin eval` and keeps the
-  headline delta honest. Recommended.
-- (b) Exclude them only from the baseline arm. Simpler but asymmetric; the
-  trial rate would still include a line the baseline cannot have.
-- (c) Leave the rate alone and add a footnote. Cheapest, but the number in CI
+- **(a) Line-level tags in the eval file.** A trailing bracketed tag on the
+  assertion, stripped before the binder and judge see the text:
+
+  ```markdown
+  - [ ] Skill `hello` invoked [unscored]
+  - [ ] ./Greetings/Bob.md contains the text 'an absolute pleasure' [arms: trial-overrides]
+  ```
+
+  `[unscored]` grades the line in every arm, reports it in every arm, and
+  keeps it out of every pooled rate and delta. `[arms: a, b]` grades the line
+  only in the named arms, skips it elsewhere, and is unscored for the lift by
+  implication, since arms with different denominators are not comparable.
+  A tag on a display-only parent applies to its children. `grading.json`
+  records `scored` and `arms` per assertion; `benchmark.md` gets a per-arm
+  "unscored" table under the main one, so a trigger rate is still visible
+  per arm. `lint` warns on a `Skill … invoked` line with no tag. Recommended:
+  it is one concept, it is visible in the rendered file, and it covers the
+  non-skill cases.
+- (b) Group-heading semantics. `### Trigger (unscored)` or
+  `### en-GB only (arms: trial-overrides)` scopes every child. Reads well,
+  but the format's rule is that display groups carry no semantics, and it is
+  coarser than the line.
+- (c) Infer from the checker. When a baseline exists, anything bound to
+  `skill_invoked` or `not_skill_invoked` is unscored, with no syntax. What
+  `plugin eval` does. Zero authoring cost, but it only fixes the skill case,
+  and it makes the binder's classification change the arithmetic, which is a
+  new coupling.
+- (d) Footnote only. Leave the rate and warn in the report. The CI number
   stays wrong.
 
-Size S. One `checker` field is already present on each bound assertion in the
-grading pipeline; the report needs to read it.
+Size M for (a): the parser in `specs/mdformat.py` learns the tag, the
+orchestration skips scoped lines per arm, the report excludes unscored lines
+from `_arm_stats` and renders the extra table. Not filed as an issue yet; the
+syntax is the decision to make first.
 
-### 2. Plumb the agent-turn timeout
+### 2. Plumb the agent-turn timeout (#130)
 
 Each adapter's `invoke` defaults `timeout: int = 600`, and `_run` in
 `src/benchspec/sandbox/sandbox.py` calls it without a timeout, so no
@@ -225,7 +261,7 @@ Options:
 
 Size S.
 
-### 3. Make repeats the default story
+### 3. Make repeats the default story (#131)
 
 `plugin eval` runs every case three times by default and says "one run of a
 non-deterministic agent tells you little." benchspec's default is one sample,
@@ -243,7 +279,7 @@ Options:
 
 Size XS.
 
-### 4. Ship a benchspec skill for Claude Code
+### 4. Ship a benchspec skill for Claude Code (#80, already open)
 
 `plugin eval init` is the on-ramp: Claude reads the plugin, proposes prompts
 and graders, pilots them, writes the files. benchspec's equivalent is a person
@@ -264,7 +300,7 @@ Options:
 Size M, mostly writing. Bonus: the skill itself becomes a benchspec eval
 target and a good dogfood suite.
 
-### 5. Add `benchspec compare`
+### 5. Add `benchspec compare` (#132)
 
 `plugin eval` aims at "catch regressions when you change the plugin or a new
 model ships" and has a `baseline` grader that judges a run against a saved
@@ -283,7 +319,7 @@ Options:
 
 Size M.
 
-### 6. Reposition the README
+### 6. Reposition the README (#133)
 
 One paragraph near the top: if you want to know whether one plugin helps
 Claude Code, `claude plugin eval` is built in and needs one credential; use
@@ -312,12 +348,84 @@ Size XS.
 - **2-of-3 judge voting.** Worth an experiment on the binder corpus style
   before adding a 3x judge bill; note it as a follow-up, not a change.
 
+## Format compatibility
+
+Can a `plugin eval` suite run under benchspec, or a benchspec suite under
+`plugin eval`? The formats are close enough that a converter is mechanical in
+one direction and lossy in the other.
+
+### Their case, our eval
+
+A case is `prompt.md` (frontmatter plus the prompt as body), `graders/*.md`
+(one typed grader each), and an optional `case.yaml` for fixtures. Every part
+has a home in a benchspec eval folder:
+
+| `plugin eval` | benchspec | Fidelity |
+|---|---|---|
+| `prompt.md` body | `## Prompt` | Exact. |
+| `history_file` (`.jsonl` transcript) | `history:` frontmatter | User and assistant text kept; tool calls dropped. |
+| `context.scaffold_script` | `setup.sh` running the script in `/workspace` before the arm split | Exact; theirs needs `--scaffold`, ours always runs it. |
+| `context.add_dirs` | `workspace/` | Theirs is read-only, ours read-write. |
+| `plugins: ["../.."]` | A set with `baseline` (nothing) and `trial` (`harness_args = ["--plugin-dir", "/project/<plugin>"]` on Claude Code; `setup.sh` copies `skills/*` into `/home/benchspec/skills` for every harness) | Exact on Claude Code; skills-only on Codex and OpenCode, since they have no plugin surface. |
+| `model`, `env` | Arm `model`, set `env` | Exact. `env` keys must match `EVAL_*` on their side only. |
+| `runs` | `--count N` | Printed as the suggested command, not stored. |
+| `timeout_seconds` | Arm `timeout` once #130 lands | Exact after #130. |
+| `max_turns`, `allowed_tools` | Nothing | Dropped. benchspec's sandbox is the boundary; the harness runs unrestricted inside it. |
+| `append_system_prompt` | `harness_args` on Claude Code | Check the adapter's reserved-flag list first. |
+| `regex` on `last_message` | "The agent's final message matches the regex '…'" | Binds to `regex` only against files; the final message goes to the judge. |
+| `regex` on `{source: file}` | "./path matches the regex '…'" | Binds to `regex`. Exact. |
+| `regex` with `not_contains` or `count:N` | Prose negation or count | Punts to the judge by the binder's rules. |
+| `tool_used: Skill` | ``Skill `x` invoked`` | Binds to `skill_invoked`. Add `[unscored]` once recommendation 1 exists. |
+| `tool_used` on any other tool, `tool_order` | Prose about the process | Judge, which sees per-turn tool activity, so order across turns is decidable. |
+| `file_exists` glob | "at least one file matches ./glob" | Binds to `glob_count`. Semantics differ with a scaffold: theirs counts created files only. Without one, exact. |
+| `file_exists: false` | "./path does not exist" | Binds to `not_file_exists`. |
+| `llm` criteria | The rubric as a prose assertion, `PASS if X` becoming `X` | Judge. Their judge sees only the focus; ours sees the whole workspace, which is a superset. |
+| `baseline` grader | Nothing | Dropped with a marker; `benchspec compare` (#132) is the nearest answer. |
+| `weight` | Nothing | Dropped. Every benchspec assertion weighs one; a weighted line could be duplicated, which is worse than dropping. |
+| `mocks/` | Nothing | A case with mocks cannot convert; refuse it with a clear message. |
+
+Nothing on their side is unrepresentable except mocks, weights, and the
+transcript-comparison grader. Their `file_exists` in an empty workspace and
+ours agree exactly, which is the common case.
+
+### Our eval, their case
+
+The reverse loses what makes benchspec worth running: arms beyond with and
+without, any harness but Claude Code, `sha256_match` and "left unchanged",
+`glob_count` with an exact count, `frontmatter_has`, the seeded workspace's
+pre-run hashes, and the cross-vendor judge. The binder's output from `analyze`
+would choose grader types for bound lines and everything punted becomes an
+`llm` grader, so the export is possible, but the result is a weaker suite for
+a tool the user already has. Not worth building.
+
+### Options
+
+- **(a) `benchspec import --from plugin-eval <plugin-dir>`.** Reads their
+  `evals/`, writes one benchspec group per case with `eval.md`, `workspace/`,
+  `setup.sh`, and a `[tool.benchspec.sets.<plugin>]` block to paste, prints
+  the suggested `run` command with `--count` from `runs`, marks generated
+  files as generated, and lists every dropped field per case. Re-runnable, so
+  their `evals/` can stay the source of truth for a plugin author who wants
+  both. Recommended. Size M; it is a mapping plus file writing, with the
+  table above as the spec.
+- (b) A native reader that discovers `evals/<case>/prompt.md` beside
+  `eval.md`. No generated files, but their frontmatter is experimental and
+  changing, and their typed graders would need an execution path that
+  bypasses the binder, which is the thesis. Not recommended.
+- (c) An exporter to their format. Lossy on every differentiator; see above.
+  Not recommended.
+
+Dependency: the importer wants recommendation 1's `[unscored]` tag for
+`tool_used: Skill` graders and #130's `timeout` key; without them it emits
+the lines and notes the difference.
+
 ## Open questions
 
 - Does `plugin eval`'s exclusion rule also apply to `not_skill_invoked`
   lines? Their docs only name `tool_used: Skill`. For benchspec the
   symmetric case (a `not invoked` line that the baseline trivially passes)
-  inflates the baseline instead, so recommendation 1 should exclude both.
+  inflates the baseline instead, so recommendation 1's tag should be
+  authored on both.
 - `plugin eval` hides the eval directory from the agent. benchspec mounts the
   staged repo at `/project`, which includes the eval files. Whether the agent
   can read its own assertions is a fairness question worth a note in
