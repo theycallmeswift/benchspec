@@ -92,6 +92,21 @@ def test_run_command_splits_passthrough_at_double_dash(monkeypatch: pytest.Monke
     assert seen[0].set == "x"
 
 
+def test_run_command_parses_timeout_as_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `benchspec run --timeout 5` hands run.run an integer timeout."""
+    seen: dict[str, object] = {}
+
+    def capture(args: argparse.Namespace) -> int:
+        seen["timeout"] = args.timeout
+        return 0
+
+    monkeypatch.setattr(__main__.run, "run", capture)
+
+    __main__.main(["run", "--timeout", "5"])
+
+    assert seen["timeout"] == 5
+
+
 def test_run_command_dispatches_to_run_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)

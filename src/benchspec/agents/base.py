@@ -380,6 +380,7 @@ class CodingAgent(Protocol):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         ...

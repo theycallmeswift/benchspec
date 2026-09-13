@@ -1,10 +1,10 @@
 """Parse benchspec config into typed eval sets/arms and resolve a run.
 
-An arm is a `harness×model` cell — plus its own `provider`, `effort`, and `env` —
-carried verbatim into one `(eval × arm)` test. Arms live in a named set
-(`[tool.benchspec.sets.<name>]`): the set adds harness/provider/model/effort/env defaults
-(inherited by arms that omit a key) and a `baseline` (the arm every other arm's Δ is
-measured against). `env` `$VAR`s expand lazily at exec time, not resolve time. Validation
+An arm is a `harness×model` cell — plus its own `provider`, `effort`, `timeout`, and
+`env` — carried verbatim into one `(eval × arm)` test. Arms live in a named set
+(`[tool.benchspec.sets.<name>]`): the set adds harness/provider/model/effort/timeout/env
+defaults (inherited by arms that omit a key) and a `baseline` (the arm every other arm's
+Δ is measured against). `env` `$VAR`s expand lazily at exec time, not resolve time. Validation
 is fail-fast at config-read time — a bad table raises SchemaError naming the defect, not
 a silent no-op mid-run.
 """
@@ -42,7 +42,7 @@ class Arm:
     timeout: int = DEFAULT_AGENT_TIMEOUT
 
 
-_SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "env", "harness_args")
+_SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "timeout", "env", "harness_args")
 _VAR = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
 _DEFAULT_EFFORT = "medium"
 _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
@@ -89,6 +89,14 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
     return value
 
 
+def _validate_timeout(where: str, value: object) -> int:
+    """Validate an agent-turn timeout (whole seconds) from configuration."""
+    # bool is an int subclass, so `timeout = true` would otherwise pass as 1 second.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise SchemaError(f"{where}: `timeout` must be a positive integer")
+    return value
+
+
 def _validate_provider(where: str, value: object) -> str:
     """Return `value` when it names a known provider, else raise SchemaError naming it."""
     if not isinstance(value, str) or value not in known_providers():
@@ -114,7 +122,7 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         raise SchemaError(
             "[tool.benchspec] needs at least one eval set "
             "([tool.benchspec.sets.<name>] with `arms`, optional set-level "
-            "harness/model/effort/env defaults, and a `baseline`), plus `default-set` "
+            "harness/model/effort/timeout/env defaults, and a `baseline`), plus `default-set` "
             "naming the set a plain run resolves."
         )
     known = known_harnesses()
@@ -126,6 +134,8 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
         defaults = {key: body[key] for key in _SET_DEFAULT_KEYS if key in body}
         if "provider" in defaults:
             _validate_provider(f"{where}: set-level `provider`", defaults["provider"])
+        if "timeout" in defaults:
+            _validate_timeout(f"{where}: set-level", defaults["timeout"])
         if "env" in defaults:
             _validate_env_table(f"{where}: set-level `env`", defaults["env"])
         if "harness_args" in defaults:
@@ -160,6 +170,8 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
 
             if "provider" in entry:
                 _validate_provider(f"{at}: arm-level `provider`", entry["provider"])
+            if "timeout" in entry:
+                _validate_timeout(f"{at}: arm-level", entry["timeout"])
             if "env" in entry:
                 _validate_env_table(f"{at}: arm-level `env`", entry["env"])
             if "harness_args" in entry:
@@ -251,11 +263,14 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
         if model_error:
             raise SchemaError(f"{where} arm `{name}`: {model_error}")
     effort = raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
+    timeout = raw.get("timeout", defaults.get("timeout", DEFAULT_AGENT_TIMEOUT))
     merged = {**defaults.get("env", {}), **raw.get("env", {})}
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
 
     # Env stays unexpanded until the arm executes.
-    return Arm(name, harness, model, effort, merged, harness_args, provider=provider)
+    return Arm(
+        name, harness, model, effort, merged, harness_args, provider=provider, timeout=timeout
+    )
 
 
 def resolve_set(
@@ -266,6 +281,7 @@ def resolve_set(
     model: str | None = None,
     harness: str | None = None,
     effort: str | None = None,
+    timeout: int | None = None,
     env: dict[str, str] | None = None,
     models: list[str] | None = None,
     environ: Mapping[str, str] | None = None,
@@ -285,6 +301,8 @@ def resolve_set(
         defaults["harness"] = harness
     if effort is not None:
         defaults["effort"] = effort
+    if timeout is not None:
+        defaults["timeout"] = timeout
     if env:
         defaults["env"] = {**defaults.get("env", {}), **env}
 

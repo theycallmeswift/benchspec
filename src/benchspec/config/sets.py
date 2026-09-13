@@ -106,6 +106,7 @@ def resolved_run_set(config: RunOptions) -> EvalSet:
             model=option_str(config, "benchspec_model"),
             harness=option_str(config, "benchspec_harness"),
             effort=option_str(config, "benchspec_effort"),
+            timeout=option_int(config, "benchspec_timeout"),
             env=_parse_env_pairs(option_str_list(config, "benchspec_env")),
             models=models,
         )

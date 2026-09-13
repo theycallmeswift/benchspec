@@ -39,6 +39,9 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument("--harness", help="harness for the single arm (--benchspec-harness)")
     run_parser.add_argument("--effort", help="reasoning effort (--benchspec-effort)")
     run_parser.add_argument(
+        "--timeout", type=int, help="agent turn timeout in seconds (--benchspec-timeout)"
+    )
+    run_parser.add_argument(
         "--eval-paths", help="comma-separated search paths (--benchspec-eval-paths)"
     )
     run_parser.add_argument("--fail-under", help="pass-rate gate (--benchspec-fail-under)")
