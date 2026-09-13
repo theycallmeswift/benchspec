@@ -286,56 +286,60 @@ claude.ai artifact). What it settles:
   them together. Inspect AI separates `return None` (not applicable, no
   coverage count) from `Score.unscored()` (applicable, no verdict).
 
-Refined recommendation: a property predicate rather than an arm name, as a
-`when:` sub-bullet under the assertion, the sibling-key shape Ansible,
-GitHub Actions and promptfoo use:
+Refined recommendation: a property predicate rather than an arm name, as an
+`if:` or `unless:` sub-bullet under the assertion, the sibling-key shape
+Ansible, GitHub Actions and promptfoo use:
 
 ```markdown
 - [ ] Skill `hello` invoked
-  - when: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 - [ ] ./Greetings/Bob.md contains 'an absolute pleasure'
-  - when: {GREETING_LOCALE} == en-GB
+  - if: {GREETING_LOCALE} == "en-GB"
 - [ ] Opens the note with Read, not Bash
-  - when: {BENCHSPEC_HARNESS} == claude-code and {BENCHSPEC_MODEL} != haiku
+  - unless: {BENCHSPEC_HARNESS} == "codex"
 ```
 
-The clause is a template evaluated with the `{VAR}` substitution `{TODAY}`
-already uses, over the names `setup.sh` already receives: `BENCHSPEC_ARM`,
-`BENCHSPEC_HARNESS`, `BENCHSPEC_MODEL`, `BENCHSPEC_SET`, every arm `env`
-key, and a new `BENCHSPEC_BASELINE` (the set's baseline arm name, exported
-to `setup.sh` as well) so the trigger case needs no keyword. Operators are
-`==`, `!=`, `and`, `or`, `not`, parentheses. One vocabulary across
-`setup.sh`, `when:`, and any later substitution into assertion text.
+The clause is a typed expression. `{VAR}` substitutes a string, using the
+same substitution `{TODAY}` already uses, over the names `setup.sh` already
+receives: `BENCHSPEC_ARM`, `BENCHSPEC_HARNESS`, `BENCHSPEC_MODEL`,
+`BENCHSPEC_SET`, every arm `env` key, and a new `BENCHSPEC_BASELINE` (the
+set's baseline arm name, exported to `setup.sh` as well) so the trigger case
+needs no keyword. Literals are typed: `1` is an int, `"en-GB"` or `'en-GB'`
+is a string, `true` and `false` are booleans; a bare word is a parse error.
+Operators are `==`, `!=`, `and`, `or`, `not`, parentheses. One `if:` or one
+`unless:` per item, never both; `unless: X` is `if: not (X)`. One
+vocabulary across `setup.sh`, the clause, and any later substitution into
+assertion text.
 
 Scoring is a property of the run, not the line. A line is graded in every
 arm where its clause is true and skipped where it is false. The pooled rate
 and every delta cover the lines graded in every arm of the run; a line
 skipped in any arm is shown per arm in a scoped table and left out, so
-denominators match. No `when:` is a clause that is always true. So
-`when: 1 == 1` is a no-op, `when: 1 == 0` disables a line without deleting
-it, the trigger line is pooled in a set with no baseline and excluded in a
-set with one, and a harness clause in a single-harness set is pooled. This
-is plugin eval's rule (`--ablation none` excludes nothing) without a special
-case.
+denominators match. No clause is `if: true`. So `if: true` is a no-op,
+`if: false` disables a line without deleting it, the trigger line is pooled
+in a set with no baseline and excluded in a set with one, and a harness
+clause in a single-harness set is pooled. This is plugin eval's rule
+(`--ablation none` excludes nothing) without a special case.
 
-Rules that keep it honest. Every value is a string; there are no numeric
-types and no `true`/`false` literals. Resolve `{VAR}` at the token level
-after parsing, never by splicing text and re-parsing, so a value containing
-a space or the word `and` cannot change the expression's shape; bare
-literals match `[A-Za-z0-9_./:-]+` and anything else is quoted. A name must
+Rules that keep it honest. The condition must evaluate to a boolean;
+`if: {GREETING_LOCALE}` is an error, there is no truthiness. A comparison
+across types is a collection error, never a silent false: `{X} == 1` fails,
+`{X} == "1"` is the way to say it. Resolve `{VAR}` at the token level after
+parsing, never by splicing text and re-parsing, so a value containing a
+space or the word `and` cannot change the expression's shape. A name must
 resolve in every arm of the run or collection fails naming the arm that
 lacks it, which pushes env keys used in clauses to the set level;
 `BENCHSPEC_BASELINE` is always defined, empty when the set has none. `lint`
-warns on a clause with no `{VAR}` in it. A `when:` under a display-only
+warns on a clause with no `{VAR}` in it. A clause under a display-only
 parent scopes all its children.
 
-Why the sub-bullet over a trailing `@if` token: an indented non-checkbox
+Why the sub-bullet over a trailing token: an indented non-checkbox
 line is a hard error today (`specs/mdformat.py`), so the slot is unclaimed
 and no existing eval changes meaning; and the assertion text reaches the
 binder and judge untouched, so nothing has to be stripped before the
 binder's regex-drift guard compares a bound pattern verbatim against the
 line. The cost is two lines per scoped assertion and a second bullet kind
-inside the checklist. `when` should stay the only key.
+inside the checklist. `if` and `unless` should stay the only keys.
 
 ### 2. Plumb the agent-turn timeout (#130)
 
