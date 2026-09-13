@@ -12,6 +12,16 @@ the CLI reference at
 the Claude Code CHANGELOG entry for 2.1.269, and a clone of
 `anthropics/claude-plugins-official` for the older `skill-creator` plugin.
 
+> **Correction, 2026-09-13.** Two claims below did not survive a second pass
+> against the same docs page and are struck through in place: the
+> "experimental, server kill switch" status, and the description of the tool as
+> running on the host without qualification. Granted `Bash` runs under Claude
+> Code's own OS-level sandbox, and on a machine with no backend the run is
+> refused rather than run unconfined. A third correction, that the judge is a
+> Claude model, is noted at the table row. See
+> [`2026-09-13-alternatives-landscape.md`](2026-09-13-alternatives-landscape.md)
+> for the re-verified figures and for the four other tools in the landscape.
+
 ## Answer up front
 
 `claude plugin eval` is a built-in Claude Code subcommand, not a marketplace
@@ -19,8 +29,12 @@ plugin. It runs each case in a throwaway `claude -p` session with the plugin
 loaded and again with nothing loaded, scores each run with authored graders,
 and reports `WITH`, `W/OUT`, and `Δ` per case plus a suite mean, a JSON file,
 and a self-contained HTML report. It is Claude Code only, two fixed arms only,
-and it lives on the host rather than in a container. It is marked experimental
-with a server-side kill switch.
+and it lives on the host rather than in a container, though granted `Bash` is
+confined by Claude Code's own OS-level sandbox. ~~It is marked experimental
+with a server-side kill switch.~~ As of 2026-09-13 the docs page carries no
+"experimental" framing — the word survives only as the `experimental.evals`
+manifest key, itself documented as a schema that may change between releases —
+and no server-side kill switch is documented.
 
 The overlap with benchspec is the capability-lift benchmark on Claude Code:
 "does my skill help, measured with and without it, over N runs, gated in CI."
@@ -146,7 +160,7 @@ each once, and writes the case directories.
 | "Unchanged" claims | Not expressible | `sha256_match` against the pre-run hash |
 | Judge evidence | Last message, or a window of the trace, or one file | Tree, contents, SHA-256s, final message, per-turn tool and skill activity, in one call per cell |
 | Judge variance control | 2-of-3 vote per grader | One call; unparseable output retried once |
-| Judge vendor | Any Claude model | Any harness and model, independent of the arms; cross-vendor recommended |
+| Judge vendor | Whatever `--judge-model` names, through the same credential and model provider as the session (not documented as Claude-only) | Any harness and model, independent of the arms; cross-vendor recommended |
 | Repeats | `runs`, default 3 | `--count N`, default 1 |
 | Delta | Mean score difference per case and suite | Percentage points, pooled, with a noise band at N≥2 |
 | Errored runs | `error` recorded; "a non-null error doesn't imply score 0" | Excluded from rates, counted and surfaced separately |
@@ -158,7 +172,7 @@ each once, and writes the case directories.
 | Authoring help | `eval init` interview | `lint` and `analyze` |
 | Per-case config | runs, model, turns, timeout, tools, env | None; frontmatter allows only `history` |
 | Mocks | MCP server mocks with fixed or agent-played answers and replay | None |
-| Status | Experimental, server kill switch | Pre-1.0 |
+| Status | Manifest key `experimental.evals`, a schema that may change between releases | Pre-1.0 |
 
 ## What this means for benchspec
 
