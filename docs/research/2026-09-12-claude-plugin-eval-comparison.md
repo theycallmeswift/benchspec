@@ -37,7 +37,7 @@ Six things are worth taking. In priority order:
    a baseline that has no skill, so it inflates every delta, and the same
    holds for any assertion one arm cannot pass by construction. `plugin eval`
    excludes such graders from scoring in both arms and reports them as
-   pass/fail indicators only. Design options below; no issue yet.
+   pass/fail indicators only. Design settled below; filed as #136.
 2. Make the agent-turn timeout configurable. It is hardcoded at 600 s in each
    adapter and never threaded from config; `plugin eval` has `timeout_seconds`
    and `max_turns` per case. Filed as #130.
@@ -189,7 +189,7 @@ selling the upside.
 
 ## Recommendations
 
-### 1. Let an assertion opt out of the lift
+### 1. Let an assertion opt out of the lift (#136)
 
 `plugin eval` refuses to score `tool_used: Skill` in either arm by default
 because the without-arm can never pass it. benchspec has the same problem and
@@ -241,8 +241,8 @@ Options:
 
 Size M for (a): the parser in `specs/mdformat.py` learns the tag, the
 orchestration skips scoped lines per arm, the report excludes unscored lines
-from `_arm_stats` and renders the extra table. Not filed as an issue yet; the
-syntax is the decision to make first.
+from `_arm_stats` and renders the extra table. The syntax and semantics were
+settled against the prior art below and filed as #136.
 
 #### Prior art (2026-09-13)
 
@@ -321,7 +321,11 @@ in a set with no baseline and excluded in a set with one, and a harness
 clause in a single-harness set is pooled. This is plugin eval's rule
 (`--ablation none` excludes nothing) without a special case.
 
-Rules that keep it honest. The condition must evaluate to a boolean;
+Rules that keep it honest. Every malformed clause is a collection error
+naming the path and line, never a failed or errored sample: parse errors,
+unknown keys, unknown names, type mismatches, and non-boolean conditions all
+raise before any sandbox boots, the way an unresolved placeholder already
+does. The condition must evaluate to a boolean;
 `if: {GREETING_LOCALE}` is an error, there is no truthiness. A comparison
 across types is a collection error, never a silent false: `{X} == 1` fails,
 `{X} == "1"` is the way to say it. Resolve `{VAR}` at the token level after
