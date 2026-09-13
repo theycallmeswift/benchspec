@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from pathlib import Path
 
 # Re-export so existing test imports keep working. New code (and external
@@ -10,6 +11,17 @@ from pathlib import Path
 from benchspec.testing import FakeExecOutput, FakeSandbox
 
 __all__ = ["FakeExecOutput", "FakeSandbox", "seed_arm"]
+
+
+def _skipped_assertion(text: str) -> dict:
+    """The grading.json entry `run_eval_arm` writes for a line whose clause did not hold."""
+    return {
+        "text": text,
+        "passed": None,
+        "skipped": True,
+        "scoped": True,
+        "reason": "if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}",
+    }
 
 
 def seed_arm(
@@ -29,15 +41,22 @@ def seed_arm(
     judge_ms: int = 200,
     errored: bool = False,
     binder_degraded: int = 0,
+    skipped: Collection[int] = frozenset(),
 ) -> Path:
     """Write a sample-sharded grading.json + timing.json.
+
+    Assertion `index` passes when `index < passes`, except the indices in `skipped`,
+    which are written as scoped-out entries (a clause that did not hold: never bound,
+    never judged) instead of graded ones.
 
     Returns the sample dir.
     """
     sample_dir = eval_root / f"eval-{eval_id}" / arm / f"sample-{sample}"
     sample_dir.mkdir(parents=True)
     assertions = [
-        {"text": f"a{index}", "passed": index < passes, "evidence": ""}
+        _skipped_assertion(f"a{index}")
+        if index in skipped
+        else {"text": f"a{index}", "passed": index < passes, "evidence": ""}
         for index in range(total)
     ]
     (sample_dir / "grading.json").write_text(

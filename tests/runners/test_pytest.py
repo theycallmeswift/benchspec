@@ -1686,3 +1686,30 @@ def test_summary_matrix_is_colored_only_when_the_writer_has_markup(
     assert plain_lines
     assert not any("\x1b[" in line for line in plain_lines)
     assert any("\x1b[" in line for line in color_lines)
+
+
+def test_sessionfinish_reports_scoped_assertions_beside_the_matrix(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a line skipped in one arm leaves the matrix rates and lands in a scoped section."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=3, total=3, skipped={1})
+    seed_arm(skill_results_dir, "alpha", "trial", passes=3, total=3)
+
+    _, printed = _finish_and_summarize(config)
+
+    iteration_root = skill_results_dir.parent.parent
+    benchmark = json.loads((iteration_root / "benchmark.json").read_text())
+    assert len(benchmark["scoped"]) == 1
+    assert benchmark["scoped"][0]["arms"] == {
+        "baseline": "skipped",
+        "trial": {"passed": 1, "total": 1},
+    }
+    assert "## Scoped assertions" in (iteration_root / "benchmark.md").read_text()
+    eval_row = next(line for line in printed if line.startswith("archive/alpha"))
+    assert eval_row.split() == ["archive/alpha", "100%", "100%"]  # the skipped line pools out
+    assert any(line.startswith("All evals") for line in printed)
