@@ -292,17 +292,28 @@ GitHub Actions and promptfoo use:
 
 ```markdown
 - [ ] Skill `hello` invoked
-  - when: not baseline
+  - when: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 - [ ] ./Greetings/Bob.md contains 'an absolute pleasure'
-  - when: GREETING_LOCALE = en-GB
+  - when: {GREETING_LOCALE} == en-GB
 - [ ] Opens the note with Read, not Bash
-  - when: harness = claude-code
+  - when: {BENCHSPEC_HARNESS} == claude-code and {BENCHSPEC_MODEL} != haiku
 ```
 
-Keys are the variables `setup.sh` already receives (`arm`, `harness`,
-`model`, `set`, arm `env`); `baseline` resolves to the set's baseline arm;
-`and`, `or`, `not` as in Cucumber tag expressions. A `when:` under a
-display-only parent scopes all its children.
+The clause is a template evaluated with the `{VAR}` substitution `{TODAY}`
+already uses, over the names `setup.sh` already receives: `BENCHSPEC_ARM`,
+`BENCHSPEC_HARNESS`, `BENCHSPEC_MODEL`, `BENCHSPEC_SET`, every arm `env`
+key, and a new `BENCHSPEC_BASELINE` (the set's baseline arm name, exported
+to `setup.sh` as well) so the trigger case needs no keyword. Operators are
+`==`, `!=`, `and`, `or`, `not`, parentheses. One vocabulary across
+`setup.sh`, `when:`, and any later substitution into assertion text.
+
+Two rules keep it honest. Resolve `{VAR}` at the token level after parsing,
+never by splicing text and re-parsing, so a value containing a space or the
+word `and` cannot change the expression's shape; bare literals match
+`[A-Za-z0-9_./:-]+` and anything else is quoted. An unknown name fails at
+collection, as an unknown `{UPPERCASE}` placeholder already does, with the
+names available in that cell listed. A `when:` under a display-only parent
+scopes all its children.
 
 Why the sub-bullet over a trailing `@if` token: an indented non-checkbox
 line is a hard error today (`specs/mdformat.py`), so the slot is unclaimed
