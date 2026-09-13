@@ -4,6 +4,10 @@ The judge grades ONLY from supplied evidence (workdir facts, SHAs, the agent's f
 message, process facts). An assertion the evidence can't decide gets graded by vibes —
 pass rates move without the skill changing. Rules are heuristics: a `warning` means the
 assertion is unjudgeable as written.
+
+Two rules look at the assertion's scope clause instead of its wording: a clause that
+reads no variable is a constant, and a skill-trigger line with no clause can never pass
+in a baseline arm that installs nothing, so every delta carries its structural lift.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from benchspec.specs import discovery
+from benchspec.specs import discovery, scope
 
 _VAGUE = re.compile(
     r"\b(explicitly|appropriately|properly|gracefully|suitably|reasonably|adequately)\b",
@@ -24,6 +28,8 @@ _PATHISH = re.compile(r"(?:[\w.-]+/)+[\w.-]+\.\w{1,8}")
 # not mid-word and not a bare `..`). Its presence marks the path-ish text as a workdir
 # fact the judge is shown, so the unseen-file rule stands down.
 _ANCHORED = re.compile(r"(?<![\w.])\./")
+_TRIGGER = re.compile(r"^Skill `[^`]+` (not )?invoked$")
+_TRIGGER_CLAUSE = "- if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}"
 
 
 @dataclass(frozen=True)
@@ -66,12 +72,38 @@ def lint_assertion(text: str) -> list[tuple[str, str]]:
     return findings
 
 
+def lint_clause(text: str, clause: dict | None) -> list[tuple[str, str]]:
+    """(rule, message) pairs for one assertion's scope clause (or its absence).
+
+    Raises:
+        scope.ScopeError: the clause's expression does not parse.
+    """
+    findings = []
+    if clause is not None and not scope.names(scope.parse(clause["expr"])):
+        findings.append(
+            (
+                "constant-clause",
+                f"`{scope.clause_text(clause)}` reads no `{{VAR}}`, so it holds or fails "
+                "identically in every arm — a no-op or a disabled line",
+            )
+        )
+    if clause is None and _TRIGGER.match(text):
+        findings.append(
+            (
+                "untagged-trigger",
+                "a skill-trigger line with no clause is graded in the baseline too, where "
+                f"it can never pass, so it inflates every delta; add `{_TRIGGER_CLAUSE}`",
+            )
+        )
+    return findings
+
+
 def lint_repo(repo_root: Path) -> list[Finding]:
-    """Lint discovered eval assertions for unjudgeable wording."""
+    """Lint discovered eval assertions for unjudgeable wording and unscoped triggers."""
     findings: list[Finding] = []
     for case in discovery.discover_eval_cases(repo_root):
-        for text in case.assertions:
-            for rule, message in lint_assertion(text):
+        for text, clause in zip(case.assertions, case.clauses, strict=True):
+            for rule, message in lint_assertion(text) + lint_clause(text, clause):
                 findings.append(Finding(case.eval_file, case.eval_id, text, rule, message))
     return findings
 

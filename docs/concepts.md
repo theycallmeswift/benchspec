@@ -39,6 +39,11 @@ One `- [ ]` line in an eval: a single claim about the final workspace, the
 agent's final message, or what the agent did. Assertions are prose, not checker
 syntax; how each one is graded is decided at run time (see **binder**).
 Example: `- [ ] ./Greetings/Alice.md contains the exact line 'Hello, Alice!'`.
+An assertion may carry one indented `- if: <expr>` / `- unless: <expr>` clause
+that scopes it to the arms where the clause holds; elsewhere it is skipped, and
+a line skipped in any arm leaves every arm's pooled rate. Example:
+`- if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}` under a skill-trigger line.
+Reference: [writing-evals.md](writing-evals.md#scoping-an-assertion-to-arms).
 
 ## Baseline
 
@@ -167,9 +172,10 @@ and are cached; cells boot from them in seconds. Reference:
 ## `setup.sh`
 
 An optional script beside the eval file that runs inside the sandbox before the
-prompt, with `BENCHSPEC_ARM` set to the arm's name. It is the one place arms
-diverge: the canonical script installs a skill on `trial` and exits early on
-`baseline`. Reference:
+prompt, with `BENCHSPEC_ARM` set to the arm's name (and `BENCHSPEC_MODEL`,
+`BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, `BENCHSPEC_BASELINE` beside it). It is
+where the environment diverges between arms: the canonical script installs a
+skill on `trial` and exits early on `baseline`. Reference:
 [writing-evals.md](writing-evals.md#setupsh-what-differs-per-arm).
 
 ## Skill

@@ -341,7 +341,8 @@ guest (see [`sandbox.md`](sandbox.md#credentials)).
 | `PROJECT_ROOT` | Repo-root override (below `--benchspec-repo-root`, above the pytest rootdir). |
 
 Inside the sandbox, each cell's `setup.sh` additionally sees `BENCHSPEC_ARM`,
-`BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, and `BENCHSPEC_SET`, described in
+`BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, and
+`BENCHSPEC_BASELINE`, described in
 [`writing-evals.md`](writing-evals.md#setupsh-what-differs-per-arm).
 
 The authoritative parsers are `benchspec.config.arms` (sets and arms),

@@ -278,12 +278,16 @@ class BaseAgent(ABC):
             f"ln -s {FIXED_SKILLS_HOME} {skill_dir}"
         )
 
-    def cell_env(self, *, arm: str, model: str, eval_set: str = "") -> dict[str, str]:
+    def cell_env(
+        self, *, arm: str, model: str, eval_set: str = "", baseline: str = ""
+    ) -> dict[str, str]:
         """BENCHSPEC_* are informational for setup.sh — they do NOT route the task model.
 
         (that goes through arm.model). BENCHSPEC_SET names the explicitly-selected set
         (--benchspec-set / make evals SET=) so setup.sh can branch on it; empty when the
-        run falls back to the pyproject default-set.
+        run falls back to the pyproject default-set. BENCHSPEC_BASELINE names the set's
+        baseline arm (empty when the set declares none) so a script or a scope clause
+        can tell the control arm apart without hardcoding its name.
         """
         return {
             **self.guest_env(),
@@ -291,6 +295,7 @@ class BaseAgent(ABC):
             "BENCHSPEC_MODEL": model,
             "BENCHSPEC_HARNESS": self.id,
             "BENCHSPEC_SET": eval_set,
+            "BENCHSPEC_BASELINE": baseline,
         }
 
 
@@ -321,7 +326,9 @@ class CodingAgent(Protocol):
         """Bridge skills home script."""
         ...
 
-    def cell_env(self, *, arm: str, model: str, eval_set: str = "") -> dict[str, str]:
+    def cell_env(
+        self, *, arm: str, model: str, eval_set: str = "", baseline: str = ""
+    ) -> dict[str, str]:
         """Return per-cell environment variables for an arm run."""
         ...
 

@@ -360,12 +360,14 @@ def test_codex_cell_env_carries_benchspec_vars() -> None:
         arm="trial",
         model="gpt-5.4",
         eval_set="codex-smoke",
+        baseline="baseline",
     )
 
     assert env["BENCHSPEC_ARM"] == "trial"
     assert env["BENCHSPEC_MODEL"] == "gpt-5.4"
     assert env["BENCHSPEC_HARNESS"] == "codex"
     assert env["BENCHSPEC_SET"] == "codex-smoke"
+    assert env["BENCHSPEC_BASELINE"] == "baseline"
 
 
 def test_detect_dispatch_matches_skill_invocation_item() -> None:

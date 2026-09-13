@@ -4,8 +4,10 @@ The eval is single-turn: a `history:` transcript block (context) is prepended to
 graded prompt. Both arms grade identically — there is no with-skill invocation gate.
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
-the arm's dispatched-skills set, not a harness assert. `session_factory`, `grade`, and `bind`
-are injectable so the loop is unit-testable without spawning a sandbox or calling the host.
+the arm's dispatched-skills set, not a harness assert. A line whose scope clause does not
+hold in this arm is neither bound nor judged; it lands in grading.json as a skipped entry
+in its document position. `session_factory`, `grade`, and `bind` are injectable so the
+loop is unit-testable without spawning a sandbox or calling the host.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from benchspec.sandbox.sandbox import (
     arm_session,
     ensure_snapshot,
 )
+from benchspec.specs import scope
 from benchspec.specs.discovery import EnvConfig, EvalCase, resolve_environment_config
 
 # The judge is a run-level concern, independent of the task arm's own harness/model
@@ -252,6 +255,7 @@ async def _run_arm_turns(
     backend: SandboxBackend,
     arm_env: dict[str, str] | None = None,
     eval_set: str = "",
+    baseline: str = "",
     harness_args: list[str] | None = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
 ) -> _ArmRun:
@@ -274,6 +278,7 @@ async def _run_arm_turns(
         project_marker=project_marker,
         arm_env=arm_env,
         eval_set=eval_set,
+        baseline=baseline,
         harness_args=harness_args,
         timeout=timeout,
         backend=backend,
@@ -383,6 +388,39 @@ def _build_runtime_provenance(
     )
 
 
+def _document_order(
+    *,
+    assertions: list[str],
+    clauses: list[dict | None],
+    applicable: list[bool],
+    graded: list[dict],
+) -> list[dict]:
+    """Interleave graded entries with skipped ones so grading.json aligns with the eval file.
+
+    `graded` holds one entry per applicable line, in order. A line whose clause did not
+    hold gets the fixed skipped shape; any line carrying a clause is tagged `scoped`.
+    """
+    graded_entries = iter(graded)
+    merged: list[dict] = []
+    for text, clause, holds in zip(assertions, clauses, applicable, strict=True):
+        if holds:
+            entry = next(graded_entries)
+            if clause is not None:
+                entry["scoped"] = True
+        else:
+            if clause is None:
+                raise RuntimeError(f"assertion {text!r} was skipped without a clause")
+            entry = {
+                "text": text,
+                "passed": None,
+                "skipped": True,
+                "scoped": True,
+                "reason": scope.clause_text(clause),
+            }
+        merged.append(entry)
+    return merged
+
+
 def run_eval_arm(
     eval_case: EvalCase,
     arm: Arm,
@@ -394,6 +432,7 @@ def run_eval_arm(
     repo_root: Path,
     sample: int,
     eval_set: str = "",
+    baseline: str | None = None,
     sandbox_name: str = DEFAULT_SANDBOX,
     project_marker: str = DEFAULT_PROJECT_MARKER,
     judge_config: JudgeConfig | None = None,
@@ -440,6 +479,12 @@ def run_eval_arm(
     # pre-run like the prompt does, not at grade time after the agent already spent tokens
     # (a raise there would unwind before the artifact writes and discard the completed run).
     graded_assertions = substitute_assertions(eval_case.assertions, today)
+    # Scope clauses resolve here for the same reason: an unknown name or a type error is
+    # an authoring defect and must surface before the sandbox boots and spends anything.
+    applicable = scope.applicable(eval_case, arm, baseline=baseline, eval_set=eval_set)
+    active_assertions = [
+        text for text, holds in zip(graded_assertions, applicable, strict=True) if holds
+    ]
 
     arm_run = asyncio.run(
         _run_arm_turns(
@@ -460,6 +505,7 @@ def run_eval_arm(
             # actually runs, never at collection (a deselected arm's secret is never read).
             arm_env=expand_env(arm.env, os.environ),
             eval_set=eval_set,
+            baseline=baseline or "",
             harness_args=arm.harness_args,
             timeout=arm.timeout,
         )
@@ -478,8 +524,9 @@ def run_eval_arm(
         )
 
     # Bind once, up front: the binder's own output is the source of truth for which
-    # assertions are activation checks — no separate recognizer.
-    specs, binder_degraded = _bind_all(graded_assertions, bind)
+    # assertions are activation checks — no separate recognizer. Only the lines whose
+    # clause holds are bound: a skipped line never reaches the binder or the judge.
+    specs, binder_degraded = _bind_all(active_assertions, bind)
 
     # Candidate skills are those the binder bound to an activation checker — the skills the
     # eval asserts on, never the group name, so an eval whose group differs still grades each.
@@ -500,8 +547,8 @@ def run_eval_arm(
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    merged, judge_ms, judge_errored = _grade_mixed(
-        assertions=graded_assertions,
+    graded, judge_ms, judge_errored = _grade_mixed(
+        assertions=active_assertions,
         specs=specs,
         tree=arm_run.tree,
         contents=arm_run.contents,
@@ -515,6 +562,12 @@ def run_eval_arm(
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
         process_facts=render_process_facts([arm_run.trajectory]),
+    )
+    merged = _document_order(
+        assertions=graded_assertions,
+        clauses=eval_case.clauses,
+        applicable=applicable,
+        graded=graded,
     )
 
     # `errored` lets the report tell an infra failure (excluded from the benchmark) apart

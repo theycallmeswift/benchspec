@@ -233,6 +233,7 @@ async def run_setup_sh(
     arm: str,
     model: str,
     eval_set: str = "",
+    baseline: str = "",
     arm_env: dict[str, str] | None = None,
 ) -> None:
     """Run an eval's own setup.sh inside the arm sandbox when present.
@@ -242,7 +243,10 @@ async def run_setup_sh(
     the eval dir and fails loudly on a nonzero exit. The `BENCHSPEC_*` cell env reaches
     the script.
     """
-    env = {**agent.cell_env(arm=arm, model=model, eval_set=eval_set), **(arm_env or {})}
+    env = {
+        **agent.cell_env(arm=arm, model=model, eval_set=eval_set, baseline=baseline),
+        **(arm_env or {}),
+    }
     eval_dir = shlex.quote(f"{PROJECT_MOUNT}/{setup_reldir}")
     script = (
         "set -e\n"
@@ -291,6 +295,7 @@ class SandboxSession:
         arm: str | None = None,
         arm_env: dict[str, str] | None = None,
         eval_set: str = "",
+        baseline: str = "",
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
@@ -308,6 +313,7 @@ class SandboxSession:
         # Per-arm environment, already expanded, is shared by setup.sh and the agent exec.
         self._arm_env = arm_env
         self._eval_set = eval_set
+        self._baseline = baseline
         self._harness_args = harness_args
         # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
         self._timeout = timeout
@@ -349,6 +355,7 @@ class SandboxSession:
                     arm=self._arm,
                     model=self._model,
                     eval_set=self._eval_set,
+                    baseline=self._baseline,
                     arm_env=self._arm_env,
                 )
             except BaseException:
@@ -415,6 +422,7 @@ def arm_session(
     arm: str | None = None,
     arm_env: dict[str, str] | None = None,
     eval_set: str = "",
+    baseline: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
@@ -434,6 +442,7 @@ def arm_session(
         arm=arm,
         arm_env=arm_env,
         eval_set=eval_set,
+        baseline=baseline,
         project_marker=project_marker,
         harness_args=harness_args,
         timeout=timeout,

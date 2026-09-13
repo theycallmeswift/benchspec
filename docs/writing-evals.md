@@ -111,6 +111,56 @@ The payoff for splitting is deterministic grading: a bare existence claim binds 
 a checker, while "exists *and* contains X" always goes to the judge (more on this
 below), and a failure pinpoints the exact clause that missed.
 
+### Scoping an assertion to arms
+
+Some expectations only make sense in some arms. `Skill \`hello\` invoked` can
+never pass in a baseline arm that installs nothing, so grading it there hands
+every delta a structural lift. Scope such a line with one indented `- if:` or
+`- unless:` sub-bullet directly under it; the assertion text stays untouched:
+
+```markdown
+## Assertions
+
+- [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+- [ ] ./Greetings/Bob.md contains the text 'an absolute pleasure'
+  - if: {GREETING_LOCALE} == "en-GB"
+- [ ] Opens the note with Read, not Bash
+  - unless: {BENCHSPEC_HARNESS} == "codex"
+- [ ] the project was scaffolded:
+  - if: {BENCHSPEC_ARM} == "trial"
+  - [ ] the ./src/ directory exists
+  - [ ] the ./tests/ directory exists
+```
+
+The line is graded in every arm where the clause holds and skipped in every arm
+where it does not: never bound, never judged, recorded in `grading.json` as
+`skipped` with the clause as its `reason`. `unless: X` is `if: not (X)`. One
+clause per item; under a display-only parent it applies to every child, and a
+child may carry its own (one indent deeper) only when the parent carries none.
+
+`{VAR}` reads the same variables `setup.sh` sees: `BENCHSPEC_ARM`,
+`BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, `BENCHSPEC_BASELINE`
+(the set's baseline arm, empty when it declares none), plus the arm's own `env`
+keys. Every variable is a string. The clause `{BENCHSPEC_ARM} !=
+{BENCHSPEC_BASELINE}` is the canonical way to grade a trigger line off the
+baseline without naming it.
+
+The expression language is small and typed: integer literals (`1`, `-3`),
+strings in double or single quotes, `true` / `false`, and `{VAR}` references;
+`==` and `!=` between two values of one type; `<`, `>`, `<=`, `>=` on integers
+only; `and`, `or`, `not` (in that order of increasing precedence) and
+parentheses. A bare word, a comparison across types (`{X} == 1` compares a
+string against an int), an ordering on a string or boolean, or an expression
+that is not a boolean is an error, never a silent `false`. Every such error, and
+any unknown `{VAR}`, fails at collection before a sandbox boots; a clause can
+never produce a failed or errored sample.
+
+Scoping changes what is pooled. A line skipped in *any* arm is excluded from the
+pooled rates, deltas, and noise bands of *every* arm, so the matrix always
+compares like with like; those lines get their own per-arm table in the report
+([`results.md`](results.md)). A clause that holds in every arm changes nothing.
+
 ### Placeholders
 
 `{TODAY}` substitutes to the host's UTC date (`YYYY-MM-DD`) in the prompt,
@@ -118,7 +168,10 @@ assertions, history content, and in workspace file contents *and file names*, so
 date-stamped fixtures and date-sensitive assertions stay honest on any day the
 suite runs. Any other `{UPPERCASE}` token in a prompt, history turn, or assertion
 is rejected before the agent runs rather than leaked to it: eval prompts must be
-self-contained, so put values in the workspace, not in placeholders.
+self-contained, so put values in the workspace, not in placeholders. A scope
+clause is the second place `{VAR}` resolves, with its own vocabulary (the
+`BENCHSPEC_*` variables and the arm's `env`); assertion text itself still takes
+only `{TODAY}`.
 
 ## The workspace and the clean room
 
@@ -142,7 +195,8 @@ the judge all see the workspace.
 
 ## `setup.sh`: what differs per arm
 
-The eval file is identical across arms; `setup.sh` is where arms diverge. If the
+The prompt and workspace are identical across arms; `setup.sh` is where the
+environment diverges, and a scope clause is where an expectation does. If the
 eval folder contains one, it runs inside the sandbox before the prompt, from
 the eval folder itself under the read-only `/project` mount, with these
 variables set:
@@ -153,6 +207,7 @@ variables set:
 | `BENCHSPEC_MODEL` | The arm's task model. Informational; it does not route the model. |
 | `BENCHSPEC_HARNESS` | The harness running this cell (`claude-code`, `codex`, `opencode`). |
 | `BENCHSPEC_SET` | The explicitly selected set name; empty when the run used `default-set`. |
+| `BENCHSPEC_BASELINE` | The set's `baseline` arm name; empty when the set declares none. |
 
 The arm's own `env` table is layered on top, so a set that declares
 `env = { CONTEXT_PROFILE = "full" }` can be read here too. A non-zero exit aborts
@@ -246,6 +301,8 @@ wording the judge cannot fairly grade, and exits `1` on any finding:
 | `vague-adverb` | `explicitly`, `appropriately`, `properly`, `gracefully`, `suitably`, `reasonably`, `adequately`: adverbs naming no observable criterion. |
 | `unseen-file` | A path-like string (`dir/file.ext`) with no `./` anchor anywhere in the line; the judge only sees workspace facts. |
 | `relative-claim` | `better`, `worse`, `cleaner`, `clearer`, `stronger`, `improved` with no "than" comparand. |
+| `constant-clause` | An `if:` / `unless:` clause that reads no `{VAR}`: it holds or fails identically in every arm, so it is a no-op or a disabled line. |
+| `untagged-trigger` | A `` Skill `…` invoked `` / `not invoked` line with no clause: graded in the baseline too, where it can never pass, so it inflates every delta. Add `- if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}`. |
 
 `benchspec analyze` asks the binder itself. It binds every assertion exactly
 as a live run would and prints one label per line, `deterministic` or
@@ -263,9 +320,17 @@ suite: it is a report, not a gate.
 - `history` must be a list of `{role, content}` turns, both fields non-empty.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
+- An item may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet.
+  A second clause on the same item, a clause with no item above it, a child clause
+  under a parent that already carries one, or an empty expression is an error. Any
+  other indented non-checkbox line is still an error.
+- A clause expression must parse and resolve for every arm of the set: unknown
+  `{VAR}`, cross-type comparison, ordering on a non-integer, or a non-boolean
+  result fails collection.
 
 The authoritative validators are `benchspec.specs.mdformat` (Markdown
-structure), `benchspec.specs.schema` (the parsed shape), and
-`benchspec.specs.lint` (the lint rules); the binder's prompt and checker list
+structure), `benchspec.specs.schema` (the parsed shape), `benchspec.specs.scope`
+(the clause language), and `benchspec.specs.lint` (the lint rules); the binder's
+prompt and checker list
 live in `benchspec.grading.binder` and `benchspec.grading.checkers`. If this
 page and those modules ever disagree, the modules are right.

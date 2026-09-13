@@ -7,6 +7,11 @@ are hard errors. A `- [ ]` item with indented `- [ ]` children is a display-only
 whose children flatten to standalone assertions in document order (one nesting level
 only); a childless item is one assertion.
 
+An item may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet, its scope
+clause: the raw expression is kept beside the assertion (`clauses`, aligned by index)
+and the prose is left untouched. A clause on a display-only parent is copied onto every
+child; a child under an unclaused parent may carry its own, one indent deeper.
+
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
 (`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
 (required) + `## Assertions` checklist (required, all prose; H3 subheadings are
@@ -27,6 +32,8 @@ from benchspec.specs import schema
 _FENCE = re.compile(r"^(```|~~~)")
 _HEADER = re.compile(r"^(#{2,3}) +(.+?)\s*$")
 _CHECKBOX = re.compile(r"^- \[[ xX]\] +(.*\S)\s*$")
+_CLAUSE = re.compile(r"^- (if|unless): +(.*\S)\s*$")
+_EMPTY_CLAUSE = re.compile(r"^- (if|unless):\s*$")
 
 _EVAL_FM = {"history"}
 
@@ -92,81 +99,160 @@ def _prose(content_lines: list[str]) -> str:
     return "\n".join(content_lines).strip()
 
 
-def _checklist(content_lines: list[str], where: str, path: Path) -> list[str]:
-    """Flatten one checklist body to plain-prose assertions, expanding a single.
+class _Item:
+    """One top-level `- [ ]` item being assembled: its prose, clause, and flattened children.
 
-    level of parent/child nesting (a parent with children is a display-only
-    header; each child becomes a standalone assertion).
-
-    Parent and children must share one body: `_collect_assertions` calls this
-    per section, so a child indented under a following `###` group surfaces here
-    as an orphan with no parent rather than adopting the prior section's parent.
+    `child_start` is the index in the output lists where this item's children begin, so
+    a parent clause that arrives after its children can be copied back onto them.
     """
-    items: list[str] = []
-    parent: str | None = None
-    parent_has_children = False
-    child_indent: int | None = None
 
-    def flush() -> None:
-        """Flush one pending Markdown assertion block into parsed output."""
-        if parent is not None and not parent_has_children:
-            items.append(parent)
+    def __init__(self, text: str, child_start: int) -> None:
+        """Start a childless, unclaused item."""
+        self.text = text
+        self.clause: dict | None = None
+        self.child_start = child_start
+        self.child_indent: int | None = None
+        self.has_children = False
 
+
+class _Checklist:
+    """Accumulate one checklist body into aligned assertion and clause lists."""
+
+    def __init__(self, where: str, path: Path) -> None:
+        """Start with no items; `where` and `path` prefix every error."""
+        self.items: list[str] = []
+        self.clauses: list[dict | None] = []
+        self._where = where
+        self._path = path
+        self._item: _Item | None = None
+
+    def _error(self, message: str, line: str) -> MdFormatError:
+        """Build the hard error for `line`, prefixed with the eval path and section."""
+        return MdFormatError(f"{self._path}: {self._where}: {message}: {line!r}")
+
+    def flush(self) -> None:
+        """Emit the pending item as one assertion unless its children stood in for it."""
+        if self._item is not None and not self._item.has_children:
+            self.items.append(self._item.text)
+            self.clauses.append(self._item.clause)
+
+    def top_level(self, line: str) -> None:
+        """Start a new item from an unindented line."""
+        self.flush()
+        checkbox_match = _CHECKBOX.match(line)
+        if not checkbox_match:
+            raise self._error("expected `- [ ] ...` items, got", line)
+        self._item = _Item(checkbox_match.group(1), child_start=len(self.items))
+
+    def indented(self, line: str) -> None:
+        """Attach an indented line to the pending item as a child or a clause."""
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        clause_match = _CLAUSE.match(stripped)
+        if clause_match:
+            self._clause(
+                {"key": clause_match.group(1), "expr": clause_match.group(2)}, indent, line
+            )
+            return
+        if _EMPTY_CLAUSE.match(stripped):
+            raise self._error("clause has no expression", line)
+        if self._item is None:
+            raise self._error("indented `- [ ]` child with no parent item above it", line)
+        checkbox_match = _CHECKBOX.match(stripped)
+        if not checkbox_match:
+            raise self._error(
+                "indented lines must be `- [ ]` children — one assertion per line, "
+                "no continuations",
+                line,
+            )
+        self._align(self._item, indent, line)
+        self._item.has_children = True
+        self.items.append(checkbox_match.group(1))
+        self.clauses.append(self._item.clause)
+
+    def _align(self, item: _Item, indent: int, line: str) -> None:
+        """Pin the child indent on first use; later siblings must sit exactly there."""
+        if item.child_indent is None:
+            item.child_indent = indent
+        elif indent > item.child_indent:
+            raise self._error("only one nesting level — unexpected grandchild", line)
+        elif indent < item.child_indent:
+            raise self._error("ragged child indent — siblings must align", line)
+
+    def _clause(self, clause: dict, indent: int, line: str) -> None:
+        """Attach a clause to the pending item, or to its last child when nested deeper."""
+        item = self._item
+        if item is None:
+            raise self._error("clause with no `- [ ]` item above it", line)
+        deeper_than_children = item.child_indent is not None and indent > item.child_indent
+        if item.has_children and deeper_than_children:
+            self._child_clause(item, clause, line)
+            return
+        if item.clause is not None:
+            raise self._error("item already carries a clause", line)
+        self._align(item, indent, line)
+        if any(child_clause is not None for child_clause in self.clauses[item.child_start :]):
+            raise self._error(
+                "a parent may not carry a clause once a child carries its own", line
+            )
+        item.clause = clause
+        for child_index in range(item.child_start, len(self.clauses)):
+            self.clauses[child_index] = clause
+
+    def _child_clause(self, item: _Item, clause: dict, line: str) -> None:
+        """Attach a clause to the item's last child."""
+        if item.clause is not None:
+            raise self._error(
+                "a child under a parent that carries a clause may not carry its own", line
+            )
+        if self.clauses[-1] is not None:
+            raise self._error("item already carries a clause", line)
+        self.clauses[-1] = clause
+
+
+def _checklist(
+    content_lines: list[str], where: str, path: Path
+) -> tuple[list[str], list[dict | None]]:
+    """Flatten one checklist body to plain-prose assertions and their aligned clauses.
+
+    Expands a single level of parent/child nesting (a parent with children is a
+    display-only header; each child becomes a standalone assertion) and attaches each
+    item's optional `- if:` / `- unless:` sub-bullet as its clause (None when absent).
+
+    Parent and children must share one body: `_collect_assertions` calls this per
+    section, so a child indented under a following `###` group surfaces here as an
+    orphan with no parent rather than adopting the prior section's parent.
+    """
+    checklist = _Checklist(where, path)
     for line in content_lines:
         if not line.strip():
             continue
-        if not line[0].isspace():
-            flush()
-            checkbox_match = _CHECKBOX.match(line)
-            if not checkbox_match:
-                raise MdFormatError(f"{path}: {where}: expected `- [ ] ...` items, got: {line!r}")
-            parent = checkbox_match.group(1)
-            parent_has_children = False
-            child_indent = None
-            continue
-        if parent is None:
-            raise MdFormatError(
-                f"{path}: {where}: indented `- [ ]` child with no parent item above it: {line!r}"
-            )
-        indent = len(line) - len(line.lstrip())
-        checkbox_match = _CHECKBOX.match(line.lstrip())
-        if not checkbox_match:
-            raise MdFormatError(
-                f"{path}: {where}: indented lines must be `- [ ]` children — "
-                f"one assertion per line, no continuations: {line!r}"
-            )
-        if child_indent is None:
-            child_indent = indent
-        elif indent > child_indent:
-            raise MdFormatError(
-                f"{path}: {where}: only one nesting level — unexpected grandchild: {line!r}"
-            )
-        elif indent < child_indent:
-            raise MdFormatError(
-                f"{path}: {where}: ragged child indent — siblings must align: {line!r}"
-            )
-        parent_has_children = True
-        items.append(checkbox_match.group(1))
-
-    flush()
-    return items
+        if line[0].isspace():
+            checklist.indented(line)
+        else:
+            checklist.top_level(line)
+    checklist.flush()
+    return checklist.items, checklist.clauses
 
 
 def _collect_assertions(
     sections: list[tuple[int, str, list[str]]], start: int, path: Path
-) -> list[str]:
+) -> tuple[list[str], list[dict | None]]:
     """The Assertions H2 at `start` plus its H3 groups, flattened in order.
 
-    Groups are display-only — no semantics ride on the H3 title.
+    Groups are display-only — no semantics ride on the H3 title. Returns the assertions
+    and their aligned clauses.
     """
-    items = _checklist(sections[start][2], "Assertions", path)
+    items, clauses = _checklist(sections[start][2], "Assertions", path)
     for level, title, content in sections[start + 1 :]:
         if level == 2:
             break
-        items.extend(_checklist(content, f"Assertions / {title}", path))
+        group_items, group_clauses = _checklist(content, f"Assertions / {title}", path)
+        items.extend(group_items)
+        clauses.extend(group_clauses)
     if not items:
         raise MdFormatError(f"{path}: Assertions section has no checklist items")
-    return items
+    return items, clauses
 
 
 def parse_eval_md(path: Path) -> dict:
@@ -194,6 +280,7 @@ def parse_eval_md(path: Path) -> dict:
     sections = _sections(body_lines, path)
     prompt = None
     assertions = None
+    clauses: list[dict | None] = []
     last_h2 = None
     for i, (level, title, content) in enumerate(sections):
         if level == 3:
@@ -208,7 +295,7 @@ def parse_eval_md(path: Path) -> dict:
             prompt = _prose(content)
         elif title == "Assertions":
             # A present `## Assertions` must be non-empty; _collect_assertions enforces it.
-            assertions = _collect_assertions(sections, i, path)
+            assertions, clauses = _collect_assertions(sections, i, path)
         else:
             raise MdFormatError(f"{path}: unexpected `## {title}`")
     if not prompt:
@@ -217,4 +304,5 @@ def parse_eval_md(path: Path) -> dict:
         raise MdFormatError(f"{path}: missing or empty `## Assertions`")
     result["prompt"] = prompt
     result["assertions"] = assertions
+    result["clauses"] = clauses
     return result
