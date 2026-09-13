@@ -410,6 +410,7 @@ def _document_order(
         else:
             if clause is None:
                 raise RuntimeError(f"assertion {text!r} was skipped without a clause")
+
             entry = {
                 "text": text,
                 "passed": None,
@@ -417,7 +418,9 @@ def _document_order(
                 "scoped": True,
                 "reason": scope.clause_text(clause),
             }
+
         merged.append(entry)
+
     return merged
 
 
@@ -479,6 +482,7 @@ def run_eval_arm(
     # pre-run like the prompt does, not at grade time after the agent already spent tokens
     # (a raise there would unwind before the artifact writes and discard the completed run).
     graded_assertions = substitute_assertions(eval_case.assertions, today)
+
     # Scope clauses resolve here for the same reason: an unknown name or a type error is
     # an authoring defect and must surface before the sandbox boots and spends anything.
     applicable = scope.applicable(eval_case, arm, baseline=baseline, eval_set=eval_set)
@@ -563,6 +567,7 @@ def run_eval_arm(
         pre_run_shas=pre_run_shas,
         process_facts=render_process_facts([arm_run.trajectory]),
     )
+
     merged = _document_order(
         assertions=graded_assertions,
         clauses=eval_case.clauses,

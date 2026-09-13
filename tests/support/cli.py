@@ -64,10 +64,12 @@ def write_eval(repo_root: Path, assertions: list[str] | str, *, slug: str = "gre
     """
     eval_file = repo_root / "skills" / "demo" / "evals" / slug / "eval.md"
     eval_file.parent.mkdir(parents=True, exist_ok=True)
+
     if isinstance(assertions, str):
         body = assertions
     else:
         body = "".join(f"- [ ] {assertion}\n" for assertion in assertions)
+
     header = dedent("""\
         ---
         ---
@@ -79,5 +81,6 @@ def write_eval(repo_root: Path, assertions: list[str] | str, *, slug: str = "gre
         ## Assertions
 
     """)
+
     eval_file.write_text(header + body)
     return eval_file

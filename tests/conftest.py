@@ -53,12 +53,14 @@ def seed_arm(
     """
     sample_dir = eval_root / f"eval-{eval_id}" / arm / f"sample-{sample}"
     sample_dir.mkdir(parents=True)
+
     assertions = [
         _skipped_assertion(f"a{index}")
         if index in skipped
         else {"text": f"a{index}", "passed": index < passes, "evidence": ""}
         for index in range(total)
     ]
+
     (sample_dir / "grading.json").write_text(
         json.dumps(
             {

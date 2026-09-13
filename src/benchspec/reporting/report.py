@@ -116,6 +116,7 @@ def _graded_samples(eval_dir: Path, arm: str) -> list[dict]:
     arm_dir = eval_dir / arm
     if not arm_dir.is_dir():
         return []
+
     gradings = (_load_json(sample_dir / "grading.json") for sample_dir in _sample_dirs(arm_dir))
     return [grading for grading in gradings if grading is not None]
 
@@ -138,7 +139,9 @@ def _excluded_indices(
                     for index, assertion in enumerate(grading.get("assertions", []))
                     if assertion.get("skipped")
                 )
+
         excluded[_eval_key(eval_dir)] = skipped
+
     return excluded
 
 
@@ -153,6 +156,7 @@ def _scoped_cell(gradings: list[dict], index: int) -> dict | str | None:
         return "skipped"
     if not entries:
         return None
+
     return {
         "passed": sum(1 for entry in entries if entry.get("passed")),
         "total": len(entries),
@@ -171,6 +175,7 @@ def _scoped_rows(
         indices = excluded[(group, eval_id)]
         if not indices:
             continue
+
         per_arm = {arm: _graded_samples(eval_dir, arm) for arm in arm_names}
         texts = {
             index: assertion["text"]
@@ -179,6 +184,7 @@ def _scoped_rows(
             for index, assertion in enumerate(grading.get("assertions", []))
             if index in indices
         }
+
         for index in sorted(indices):
             rows.append(
                 {
@@ -189,6 +195,7 @@ def _scoped_rows(
                     "arms": {arm: _scoped_cell(per_arm[arm], index) for arm in arm_names},
                 }
             )
+
     return rows
 
 
@@ -231,6 +238,7 @@ def _arm_stats(
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
+
             assertions = [
                 assertion
                 for index, assertion in enumerate(grading.get("assertions", []))
@@ -238,6 +246,7 @@ def _arm_stats(
             ]
             if not assertions:
                 continue
+
             passed = sum(1 for assertion in assertions if assertion.get("passed"))
             sample_rates.append(passed / len(assertions))
             passed_total += passed
@@ -456,6 +465,7 @@ def _column_order(benchmark: dict) -> list[str]:
     """Return the arm column order: the baseline first, then the rest in declared order."""
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
+
     return ([baseline] if baseline in arms else []) + [
         arm_name for arm_name in arms if arm_name != baseline
     ]
@@ -537,6 +547,7 @@ def _scoped_table(benchmark: dict) -> list[str]:
     names = _column_order(benchmark)
     if not rows or not names:
         return []
+
     lines = [
         "## Scoped assertions",
         "",
@@ -549,6 +560,7 @@ def _scoped_table(benchmark: dict) -> list[str]:
         label = f"{row['group']}/{row['eval_id']} · {row['text']}"
         cells = [_scoped_cell_text(row["arms"].get(name)) for name in names]
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
+
     lines.append("")
     return lines
 
@@ -843,6 +855,7 @@ def build_benchmark(
         }
     )
     arm_names = configured + [name for name in discovered if name not in configured]
+
     # A line skipped by any arm's clause is pooled by none, so every arm rates the same
     # lines; the left-out lines get their own per-arm table instead.
     excluded = _excluded_indices(eval_dirs, arm_names)

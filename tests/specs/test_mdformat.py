@@ -784,38 +784,10 @@ def test_clause_with_no_parent_is_a_hard_error(tmp_path: Path) -> None:
     assert 'if: {BENCHSPEC_HARNESS} == "codex"' in str(exc_info.value)
 
 
-def test_child_clause_under_a_claused_parent_is_a_hard_error(tmp_path: Path) -> None:
-    """Verify a child may not carry its own clause once its parent carries one."""
-    eval_path = _write_slug(
-        tmp_path,
-        "double-scoped",
-        """\
-        ---
-        {}
-        ---
-
-        ## Prompt
-
-        Scaffold the project.
-
-        ## Assertions
-
-        - [ ] the project was scaffolded:
-          - if: {BENCHSPEC_ARM} == "trial"
-          - [ ] the ./src/ directory exists
-            - if: {BENCHSPEC_HARNESS} == "codex"
-    """,
-    )
-
-    with pytest.raises(mdformat.MdFormatError) as exc_info:
-        mdformat.parse_eval_md(eval_path)
-
-    assert str(eval_path) in str(exc_info.value)
-    assert 'if: {BENCHSPEC_HARNESS} == "codex"' in str(exc_info.value)
-
-
-def test_parent_clause_applies_to_every_child(tmp_path: Path) -> None:
-    """Verify a clause on a display-only parent is copied onto each flattened child."""
+def test_clause_before_children_under_a_display_only_parent_is_a_hard_error(
+    tmp_path: Path,
+) -> None:
+    """Verify a clause under a parent, ahead of its children, raises quoting the clause line."""
     eval_path = _write_slug(
         tmp_path,
         "scoped-parent",
@@ -834,26 +806,20 @@ def test_parent_clause_applies_to_every_child(tmp_path: Path) -> None:
           - if: {BENCHSPEC_ARM} == "trial"
           - [ ] the ./src/ directory exists
           - [ ] the ./tests/ directory exists
-        - [ ] Skill `hello` invoked
     """,
     )
 
-    ev = mdformat.parse_eval_md(eval_path)
+    with pytest.raises(mdformat.MdFormatError, match="display-only parent") as exc_info:
+        mdformat.parse_eval_md(eval_path)
 
-    assert ev["assertions"] == [
-        "the ./src/ directory exists",
-        "the ./tests/ directory exists",
-        "Skill `hello` invoked",
-    ]
-    assert ev["clauses"] == [
-        {"key": "if", "expr": '{BENCHSPEC_ARM} == "trial"'},
-        {"key": "if", "expr": '{BENCHSPEC_ARM} == "trial"'},
-        None,
-    ]
+    assert str(eval_path) in str(exc_info.value)
+    assert 'if: {BENCHSPEC_ARM} == "trial"' in str(exc_info.value)
 
 
-def test_parent_clause_after_its_children_is_a_hard_error(tmp_path: Path) -> None:
-    """Verify a parent clause that arrives after the children raises, quoting that line."""
+def test_clause_after_children_under_a_display_only_parent_is_a_hard_error(
+    tmp_path: Path,
+) -> None:
+    """Verify a clause at the children's indent, after them, raises quoting that line."""
     eval_path = _write_slug(
         tmp_path,
         "late-parent-clause",
@@ -875,7 +841,7 @@ def test_parent_clause_after_its_children_is_a_hard_error(tmp_path: Path) -> Non
     """,
     )
 
-    with pytest.raises(mdformat.MdFormatError, match="before its children") as exc_info:
+    with pytest.raises(mdformat.MdFormatError, match="display-only parent") as exc_info:
         mdformat.parse_eval_md(eval_path)
 
     assert str(eval_path) in str(exc_info.value)
@@ -909,7 +875,7 @@ def test_clause_without_a_space_after_the_colon_is_a_hard_error(tmp_path: Path) 
     assert 'if:{BENCHSPEC_ARM} == "trial"' in str(exc_info.value)
 
 
-def test_child_under_an_unclaused_parent_may_carry_its_own_clause(tmp_path: Path) -> None:
+def test_child_may_carry_its_own_clause(tmp_path: Path) -> None:
     """Verify a child's clause, one indent deeper than the child, attaches to that child only."""
     eval_path = _write_slug(
         tmp_path,

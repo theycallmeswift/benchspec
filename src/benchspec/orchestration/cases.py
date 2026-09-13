@@ -73,8 +73,10 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
         for arm in arms:
             pairs.append((case, arm))
             ids.append(f"{case.param_id}-{arm.name}")
+
     if run_set is not None:
         _resolve_scope_clauses(pairs, run_set.baseline, _eval_set_name(config))
+
     return pairs, ids
 
 

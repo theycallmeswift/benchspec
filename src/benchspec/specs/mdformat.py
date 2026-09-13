@@ -7,11 +7,11 @@ are hard errors. A `- [ ]` item with indented `- [ ]` children is a display-only
 whose children flatten to standalone assertions in document order (one nesting level
 only); a childless item is one assertion.
 
-An item may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet, its scope
-clause: the raw expression is kept beside the assertion (`clauses`, aligned by index)
-and the prose is left untouched. A parent's clause sits directly under the parent line,
-before its children, and applies to every child; a child under an unclaused parent may
-carry its own, one indent deeper.
+A graded assertion may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet,
+its scope clause: the raw expression is kept beside the assertion (`clauses`, aligned by
+index) and the prose is left untouched. A clause scopes the `- [ ]` line directly above
+it — a childless item, or a child (one indent deeper than the child). A display-only
+parent is never graded, so it cannot carry one.
 
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
 (`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
@@ -37,6 +37,10 @@ _CLAUSE = re.compile(r"^- (if|unless): +(.*\S)\s*$")
 _CLAUSE_LIKE = re.compile(r"^- (?i:if|unless)\b")
 
 _EVAL_FM = {"history"}
+
+_DISPLAY_ONLY_PARENT = (
+    "a clause scopes one graded assertion; a display-only parent cannot carry one"
+)
 
 
 class MdFormatError(schema.SchemaError):
@@ -107,8 +111,9 @@ class _Item:
         """Start a childless, unclaused item."""
         self.text = text
         self.clause: dict | None = None
+        # The raw clause line, kept so a child arriving later can name it in the error.
+        self.clause_line: str | None = None
         self.child_indent: int | None = None
-        self.has_children = False
 
 
 class _Checklist:
@@ -128,32 +133,35 @@ class _Checklist:
 
     def flush(self) -> None:
         """Emit the pending item as one assertion unless its children stood in for it."""
-        if self._item is not None and not self._item.has_children:
+        if self._item is not None and self._item.child_indent is None:
             self.items.append(self._item.text)
             self.clauses.append(self._item.clause)
 
     def top_level(self, line: str) -> None:
         """Start a new item from an unindented line."""
         self.flush()
+
         checkbox_match = _CHECKBOX.match(line)
         if not checkbox_match:
             raise self._error("expected `- [ ] ...` items, got", line)
+
         self._item = _Item(checkbox_match.group(1))
 
     def indented(self, line: str) -> None:
         """Attach an indented line to the pending item as a child or a clause."""
         stripped = line.lstrip()
         indent = len(line) - len(stripped)
+
         clause_match = _CLAUSE.match(stripped)
         if clause_match:
-            self._clause(
-                {"key": clause_match.group(1), "expr": clause_match.group(2)}, indent, line
-            )
+            clause = {"key": clause_match.group(1), "expr": clause_match.group(2)}
+            self._clause(clause, indent, line)
             return
         if _CLAUSE_LIKE.match(stripped):
             raise self._error("a clause reads `- if: <expr>` or `- unless: <expr>`", line)
         if self._item is None:
             raise self._error("indented `- [ ]` child with no parent item above it", line)
+
         checkbox_match = _CHECKBOX.match(stripped)
         if not checkbox_match:
             raise self._error(
@@ -161,10 +169,17 @@ class _Checklist:
                 "no continuations",
                 line,
             )
-        self._align(self._item, indent, line)
-        self._item.has_children = True
-        self.items.append(checkbox_match.group(1))
-        self.clauses.append(self._item.clause)
+
+        self._child(self._item, checkbox_match.group(1), indent, line)
+
+    def _child(self, item: _Item, text: str, indent: int, line: str) -> None:
+        """Flatten a `- [ ]` child to its own assertion; `item` becomes display-only."""
+        if item.clause_line is not None:
+            raise self._error(_DISPLAY_ONLY_PARENT, item.clause_line)
+
+        self._align(item, indent, line)
+        self.items.append(text)
+        self.clauses.append(None)
 
     def _align(self, item: _Item, indent: int, line: str) -> None:
         """Pin the child indent on first use; later siblings must sit exactly there."""
@@ -176,31 +191,32 @@ class _Checklist:
             raise self._error("ragged child indent — siblings must align", line)
 
     def _clause(self, clause: dict, indent: int, line: str) -> None:
-        """Attach a clause to the pending item, or to its last child when nested deeper."""
+        """Attach a clause to the `- [ ]` line directly above it: the item or its last child."""
         item = self._item
         if item is None:
             raise self._error("clause with no `- [ ]` item above it", line)
-        deeper_than_children = item.child_indent is not None and indent > item.child_indent
-        if item.has_children and deeper_than_children:
-            self._child_clause(item, clause, line)
-            return
-        if item.has_children:
-            raise self._error(
-                "a parent clause must sit directly under its item, before its children", line
-            )
+
+        child_indent = item.child_indent
+        if child_indent is None:
+            self._item_clause(item, clause, line)
+        elif indent > child_indent:
+            self._child_clause(clause, line)
+        else:
+            raise self._error(_DISPLAY_ONLY_PARENT, line)
+
+    def _item_clause(self, item: _Item, clause: dict, line: str) -> None:
+        """Attach a clause to a still-childless item."""
         if item.clause is not None:
             raise self._error("item already carries a clause", line)
-        self._align(item, indent, line)
-        item.clause = clause
 
-    def _child_clause(self, item: _Item, clause: dict, line: str) -> None:
+        item.clause = clause
+        item.clause_line = line
+
+    def _child_clause(self, clause: dict, line: str) -> None:
         """Attach a clause to the item's last child."""
-        if item.clause is not None:
-            raise self._error(
-                "a child under a parent that carries a clause may not carry its own", line
-            )
         if self.clauses[-1] is not None:
             raise self._error("item already carries a clause", line)
+
         self.clauses[-1] = clause
 
 
@@ -221,10 +237,12 @@ def _checklist(
     for line in content_lines:
         if not line.strip():
             continue
+
         if line[0].isspace():
             checklist.indented(line)
         else:
             checklist.top_level(line)
+
     checklist.flush()
     return checklist.items, checklist.clauses
 
@@ -241,11 +259,14 @@ def _collect_assertions(
     for level, title, content in sections[start + 1 :]:
         if level == 2:
             break
+
         group_items, group_clauses = _checklist(content, f"Assertions / {title}", path)
         items.extend(group_items)
         clauses.extend(group_clauses)
+
     if not items:
         raise MdFormatError(f"{path}: Assertions section has no checklist items")
+
     return items, clauses
 
 
@@ -296,7 +317,9 @@ def parse_eval_md(path: Path) -> dict:
         raise MdFormatError(f"{path}: missing or empty `## Prompt`")
     if not assertions:
         raise MdFormatError(f"{path}: missing or empty `## Assertions`")
+
     result["prompt"] = prompt
     result["assertions"] = assertions
     result["clauses"] = clauses
+
     return result

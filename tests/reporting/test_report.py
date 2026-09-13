@@ -1404,7 +1404,6 @@ def test_scoped_table_renders_pass_when_every_sample_passed(tmp_path: Path) -> N
     """Verify a fully passing arm cell renders as `pass`."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=1, skipped={0})
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
-
     bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
     )
@@ -1418,7 +1417,6 @@ def test_no_scoped_lines_means_no_scoped_section(tmp_path: Path) -> None:
     """Verify an unscoped run writes no `## Scoped assertions` heading."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=1)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=1, total=1)
-
     bench = report.build_benchmark(
         report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
     )

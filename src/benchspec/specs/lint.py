@@ -87,6 +87,7 @@ def lint_clause(text: str, clause: dict | None) -> list[tuple[str, str]]:
                 "identically in every arm — a no-op or a disabled line",
             )
         )
+
     if clause is None and _TRIGGER.match(text):
         findings.append(
             (
@@ -95,6 +96,7 @@ def lint_clause(text: str, clause: dict | None) -> list[tuple[str, str]]:
                 f"it can never pass, so it inflates every delta; add `{_TRIGGER_CLAUSE}`",
             )
         )
+
     return findings
 
 
@@ -105,6 +107,7 @@ def lint_repo(repo_root: Path) -> list[Finding]:
         for text, clause in zip(case.assertions, case.clauses, strict=True):
             for rule, message in lint_assertion(text) + lint_clause(text, clause):
                 findings.append(Finding(case.eval_file, case.eval_id, text, rule, message))
+
     return findings
 
 

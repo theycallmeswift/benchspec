@@ -134,10 +134,12 @@ def _tokenize(expr: str) -> list[_Token]:
         match = _TOKEN.match(expr, position)
         if match is None:
             raise ScopeError(f"unexpected character {expr[position]!r} at position {position}")
+
         position = match.end()
         kind = _lexeme(match)
         if kind == "space":
             continue
+
         if kind == "variable":
             tokens.append(_Token("variable", match.group("name")))
         elif kind == "bad_variable":
@@ -152,6 +154,7 @@ def _tokenize(expr: str) -> list[_Token]:
             tokens.append(_Token(word, word))
         else:
             tokens.append(_Token(kind, match.group(0)))
+
     tokens.append(_Token("end", ""))
     return tokens
 
@@ -172,6 +175,7 @@ class _Parser:
         """Consume and return the current token."""
         token = self._tokens[self._position]
         self._position += 1
+
         return token
 
     def _expect(self, kind: str) -> _Token:
@@ -179,6 +183,7 @@ class _Parser:
         token = self._peek()
         if token.kind != kind:
             raise ScopeError(f"expected `{kind}`, got {_describe(token)}")
+
         return self._advance()
 
     def parse(self) -> Expr:
@@ -186,6 +191,7 @@ class _Parser:
         expr = self._or()
         if self._peek().kind != "end":
             raise ScopeError(f"unexpected {_describe(self._peek())} after a complete expression")
+
         return expr
 
     def _or(self) -> Expr:
@@ -194,6 +200,7 @@ class _Parser:
         while self._peek().kind == "or":
             self._advance()
             expr = Or(expr, self._and())
+
         return expr
 
     def _and(self) -> Expr:
@@ -202,6 +209,7 @@ class _Parser:
         while self._peek().kind == "and":
             self._advance()
             expr = And(expr, self._not())
+
         return expr
 
     def _not(self) -> Expr:
@@ -209,6 +217,7 @@ class _Parser:
         if self._peek().kind == "not":
             self._advance()
             return Not(self._not())
+
         return self._comparison()
 
     def _comparison(self) -> Expr:
@@ -216,6 +225,7 @@ class _Parser:
         left = self._primary()
         if self._peek().kind != "operator":
             return left
+
         operator = self._advance().text
         return Compare(operator, left, self._primary())
 
@@ -261,12 +271,14 @@ def parse(expr: str) -> Expr:
     """
     if not expr.strip():
         raise ScopeError("empty expression")
+
     return _Parser(_tokenize(expr)).parse()
 
 
 def _walk(expr: Expr) -> Iterator[Expr]:
     """Yield every node of the tree, pre-order."""
     yield expr
+
     if isinstance(expr, Compare | And | Or):
         yield from _walk(expr.left)
         yield from _walk(expr.right)
@@ -296,10 +308,13 @@ def _compare(operator: str, left: Value, right: Value) -> bool:
             f"`{operator}` compares {left_kind} {left!r} against {right_kind} {right!r}; "
             "both sides must be the same type"
         )
+
     if operator in _EQUALITY:
         return (left == right) if operator == "==" else (left != right)
+
     if left_kind != "int" or not (isinstance(left, int) and isinstance(right, int)):
         raise ScopeError(f"`{operator}` orders ints only, got {left_kind} {left!r}")
+
     return _ordering(operator, left, right)
 
 
@@ -318,6 +333,7 @@ def _boolean(value: Value, *, where: str) -> bool:
     """Require a boolean operand; there is no truthiness in the clause language."""
     if not isinstance(value, bool):
         raise ScopeError(f"`{where}` takes booleans only, got {_kind(value)} {value!r}")
+
     return value
 
 
@@ -325,6 +341,7 @@ def _unknown_variables(unknown: Iterable[str], variables: Mapping[str, str]) -> 
     """The error for `{NAME}` references `variables` lacks, listing the names it has."""
     missing = ", ".join(f"{{{name}}}" for name in sorted(unknown))
     available = ", ".join(sorted(variables)) or "none"
+
     return ScopeError(f"unknown variable {missing}; available: {available}")
 
 
@@ -335,6 +352,7 @@ def _evaluate(expr: Expr, variables: Mapping[str, str]) -> Value:
     if isinstance(expr, Variable):
         if expr.name not in variables:
             raise _unknown_variables({expr.name}, variables)
+
         return variables[expr.name]
     if isinstance(expr, Compare):
         return _compare(
@@ -342,10 +360,12 @@ def _evaluate(expr: Expr, variables: Mapping[str, str]) -> Value:
         )
     if isinstance(expr, Not):
         return not _boolean(_evaluate(expr.operand, variables), where="not")
+
     where = "and" if isinstance(expr, And) else "or"
     # Both sides are evaluated so a type error on the right surfaces on every arm.
     left = _boolean(_evaluate(expr.left, variables), where=where)
     right = _boolean(_evaluate(expr.right, variables), where=where)
+
     return (left and right) if isinstance(expr, And) else (left or right)
 
 
@@ -367,6 +387,7 @@ def evaluate(expr: Expr, variables: Mapping[str, str]) -> bool:
     result = _evaluate(expr, variables)
     if not isinstance(result, bool):
         raise ScopeError(f"expression is {_kind(result)} {result!r}, not a boolean")
+
     return result
 
 
@@ -388,6 +409,7 @@ def applies(clause: Mapping[str, str], variables: Mapping[str, str]) -> bool:
         holds = evaluate(parse(clause["expr"]), variables)
     except ScopeError as error:
         raise ScopeError(f"`{clause_text(clause)}`: {error}") from error
+
     return holds if clause["key"] == "if" else not holds
 
 
@@ -422,6 +444,7 @@ def _resolve(
     unknown = referenced - set(variables)
     if unknown:
         raise _unknown_variables(unknown, variables)
+
     return expand_env({name: variables[name] for name in referenced}, environ)
 
 
@@ -445,11 +468,13 @@ def applicable(case: EvalCase, arm: Arm, *, baseline: str | None, eval_set: str)
             file, the clause, and the arm.
     """
     variables = arm_variables(arm, baseline=baseline, eval_set=eval_set)
+
     flags: list[bool] = []
     for clause in case.clauses:
         if clause is None:
             flags.append(True)
             continue
+
         try:
             expr = parse(clause["expr"])
             resolved = _resolve(names(expr), variables, os.environ)
@@ -459,5 +484,7 @@ def applicable(case: EvalCase, arm: Arm, *, baseline: str | None, eval_set: str)
                 f"{case.eval_file}: `{clause_text(clause)}` cannot be resolved for arm "
                 f"`{arm.name}`: {error}"
             ) from error
+
         flags.append(holds if clause["key"] == "if" else not holds)
+
     return flags

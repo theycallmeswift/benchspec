@@ -206,6 +206,7 @@ def _eval_case(tmp_path: Path, checklist: str) -> EvalCase:
         """)
         + checklist
     )
+
     return EvalCase(
         group="demo", eval_dir=eval_dir, eval_file=eval_file, eval=mdformat.parse_eval_md(eval_file)
     )

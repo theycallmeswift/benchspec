@@ -128,17 +128,18 @@ every delta a structural lift. Scope such a line with one indented `- if:` or
 - [ ] Opens the note with Read, not Bash
   - unless: {BENCHSPEC_HARNESS} == "codex"
 - [ ] the project was scaffolded:
-  - if: {BENCHSPEC_ARM} == "trial"
   - [ ] the ./src/ directory exists
+    - if: {BENCHSPEC_ARM} == "trial"
   - [ ] the ./tests/ directory exists
 ```
 
 The line is graded in every arm where the clause holds and skipped in every arm
 where it does not: never bound, never judged, recorded in `grading.json` as
-`skipped` with the clause as its `reason`. `unless: X` is `if: not (X)`. One
-clause per item; a parent's clause sits directly under the parent line, before
-its children, and applies to every child; a child may carry its own (one indent
-deeper) only when the parent carries none.
+`skipped` with the clause as its `reason`. `unless: X` is `if: not (X)`. A clause
+scopes the one `- [ ]` line directly above it, and that line must be one that is
+graded: a childless item, or a child (the clause then sits one indent deeper than
+the child). One clause per line. A display-only parent is never graded, so it
+cannot carry a clause; scope each child instead.
 
 `{VAR}` reads the `BENCHSPEC_*` variables `setup.sh` sees — `BENCHSPEC_ARM`,
 `BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, `BENCHSPEC_BASELINE`
@@ -321,10 +322,11 @@ suite: it is a report, not a gate.
 - `history` must be a list of `{role, content}` turns, both fields non-empty.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
-- An item may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet.
-  A second clause on the same item, a clause with no item above it, a child clause
-  under a parent that already carries one, or an empty expression is an error. Any
-  other indented non-checkbox line is still an error.
+- A graded line (a childless item or a child) may carry one indented
+  `- if: <expr>` / `- unless: <expr>` sub-bullet. A second clause on the same
+  line, a clause with no item above it, a clause on a display-only parent, or an
+  empty expression is an error. Any other indented non-checkbox line is still an
+  error.
 - A clause expression must parse and resolve for every arm of the set: unknown
   `{VAR}`, cross-type comparison, ordering on a non-integer, or a non-boolean
   result fails collection.

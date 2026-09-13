@@ -173,6 +173,7 @@ def _eval_case(tmp_path: Path, checklist: str) -> EvalCase:
     eval_dir.mkdir(parents=True)
     eval_file = eval_dir / "eval.md"
     eval_file.write_text(_EVAL_HEADER + checklist)
+
     return EvalCase(
         group="myskill",
         eval_dir=eval_dir,
