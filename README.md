@@ -83,6 +83,7 @@ Greet Alice by name.
 
 - [ ] ./Greetings/Alice.md contains the exact line 'Hello, Alice!'
 - [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 - [ ] The greeting feels warm and personable, not curt or robotic
 ```
 
@@ -113,7 +114,10 @@ benchspec run       # every (eval × arm) in its own sandbox, graded, reported
 
 The `` Skill `hello` invoked `` line needs a skill for the trial arm to install
 and a `setup.sh` that installs it; the [quickstart](docs/quickstart.md) writes
-both and takes an empty directory to that first graded report.
+both and takes an empty directory to that first graded report. Its `- if:`
+sub-bullet grades the line only off the baseline arm, so the headline delta
+measures the skill rather than the fact that a bare baseline could never pass
+it ([scoping](docs/writing-evals.md#scoping-an-assertion-to-arms)).
 
 ## How a run works
 
