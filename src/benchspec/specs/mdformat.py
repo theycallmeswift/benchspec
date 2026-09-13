@@ -8,10 +8,8 @@ whose children flatten to standalone assertions in document order (one nesting l
 only); a childless item is one assertion.
 
 A graded assertion may carry one indented `- if: <expr>` / `- unless: <expr>` sub-bullet,
-its scope clause: the raw expression is kept beside the assertion (`clauses`, aligned by
-index) and the prose is left untouched. A clause scopes the `- [ ]` line directly above
-it — a childless item, or a child (one indent deeper than the child). A display-only
-parent is never graded, so it cannot carry one.
+its scope clause, kept raw beside it (`clauses`, aligned by index). A clause scopes the
+`- [ ]` line directly above it; a display-only parent is never graded, so it cannot carry one.
 
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
 (`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
@@ -111,7 +109,7 @@ class _Item:
         """Start a childless, unclaused item."""
         self.text = text
         self.clause: dict | None = None
-        # The raw clause line, kept so a child arriving later can name it in the error.
+        # Kept so a later child can name the offending line in its error.
         self.clause_line: str | None = None
         self.child_indent: int | None = None
 
@@ -225,11 +223,8 @@ def _checklist(
 ) -> tuple[list[str], list[dict | None]]:
     """Flatten one checklist body to plain-prose assertions and their aligned clauses.
 
-    Expands a single level of parent/child nesting (a parent with children is a
-    display-only header; each child becomes a standalone assertion) and attaches each
-    item's optional `- if:` / `- unless:` sub-bullet as its clause (None when absent).
-
-    Parent and children must share one body: `_collect_assertions` calls this per
+    A parent with children is a display-only header; each child becomes a standalone
+    assertion. Parent and children must share one body: `_collect_assertions` calls this per
     section, so a child indented under a following `###` group surfaces here as an
     orphan with no parent rather than adopting the prior section's parent.
     """

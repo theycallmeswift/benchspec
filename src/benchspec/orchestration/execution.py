@@ -5,9 +5,9 @@ graded prompt. Both arms grade identically — there is no with-skill invocation
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
 the arm's dispatched-skills set, not a harness assert. A line whose scope clause does not
-hold in this arm is neither bound nor judged; it lands in grading.json as a skipped entry
-in its document position. `session_factory`, `grade`, and `bind` are injectable so the
-loop is unit-testable without spawning a sandbox or calling the host.
+hold is neither bound nor judged, only recorded as skipped. `session_factory`, `grade`,
+and `bind` are injectable so the loop is unit-testable without spawning a sandbox or
+calling the host.
 """
 
 from __future__ import annotations
@@ -395,11 +395,7 @@ def _document_order(
     applicable: list[bool],
     graded: list[dict],
 ) -> list[dict]:
-    """Interleave graded entries with skipped ones so grading.json aligns with the eval file.
-
-    `graded` holds one entry per applicable line, in order. A line whose clause did not
-    hold gets the fixed skipped shape; any line carrying a clause is tagged `scoped`.
-    """
+    """Interleave graded entries with skipped ones so grading.json aligns with the eval file."""
     graded_entries = iter(graded)
     merged: list[dict] = []
     for text, clause, holds in zip(assertions, clauses, applicable, strict=True):
@@ -478,13 +474,11 @@ def run_eval_arm(
     # History block (context) first, then the one graded prompt — both rendered with the
     # same `today`. render_history emits a trailing blank line, so the prompt follows cleanly.
     prompt = render_history(eval_case.history, today) + substitute_prompt(eval_case.prompt, today)
-    # Substitute the assertions here too, before the run — a stray-placeholder typo must fail
-    # pre-run like the prompt does, not at grade time after the agent already spent tokens
-    # (a raise there would unwind before the artifact writes and discard the completed run).
+    # Substitute the assertions and resolve scope clauses here too, before the run — a
+    # stray-placeholder typo or a bad clause must fail pre-run like the prompt does, not at
+    # grade time after the agent already spent tokens (a raise there would unwind before
+    # the artifact writes and discard the completed run).
     graded_assertions = substitute_assertions(eval_case.assertions, today)
-
-    # Scope clauses resolve here for the same reason: an unknown name or a type error is
-    # an authoring defect and must surface before the sandbox boots and spends anything.
     applicable = scope.applicable(eval_case, arm, baseline=baseline, eval_set=eval_set)
     active_assertions = [
         text for text, holds in zip(graded_assertions, applicable, strict=True) if holds
@@ -528,8 +522,7 @@ def run_eval_arm(
         )
 
     # Bind once, up front: the binder's own output is the source of truth for which
-    # assertions are activation checks — no separate recognizer. Only the lines whose
-    # clause holds are bound: a skipped line never reaches the binder or the judge.
+    # assertions are activation checks — no separate recognizer.
     specs, binder_degraded = _bind_all(active_assertions, bind)
 
     # Candidate skills are those the binder bound to an activation checker — the skills the

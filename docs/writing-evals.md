@@ -113,10 +113,11 @@ below), and a failure pinpoints the exact clause that missed.
 
 ### Scoping an assertion to arms
 
-Some expectations only make sense in some arms. `Skill \`hello\` invoked` can
+Some expectations only make sense in some arms: `Skill \`hello\` invoked` can
 never pass in a baseline arm that installs nothing, so grading it there hands
-every delta a structural lift. Scope such a line with one indented `- if:` or
-`- unless:` sub-bullet directly under it; the assertion text stays untouched:
+every delta a structural lift. One indented `- if:` / `- unless:` sub-bullet
+scopes the line to the arms where its clause holds — the first line below is the
+canonical way to grade a trigger off the baseline without naming it:
 
 ```markdown
 ## Assertions
@@ -133,35 +134,26 @@ every delta a structural lift. Scope such a line with one indented `- if:` or
   - [ ] the ./tests/ directory exists
 ```
 
-The line is graded in every arm where the clause holds and skipped in every arm
-where it does not: never bound, never judged, recorded in `grading.json` as
-`skipped` with the clause as its `reason`. `unless: X` is `if: not (X)`. A clause
-scopes the one `- [ ]` line directly above it, and that line must be one that is
-graded: a childless item, or a child (the clause then sits one indent deeper than
-the child). One clause per line. A display-only parent is never graded, so it
-cannot carry a clause; scope each child instead.
+A clause scopes the one `- [ ]` line directly above it, one clause per line, and
+that line must be graded: a childless item or a child (the clause then sits one
+indent deeper). A display-only parent cannot carry one; scope each child instead.
+`unless: X` is `if: not (X)`. Where the clause does not hold the line is never
+bound or judged; `grading.json` records it as `skipped` with the clause as its
+`reason`.
 
 `{VAR}` reads the `BENCHSPEC_*` variables `setup.sh` sees — `BENCHSPEC_ARM`,
 `BENCHSPEC_MODEL`, `BENCHSPEC_HARNESS`, `BENCHSPEC_SET`, `BENCHSPEC_BASELINE`
 (the set's baseline arm, empty when it declares none) — plus the arm's own `env`
-keys, and nothing else from the guest. Every variable is a string. The clause
-`{BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}` is the canonical way to grade a
-trigger line off the baseline without naming it.
+keys. Every variable is a string.
 
-The expression language is small and typed: integer literals (`1`, `-3`),
-strings in double or single quotes, `true` / `false`, and `{VAR}` references;
-`==` and `!=` between two values of one type; `<`, `>`, `<=`, `>=` on integers
-only; `and`, `or`, `not` (`not` binds tightest, then `and`, then `or`) and
-parentheses. A bare word, a comparison across types (`{X} == 1` compares a
-string against an int), an ordering on a string or boolean, or an expression
-that is not a boolean is an error, never a silent `false`. Every such error, and
-any unknown `{VAR}`, fails at collection before a sandbox boots; a clause can
-never produce a failed or errored sample.
+The language is small and typed: integer literals, single- or double-quoted
+strings, `true` / `false`, `{VAR}`; `==` / `!=`; `<`, `>`, `<=`, `>=`; `and`,
+`or`, `not` (`not` binds tightest, then `and`, then `or`) and parentheses. A bare
+word, a cross-type comparison, an ordering on a non-int, a non-boolean result, or
+an unknown `{VAR}` fails at collection, before any sandbox boots.
 
-Scoping changes what is pooled. A line skipped in *any* arm is excluded from the
-pooled rates, deltas, and noise bands of *every* arm, so the matrix always
-compares like with like; those lines get their own per-arm table in the report
-([`results.md`](results.md)). A clause that holds in every arm changes nothing.
+A line skipped in *any* arm leaves *every* arm's pooled rate and gets its own
+per-arm table instead ([`results.md`](results.md#benchmarkmd-section-by-section)).
 
 ### Placeholders
 
@@ -170,10 +162,8 @@ assertions, history content, and in workspace file contents *and file names*, so
 date-stamped fixtures and date-sensitive assertions stay honest on any day the
 suite runs. Any other `{UPPERCASE}` token in a prompt, history turn, or assertion
 is rejected before the agent runs rather than leaked to it: eval prompts must be
-self-contained, so put values in the workspace, not in placeholders. A scope
-clause is the second place `{VAR}` resolves, with its own vocabulary (the
-`BENCHSPEC_*` variables and the arm's `env`); assertion text itself still takes
-only `{TODAY}`.
+self-contained, so put values in the workspace, not in placeholders (a scope
+clause's `{VAR}` is its own vocabulary, [above](#scoping-an-assertion-to-arms)).
 
 ## The workspace and the clean room
 
@@ -303,8 +293,8 @@ wording the judge cannot fairly grade, and exits `1` on any finding:
 | `vague-adverb` | `explicitly`, `appropriately`, `properly`, `gracefully`, `suitably`, `reasonably`, `adequately`: adverbs naming no observable criterion. |
 | `unseen-file` | A path-like string (`dir/file.ext`) with no `./` anchor anywhere in the line; the judge only sees workspace facts. |
 | `relative-claim` | `better`, `worse`, `cleaner`, `clearer`, `stronger`, `improved` with no "than" comparand. |
-| `constant-clause` | An `if:` / `unless:` clause that reads no `{VAR}`: it holds or fails identically in every arm, so it is a no-op or a disabled line. |
-| `untagged-trigger` | A `` Skill `…` invoked `` / `not invoked` line with no clause: graded in the baseline too, where it can never pass, so it inflates every delta. Add `- if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}`. |
+| `constant-clause` | An `if:` / `unless:` clause reading no `{VAR}`: it holds or fails identically in every arm. |
+| `untagged-trigger` | A `` Skill `…` invoked `` / `not invoked` line with no clause: graded in the baseline too, where it can never pass. |
 
 `benchspec analyze` asks the binder itself. It binds every assertion exactly
 as a live run would and prints one label per line, `deterministic` or
@@ -322,14 +312,11 @@ suite: it is a report, not a gate.
 - `history` must be a list of `{role, content}` turns, both fields non-empty.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
-- A graded line (a childless item or a child) may carry one indented
-  `- if: <expr>` / `- unless: <expr>` sub-bullet. A second clause on the same
-  line, a clause with no item above it, a clause on a display-only parent, or an
-  empty expression is an error. Any other indented non-checkbox line is still an
-  error.
-- A clause expression must parse and resolve for every arm of the set: unknown
-  `{VAR}`, cross-type comparison, ordering on a non-integer, or a non-boolean
-  result fails collection.
+- A graded line may carry one `- if:` / `- unless:` sub-bullet; a second clause,
+  a clause with no item above it or on a display-only parent, or an empty
+  expression is an error.
+- Every clause must parse and resolve for every arm of the set, or collection
+  fails.
 
 The authoritative validators are `benchspec.specs.mdformat` (Markdown
 structure), `benchspec.specs.schema` (the parsed shape), `benchspec.specs.scope`

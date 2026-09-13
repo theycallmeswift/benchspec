@@ -286,8 +286,8 @@ class BaseAgent(ABC):
         (that goes through arm.model). BENCHSPEC_SET names the explicitly-selected set
         (--benchspec-set / make evals SET=) so setup.sh can branch on it; empty when the
         run falls back to the pyproject default-set. BENCHSPEC_BASELINE names the set's
-        baseline arm (empty when the set declares none) so a script or a scope clause
-        can tell the control arm apart without hardcoding its name.
+        baseline arm (empty when none) so a script or clause can tell the control arm
+        apart without hardcoding its name.
         """
         return {
             **self.guest_env(),

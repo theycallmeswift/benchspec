@@ -5,9 +5,8 @@ message, process facts). An assertion the evidence can't decide gets graded by v
 pass rates move without the skill changing. Rules are heuristics: a `warning` means the
 assertion is unjudgeable as written.
 
-Two rules look at the assertion's scope clause instead of its wording: a clause that
-reads no variable is a constant, and a skill-trigger line with no clause can never pass
-in a baseline arm that installs nothing, so every delta carries its structural lift.
+Two rules read the scope clause instead: a clause naming no variable is a constant, and
+a skill-trigger line with no clause is graded in a baseline where it can never pass.
 """
 
 from __future__ import annotations

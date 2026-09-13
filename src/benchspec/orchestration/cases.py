@@ -83,11 +83,10 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
 def _resolve_scope_clauses(
     pairs: list[tuple[EvalCase, Arm]], baseline: str | None, eval_set: str
 ) -> None:
-    """Resolve every clause for every (case × arm) pair so a defect fails collection.
+    """Resolve every clause for every pair so an authoring defect fails collection.
 
     Raises:
-        pytest.UsageError: a clause that cannot be parsed or evaluated for some arm,
-            naming the eval file, the clause, and the arm.
+        pytest.UsageError: a clause that cannot be resolved for some arm.
     """
     for case, arm in pairs:
         try:
@@ -296,11 +295,7 @@ def eval_sandbox(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 def baseline_arm(request: pytest.FixtureRequest) -> str | None:
-    """Return the set's baseline arm name, or None when the set declares none.
-
-    Exported to `setup.sh` as `BENCHSPEC_BASELINE` and read by scope clauses; resolved
-    from the same set `eval_arm` was parametrized from.
-    """
+    """Return the set's baseline arm name (`BENCHSPEC_BASELINE`), or None when it has none."""
     return resolved_run_set(request.config).baseline
 
 

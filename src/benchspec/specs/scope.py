@@ -1,10 +1,8 @@
 """Scope clauses: the `- if:` / `- unless:` expression that gates an assertion per arm.
 
-A clause decides whether one assertion is graded in one arm without touching the
-assertion's prose. Its expression is a small typed language, parsed here into a frozen
-AST and evaluated against the arm's variables. Substitution happens at the AST level —
-a `{VAR}` node reads its value at evaluation time, so a value containing spaces or the
-word `and` compares as a plain string and can never re-tokenize.
+The expression is a small typed language, parsed into a frozen AST and evaluated against
+the arm's variables; a `{VAR}` node reads its value at evaluation time, so a value can
+never re-tokenize.
 
 Grammar (precedence low to high):
 
@@ -18,9 +16,8 @@ Grammar (precedence low to high):
     STRING := "..." | '...'      (no escapes)
     NAME   := [A-Z][A-Z0-9_]*    (always substitutes a string)
 
-Typing is strict and fails loud: `==` / `!=` compare one type against itself; the
-ordering operators take ints only; `and` / `or` / `not` take booleans only; the whole
-expression must be a boolean. A bare word is a parse error, never an implicit string.
+Typing is strict: `==` / `!=` within one type, ordering on ints, logic on booleans, a
+boolean result; a bare word is a parse error, never an implicit string.
 """
 
 from __future__ import annotations
@@ -260,12 +257,6 @@ def _describe(token: _Token) -> str:
 def parse(expr: str) -> Expr:
     """Parse a clause expression into its AST.
 
-    Args:
-        expr: The raw expression text after `if:` / `unless:`.
-
-    Returns:
-        The expression tree.
-
     Raises:
         ScopeError: on any syntax error, including a bare unquoted word.
     """
@@ -370,19 +361,11 @@ def _evaluate(expr: Expr, variables: Mapping[str, str]) -> Value:
 
 
 def evaluate(expr: Expr, variables: Mapping[str, str]) -> bool:
-    """Evaluate an expression to a boolean under `variables`.
-
-    Args:
-        expr: A parsed expression.
-        variables: `{NAME}` values; every value is a string.
-
-    Returns:
-        The expression's boolean value.
+    """Evaluate an expression to a boolean under `variables` (every value a string).
 
     Raises:
-        ScopeError: an unknown variable (naming the available ones), a cross-type
-            comparison, an ordering on a non-int, a non-boolean logical operand, or a
-            non-boolean result.
+        ScopeError: an unknown variable, a cross-type comparison, an ordering on a
+            non-int, a non-boolean logical operand, or a non-boolean result.
     """
     result = _evaluate(expr, variables)
     if not isinstance(result, bool):
@@ -399,9 +382,6 @@ def clause_text(clause: Mapping[str, str]) -> str:
 def applies(clause: Mapping[str, str], variables: Mapping[str, str]) -> bool:
     """Whether an assertion carrying `clause` is graded under `variables`.
 
-    `unless: X` is `if: not (X)`. Every failure is re-raised with the clause text so an
-    author can find the line.
-
     Raises:
         ScopeError: any parse or evaluation failure, naming the clause.
     """
@@ -414,18 +394,10 @@ def applies(clause: Mapping[str, str], variables: Mapping[str, str]) -> bool:
 
 
 def arm_variables(arm: Arm, *, baseline: str | None, eval_set: str) -> dict[str, str]:
-    """The variables a clause sees for `arm`: the cell env plus the arm's own `env`.
+    """The variables a clause sees for `arm`: the `BENCHSPEC_*` cell env plus its own `env`.
 
-    The arm's `env` is layered raw — a `$VAR` reference is expanded only when a clause
-    reads it (see `applicable`), so an unreferenced secret is never read at collection.
-
-    Args:
-        arm: The arm being resolved.
-        baseline: The set's baseline arm name, or None when the set has none.
-        eval_set: The explicitly selected set name; empty on a default-set run.
-
-    Returns:
-        The variable mapping, `BENCHSPEC_*` first, arm `env` on top.
+    The `env` is layered raw — a `$VAR` reference is expanded only when a clause reads
+    it (see `applicable`), so an unreferenced secret is never read at collection.
     """
     return {
         "BENCHSPEC_ARM": arm.name,
@@ -450,18 +422,6 @@ def _resolve(
 
 def applicable(case: EvalCase, arm: Arm, *, baseline: str | None, eval_set: str) -> list[bool]:
     """One flag per assertion of `case`: True where it is graded in `arm`.
-
-    A line without a clause is always graded. Resolution happens before any sandbox
-    boots, so a failure here costs nothing.
-
-    Args:
-        case: The discovered eval.
-        arm: The arm being resolved.
-        baseline: The set's baseline arm name, or None.
-        eval_set: The explicitly selected set name; empty on a default-set run.
-
-    Returns:
-        Flags aligned with `case.assertions`.
 
     Raises:
         ScopeError: any parse, unknown-name, expansion, or type failure, naming the eval

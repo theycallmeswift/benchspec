@@ -57,9 +57,9 @@ assertion pass rate; every other cell shows its rate *and* delta:
 
 The `All evals` footer is each arm's pooled rate across every eval in the run.
 
-**Scoped assertions.** Present only when some line carried an `if:` / `unless:`
-clause that did not hold in some arm. Such a line is pooled in *no* arm (the
-rates above cover only lines graded in every arm of the run) and is reported
+**Scoped assertions.** Present only when some line's `if:` / `unless:` clause
+did not hold in some arm. Such a line is pooled in *no* arm — the rates, deltas,
+and noise bands above cover only lines graded in every arm — and is reported
 here instead, one row per line with each arm's own verdict: `skipped` where the
 clause did not hold, `pass` / `fail` where every sample agreed, `k/n` across
 samples otherwise, `—` for an arm with no graded sample:
@@ -91,8 +91,7 @@ inside it. A one-sample run has no band even across many evals — its
 `delta_noise_pp` is `null` — because eval-to-eval spread is not rerun noise.
 Treat the band as a guardrail against over-reading small numbers, not
 a significance test: rates are pooled, sample-weighted means, not a paired
-analysis. The band, like the rates, is computed over pooled lines only; a line
-some arm's clause skipped contributes to neither.
+analysis. The band, like the rates, covers pooled lines only.
 
 The `--fail-under` CI gate deliberately uses the **raw** delta
 ([`configuration.md`](configuration.md#the---fail-under-gate)); the label exists
@@ -181,10 +180,9 @@ versus observed**:
 One JSON object per `(eval × arm × sample)` row: identity (`skill`, which is the
 group, then `kind`, `eval_id`, `arm`, `sample`), the arm's three core axes
 (`harness`, `model`, `effort`) denormalized onto the row so no join with
-`meta.json` is needed, `errored`, `passed`/`total` assertion counts (`total`
-counts graded lines), `scoped` (lines carrying a clause) and `skipped` (lines
-whose clause did not hold) counts, and the timing and token figures from the
-sample's `timing.json`. Derivable from the tree; persisted so tools never
+`meta.json` is needed, `errored`, `passed`/`total`/`scoped`/`skipped` assertion
+counts (`total` excludes skipped lines), and the timing and token figures from
+the sample's `timing.json`. Derivable from the tree; persisted so tools never
 hardcode the layout.
 
 ### `benchmark.json`
@@ -195,9 +193,9 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
 (pass rate, stdev, `delta_pp`, `delta_noise_pp`, errored and binder-degraded
-counts, per-eval rows), `scoped` (one row per line some arm skipped: `group`,
-`eval_id`, `index`, `text`, and per-arm `{passed, total}` / `"skipped"` /
-`null` cells), the `runner` and `binder` identity, and the same
+counts, per-eval rows), the `scoped` rows (`group`, `eval_id`, `index`, `text`,
+a `{passed, total}` / `"skipped"` / `null` cell per arm), the `runner` and
+`binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
 `arms` here is *result stats*; `planned_arms` is configuration.
 
@@ -205,10 +203,9 @@ counts, per-eval rows), `scoped` (one row per line some arm skipped: `group`,
 
 - `grading.json`: the verdict. One entry per assertion with its text, `passed`,
   `evidence`, and `type` (`deterministic` for a checker, `semantic` for the
-  judge), plus the sample's `errored` flag and a `binder_degraded` count. An
-  entry whose line carries a clause adds `scoped: true`; one whose clause did
-  not hold in this arm is `{"text", "passed": null, "skipped": true,
-  "scoped": true, "reason": "<the clause>"}`, in its document position.
+  judge), plus the sample's `errored` flag and a `binder_degraded` count. A
+  clause-bearing entry adds `scoped: true`; a skipped one is `{"text",
+  "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.
 - `timing.json`: `duration_ms`, `judge_ms`, and the token split
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
   `cache_creation_tokens`; zero where the harness does not report them).

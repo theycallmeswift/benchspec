@@ -7,9 +7,8 @@ index.jsonl). Rows are keyed `group/eval_id`; columns are the run's arms. Errore
 (infra failures) are excluded from pass rates but counted and surfaced — a half-crashed
 run must not read like a clean one.
 
-A line whose scope clause did not hold in some arm is recorded there as `skipped`; such a
-line is pooled in no arm at all (rates, deltas, and noise bands cover only lines graded
-in every arm of the run) and is reported instead in the `scoped` table, cell by cell.
+A line recorded as `skipped` in any arm is pooled in no arm; it goes to the `scoped`
+table instead.
 
 Layout: `<group>/eval-<id>/<arm>/sample-<k>/{grading,timing}.json` where arm names are
 arbitrary strings discovered from disk (the per-eval subdirs are the arm names). Evals
@@ -124,11 +123,7 @@ def _graded_samples(eval_dir: Path, arm: str) -> list[dict]:
 def _excluded_indices(
     eval_dirs: list[Path], arm_names: list[str]
 ) -> dict[tuple[str, str], set[int]]:
-    """Per eval, the assertion indices some sample of some arm recorded as `skipped`.
-
-    One pass over every arm's samples, errored ones included: an index skipped anywhere
-    leaves the pooled rate everywhere, so every arm scores the same set of lines.
-    """
+    """Per eval, the assertion indices any sample of any arm (errored included) skipped."""
     excluded: dict[tuple[str, str], set[int]] = {}
     for eval_dir in eval_dirs:
         skipped: set[int] = set()
@@ -204,9 +199,7 @@ def _arm_stats(
 ) -> dict:
     """Compute aggregate pass-rate and token statistics for an arm.
 
-    `excluded` names, per eval, the assertion indices left out of every rate (lines some
-    arm skipped; an eval absent from it has none); a sample with no pooled line
-    contributes no rate.
+    `excluded` holds, per eval, the assertion indices left out of every rate.
     """
     per_eval: list[dict] = []
     # Pooled with equal weight per (eval × sample) pair — sample-weighted, not a
@@ -374,7 +367,6 @@ def index_rows(
                         "sample": int(sample_dir.name.removeprefix("sample-")),
                         "errored": bool(grading.get("errored")),
                         "passed": sum(1 for assertion in assertions if assertion.get("passed")),
-                        # `total` counts graded lines; a skipped line is neither.
                         "total": sum(1 for assertion in assertions if not assertion.get("skipped")),
                         "scoped": sum(1 for assertion in assertions if assertion.get("scoped")),
                         "skipped": sum(1 for assertion in assertions if assertion.get("skipped")),
@@ -840,8 +832,7 @@ def build_benchmark(
         non-baseline arm's `delta_noise_pp` is None at one sample per cell, however many
         evals ran. `unbanded` is True when a baseline exists and some arm carries a Δ
         against it but no arm's Δ has a noise band — a comparison the reader can't weigh.
-        `scoped` lists, per line some arm skipped, each arm's own verdict; those lines
-        are in no arm's rate.
+        `scoped` holds, per line some arm skipped, each arm's own verdict.
     """
     configured = list(arm_meta) if arm_meta else []
     # Require a graded sample so a stray subdir (__pycache__, editor temp) never becomes
@@ -856,8 +847,6 @@ def build_benchmark(
     )
     arm_names = configured + [name for name in discovered if name not in configured]
 
-    # A line skipped by any arm's clause is pooled by none, so every arm rates the same
-    # lines; the left-out lines get their own per-arm table instead.
     excluded = _excluded_indices(eval_dirs, arm_names)
     arm_stats = {arm_name: _arm_stats(eval_dirs, arm_name, excluded) for arm_name in arm_names}
 
