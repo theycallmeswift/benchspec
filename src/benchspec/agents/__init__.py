@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 
 from benchspec.agents.base import (
+    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     HARNESS_PROVIDERS,
     OPENROUTER_PROVIDER,
@@ -26,6 +27,7 @@ from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 
 __all__ = [
+    "DEFAULT_AGENT_TIMEOUT",
     "DEFAULT_PROVIDER",
     "HARNESS_PROVIDERS",
     "OPENROUTER_PROVIDER",

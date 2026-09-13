@@ -18,6 +18,7 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
+    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     FIXED_SKILLS_HOME,
     OPENROUTER_PROVIDER,
@@ -439,7 +440,7 @@ class CodexAgent(BaseAgent):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
-        timeout: int = 600,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(

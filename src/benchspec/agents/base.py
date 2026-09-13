@@ -53,6 +53,11 @@ _VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
 # an explained-unavailable result like any other probe failure.
 GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
 
+# The wall-clock cap on one graded agent turn, seconds. The built-in default every arm
+# inherits when neither the set, the arm, nor `--benchspec-timeout` says otherwise; the
+# adapters' `invoke` defaults to it so a direct call and a configured arm agree.
+DEFAULT_AGENT_TIMEOUT = 600
+
 
 def unqualified_openrouter_model_error(model: str) -> str | None:
     """Why `model` cannot be sent through OpenRouter, or None when it can.

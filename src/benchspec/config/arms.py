@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from benchspec.agents import (
+    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     known_harnesses,
@@ -38,6 +39,7 @@ class Arm:
     env: dict[str, str] = field(default_factory=dict, hash=False)  # unhashable; keep Arm hashable
     harness_args: list[str] = field(default_factory=list, hash=False)
     provider: str = DEFAULT_PROVIDER
+    timeout: int = DEFAULT_AGENT_TIMEOUT
 
 
 _SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "env", "harness_args")
