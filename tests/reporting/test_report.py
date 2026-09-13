@@ -209,6 +209,43 @@ def test_build_benchmark_computes_delta_vs_reference(tmp_path: Path) -> None:
     assert eval_dir.is_dir()  # discovered the eval dir on disk
 
 
+def test_build_benchmark_unbanded_at_one_sample_with_baseline(tmp_path: Path) -> None:
+    """Verify a one-sample delta against a baseline is flagged as carrying no noise band."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["trial"]["delta_noise_pp"] is None
+    assert bench["unbanded"] is True
+
+
+def test_build_benchmark_banded_at_three_samples(tmp_path: Path) -> None:
+    """Verify three samples per cell yield a noise band, so the run is not unbanded."""
+    for sample in (0, 1, 2):
+        seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=sample)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["arms"]["trial"]["delta_noise_pp"] is not None
+    assert bench["unbanded"] is False
+
+
+def test_build_benchmark_not_unbanded_without_baseline(tmp_path: Path) -> None:
+    """Verify a sweep with no baseline has no delta, so nothing is unbanded."""
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
+
+    bench = report.build_benchmark(report.discover_eval_dirs(tmp_path), "label", baseline=None)
+
+    assert bench["unbanded"] is False
+
+
 def test_build_benchmark_no_reference_absolute_only(tmp_path: Path) -> None:
     """Verify build benchmark no reference absolute only."""
     seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=1, total=2)
@@ -331,6 +368,54 @@ def test_markdown_headline_shows_delta_vs_reference(tmp_path: Path) -> None:
     assert "+100pp" in md
 
 
+def test_markdown_headline_flags_single_sample_delta_as_unbanded(tmp_path: Path) -> None:
+    """Verify a one-sample delta's headline says it carries no noise band."""
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)
+
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    headline = (tmp_path / "benchmark.md").read_text().splitlines()[2]
+    assert headline == (
+        "**trial:** baseline 0% → trial 100% (**+100pp**) — single sample, no noise band"
+    )
+
+
+def test_markdown_headline_shows_noise_band_not_single_sample_note_at_three_samples(
+    tmp_path: Path,
+) -> None:
+    """Verify three samples yield a noise band in the headline and no single-sample note."""
+    for sample in (0, 1, 2):
+        seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=sample)
+        seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2, sample=sample)
+
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    headline = (tmp_path / "benchmark.md").read_text().splitlines()[2]
+    assert "noise band ±" in headline
+    assert "single sample, no noise band" not in headline
+
+
+def test_markdown_headline_without_reference_has_no_band_or_single_sample_note(
+    tmp_path: Path,
+) -> None:
+    """Verify a one-sample sweep with no baseline mentions neither a band nor its absence."""
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
+
+    report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
+
+    headline = (tmp_path / "benchmark.md").read_text().splitlines()[2]
+    assert "noise band" not in headline
+    assert "single sample" not in headline
+
+
 def test_markdown_headline_absolute_when_no_reference(tmp_path: Path) -> None:
     """Verify markdown headline absolute when no reference."""
     seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
@@ -380,7 +465,7 @@ def _terminal_rows(lines: list[str]) -> dict[str, str]:
     """Map each terminal matrix row's label to its whitespace-normalized cell text."""
     rows: dict[str, str] = {}
     for line in lines[1:-1]:
-        if set(line) == {"-"}:
+        if set(line) == {"-"} or line.startswith("WARN "):
             continue
         label, *cells = line.split("  ")
         rows[label.strip()] = " ".join(cell.strip() for cell in cells if cell.strip())
@@ -527,6 +612,72 @@ def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: Pat
     assert versus[:baseline_edge].strip() == "vs baseline"
 
 
+def test_terminal_matrix_warns_once_when_one_sample_has_no_noise_band(tmp_path: Path) -> None:
+    """Verify a one-sample run with a baseline gets one `WARN samples:` line before the pointer."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=2)  # 0%
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)  # 100%, +100pp
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert lines == [
+        "Eval           baseline   trial",
+        "archive/alpha        0%    100%",
+        "-------------------------------",
+        "All evals            0%    100%",
+        "vs baseline              +100pp",
+        "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)",
+        f"Report: {tmp_path / 'benchmark.md'}",
+    ]
+
+
+def test_terminal_matrix_does_not_warn_when_several_evals_pool_a_band(tmp_path: Path) -> None:
+    """Verify one sample across several evals pools a cross-eval band, so no warning fires."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=2, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert bench["unbanded"] is False
+    assert bench["arms"]["trial"]["delta_noise_pp"] is not None
+    assert not any(line.startswith("WARN samples:") for line in lines)
+
+
+def test_terminal_matrix_does_not_warn_at_three_samples(tmp_path: Path) -> None:
+    """Verify a three-sample run carries a noise band and so no `WARN samples:` line."""
+    for sample in (0, 1, 2):
+        seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2, sample=sample)
+        seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2, sample=sample)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert any(line.startswith("vs baseline") for line in lines)
+    assert not any(line.startswith("WARN samples:") for line in lines)
+
+
+def test_terminal_matrix_does_not_warn_without_baseline(tmp_path: Path) -> None:
+    """Verify a one-sample sweep with no baseline has no delta to warn about."""
+    seed_arm(tmp_path / "archive", "alpha", "trial-opus", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial-sonnet", passes=1, total=2)
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), label="iteration_01", baseline=None
+    )
+
+    lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert not any(line.startswith("WARN samples:") for line in lines)
+
+
 def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: Path) -> None:
     """Verify the `vs baseline` line carries one delta per non-baseline arm."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)  # 50%
@@ -544,6 +695,7 @@ def test_terminal_matrix_pooled_delta_line_spans_every_trial_arm(tmp_path: Path)
         "-----------------------------------------------",
         "All evals           50%   100%               0%",
         "vs baseline              +50pp            -50pp",
+        "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)",
         f"Report: {tmp_path / 'benchmark.md'}",
     ]
 

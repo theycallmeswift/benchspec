@@ -87,6 +87,8 @@ so on three surfaces: the `benchmark.md` headline ends in
 `— single sample, no noise band`, the terminal summary prints a `WARN samples:`
 line, and `benchmark.json` carries `unbanded: true`, so an aggregator can
 exclude unbanded runs from a trend without re-deriving it from `max_samples`.
+`unbanded` is the broader flag: it is also `true` for a multi-sample run whose
+bands were lost to errored samples, which prints neither text marker.
 
 > **Key concept: errored is not failed.** A *failed* assertion is a measurement:
 > the agent ran and the claim did not hold. An *errored* sample is
@@ -170,8 +172,9 @@ tree; persisted so tools never hardcode the layout.
 
 The matrix, machine-readable (`format_version: 3`, versioned independently of
 `meta.json`): the `label`, the `baseline` arm (or `null`), `max_samples`,
-`unbanded` (`true` when a baseline exists and no arm's `delta_noise_pp` could be
-computed, `false` otherwise), the eval `roster`, per-arm stats under `arms`
+`unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
+against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
+the eval `roster`, per-arm stats under `arms`
 (pass rate, stdev, `delta_pp`, `delta_noise_pp`, errored and binder-degraded
 counts, per-eval rows), the `runner` and `binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:

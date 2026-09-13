@@ -18,7 +18,7 @@ printf 'GEMINI_API_KEY=...\nCLAUDE_CODE_OAUTH_TOKEN=...\n' > .env   # Prerequisi
 # Steps 2–3: write skills/hello/SKILL.md, pyproject.toml, the eval, and setup.sh
 .venv/bin/benchspec lint                    # free static checks
 .venv/bin/benchspec run -- --collect-only   # confirm discovery, nothing spent
-.venv/bin/benchspec run -- --count 3        # six cells, graded, reported
+.venv/bin/benchspec run -- --count 3        # two cells × 3 samples, graded, reported
 cat tmp/evals/iteration_01/benchmark.md
 ```
 
@@ -183,9 +183,9 @@ A malformed eval fails here, loudly, with the offending path quoted.
 
 The first run builds the sandbox snapshot (about a minute to download the base
 image and install the agent CLI); later runs reuse it, or run
-`benchspec sandbox:build` once to pay that cost up front. The six cells (two
-arms × three samples) then run under their eval file's progress line, grade,
-and the session ends with the benchmark table:
+`benchspec sandbox:build` once to pay that cost up front. Both cells then run
+three times each under their eval file's progress line, grade, and the session
+ends with the benchmark table:
 
 ```
 evals/hello/greets-by-name.eval.md ......                                 [100%]
