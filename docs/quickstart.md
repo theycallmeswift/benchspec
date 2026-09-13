@@ -38,9 +38,10 @@ cat tmp/evals/iteration_01/benchmark.md
   the defaults.)
 
 If with-versus-without on Claude Code is the whole question, none of this is
-needed: Claude Code's built-in `claude plugin eval` answers it on one
-credential. The README says [when benchspec is the step
-up](../README.md#benchspec-vs-the-alternatives).
+needed: `claude plugin eval` ships inside Claude Code and answers it on one
+credential. The README's
+[comparison](../README.md#benchspec-vs-the-alternatives) says when benchspec is
+the step up.
 
 Credentials can live in a repo-root `.env`; every subcommand loads it first, and
 exported variables win over `.env` values. For this walkthrough that file is two

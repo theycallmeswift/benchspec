@@ -28,8 +28,8 @@ index, or come back when a term in another page is unfamiliar.
 
 One column of the benchmark: a named configuration of harness, model, effort,
 agent-turn timeout, environment variables, and pass-through CLI arguments. A set
-takes any number of them, not a fixed two. Arms differ from each other only in
-that configuration and in what their `setup.sh` branch installs.
+takes any number of them. Arms differ from each other only in that configuration
+and in what their `setup.sh` branch installs.
 Example: `{ name = "trial", model = "opus", effort = "high" }`. Reference:
 [configuration.md](configuration.md).
 
