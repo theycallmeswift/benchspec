@@ -290,7 +290,12 @@ def delta_noise_pp(arm_a: dict, arm_b: dict) -> float | None:
 
 
 def _headline_lines(benchmark: dict) -> list[str]:
-    """Return benchmark headline lines."""
+    """Return benchmark headline lines.
+
+    One line per non-baseline arm: baseline rate → arm rate, its Δ, and either the
+    noise band (labeled `within noise` when the Δ sits inside it) or, at one sample
+    per cell, a note that no band exists. Without a baseline, each arm's bare rate.
+    """
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
     if baseline is None:
@@ -310,6 +315,8 @@ def _headline_lines(benchmark: dict) -> list[str]:
                 seg += f" — noise band ±{band:.0f}pp"
                 if abs(delta_pp) <= band:
                     seg += " (within noise)"
+            elif benchmark["max_samples"] <= 1:
+                seg += " — single sample, no noise band"
         lines.append(seg)
     # Baseline-only sweep: no contrast arm to take a Δ against, so show the baseline's
     # own rate rather than an empty headline.
@@ -459,8 +466,9 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
     column shares one right edge; the per-eval deltas stay in `benchmark.md`. The eval
     column is left-aligned and every arm column right-aligned; a rule separates the eval
     rows from the `All evals` footer; when a baseline arm exists, a `vs baseline` line
-    under the footer carries each other arm's pooled delta as `+Npp`; the last line
-    points at the written report.
+    under the footer carries each other arm's pooled delta as `+Npp`; an unbanded
+    one-sample run adds a `WARN samples:` line saying those deltas carry no noise band;
+    the last line points at the written report.
 
     Args:
         benchmark: A built benchmark (see `build_benchmark`).
@@ -513,6 +521,12 @@ def terminal_matrix(benchmark: dict, report_path: Path, *, color: bool = False) 
         if label == "All evals":
             lines.append("-" * table_width)
         lines.append(aligned(label, cells))
+    # One free-form line, not one per arm. `unbanded` alone is broader — a multi-sample
+    # run whose bands were lost to errored samples — and `--count 3` is no cure for that.
+    if benchmark["unbanded"] and benchmark["max_samples"] <= 1:
+        lines.append(
+            "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)"
+        )
     lines.append(f"Report: {report_path}")
 
     return lines
@@ -661,8 +675,11 @@ def build_benchmark(
         binder: The fixed run-level binder transport identity (no key material).
 
     Returns:
-        The benchmark dict: format_version, label, baseline, max_samples, roster,
-        arms, runner, binder, planned_arms, observed_arms.
+        The benchmark dict: format_version, label, baseline, max_samples, unbanded,
+        roster, arms, runner, binder, planned_arms, observed_arms. Each non-baseline
+        arm's `delta_noise_pp` is None at one sample per cell, however many evals ran.
+        `unbanded` is True when a baseline exists and some arm carries a Δ against it
+        but no arm's Δ has a noise band — a comparison the reader can't weigh.
     """
     configured = list(arm_meta) if arm_meta else []
     # Require a graded sample so a stray subdir (__pycache__, editor temp) never becomes
@@ -696,7 +713,15 @@ def build_benchmark(
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
 
-    # Each non-baseline arm's Δ and noise band against the baseline rate.
+    # Observed --count N; per-eval `samples` may be smaller where samples errored.
+    max_samples = max(
+        (row["samples"] for stats in arm_stats.values() for row in stats["per_eval"]),
+        default=0,
+    )
+
+    # Each non-baseline arm's Δ and noise band against the baseline rate. At one sample
+    # per cell the pooled stdev is eval-to-eval spread, not rerun noise, so it must not
+    # pose as a band.
     ref_stats = arm_stats.get(baseline) if baseline is not None else None
     ref_rate = ref_stats["pass_rate"] if ref_stats is not None else None
     for name, stats in arm_stats.items():
@@ -704,7 +729,9 @@ def build_benchmark(
             continue
         if stats["pass_rate"] is not None and ref_rate is not None:
             stats["delta_pp"] = (stats["pass_rate"] - ref_rate) * 100
-            stats["delta_noise_pp"] = delta_noise_pp(stats, ref_stats)
+            stats["delta_noise_pp"] = (
+                delta_noise_pp(stats, ref_stats) if max_samples > 1 else None
+            )
 
     # The roster comes from the eval dirs on disk, not the per-eval union — so an
     # all-errored eval (which _arm_stats skips) still yields a matrix row.
@@ -715,10 +742,12 @@ def build_benchmark(
         )
     ]
 
-    # Observed --count N; per-eval `samples` may be smaller where samples errored.
-    max_samples = max(
-        (row["samples"] for stats in arm_stats.values() for row in stats["per_eval"]),
-        default=0,
+    # Flagged once at the top level so a one-sample comparison never reads as measured.
+    trial_stats = [stats for name, stats in arm_stats.items() if name != baseline]
+    unbanded = (
+        baseline is not None
+        and any(stats.get("delta_pp") is not None for stats in trial_stats)
+        and all(stats.get("delta_noise_pp") is None for stats in trial_stats)
     )
 
     return {
@@ -726,6 +755,7 @@ def build_benchmark(
         "label": label,
         "baseline": baseline,
         "max_samples": max_samples,
+        "unbanded": unbanded,
         "roster": roster,
         "arms": arm_stats,
         "runner": runner,

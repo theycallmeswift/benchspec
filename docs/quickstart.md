@@ -18,7 +18,7 @@ printf 'GEMINI_API_KEY=...\nCLAUDE_CODE_OAUTH_TOKEN=...\n' > .env   # Prerequisi
 # Steps 2–3: write skills/hello/SKILL.md, pyproject.toml, the eval, and setup.sh
 .venv/bin/benchspec lint                    # free static checks
 .venv/bin/benchspec run -- --collect-only   # confirm discovery, nothing spent
-.venv/bin/benchspec run                     # two sandboxes, graded, reported
+.venv/bin/benchspec run -- --count 3        # two cells × 3 samples, graded, reported
 cat tmp/evals/iteration_01/benchmark.md
 ```
 
@@ -178,17 +178,17 @@ A malformed eval fails here, loudly, with the offending path quoted.
 ## Step 5 — Run
 
 ```bash
-.venv/bin/benchspec run
+.venv/bin/benchspec run -- --count 3
 ```
 
 The first run builds the sandbox snapshot (about a minute to download the base
 image and install the agent CLI); later runs reuse it, or run
 `benchspec sandbox:build` once to pay that cost up front. Both cells then run
-under their eval file's progress line, grade, and the session ends with the
-benchmark table:
+three times each under their eval file's progress line, grade, and the session
+ends with the benchmark table:
 
 ```
-evals/hello/greets-by-name.eval.md ..                                     [100%]
+evals/hello/greets-by-name.eval.md ......                                 [100%]
 
 ============================= benchspec benchmark ==============================
 Eval                  baseline   trial
@@ -206,12 +206,18 @@ Your numbers will differ: the baseline arm may guess the right shape, the trial
 arm may miss an assertion. What matters is that both arms ran and the table
 shows a delta rather than a lone score.
 
+A plain `benchspec run` (no `--count`) takes one sample per cell, and one sample
+yields a delta with no noise band. Such a run says so: a
+`WARN samples: 1 per cell; deltas carry no noise band` line under the matrix,
+and a `— single sample, no noise band` suffix on the `benchmark.md` headline.
+Visibility only; the exit status is unchanged.
+
 ## What a run costs
 
 - `lint` is free: no credentials, no network.
 - `analyze` makes one Gemini call per assertion, except bare existence lines
   ("./x exists"), which bind locally for free.
-- `run` boots one sandbox per cell (two here), makes the agent's model calls
+- `run` boots one sandbox per sample (six here), makes the agent's model calls
   through the agent's provider (Anthropic here), one Gemini call per
   non-trivial assertion for the binder, and one judge call per cell that has at
   least one punted assertion, through the judge's provider (the default judge is
@@ -232,20 +238,22 @@ cat tmp/evals/iteration_01/benchmark.md
 
 Rendered, the report's headline and matrix for this walkthrough look like:
 
-> **trial:** baseline 0% → trial 100% (**+100pp**)
+> **trial:** baseline 0% → trial 100% (**+100pp**) — noise band ±0pp
 
 | Eval | baseline (claude-code) | trial (claude-code) |
 |------|------|------|
 | hello/greets-by-name | 0% | 100% (+100pp) |
 | All evals | 0% | 100% (+100pp) |
 
-The full report continues with per-arm detail (timing, tokens, per-eval rates)
-and a provenance section recording which agent version and sandbox snapshot
-each arm ran on. Alongside it:
+The band is zero here because every sample agreed; a real run's band is wider,
+and a delta inside it is labeled `within noise`. The full report continues with
+per-arm detail (timing, tokens, per-eval rates) and a provenance section
+recording which agent version and sandbox snapshot each arm ran on. Alongside
+it:
 
 - `meta.json`: the run manifest (identity, planned arms, observed provenance).
 - `index.jsonl`: one row per `(eval × arm × sample)`, for aggregation.
-- `skills/hello/eval-greets-by-name/<arm>/sample-0/`: per-sample artifacts
+- `skills/hello/eval-greets-by-name/<arm>/sample-<n>/`: per-sample artifacts
   (`grading.json`, `timing.json`, `transcript.json`, `provenance.json`, and the
   lossless `session.jsonl` stream when the harness produced output).
 

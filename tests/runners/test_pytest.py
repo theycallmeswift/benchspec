@@ -574,12 +574,15 @@ def test_terminal_summary_prints_matrix(
     _, printed = _finish_and_summarize(config)
 
     assert printed[0].strip("= ") == "benchspec benchmark"
-    header, eval_row, rule, footer, versus, pointer = printed[1:]
+    header, eval_row, rule, footer, versus, warning, pointer = printed[1:]
     assert header.split() == ["Eval", "baseline", "trial"]
     assert eval_row.split() == ["archive/alpha", "0%", "100%"]
     assert rule == "-" * len(header)
     assert footer.split() == ["All", "evals", "0%", "100%"]
     assert versus.split() == ["vs", "baseline", "+100pp"]
+    assert warning == (
+        "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)"
+    )
     benchmark_md = skill_results_dir.parent.parent / "benchmark.md"
     assert pointer == f"Report: {benchmark_md}"
     assert benchmark_md.is_file()
@@ -610,7 +613,7 @@ def test_terminal_summary_multi_skill_single_header(
     headers = [line for line in printed if line.strip("= ") == "benchspec benchmark"]
     assert headers == [printed[0]]
 
-    *table, pointer = printed[1:]
+    *table, warning, pointer = printed[1:]
     assert [line.split("  ")[0] for line in table] == [
         "Eval",
         "archive/alpha",
@@ -619,6 +622,7 @@ def test_terminal_summary_multi_skill_single_header(
         "All evals",
         "vs baseline",
     ]
+    assert warning.startswith("WARN samples:")
     assert pointer.startswith("Report: ")
 
     iteration_root = skills.parent
@@ -628,6 +632,46 @@ def test_terminal_summary_multi_skill_single_header(
     assert "| archive/alpha |" in markdown
     assert "| ingest/beta |" in markdown
     assert "| All evals |" in markdown
+
+
+def test_terminal_summary_warns_on_single_sample_without_changing_exit_status(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a one-sample run with a baseline warns between `vs baseline` and `Report:`."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2)
+    seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2)
+
+    session, printed = _finish_and_summarize(config)
+
+    warning_index = printed.index(
+        "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)"
+    )
+    assert printed[warning_index - 1].startswith("vs baseline")
+    assert printed[warning_index + 1].startswith("Report: ")
+    assert session.exitstatus == 0
+
+
+def test_terminal_summary_quiet_on_multi_sample_run(
+    pytester: pytest.Pytester, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify three samples per cell print no `WARN samples:` line."""
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    (tmp_path / "pyproject.toml").write_text(ARMS_TOML)
+    config = _configured_plugin(pytester, tmp_path)
+    workspace.set_current_iteration("iteration_01")
+    skill_results_dir = tmp_path / "tmp" / "evals" / "iteration_01" / "skills" / "archive"
+    for sample_index in (0, 1, 2):
+        seed_arm(skill_results_dir, "alpha", "trial", passes=2, total=2, sample=sample_index)
+        seed_arm(skill_results_dir, "alpha", "baseline", passes=0, total=2, sample=sample_index)
+
+    _, printed = _finish_and_summarize(config)
+
+    assert not any(line.startswith("WARN samples:") for line in printed)
 
 
 def test_sessionfinish_writes_run_manifest(

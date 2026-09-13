@@ -40,8 +40,9 @@ full artifacts.
 
 **The headline.** One line per non-baseline arm:
 `**trial:** baseline 72% → trial 86% (**+14pp**)`, with a noise band appended
-when the run has enough samples to compute one. With no baseline configured, the
-headline lists each arm's absolute rate.
+when the run has enough samples to compute one, or
+`— single sample, no noise band` when it has one sample per cell. With no
+baseline configured, the headline lists each arm's absolute rate.
 
 **The matrix.** Rows are `group/eval_id` (from the run's roster, so an eval whose
 every sample errored still appears as a row of `—`); columns are the arms,
@@ -72,13 +73,24 @@ A delta smaller than its sampling noise is a coin flip, not a lift. With at leas
 two samples per arm (`--count N`), benchspec computes a noise band for each
 arm-vs-baseline delta (the standard error of the difference of the two arms'
 per-sample rates) and labels the headline **within noise** when `|Δ|` falls
-inside it. Treat the band as a guardrail against over-reading small numbers, not
+inside it. A one-sample run has no band even across many evals — its
+`delta_noise_pp` is `null` — because eval-to-eval spread is not rerun noise.
+Treat the band as a guardrail against over-reading small numbers, not
 a significance test: rates are pooled, sample-weighted means, not a paired
 analysis.
 
 The `--fail-under` CI gate deliberately uses the **raw** delta
 ([`configuration.md`](configuration.md#the---fail-under-gate)); the label exists
 so a human does not ship a noisy win.
+
+`--count 3` is the documented normal run; the numeric default stays one sample
+per cell (each cell boots a 2 GB sandbox). A one-sample run with a baseline says
+so on three surfaces: the `benchmark.md` headline ends in
+`— single sample, no noise band`, the terminal summary prints a `WARN samples:`
+line, and `benchmark.json` carries `unbanded: true`, so an aggregator can
+exclude unbanded runs from a trend without re-deriving it from `max_samples`.
+`unbanded` is the broader flag: it is also `true` for a multi-sample run whose
+bands were lost to errored samples, which prints neither text marker.
 
 > **Key concept: errored is not failed.** A *failed* assertion is a measurement:
 > the agent ran and the claim did not hold. An *errored* sample is
@@ -116,6 +128,9 @@ live only in `benchmark.md`. When a baseline arm exists, a `vs baseline` line un
 the footer carries each other arm's pooled delta as `+Npp` (blank under the baseline
 column); without a baseline the table ends at `All evals`. The terminal table carries
 no harness labels or noise bands; `Report:` points at the `benchmark.md` that does.
+A one-sample run with a baseline prints one line between `vs baseline` and `Report:`,
+`` WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more) ``
+(never silent, never an error: the exit status is untouched).
 A rule separates the eval rows from the pooled footer, and on a terminal that
 supports color, rates are color-coded by band (green from 80%, yellow from 50%,
 red below) and the `vs baseline` deltas by sign (green up, red down, yellow zero);
@@ -158,12 +173,14 @@ tree; persisted so tools never hardcode the layout.
 ### `benchmark.json`
 
 The matrix, machine-readable (`format_version: 3`, versioned independently of
-`meta.json`): the `label`, the `baseline` arm (or `null`), `max_samples`, the
-eval `roster`, per-arm stats under `arms` (pass rate, stdev, `delta_pp`,
-`delta_noise_pp`, errored and binder-degraded counts, per-eval rows), the
-`runner` and `binder` identity, and the same `planned_arms`/`observed_arms`
-provenance pair as `meta.json`. Note the naming: `arms` here is *result stats*;
-`planned_arms` is configuration.
+`meta.json`): the `label`, the `baseline` arm (or `null`), `max_samples`,
+`unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
+against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
+the eval `roster`, per-arm stats under `arms`
+(pass rate, stdev, `delta_pp`, `delta_noise_pp`, errored and binder-degraded
+counts, per-eval rows), the `runner` and `binder` identity, and the same
+`planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
+`arms` here is *result stats*; `planned_arms` is configuration.
 
 ### Per-sample files
 

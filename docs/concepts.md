@@ -149,9 +149,10 @@ too, so keep prompts pointed at `./`. Details:
 
 ## Sample
 
-One execution of a cell. A plain run takes one sample per cell (`sample-0/`);
-`--count N` takes N, so the report can show flakiness and a noise band on each
-delta. Example: `benchspec run -- --count 5`. See
+One execution of a cell. A plain run takes one sample per cell (`sample-0/`),
+so its deltas carry no noise band; `--count N` takes N, so the report can show
+flakiness and a noise band on each delta. Example: `benchspec run -- --count 3`.
+See
 [results.md](results.md#noise-samples-and-flakiness).
 
 ## Sandbox and snapshot
