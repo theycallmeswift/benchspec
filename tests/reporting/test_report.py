@@ -222,6 +222,29 @@ def test_build_benchmark_unbanded_at_one_sample_with_baseline(tmp_path: Path) ->
     assert bench["unbanded"] is True
 
 
+def test_build_benchmark_one_sample_across_several_evals_has_no_band(tmp_path: Path) -> None:
+    """Verify several evals at one sample each pool a stdev but never a noise band.
+
+    The pooled stdev is eval-to-eval spread, not rerun noise, so it must not be
+    dressed up as a band on the delta.
+    """
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "beta", "baseline", passes=0, total=2)
+    seed_arm(tmp_path / "archive", "beta", "trial", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "gamma", "baseline", passes=2, total=2)
+    seed_arm(tmp_path / "archive", "gamma", "trial", passes=1, total=2)
+
+    bench = report.build_benchmark(
+        report.discover_eval_dirs(tmp_path), "label", baseline="baseline"
+    )
+
+    assert bench["max_samples"] == 1
+    assert bench["arms"]["trial"]["pass_rate_stdev"] is not None
+    assert bench["arms"]["trial"]["delta_noise_pp"] is None
+    assert bench["unbanded"] is True
+
+
 def test_build_benchmark_banded_at_three_samples(tmp_path: Path) -> None:
     """Verify three samples per cell yield a noise band, so the run is not unbanded."""
     for sample in (0, 1, 2):
@@ -484,7 +507,7 @@ def test_terminal_matrix_aligns_columns(tmp_path: Path) -> None:
 
     lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
 
-    header, *rows, pointer = lines
+    header, *rows, _warning, pointer = lines
     assert header.split() == ["Eval", "baseline", "trial"]
     assert [row.split("  ")[0].strip() for row in rows] == [
         "archive/alpha",
@@ -602,9 +625,10 @@ def test_terminal_matrix_renders_bare_rates_with_pooled_delta_line(tmp_path: Pat
         "------------------------------",
         "All evals           17%   100%",
         "vs baseline              +83pp",
+        "WARN samples: 1 per cell; deltas carry no noise band (run with `--count 3` or more)",
         f"Report: {tmp_path / 'benchmark.md'}",
     ]
-    header, alpha, beta, _rule, footer, versus, _pointer = lines
+    header, alpha, beta, _rule, footer, versus, _warning, _pointer = lines
     assert not any("pp" in line for line in (alpha, beta, footer))
     baseline_edge = header.index("baseline") + len("baseline")
     assert all(line[baseline_edge - 1] == "%" for line in (alpha, beta, footer))
@@ -633,8 +657,8 @@ def test_terminal_matrix_warns_once_when_one_sample_has_no_noise_band(tmp_path: 
     ]
 
 
-def test_terminal_matrix_does_not_warn_when_several_evals_pool_a_band(tmp_path: Path) -> None:
-    """Verify one sample across several evals pools a cross-eval band, so no warning fires."""
+def test_terminal_matrix_warns_when_several_evals_share_one_sample(tmp_path: Path) -> None:
+    """Verify one sample across several evals is still unbanded and warns exactly once."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
     seed_arm(tmp_path / "archive", "alpha", "trial", passes=2, total=2)
     seed_arm(tmp_path / "archive", "beta", "baseline", passes=0, total=2)
@@ -645,9 +669,9 @@ def test_terminal_matrix_does_not_warn_when_several_evals_pool_a_band(tmp_path: 
 
     lines = report.terminal_matrix(bench, tmp_path / "benchmark.md")
 
-    assert bench["unbanded"] is False
-    assert bench["arms"]["trial"]["delta_noise_pp"] is not None
-    assert not any(line.startswith("WARN samples:") for line in lines)
+    assert bench["arms"]["trial"]["delta_noise_pp"] is None
+    assert bench["unbanded"] is True
+    assert sum(line.startswith("WARN samples:") for line in lines) == 1
 
 
 def test_terminal_matrix_does_not_warn_at_three_samples(tmp_path: Path) -> None:

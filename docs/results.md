@@ -73,7 +73,9 @@ A delta smaller than its sampling noise is a coin flip, not a lift. With at leas
 two samples per arm (`--count N`), benchspec computes a noise band for each
 arm-vs-baseline delta (the standard error of the difference of the two arms'
 per-sample rates) and labels the headline **within noise** when `|Δ|` falls
-inside it. Treat the band as a guardrail against over-reading small numbers, not
+inside it. A one-sample run has no band even across many evals — its
+`delta_noise_pp` is `null` — because eval-to-eval spread is not rerun noise.
+Treat the band as a guardrail against over-reading small numbers, not
 a significance test: rates are pooled, sample-weighted means, not a paired
 analysis.
 

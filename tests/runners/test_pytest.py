@@ -613,7 +613,7 @@ def test_terminal_summary_multi_skill_single_header(
     headers = [line for line in printed if line.strip("= ") == "benchspec benchmark"]
     assert headers == [printed[0]]
 
-    *table, pointer = printed[1:]
+    *table, warning, pointer = printed[1:]
     assert [line.split("  ")[0] for line in table] == [
         "Eval",
         "archive/alpha",
@@ -622,6 +622,7 @@ def test_terminal_summary_multi_skill_single_header(
         "All evals",
         "vs baseline",
     ]
+    assert warning.startswith("WARN samples:")
     assert pointer.startswith("Report: ")
 
     iteration_root = skills.parent
