@@ -29,6 +29,11 @@ transcript, trust the vibe. benchspec turns that guess into a measurement.
 Write the goal once, run it across the configurations you care about, and read
 off — in percentage points — how good each one actually is at accomplishing it.
 
+> **When to use benchspec.** If the only question is whether one plugin helps
+> Claude Code, `claude plugin eval` ships inside Claude Code and answers it on
+> one credential, no container. The
+> [comparison below](#benchspec-vs-the-alternatives) routes the other cases.
+
 ## What you need
 
 | | |
@@ -156,19 +161,25 @@ fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
 eval. The repo's own `make e2e` defaults to six workers through the `WORKERS`
 variable; `make e2e WORKERS=1` runs the cells sequentially.
 
-## Why benchspec
+## benchspec vs. the alternatives
 
-- **Comparison is first-class.** A single pass rate is a number without a
-  reference point. Arms and a baseline make the headline a delta; skip the
-  baseline when absolute rates are what you want.
-- **Deterministic where possible, judged where necessary.** The binder is tuned
-  so a false positive, a surface check passing on wrong output, is the one
-  unacceptable error; anything doubtful goes to the judge, which sees the
-  collected evidence and never grades from recall.
-- **Self-describing artifacts.** Every run writes `meta.json` (planned config
-  plus observed provenance, down to the agent version inside the guest),
-  `index.jsonl` (one row per sample), and `benchmark.json`, so other tools can
-  aggregate runs without knowing the directory layout.
+Where each alternative is the better answer:
+
+| | Reach for it when | What benchspec adds |
+|---|---|---|
+| [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals) | The question is whether one plugin helps Claude Code. It ships inside Claude Code, needs one credential and no container, and interviews you to write the suite. | A second harness, arms beyond with-and-without, a workspace seeded and hashed before the run, and a judge that need not share the arms' provider. |
+| [Inspect AI](https://inspect.aisi.org.uk/) | You write Python, and you want off-the-shelf evals, remote execution at scale, or `pass@k` reducers. | The eval is a Markdown file of prose claims rather than a scorer you implement, and the report is an arms-versus-baseline delta without assembling one. |
+| [Harbor](https://www.harborframework.com/) / Terminal-Bench | You want to rank agents on a standard published benchmark, with a long list of agents already integrated. | Your tasks, your baseline, your delta. |
+| [Coder Eval](https://github.com/UiPath/coder_eval) | You want typed YAML criteria with weights and fractional credit, or its GitHub Action. | Prose assertions instead of a criterion schema, and pre-run hashes behind `left unchanged`. |
+| [promptfoo](https://www.promptfoo.dev/) | What you are grading is a prompt and the reply it produced. | Grading of the workspace the agent left behind, not the response it wrote about it. |
+
+benchspec's own cost is the top of this README: a Docker daemon, and up to
+three vendors' credentials. Every run pays that back in artifacts —
+`meta.json`, `index.jsonl`, `benchmark.json` — that another tool can aggregate
+without knowing the directory layout.
+
+[`docs/research/2026-09-13-alternatives-landscape.md`](docs/research/2026-09-13-alternatives-landscape.md)
+has the long version: unit of evaluation, isolation, and statistics per tool.
 
 ## Documentation
 
