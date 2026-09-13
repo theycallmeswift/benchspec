@@ -333,11 +333,14 @@ def report_lines() -> list[TerminalLine]:
     return [
         TerminalLine([Span(rule, color=TERMINAL_MUTED)], gap_before=REPORT_GAP),
         header,
-        matrix_line(Span("hello/greets-by-name"), [rate_cell(33), rate_cell(100, 67)]),
-        matrix_line(Span("hello-file/writes-greeting-file"), [rate_cell(50), rate_cell(50, 0)]),
+        matrix_line(Span("hello/greets-by-name"), [rate_cell(50), rate_cell(100, 50)]),
+        matrix_line(Span("hello-file/writes-greeting-file"), [rate_cell(0), rate_cell(100, 100)]),
+        matrix_line(
+            Span("hello-outside/allows-filesystem-traversal"), [rate_cell(0), rate_cell(100, 100)]
+        ),
         TerminalLine([Span("-" * TERMINAL_COLUMNS, color=TERMINAL_MUTED)]),
         matrix_line(
-            Span("All evals", bold=True), [rate_cell(40), rate_cell(80, 40, bold_rate=True)]
+            Span("All evals", bold=True), [rate_cell(17), rate_cell(100, 83, bold_rate=True)]
         ),
         TerminalLine([Span("Report: tmp/evals/iteration_01/benchmark.md", color=TERMINAL_MUTED)]),
     ]

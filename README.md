@@ -17,12 +17,13 @@ one harness versus another.
 
 <img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: benchspec run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
 
-*End-of-run summary for a two-arm run of the in-repo [`hello`](evals/e2e/hello/)
-suite (illustrative numbers).* Rows are evals, columns are arms (`baseline` ran
-the agent bare, `trial` installed the skill), and every non-baseline cell shows
-its assertion pass rate plus the delta against the baseline in percentage
-points. The same matrix lands in `benchmark.md`, with machine-readable artifacts
-alongside.
+*End-of-run summary for the in-repo [`hello`](evals/e2e/hello/) suite: the
+`baseline` and `trial` columns of a real one-sample run.* Rows are evals, columns
+are arms (`baseline` ran the agent bare, `trial` installed the skill), and every
+non-baseline cell shows its assertion pass rate plus the delta against the
+baseline in percentage points. The scoped `` Skill `hello` invoked `` line is in
+neither column. The same matrix lands in `benchmark.md`, with machine-readable
+artifacts alongside.
 
 Teams pick harnesses, models, and prompts by anecdote: run it once, eyeball the
 transcript, trust the vibe. benchspec turns that guess into a measurement.
