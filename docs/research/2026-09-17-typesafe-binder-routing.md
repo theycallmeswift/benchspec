@@ -13,11 +13,13 @@ Sources: [docs.typesafe.ai](https://docs.typesafe.ai) (`/api`, `/primitives`,
 ## Answer up front
 
 **No — it binds two assertions that must be punted.** That's the one error the
-binder isn't allowed to make. Gemini made zero on the same corpus.
+binder isn't allowed to make. Gemini made zero on the same corpus. A third
+answer picks a checker whose scope is wrong in a way that also passes on failing
+output, so three of its results here would report a broken run as green.
 
 It's 15x cheaper and noticeably faster, and its routing accuracy is otherwise
-level with Gemini's. The blocker is those two, plus a structural gap that means
-it can't do the whole job anyway.
+level with Gemini's. The blocker is those three, plus a structural gap that
+means it can't do the whole job anyway.
 
 ## Background: what the binder is for
 
@@ -135,6 +137,12 @@ POST /v1/systemone
 }
 ```
 
+Every example below carries a **[Playground link][pg-payload]** that opens the
+exact state and question we sent. They only restore the payload if you are
+already signed in — a cold link bounces through `/login?returnTo=%2Fdecode`,
+which drops the `#share/` fragment. TypeSafe's own docs links behave the same
+way.
+
 Both runs bypass `_bind_bare_exists`, a local regex shortcut that binds simple
 existence assertions with no API call at all. Leaving it in would have measured
 the shortcut rather than the model.
@@ -146,7 +154,7 @@ the shortcut rather than the model.
 | **bound something it must punt** | **2 of 86** | **0 of 86** |
 | picked the right checker | 43 of 53 | 42 of 53 |
 | punted when it should have bound | 9 of 53 | 11 of 53 |
-| picked the wrong checker | 1 of 53 | 0 of 53 |
+| picked the wrong checker *(also a false pass)* | 1 of 53 | 0 of 53 |
 | average response time | 567 ms | 877 ms |
 | cost for one pass over the corpus | **$0.005** | $0.074 |
 | same answer on all 10 runs | 139 of 139 | 139 of 139 |
@@ -179,6 +187,8 @@ assertion: "The new log entry has a 'source:' line naming the move of the
        you have to read the line and understand what it refers to.
 ```
 
+[Reproduce in the Playground][pg-leak1]
+
 ```
 assertion: "The Problem section uses labeled bullets (e.g. Symptom /
             Constraint), not multi-sentence paragraphs"
@@ -191,25 +201,48 @@ assertion: "The Problem section uses labeled bullets (e.g. Symptom /
        happens to start with a word and a colon.
 ```
 
+[Reproduce in the Playground][pg-leak2]
+
 Both did it all ten times, so it's a consistent blind spot rather than bad luck.
 The shared shape: an assertion that *contains* a mechanically checkable surface
 feature, wrapped in a semantic claim. Jev latches onto the checkable part.
 Notably it isn't wildly confident in either — 0.29 and 0.42 of the mass sat on
 `punt` — it just didn't land there.
 
-### One wrong checker
+### A third false pass, which our own gate cannot see
 
 ```
 assertion: "No file named .gitkeep exists anywhere under ./"
 
   jev    -> not_file_exists  { not_file_exists: 0.57, glob_count: 0.37, ... }
   gemini -> punt
-  wanted -> glob_count      (with count: 0 — it's a recursive search, not one path)
+  wanted -> glob_count  (count: 0)
 ```
 
-Harmless here, since `not_file_exists` would also fail correctly in most cases,
-but it's the right kind of near-miss to notice: the distribution had the correct
-answer in second place at 0.37.
+This reads as a cosmetic near-miss and is not. `not_file_exists` is
+`_negated(_file_exists)`, and `_file_exists` resolves **exactly one** path —
+while the assertion is a recursive claim about the whole tree. Verified against
+the real checkers, with the agent having left `docs/.gitkeep`:
+
+```
+not_file_exists  path=".gitkeep"             -> PASS   ** false pass **
+                                                ".gitkeep absent" — only looked at the root
+glob_count       glob="**/.gitkeep" count=0  -> FAIL   correct
+                                                "1 match(es), expected exactly 0"
+```
+
+So three of Jev's outputs on this corpus would let a failing run report green,
+not two. Our gate only catches the first two: it asserts on `punt`-labeled
+entries, and this one is `bind`-labeled, so a wrong checker lands in the
+`bind_mismatch` statistic rather than failing the gate. **That is a hole in our
+gate as much as a finding about Jev** — a bind-labeled assertion that binds to
+the wrong checker can be a false pass, and nothing currently fails on it. Worth
+fixing on our side independently of TypeSafe.
+
+The encouraging read: the correct answer sat second at 0.37 and `punt` at 0.05,
+so the right shape was in view.
+
+[Reproduce in the Playground][pg-gitkeep]
 
 ### Where both models struggle
 
@@ -224,6 +257,8 @@ assertion: "No file was written to disk — the handoff exists only as the
   gemini -> punt
   wanted -> glob_count  (count: 0)
 ```
+
+[Reproduce in the Playground][pg-overpunt]
 
 ```
 assertion: "All three are flat markdown files under ./9. Archive/Sources/{TODAY}/
@@ -280,8 +315,8 @@ here.
 
 ## Recommendation
 
-Don't swap the binder. Two bad binds is disqualifying, and confidence gating
-costs more than it saves.
+Don't swap the binder. Three results that would report a broken run as green is
+disqualifying, and confidence gating costs more than it saves.
 
 If it's worth revisiting, settle the argument-filling half first — routing is
 already at rough parity, so there's no point tuning it further until we know the
@@ -289,13 +324,30 @@ other half can work at all. The 15x price difference is the reason to bother.
 
 ### What would change our answer
 
-For the TypeSafe team, the two things that actually gate adoption here:
+For the TypeSafe team, the three things that actually gate adoption here:
 
-1. **The semantic-claim-wrapping-a-checkable-surface pattern.** Both failures
+1. **The semantic-claim-wrapping-a-checkable-surface pattern.** Both bad binds
    are the same shape. If a stance instruction can reliably push that toward
    `punt` without collapsing everything else into `punt`, the leak problem goes
    away.
-2. **Confidence stability.** The choice is deterministic; the confidence isn't
+2. **Scope: a claim about a tree is not a claim about a path.** The `.gitkeep`
+   miss is a different shape — the model read "anywhere under `./`" and still
+   chose a checker whose rubric says *a single path*. The right answer was
+   second at 0.37, so the distinction is available to it but not decisive.
+   Whether option rubrics can carry that kind of hard constraint is the question.
+3. **Confidence stability.** The choice is deterministic; the confidence isn't
    quite. For a zero-tolerance gate the threshold is the whole safety mechanism,
    so how tightly confidence is expected to reproduce across identical calls is
    the number we'd need.
+
+Also worth a look on their side: the Playground share links lose their payload
+for a logged-out reader. `/decode#share/<blob>` redirects to
+`/login?returnTo=%2Fdecode`, dropping the fragment, so the reader lands on an
+empty Playground. Their own docs links behave the same way — confirmed in a
+browser against both.
+
+[pg-leak1]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABOjgB3PgBtUAcz70GCAJ59uYJHzB8A5ElRUEFOFnVioggWBrGpDXnxqpc-VADM+V-uohyKGALQBrOHLoqAxwho6ooqSIfMYMqDEMKmC63FD2pHxRSAzGYDkYxCAQCKg0EIks7JzAADrofHw1ICVUIU1YfLX1DY0gDHIQcO29FNyoUHpNRHU9vcbZCFQU+ehIw12zDU0Myr7DTQDCYPVWUElISIgrfABG-PYIUI5QcBl0o8cTYKKiCjcKbDAy1+fAw-CiIQQ5nQZxyFD4ozgFH8CCIfAA6gBJJgACQA8gBVJh8BBwMCkCx8Z6ifheRgyKmoBA2Mkw9ASAD8Uxmmya2WOk2wvQAmtpVKTVAiMJcELg8mlaaJlChnogAHR8AAKVEYlLOqlEQjAchUjlJ-EAKASSiA6kIZZVXND1CSoOAqOKqeoAGS9AFk+AArKikCT8eYhckanj8PEAOS9wr4OqBenKYBuNOkCBKzP1akRyOiVjyUqokT4EGVoPq6IASnGAOKg1o2hga9G8erGT0KchUG4MNE2xhq7ndWZNYcMAD6Qk7wwA2jzNr1Y3BXio6SFGCSyRlwsy6J92XwrepSY4act3dZHEDEuo0eo8xRqAg8qExyutiAAEI60gaXdIR4iZGwmX4O9r1PDQ2FhJJ0AyLcwHmA1RD4FBWBcOAyiVEIkHUL9v0OJUoBoFQtDoU4TyNFRYzxYkPnZV4AHpSVsdIWNIKgIFEL47RY8kolIJplx6ABdMSAF9pnHEZHkhKAwHWMSf2pOBpzg7I1iFJoAEEMIsTNKysaRWHg0FmVohFSQ-UgNVjYJUhPOBREuUdiFU3oghndTNPM7T9hAAyUHZYy8m4GIVBdQQNQMm0JRM7hvHTS50D0BFSJoDzZJXJoJHEG5py8W0goAUVYe8QVjNEwJLGllAYPgaqpKAgJsPJRklArUBuHKvKaUlQ1YIKDPQMxXlazMlCSIwTBoTrnKkNR+TtCs8khdB+rktSSkYBaGEhacZtG0w6H3NrQlNPaGAOyFFGUbqFXqfw5G2vKQCQJQACYAFYADZpwO0ZTvUqLbjkEJvCgKJdQob4XHiNRxvOqa4He3lPt8NrRGnYxcFQfwRN04LbmSfh7zSeUMDm-QMOxn4+AADT4az8cJ14MYnEAfOnJAGdx9midOm5yYEHxKbla4+MEDp+Zx5nWcenyYnQAmia5npJ1Kkm9PQSGlukNz0dEuSpJ5c30CkwpLivO1fVQKI3OwBcQADOBcG8PC3Q4cSpKAA
+[pg-leak2]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABAAUEqAEYAbODT5I4FBmnR8qMpHzFgRcCaT4iqYiQ1UAKOADoA5mb4BlAJ40IDVFID0fAMIYkDBGCiMAJREfOioDHw0+vIAtDKM9BT8EGB+Fn4Q3EjEIBDCjkYs7JzAADqKfKUgwlQMcFVYfGUVfJUgDHYQ9dhtFNyoUElVROWtrVUBPghUcgpIDU2jY+PtYEgA1gtVHmCKDNxQqmsyCPIYuvy4iFAAZlBwOnR9u4NgBna6H2xgcmIfGPxSHA6ggaAFDvIKHw+rJ1ogQgB1ACSTAAEgB5ACqTD4CDgYFIAQsfDuEmhGDqjBJqAQkXx6CJAH5hktllUfLshj0qgBNVBUPipfhgcnoE64MDyK7Q9RIFB3RDWARURhEviHQViADuYDsqhueP4gBQCQV8CAquo6Y6IM6KCyoOCqZyCxQAGVdAFk+AArKikCz8SZ1AnWHj8dEAOVdPKU6B+SScGjJiGEtI1IphFDhtP2kvJ+h0KTlfHOCIASpGAOIl2rmhjWBG8RQBF0fchUEQMELmxhmFktMZVHsMAD6WqbCwA2qzlm0I3AHqoKBT6BE8QTqbS6C90MSTQByPE3CRyJ28Ek-Iz7kL79MUah+Or7-uzwcgABCKtIEidWtQJa3Gl+BuS9VAPNgISOdAdGXRh-DFTUxGkKBWD4OpHHUOokGfYgZzZEAPHUKAaFUJAXGBA5dz4HVVAjdEcWeXcHlcPEaFQK5SFcUgqAgMRXktVwCSBUgqjwvgAF0ZwAXxGAcqgoBAoBBKAwAWZpXyqUk4BHCCfHmbkQAAQWQ3cyRSfY+F0owAOotZoXXS1rAjcJKOJLQZD7XCBxWMJRy0nTWEgrYjJMiwzMlbh1VUe10HMPhjPNPEzQimINHiJIZX8GhPNkjSQDC0QR2XC1goAUVYS8-j4CMQhpQUIgkNYIhqkkoB-SJJT6U0CpEHKxKqPEA1YYLjLjOgdC0vhuDskU+NijqGD6NURQ5S1koYEF0D67y2gNCkaElEER2m-TGiqUawHG1qJH3fVhEYA6NsQKaZr4CwoCuRQ4Tsba8qQaaACYAFYADYR0evoRuuwNVBEOw6hiKAgVVCg3jQ-8RTGh5od+2d2XWNqxBHAJcFQOERIM4yRCFQVZglW01ACOBGg2Qm+AADVs1QSbJh5cfw3yR1ZgxifQUnyah6mkrCdBUrpyUFEZ2KWYJgwOa50JwnVMXedIfm32HEb0Hh1zLLEDzRIHKSlmt9ApJyGQT0tD1UCBc3sEnEBvTgXAYkwx0OHEqSgA
+[pg-gitkeep]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF7owdUrwB0AcygMA1nDgRebKEgZJeYdAE8A7gAtEoqulKIZAemIgICVDQjaW7TsAA66Xry8gTlQMcAFYvN6+fv4gDPoQodgxFMaoUBSJRD7RMVDoWghUFAxo+WER2TkxDGBIiuUBAMJ6vAzGmrpISIglGLwARqK4iFCCcFJ0KXrpYEJC+gMLbGDF87wYolYhCDR5miUUvClwFMoIRLwA6gCSTAASAPIAqky8CHBgpHmyAsKiFBgQowBKgELw6NN0LIAPwBLJRHIBLR6DINEAATVQVF0710Rww3QQuDAJWGRyEtRQYwQ0l4AAULCUobwOrNDGB9Dp+O9RIAUAjxEEZ406hN6vlkqDgOgYfBaABk5QBZXgAKyopFkojyWg+pFpTFMvAeXDl6N4FhWGVcYH6InUCCcYNZR1Mp2sbRJ+KoQikEEp618lwASsaAOLrYKChi0y6mXx5XQGXjkKj9BgXQWMaRwyqIhyMgD6Jno5QA2rmqgEuCpSDoAYx6Aw3rqQWCIehvrx+QByd78ETFaWG-grbTdi7d1kUagIElwbs5hGVkAAIQspBE0sMfFB4NBohHg67vG7Gi0Oj0UnrNW1ujmvBQrFacBcFJCSAXxArecaFKgNB0JBnDgNpO3ZHQuAeV4pihcYbHeGhUGGUgbFIKgICEGYQhQz4rFIAJv14ABdCsAF94TzCgEAUEYwHKSIqhiQQRALM9tDRABBB9vjtP02nUVh9h0XdwKOd45z1XgeFA5k4CEbpsy-Jc-ACdBUAYAtmLgVjBPPTjuKhXiSWMFkdAldA4FpLjBVxPjjAAWhtbp0AyckwH-RSKOXWQhFQfoCwBRk0QAUVYUc1i4C5d09ERaibSLfk3cESRSPEfL8zzCICd5NVYfTxEkRLRGMWo8UwizkoYFJOzAB8amw3g+O2dBMuUpinEYGgSW2AsSqQfKJGFLTuy5DqGC6hhtl4Pq0qgYZfGUfRWsYpESoAJgAVgANgLCaUn0rTTMWEJ7KgKxGBmIRWllMRBqkLTluXOphCEAs8lwVBlHwpIAi4-owFxUc5pJUpeHKuBwme+8AA1eFE97PvGR68zUjSodehGvv0-7cTU9BHOKYGxTBvIIYfRQXt4WHRNRll0A+r7keiAJMwYTiDBkn45IUgil1Iyp+fQUj7G6AdsMVVArHk7BSxAFU4Fwey3ylDgiNIoA
+[pg-overpunt]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF4B3MEnEIoDBvV4M+pKEgDWvQCgEigBaidYdOX79ebVQykYhAT16TdouDVnzSvOkiRgA5nGIgEAioNBCWLOycwAA66Ly80SDBVPKJWLwxcfEJIAw2EHBpORQ6qFAUhcSx2TlQ6EgMCFQUDGj1RZk18YkMkmpFiQDChrqq9l6IrRi8AEaiuIhQgnDudCWG5WBCtrN2bGAtOxiipHDyCC7oFuW8JXAUaohEvADqAJJMABIA8gCqTLwEHAwCp0D4BMJRBQMPJGAJUAgPMCrmCAPyJIjVLqJBqGCoDEAATVQVHsQPstwwSEQuDArQWtyEkhQywQADpeAAFKiMOrgsZbCQ2KT8IGibRgXgQHlucbUhBTOI+VBwKRKexxAAymoAsrwAFZUUh+Xh1BrA0gcph6XjfLiawm8HkHCphMAzERmBDBREC256B6IXR0ylUITuCDM3jTF4AJTtAHFoylpQwOS89HE6hq7OQqDMGM9pYw2RisTVEsWGAB9MSZooAbXL2O4cBWUmhjHoDEBFvhiLoGzBWl4AHIgfwRC01Tb+AdLKPnqOBRRqAg6XBR2Wsl0cgAhHmkERqsR8BEeBGiOfTkej8wNKSGdyd3pm+zbXgoViKZwQJnyJAtyqHcW0GJkoBoKQkBCM4dD5cQHC4b4AXWMEVgAeiBGhUAWUh0NIKg-02Nx0JBU5SESZt4gAXWbABfTEQMSCgZHOKAwA6KickEERq3vSwCQAQU-PlPUjBgdDMVgLCsREJA7IEN0tXgeAk+C4CEalS2A3dEnQVAax4uA+Okh8hJEsExLpSSxmVdA4A5YTpXJcSdAAWndal0AqRkwAg7TGN0kAfCEVAZmraEZQJABRVh5x2LhnnPEMREkHtEohY8PDpEoKRCsKAq4xIgT8VhzPQMA6HcIzeAMR9eCEOpRBoHK4OHSVcVlcTznQQqQO6EBRRhFq5EQas6vKyqVkyzcRWCRgRvOWqHElHwoAWOJHhsPqgqQAwACYAFYADZqxGkpzJqsYZhseQ3KgU5eQoLZFD4SUKqqmadpbdRhCEas6lwVBHgo7AcmEmYwHJed1rpNoGqa9Jfo-AANBCpEB4GVm+isQH0mtkf+zGQfMyHyX09APJaWHFQR+ykbUP7eDR+TeHx010CBkGceySsorBxJBPQW62vBDStMokC6KxaX0DogJqSnNwdVQU5NOwBsQH1OBcDc-9VQ4ai6KAA
+[pg-payload]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgMAWcABADoA9ACMqUADakhfUlARwKDVAgCefdKgDufNlCQMkfMOlJ8KGBmCjojYCRL49+FmtAlwzYJEjiHiIBAIqG6GLOycwAA66Hx8USDBVAxwCVh80bFx8VyqEKnYORTcqFAUBUQx2Tk2BghUSmi2aRlV1TlWSADWLQkAwiZO3PrGPogMTXwi-LiIUABmUJ58dMUmZfYS6iLqbGBKW3wY-KR+iDQ2+hMU5rwUXYhEfADqAJJMABIA8gCqTHwKMBydAAcz4iw85ks9AY4JUKzg61BAH4EpUstUEgYTOVeiAAJqoKjGBTGKG2RC4MATWbmCTeFCLRACPgABSojBsYJG9i0YFURnmCn4gBQCMkQDkpLxjBATDB8EGoOBGZTGWIAGXVAFk+AArKikEH8WopIEspi8PhfABy6vxfA5+3KECsIkhiGCCD4PNuigeXp41KhVCkfAgDKOsWeACUbQBxI7JCUMFnPXixGxq9TkKgiBhPCWMARotqYwKSgD6WnTLQA2qX2glrXBPEYLIwYQDEWZ5vC6EiwWKAOQKeYeJQqy3zfaGIdPIc8ijUBDUuBDksYxsgABCHNIHhVWlQRy9NBU-GnE74w70BjspnJVlqxgcfBQrCccDc9JSSHXxAbMs+npKAaCMJAQj8YZQT4PkjGtL5-jWUFPCEBQz1maRSCoCAJA2KUhCBU5SASQC+AAXQbABfdEywoBAoBSBiwBaTJ2hyCE4ArW9DDxABBN8uUhcMeF0VgriMeE4PMQEpRZa1UB4LldAkXxiwAzc4gSTQGArTjuPEu9+ME0FhOpbhvSMRV0DgFkBIlUkRO4ABaMARF8dByjpawaHU2itxBCRUBECsLElPEAFFWBnQ5rSeeEgw8bxYTi8FJGVFZqWKMlAuCvyyISBQjVYYz0DAOge3SvhuG8Mk8JszKGGKZSwDfKwpTDakmPQfLNI44JGBoLrEArGqkFK8rlk4odBQGhghoYJjqtq1qQSgWZYgeVRevYrEaoAJgAVgANgrBbimMzjLKmVQUmcqBTk5Ch7CcY9WrKiq0o8Hat26SQJArGxcFQB4SMKBIBJEMBSRndbqUmeq4HSP7XwADVg2qgZBzwfrLHSKxRgGsdB4yodJTR0FcxoqTlWJEeRrp-r4dHpJ0710GB0HceyBJCwYfj0Fu6CwTgVTbNIzcqLaKX0CogJfHHKUtVQU5VOwWsQF1OBcGcn9lQ4ciqKAA
