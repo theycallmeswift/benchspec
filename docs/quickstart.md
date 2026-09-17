@@ -241,19 +241,19 @@ cat tmp/evals/iteration_01/benchmark.md
 
 Rendered, the report's headline and matrix for this walkthrough look like:
 
-> **trial:** baseline 0% → trial 100% (**+100pp**) — noise band ±0pp
+> **trial:** baseline 0% → trial 100% (**+100pp**) — noise band ±0pp (1 SE)
 
 | Eval | baseline (claude-code) | trial (claude-code) |
 |------|------|------|
 | hello/greets-by-name | 0% | 100% (+100pp) |
 | All evals | 0% | 100% (+100pp) |
 
-The band is zero here because every sample agreed; a real run's band is wider,
-and a delta inside it is labeled `within noise`. The scoped trigger line is in
-neither column; it has its own row under "Scoped assertions", `skipped` for
-`baseline`. The full report continues with per-arm detail (timing, tokens,
-per-eval rates) and a provenance section recording which agent version and
-sandbox snapshot each arm ran on. Alongside it:
+The band is zero here because every sample agreed; a real run's band is wider —
+one standard error — and a delta inside it is labeled `within noise`. The scoped
+trigger line is in neither column; it has its own row under "Scoped assertions",
+`skipped` for `baseline`. The full report continues with per-arm detail (timing,
+tokens, per-eval rates) and a provenance section recording which agent version
+and sandbox snapshot each arm ran on. Alongside it:
 
 - `meta.json`: the run manifest (identity, planned arms, observed provenance).
 - `index.jsonl`: one row per `(eval × arm × sample)`, for aggregation.

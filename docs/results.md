@@ -85,13 +85,36 @@ a runtime record is labeled `not observed`, never shown with fabricated identity
 
 A delta smaller than its sampling noise is a coin flip, not a lift. With at least
 two samples per arm (`--count N`), benchspec computes a noise band for each
-arm-vs-baseline delta (the standard error of the difference of the two arms'
-per-sample rates) and labels the headline **within noise** when `|Δ|` falls
-inside it. A one-sample run has no band even across many evals — its
-`delta_noise_pp` is `null` — because eval-to-eval spread is not rerun noise.
-Treat the band as a guardrail against over-reading small numbers, not
-a significance test: rates are pooled, sample-weighted means, not a paired
-analysis. The band, like the rates, covers pooled lines only.
+arm-vs-baseline delta and labels the headline **within noise** when `|Δ|` falls
+inside it. The band is one standard error (~68% coverage), printed as
+`— noise band ±Npp (1 SE)` — not a 95% interval. A one-sample run has no band
+even across many evals — its `delta_noise_pp` is `null` — because eval-to-eval
+spread is not rerun noise.
+
+It is **paired by eval**: the band comes from each eval's own rerun variance, at
+that eval's share of its arm's samples so it weighs as `delta_pp` does. Pooling
+each arm's rates across evals first would count difficulty spread twice — spread
+that cancels in the delta — and bury deltas that rerun exactly.
+`delta_noise_evals` counts the evals behind the band.
+
+A cell down to one surviving sample has an unknown spread, not a zero one, so it
+enters at the widest a pass rate can vary — an upper bound that never understates
+the band. Such a cell also carries the least weight, so one flaky cell barely
+moves a large suite's band and dominates a small one's, which is the right answer
+in both cases. `delta_noise_capped_cells` counts them; with every cell capped
+nothing was measured and there is no band.
+
+One shape costs the band outright, since it has to cover the delta printed beside
+it: an eval only one arm graded (every sample errored, or every line scoped out)
+still moves `delta_pp` at full weight while contributing no spread, so a band
+drawn from the remaining evals would understate it. That prints `no noise band
+(an eval only one arm graded)` and sets `unbanded`.
+
+The band asks whether a delta would reproduce on a rerun of *this* suite, not
+whether it generalizes: a skill that helps one eval more than another is signal,
+not noise, and widens nothing. Treat it as a guardrail against over-reading
+small numbers, not a significance test. The band, like the rates, covers pooled
+lines only.
 
 The `--fail-under` CI gate deliberately uses the **raw** delta
 ([`configuration.md`](configuration.md#the---fail-under-gate)); the label exists
@@ -192,10 +215,10 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 `unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
-(pass rate, stdev, `delta_pp`, `delta_noise_pp`, errored and binder-degraded
-counts, per-eval rows), the `scoped` rows (`group`, `eval_id`, `index`, `text`,
-a `{passed, total}` / `"skipped"` / `null` cell per arm), the `runner` and
-`binder` identity, and the same
+(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, `delta_noise_capped_cells`, errored and
+binder-degraded counts, per-eval rows), the `scoped` rows (`group`, `eval_id`,
+`index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
+`runner` and `binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
 `arms` here is *result stats*; `planned_arms` is configuration.
 

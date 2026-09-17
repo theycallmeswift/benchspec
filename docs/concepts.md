@@ -153,7 +153,9 @@ too, so keep prompts pointed at `./`. Details:
 
 One execution of a cell. A plain run takes one sample per cell (`sample-0/`),
 so its deltas carry no noise band; `--count N` takes N, so the report can show
-flakiness and a noise band on each delta. Example: `benchspec run -- --count 3`.
+flakiness and a noise band on each delta — built from each eval's own rerun
+spread and combined across the evals both arms graded, not from one pooled
+scatter. Example: `benchspec run -- --count 3`.
 See
 [results.md](results.md#noise-samples-and-flakiness).
 
