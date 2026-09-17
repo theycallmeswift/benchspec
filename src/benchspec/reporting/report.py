@@ -386,11 +386,7 @@ def _pct(value: float | None) -> str:
 
 
 def _paired_evals(arm_a: dict, arm_b: dict) -> list[tuple[dict, dict]]:
-    """Return the per-eval rows both arms graded, joined on (group, eval_id).
-
-    An eval missing from either arm — every sample errored, or every line scoped
-    out — has no delta to contribute and drops out of the pair set.
-    """
+    """Return the per-eval rows both arms graded, joined on (group, eval_id)."""
     by_key = {(row["group"], row["eval_id"]): row for row in arm_b["per_eval"]}
     return [
         (row, by_key[key])
@@ -402,32 +398,22 @@ def _paired_evals(arm_a: dict, arm_b: dict) -> list[tuple[dict, dict]]:
 def delta_noise_pp(arm_a: dict, arm_b: dict) -> tuple[float, int] | None:
     """Return the delta's noise band in points and the eval count behind it, or None.
 
-    Paired by eval: both arms run the same evals, so eval-to-eval difficulty spread
-    is common to both and cancels in the delta. Pooling the rates across evals first
-    (as a two-independent-means standard error does) counts that spread twice and
-    inflates the band, which hides deltas that rerun identically. So the band comes
-    from each eval's own rerun variance, combined across the evals both arms graded.
-
-    Each eval enters weighted by its share of its arm's samples, because `delta_pp`
-    is a sample-weighted pooled mean: a cell that lost samples to an errored run has
-    to weigh the same here as it does there, or the band describes a number the
-    report never printed. Where every cell holds the same number of samples those
-    weights are uniform, and at a single eval the whole expression reduces to the
-    two-independent-means standard error, that eval's rates being all there is.
+    Paired by eval: both arms run the same evals, so difficulty spread cancels in the
+    delta, and pooling their rates first would count it twice and inflate the band.
+    Each eval enters at its share of its arm's samples, matching `delta_pp`'s own
+    weighting. At one eval this reduces to the unpaired standard error.
     """
     paired = _paired_evals(arm_a, arm_b)
-    # The band has to cover the delta it is printed beside, and `delta_pp` pools every
-    # eval an arm graded. An eval missing from either arm still moves the delta while
-    # contributing no term here, which is how a +25pp delta earns a ±0pp band.
+    # `delta_pp` pools every eval an arm graded, so an eval only one arm graded moves
+    # the delta while contributing no term here — a +25pp delta under a ±0pp band.
     if (
         not paired
         or len(paired) != len(arm_a["per_eval"])
         or len(paired) != len(arm_b["per_eval"])
     ):
         return None
-    # A cell down to one surviving sample has an unknown rerun variance, not a zero
-    # one, so nothing can cover it. `is None`, not falsy: a zero-variance eval is a
-    # real measurement and must not suppress what the other evals contribute.
+    # One surviving sample leaves a cell's rerun variance unknown, not zero. `is None`,
+    # not falsy: a zero-variance eval is measured, and must not suppress the others.
     if any(
         row_a["pass_rate_stdev"] is None or row_b["pass_rate_stdev"] is None
         for row_a, row_b in paired
@@ -464,7 +450,6 @@ def _headline_lines(benchmark: dict) -> list[str]:
             seg += f" (**{delta_pp:+.0f}pp**)"
             band = stats.get("delta_noise_pp")
             if band is not None:
-                # Coverage stated: the band is one standard error, not a 95% interval.
                 seg += f" — noise band ±{band:.0f}pp (1 SE)"
                 if abs(delta_pp) <= band:
                     seg += " (within noise)"
@@ -936,9 +921,7 @@ def build_benchmark(
             stats["delta_pp"] = (stats["pass_rate"] - ref_rate) * 100
             banded = delta_noise_pp(stats, ref_stats) if max_samples > 1 else None
             stats["delta_noise_pp"] = None if banded is None else banded[0]
-            # How many evals the band rests on. Its presence also dates the arithmetic,
-            # so a consumer never reads a paired band as one of the unpaired numbers
-            # this key did not accompany.
+            # Evals behind the band; its presence also marks the band as paired.
             stats["delta_noise_evals"] = None if banded is None else banded[1]
 
     # The roster comes from the eval dirs on disk, not the per-eval union — so an

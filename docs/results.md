@@ -91,28 +91,24 @@ inside it. The band is one standard error (~68% coverage), printed as
 even across many evals — its `delta_noise_pp` is `null` — because eval-to-eval
 spread is not rerun noise.
 
-It is **paired by eval**: both arms run the same evals, so the band comes from
-each eval's own rerun variance, weighted by that eval's share of its arm's
-samples so it covers the same sample-weighted mean `delta_pp` reports. Pooling
-each arm's rates across evals first would count eval-to-eval difficulty spread
-twice — spread that cancels in the delta — and inflate the band until deltas
-that rerun exactly read as noise. `delta_noise_evals` counts the evals behind
-the band.
+It is **paired by eval**: the band comes from each eval's own rerun variance, at
+that eval's share of its arm's samples so it weighs as `delta_pp` does. Pooling
+each arm's rates across evals first would count difficulty spread twice — spread
+that cancels in the delta — and bury deltas that rerun exactly.
+`delta_noise_evals` counts the evals behind the band.
 
-Two shapes cost the band outright rather than skewing it, because `delta_pp`
-pools every eval an arm graded and a band has to cover the delta printed beside
-it: an eval only one arm graded (every sample errored, or every line scoped
-out), which would otherwise put the whole delta under a band computed from the
-evals the arms share; and a cell down to one surviving sample, whose rerun
-variance is unknown rather than zero. Both print `no noise band (uneven evals
-or a one-sample cell)` on the headline and set `unbanded`. A single-eval run is
-unchanged: one eval's pooled stdev *is* its rerun stdev.
+Two shapes cost the band rather than skewing it, since it has to cover the delta
+printed beside it: an eval only one arm graded (every sample errored, or every
+line scoped out), which otherwise puts the whole delta under a band drawn from
+other evals; and a cell down to one surviving sample, whose rerun variance is
+unknown rather than zero. Both print `no noise band (uneven evals or a
+one-sample cell)` and set `unbanded`.
 
 The band asks whether a delta would reproduce on a rerun of *this* suite, not
-whether it would generalize to other tasks: a skill that genuinely helps one
-eval more than another is signal, not noise, and widens nothing. Treat it as a
-guardrail against over-reading small numbers, not a significance test. The band,
-like the rates, covers pooled lines only.
+whether it generalizes: a skill that helps one eval more than another is signal,
+not noise, and widens nothing. Treat it as a guardrail against over-reading
+small numbers, not a significance test. The band, like the rates, covers pooled
+lines only.
 
 The `--fail-under` CI gate deliberately uses the **raw** delta
 ([`configuration.md`](configuration.md#the---fail-under-gate)); the label exists

@@ -1484,10 +1484,8 @@ def test_noise_band_pairs_by_eval_so_difficulty_spread_cannot_hide_a_delta(
     tmp_path: Path,
 ) -> None:
     """Verify a delta that reproduces exactly is not labeled within noise."""
-    # Two evals of very different difficulty, zero rerun variance: every sample of a
-    # cell agrees with every other, so rerunning the suite gives the same +12.5pp.
-    # Pooling the rates across evals first would count that difficulty spread twice
-    # and yield a ±28pp band, burying a perfectly reproducible lift.
+    # Two evals of different difficulty, zero rerun variance: the +12.5pp reproduces
+    # exactly, yet pooling across evals first bands it at ±28pp and buries it.
     root = tmp_path / "archive"
     for sample in range(3):
         seed_arm(root, "easy", "baseline", passes=0, total=4, sample=sample)
@@ -1508,10 +1506,8 @@ def test_noise_band_pairs_by_eval_so_difficulty_spread_cannot_hide_a_delta(
 
 def test_noise_band_at_one_eval_matches_the_pooled_formula(tmp_path: Path) -> None:
     """Verify the band is unchanged where only one eval is paired."""
-    # A single eval has no eval-to-eval spread to cancel, so its pooled stdev *is* its
-    # rerun stdev and the paired band is algebraically the old one. Pinned so the
-    # quickstart walkthrough and the per-group `--fail-under` rebuild, both single-eval,
-    # keep the numbers they printed before the pairing change.
+    # One eval has no spread to cancel, so its pooled stdev *is* its rerun stdev.
+    # Pinned: the quickstart and the `--fail-under` rebuild are both single-eval.
     root = tmp_path / "archive"
     for sample, (base_passes, trial_passes) in enumerate(((0, 2), (1, 1), (0, 2))):
         seed_arm(root, "alpha", "baseline", passes=base_passes, total=2, sample=sample)
@@ -1532,8 +1528,7 @@ def test_noise_band_at_one_eval_matches_the_pooled_formula(tmp_path: Path) -> No
 
 def test_noise_band_still_widens_with_rerun_noise(tmp_path: Path) -> None:
     """Verify real sample-to-sample scatter still produces a band."""
-    # Pairing removes eval-to-eval spread, not rerun noise: arms that disagree with
-    # themselves between samples must still be banded.
+    # Pairing removes eval-to-eval spread, not rerun noise.
     root = tmp_path / "archive"
     for sample, passes in enumerate((2, 0, 2)):
         seed_arm(root, "alpha", "trial", passes=passes, total=2, sample=sample)
@@ -1551,10 +1546,9 @@ def test_noise_band_still_widens_with_rerun_noise(tmp_path: Path) -> None:
 
 def test_noise_band_refused_when_an_eval_only_one_arm_graded(tmp_path: Path) -> None:
     """Verify an eval missing from one arm costs the band rather than skewing it."""
-    # Every sample of `orphan` errored in the baseline, so that arm has no per-eval row
-    # for it — but `delta_pp` still pools the trial's `orphan` rate, so the whole delta
-    # comes from an eval the baseline never graded. Banding the one eval the arms share
-    # would print that delta under a ±0pp band, which is worse than printing no band.
+    # `orphan` errored out of the baseline, but `delta_pp` still pools the trial's
+    # rate for it — so the whole delta comes from an eval the baseline never graded.
+    # Banding the one shared eval would print that under ±0pp.
     root = tmp_path / "archive"
     for sample in range(2):
         seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
@@ -1614,10 +1608,9 @@ def test_headline_states_the_band_coverage(tmp_path: Path) -> None:
 
 def test_noise_band_pins_the_combination_across_evals(tmp_path: Path) -> None:
     """Verify the band's exact value at two evals with unequal, non-zero rerun spread."""
-    # A numeric pin, not an inequality: with every cell at three samples each eval enters
-    # at weight 3/6, so the band is 100·sqrt(Σ (n_i/n)²·sd_i²/n_i) over both arms —
-    # 0.25·(0.5774²/3) + 0.25·(0.2887²/3) + 0 + 0.25·(0.2887²/3), rooted, is 0.2041.
-    # Without this an estimator that divides by sqrt(k), or not at all, still passes.
+    # A numeric pin, not an inequality: every cell at three samples puts each eval at
+    # weight 3/6, so the band is 100·sqrt(Σ (n_i/n)²·sd_i²/n_i) over both arms. Without
+    # it an estimator dividing by sqrt(k), or not at all, still passes.
     root = tmp_path / "archive"
     for sample, (alpha, beta) in enumerate(((2, 1), (0, 1), (2, 2))):
         seed_arm(root, "alpha", "trial", passes=alpha, total=2, sample=sample)
@@ -1638,10 +1631,9 @@ def test_noise_band_pins_the_combination_across_evals(tmp_path: Path) -> None:
 
 def test_noise_band_weights_evals_as_the_delta_does(tmp_path: Path) -> None:
     """Verify a cell that lost a sample weighs the same in the band as in the delta."""
-    # `delta_pp` is a sample-weighted pooled mean, so an eval that lost a sample to an
-    # errored run contributes less to it. The band has to match that weighting or it
-    # describes an estimator the report never printed: weighting all four cells equally
-    # here gives ±22.44pp against the ±23.86pp that actually covers this delta.
+    # `delta_pp` is sample-weighted, so an eval that lost a sample counts for less.
+    # The band must match: equal weights here give ±22.44pp, not the ±23.86pp that
+    # covers this delta.
     root = tmp_path / "archive"
     for sample, (alpha, beta) in enumerate(((2, 1), (0, 2), (2, None))):
         seed_arm(root, "alpha", "trial", passes=alpha, total=2, sample=sample)
@@ -1663,9 +1655,8 @@ def test_noise_band_weights_evals_as_the_delta_does(tmp_path: Path) -> None:
 
 def test_noise_band_ignores_effect_heterogeneity(tmp_path: Path) -> None:
     """Verify an effect that differs sharply between evals does not widen the band."""
-    # The band asks whether the delta reproduces on a rerun of this suite, not whether
-    # it generalizes to other tasks. A skill that helps one eval and hurts another is
-    # signal; with no rerun scatter the delta is exactly reproducible, so the band is 0.
+    # The band asks whether the delta reproduces, not whether it generalizes. With no
+    # rerun scatter it is exactly reproducible however unevenly the effect lands.
     root = tmp_path / "archive"
     for sample in range(3):
         seed_arm(root, "helped", "baseline", passes=0, total=2, sample=sample)
@@ -1683,10 +1674,8 @@ def test_noise_band_ignores_effect_heterogeneity(tmp_path: Path) -> None:
 
 def test_noise_band_refused_when_a_cell_has_one_surviving_sample(tmp_path: Path) -> None:
     """Verify a cell reduced to one sample costs the band and says so."""
-    # Two of `beta`'s three trial samples errored. One surviving sample leaves that
-    # cell's rerun variance unknown, not zero, so no band can cover the pooled delta —
-    # and the headline has to explain the absence at three samples, where the
-    # single-sample note does not fire.
+    # One surviving sample leaves that cell's rerun variance unknown, not zero. The
+    # headline must say so at three samples, where the single-sample note never fires.
     root = tmp_path / "archive"
     for sample in range(3):
         seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
