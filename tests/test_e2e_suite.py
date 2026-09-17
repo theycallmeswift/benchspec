@@ -20,7 +20,9 @@ import pytest
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.binder_config import resolve_binder_config
 from benchspec.grading.judges.config import resolve_judge_config
+from benchspec.specs import scope
 from benchspec.specs.discovery import discover_eval_cases, pyproject_table
+from tests.support.cli import run_benchspec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -343,9 +345,96 @@ def test_make_e2e_runs_the_openrouter_set_with_judge_and_binder_on_openrouter() 
     arms = resolve_set(rawsets, default_set, set_name="e2e-openrouter").arms
 
     assert [_flag_value(argv, "--set") for argv in commands] == ["e2e", "e2e-openrouter"]
+    assert all(_flag_value(argv, "--count") == "3" for argv in commands)
     assert judge.harness == "codex"
     assert judge.provider == "openrouter"
     assert judge.model.startswith("google/")  # cross-family from the Anthropic and OpenAI arms
     assert binder.provider == "openrouter"
     assert binder.model == "google/gemini-3.5-flash-lite"
     assert all(arm.provider == "openrouter" for arm in arms)
+
+
+TRIGGER_LINE = "Skill `hello` invoked"
+TRIGGER_CLAUSE = {"key": "if", "expr": "{BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}"}
+EN_GB_LINE = "./Greetings/Bob.md contains the text 'an absolute pleasure'"
+EN_GB_CLAUSE = {"key": "if", "expr": '{GREETING_LOCALE} == "en-GB"'}
+
+
+def test_hello_trigger_lines_carry_the_baseline_clause() -> None:
+    """Verify every in-repo `Skill hello invoked` line is scoped off the baseline arm."""
+    cases = discover_eval_cases(REPO_ROOT)
+
+    trigger_clauses = {
+        (case.eval_id, index): clause
+        for case in cases
+        for index, (assertion, clause) in enumerate(zip(case.assertions, case.clauses, strict=True))
+        if assertion == TRIGGER_LINE
+    }
+
+    assert {eval_id for eval_id, _ in trigger_clauses} == {
+        "greets-by-name",
+        "allows-filesystem-traversal",
+    }
+    assert len(trigger_clauses) == 2
+    assert trigger_clauses == dict.fromkeys(trigger_clauses, TRIGGER_CLAUSE)
+
+
+def test_hello_file_locale_line_carries_the_en_gb_clause() -> None:
+    """Verify the en-GB-only phrase is scoped to the locale and the other line is unscoped."""
+    cases = discover_eval_cases(REPO_ROOT)
+    case = next(case for case in cases if case.eval_id == "writes-greeting-file")
+
+    clauses_by_line = dict(zip(case.assertions, case.clauses, strict=True))
+
+    assert clauses_by_line == {
+        "./Greetings/Bob.md matches the regex 'Hello, Bob!'": None,
+        EN_GB_LINE: EN_GB_CLAUSE,
+    }
+
+
+@pytest.mark.parametrize("set_name", ["e2e", "e2e-openrouter"])
+def test_hello_clauses_resolve_for_every_arm(set_name: str) -> None:
+    """Verify every in-repo clause resolves on every arm of both live sets to the expected flag.
+
+    The trigger line is graded everywhere but the baseline; the en-GB phrase only where the
+    arm's own `GREETING_LOCALE` is `en-GB` (`trial-overrides` in `e2e`, nowhere in
+    `e2e-openrouter`); an unclaused line everywhere.
+    """
+    table = pyproject_table(REPO_ROOT)
+    rawsets, default_set = parse_sets(table)
+    resolved = resolve_set(rawsets, default_set, set_name=set_name)
+    cases = discover_eval_cases(REPO_ROOT)
+
+    flags_by_cell = {
+        (case.eval_id, arm.name): scope.applicable(
+            case, arm, baseline=resolved.baseline, eval_set=set_name
+        )
+        for case in cases
+        for arm in resolved.arms
+    }
+
+    en_gb_arms = {arm.name for arm in resolved.arms if arm.env["GREETING_LOCALE"] == "en-GB"}
+    assert resolved.baseline == "baseline"
+    assert en_gb_arms == ({"trial-overrides"} if set_name == "e2e" else set())
+    expected_by_cell = {}
+    for case in cases:
+        for arm in resolved.arms:
+            expected = []
+            for assertion in case.assertions:
+                if assertion == TRIGGER_LINE:
+                    expected.append(arm.name != "baseline")
+                elif assertion == EN_GB_LINE:
+                    expected.append(arm.name in en_gb_arms)
+                else:
+                    expected.append(True)
+            expected_by_cell[(case.eval_id, arm.name)] = expected
+    assert flags_by_cell == expected_by_cell
+
+
+def test_lint_is_clean_on_the_in_repo_suite() -> None:
+    """Verify `benchspec lint` on this repository reports no warnings and exits 0."""
+    result = run_benchspec("lint", str(REPO_ROOT), cwd=REPO_ROOT)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "0 warning(s)" in result.stdout
+    assert "[warning]" not in result.stdout

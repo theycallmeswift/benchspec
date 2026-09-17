@@ -17,12 +17,13 @@ one harness versus another.
 
 <img src="docs/assets/benchmark-terminal.gif" width="800" alt="Animated terminal output: benchspec run prints a benchmark matrix with evals as rows, arms as columns, color-coded rates, and percentage-point deltas">
 
-*End-of-run summary for a two-arm run of the in-repo [`hello`](evals/e2e/hello/)
-suite (illustrative numbers).* Rows are evals, columns are arms (`baseline` ran
-the agent bare, `trial` installed the skill), and every non-baseline cell shows
-its assertion pass rate plus the delta against the baseline in percentage
-points. The same matrix lands in `benchmark.md`, with machine-readable artifacts
-alongside.
+*End-of-run summary for the in-repo [`hello`](evals/e2e/hello/) suite: the
+`baseline` and `trial` columns of a real three-sample run.* Rows are evals, columns
+are arms (`baseline` ran the agent bare, `trial` installed the skill), and every
+non-baseline cell shows its assertion pass rate plus the delta against the
+baseline in percentage points. The scoped `` Skill `hello` invoked `` line is in
+neither column. The same matrix lands in `benchmark.md`, with machine-readable
+artifacts alongside.
 
 Teams pick harnesses, models, and prompts by anecdote: run it once, eyeball the
 transcript, trust the vibe. benchspec turns that guess into a measurement.
@@ -83,6 +84,7 @@ Greet Alice by name.
 
 - [ ] ./Greetings/Alice.md contains the exact line 'Hello, Alice!'
 - [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 - [ ] The greeting feels warm and personable, not curt or robotic
 ```
 
@@ -113,7 +115,9 @@ benchspec run       # every (eval × arm) in its own sandbox, graded, reported
 
 The `` Skill `hello` invoked `` line needs a skill for the trial arm to install
 and a `setup.sh` that installs it; the [quickstart](docs/quickstart.md) writes
-both and takes an empty directory to that first graded report.
+both and takes an empty directory to that first graded report. The `- if:`
+sub-bullet keeps that line out of the baseline's rate, so the delta measures the
+skill ([scoping](docs/writing-evals.md#scoping-an-assertion-to-arms)).
 
 ## How a run works
 
@@ -158,8 +162,9 @@ pytest verbatim. The normal run is `benchspec run -- --count 3`: three samples
 per cell (pytest-repeat), so every delta carries a noise band; a one-sample run
 is flagged in the report. `-n 8` fans cells across eight sandboxes to keep it
 fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
-eval. The repo's own `make e2e` defaults to six workers through the `WORKERS`
-variable; `make e2e WORKERS=1` runs the cells sequentially.
+eval. The repo's own `make e2e` defaults to three samples and six workers through
+the `COUNT` and `WORKERS` variables; `make e2e COUNT=1 WORKERS=1` is the quick
+sequential pass.
 
 ## benchspec vs. the alternatives
 
@@ -214,7 +219,7 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 2. **Confirm the suite collects.** Needs no credentials and no Docker:
 
    ```bash
-   make e2e EVAL_ARGS="--collect-only -q"   # 9 cells: 3 evals × 3 arms, then 12 through OpenRouter
+   make e2e EVAL_ARGS="--collect-only -q"   # 27 cells: 3 evals × 3 arms × 3 samples, then 36 through OpenRouter
    ```
 
 3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/)
@@ -240,8 +245,8 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 4. **Run it.** The cheapest real run is one eval, one sandbox:
 
    ```bash
-   make e2e WORKERS=1 EVAL_ARGS="-k greets-by-name"   # one eval, sequential
-   make e2e                                          # the whole suite, six sandboxes
+   make e2e COUNT=1 WORKERS=1 EVAL_ARGS="-k greets-by-name"   # one eval, one sample, sequential
+   make e2e                                                  # the whole suite, three samples, six sandboxes
    ```
 
    The first run builds the sandbox snapshot (about a minute); with the snapshot

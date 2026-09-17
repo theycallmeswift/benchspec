@@ -117,11 +117,14 @@ Greet Alice by name.
 
 - [ ] ./Greetings/Alice.md contains the exact line 'Hello, Alice!'
 - [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 ```
 
 The empty `---`/`---` frontmatter is required even when the eval has no
 `history:`. Each `- [ ]` line is one plain-prose assertion. Keep the `./` anchor
-on paths so they read as workspace facts (the linter warns otherwise).
+on paths so they read as workspace facts (the linter warns otherwise). The
+`- if:` sub-bullet keeps the trigger line out of the baseline's rate
+([scoping](writing-evals.md#scoping-an-assertion-to-arms)).
 
 > **Key concept:** the agent runs with its working directory set to `/workspace`,
 > the clean room mounted into the sandbox. It writes there; the host grades the
@@ -246,11 +249,11 @@ Rendered, the report's headline and matrix for this walkthrough look like:
 | All evals | 0% | 100% (+100pp) |
 
 The band is zero here because every sample agreed; a real run's band is wider —
-one standard error on the delta — and a delta inside it is labeled `within
-noise`. The full report continues with per-arm detail (timing, tokens, per-eval
-rates) and a provenance section
-recording which agent version and sandbox snapshot each arm ran on. Alongside
-it:
+one standard error — and a delta inside it is labeled `within noise`. The scoped
+trigger line is in neither column; it has its own row under "Scoped assertions",
+`skipped` for `baseline`. The full report continues with per-arm detail (timing,
+tokens, per-eval rates) and a provenance section recording which agent version
+and sandbox snapshot each arm ran on. Alongside it:
 
 - `meta.json`: the run manifest (identity, planned arms, observed provenance).
 - `index.jsonl`: one row per `(eval × arm × sample)`, for aggregation.
@@ -286,8 +289,8 @@ The microsandbox opt-in (`sandbox = "microsandbox"`) adds two of its own:
 
 - The in-repo [`evals/e2e/hello/`](../evals/e2e/hello/) suite is this walkthrough
   as living code: three evals, three arms, authored `history:`, and a seeded
-  `workspace/`. It runs with `make e2e`, which fans the cells across six
-  sandboxes by default (`WORKERS=N` to change).
+  `workspace/`. It runs with `make e2e`, three samples per cell across six
+  sandboxes by default (`COUNT=N` and `WORKERS=N` to change).
 - [`writing-evals.md`](writing-evals.md): the full eval format and grading model.
 - [`configuration.md`](configuration.md): multi-harness sets, model sweeps, the
   judge, and every flag.

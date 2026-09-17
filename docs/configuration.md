@@ -263,10 +263,10 @@ benchspec run -- -k greets-by-name     # one eval (substring match on the test i
 benchspec run -- --collect-only -q     # list the cells without running
 ```
 
-The in-repo `make e2e` and `make evals` targets pass `-n $(WORKERS)` (default
-6; each e2e worker reserves a 2 GB sandbox), and `EVAL_ARGS` appends further
-pytest arguments after it, so `make e2e WORKERS=1` or `EVAL_ARGS="-n 1"`
-restores a sequential run.
+The in-repo `make e2e` target passes `--count $(COUNT)` (default 3) and, like
+`make evals`, `-n $(WORKERS)` (default 6; each e2e worker reserves a 2 GB
+sandbox); `EVAL_ARGS` appends further pytest arguments after them, so
+`make e2e WORKERS=1` or `EVAL_ARGS="-n 1"` restores a sequential run.
 
 A few plugin options have no curated `run` flag and are reached the same way:
 `--benchspec-judge-timeout`, `--benchspec-judge-env K=V`,
