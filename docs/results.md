@@ -97,12 +97,18 @@ each arm's rates across evals first would count difficulty spread twice — spre
 that cancels in the delta — and bury deltas that rerun exactly.
 `delta_noise_evals` counts the evals behind the band.
 
-Two shapes cost the band rather than skewing it, since it has to cover the delta
-printed beside it: an eval only one arm graded (every sample errored, or every
-line scoped out), which otherwise puts the whole delta under a band drawn from
-other evals; and a cell down to one surviving sample, whose rerun variance is
-unknown rather than zero. Both print `no noise band (uneven evals or a
-one-sample cell)` and set `unbanded`.
+A cell down to one surviving sample has an unknown spread, not a zero one, so it
+enters at the widest a pass rate can vary — an upper bound that never understates
+the band. Such a cell also carries the least weight, so one flaky cell barely
+moves a large suite's band and dominates a small one's, which is the right answer
+in both cases. `delta_noise_capped_cells` counts them; with every cell capped
+nothing was measured and there is no band.
+
+One shape costs the band outright, since it has to cover the delta printed beside
+it: an eval only one arm graded (every sample errored, or every line scoped out)
+still moves `delta_pp` at full weight while contributing no spread, so a band
+drawn from the remaining evals would understate it. That prints `no noise band
+(an eval only one arm graded)` and sets `unbanded`.
 
 The band asks whether a delta would reproduce on a rerun of *this* suite, not
 whether it generalizes: a skill that helps one eval more than another is signal,
@@ -209,7 +215,7 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 `unbanded` (`true` when a baseline exists, at least one arm has a `delta_pp`
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
-(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, errored and
+(pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, `delta_noise_capped_cells`, errored and
 binder-degraded counts, per-eval rows), the `scoped` rows (`group`, `eval_id`,
 `index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
 `runner` and `binder` identity, and the same

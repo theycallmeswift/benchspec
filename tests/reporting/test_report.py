@@ -366,9 +366,10 @@ def test_delta_noise_pp_generalized(tmp_path: Path) -> None:
     assert bench["arms"]["trial"]["delta_noise_pp"] >= 0
     banded = report.delta_noise_pp(bench["arms"]["trial"], bench["arms"]["baseline"])
     assert banded is not None
-    band, paired_evals = banded
+    band, paired_evals, capped = banded
     assert band >= 0
     assert paired_evals == 1
+    assert capped == 0
 
 
 def test_errored_arm_excluded_from_stats(tmp_path: Path) -> None:
@@ -1501,6 +1502,7 @@ def test_noise_band_pairs_by_eval_so_difficulty_spread_cannot_hide_a_delta(
     assert trial["delta_pp"] == pytest.approx(12.5)
     assert trial["delta_noise_pp"] == pytest.approx(0.0)
     assert trial["delta_noise_evals"] == 2
+    assert trial["delta_noise_capped_cells"] == 0
     assert "within noise" not in "\n".join(report._headline_lines(bench))
 
 
@@ -1567,7 +1569,7 @@ def test_noise_band_refused_when_an_eval_only_one_arm_graded(tmp_path: Path) -> 
     assert trial["delta_noise_pp"] is None
     assert trial["delta_noise_evals"] is None
     assert bench["unbanded"] is True
-    assert "no noise band (uneven evals or a one-sample cell)" in "\n".join(
+    assert "no noise band (an eval only one arm graded)" in "\n".join(
         report._headline_lines(bench)
     )
 
@@ -1627,6 +1629,7 @@ def test_noise_band_pins_the_combination_across_evals(tmp_path: Path) -> None:
     assert trial["delta_pp"] == pytest.approx(33.333333333333336)
     assert trial["delta_noise_pp"] == pytest.approx(20.41241452319315)
     assert trial["delta_noise_evals"] == 2
+    assert trial["delta_noise_capped_cells"] == 0
 
 
 def test_noise_band_weights_evals_as_the_delta_does(tmp_path: Path) -> None:
@@ -1672,10 +1675,11 @@ def test_noise_band_ignores_effect_heterogeneity(tmp_path: Path) -> None:
     assert bench["arms"]["trial"]["delta_noise_pp"] == pytest.approx(0.0)
 
 
-def test_noise_band_refused_when_a_cell_has_one_surviving_sample(tmp_path: Path) -> None:
-    """Verify a cell reduced to one sample costs the band and says so."""
-    # One surviving sample leaves that cell's rerun variance unknown, not zero. The
-    # headline must say so at three samples, where the single-sample note never fires.
+def test_noise_band_caps_a_cell_with_one_surviving_sample(tmp_path: Path) -> None:
+    """Verify one flaky cell widens the band instead of costing the whole run its band."""
+    # One surviving sample leaves that cell's spread unknown, not zero, so it enters at
+    # the widest a rate can vary. Refusing the band instead would let a single flaky
+    # cell blind a whole suite, which is likelier the larger the suite gets.
     root = tmp_path / "archive"
     for sample in range(3):
         seed_arm(root, "alpha", "baseline", passes=1, total=2, sample=sample)
@@ -1692,6 +1696,7 @@ def test_noise_band_refused_when_a_cell_has_one_surviving_sample(tmp_path: Path)
 
     assert bench["max_samples"] == 3
     assert bench["arms"]["trial"]["delta_pp"] is not None
-    assert bench["arms"]["trial"]["delta_noise_pp"] is None
-    assert "no noise band (uneven evals or a one-sample cell)" in headline
-    assert "single sample" not in headline
+    assert bench["arms"]["trial"]["delta_noise_pp"] > 0
+    assert bench["arms"]["trial"]["delta_noise_capped_cells"] == 1
+    assert bench["unbanded"] is False
+    assert "no noise band" not in headline

@@ -395,8 +395,22 @@ def _paired_evals(arm_a: dict, arm_b: dict) -> list[tuple[dict, dict]]:
     ]
 
 
-def delta_noise_pp(arm_a: dict, arm_b: dict) -> tuple[float, int] | None:
-    """Return the delta's noise band in points and the eval count behind it, or None.
+# A cell down to one sample has an unknown rerun spread, not a zero one. A pass rate
+# lives in [0, 1], so its stdev is at most 0.5 — a true upper bound, assuming nothing
+# about how the other evals vary. Such a cell also carries the smallest weight below,
+# so the worst case barely moves a real suite and dominates a tiny one, as it should.
+_UNKNOWN_STDEV = 0.5
+
+
+def _cell_variance(row: dict, arm_samples: int) -> tuple[float, bool]:
+    """One eval's contribution to an arm's delta variance, and whether it was capped."""
+    capped = row["pass_rate_stdev"] is None
+    stdev = _UNKNOWN_STDEV if capped else row["pass_rate_stdev"]
+    return (row["samples"] / arm_samples) ** 2 * stdev**2 / row["samples"], capped
+
+
+def delta_noise_pp(arm_a: dict, arm_b: dict) -> tuple[float, int, int] | None:
+    """Return the delta's noise band in points, the evals behind it, and how many capped.
 
     Paired by eval: both arms run the same evals, so difficulty spread cancels in the
     delta, and pooling their rates first would count it twice and inflate the band.
@@ -412,19 +426,16 @@ def delta_noise_pp(arm_a: dict, arm_b: dict) -> tuple[float, int] | None:
         or len(paired) != len(arm_b["per_eval"])
     ):
         return None
-    # One surviving sample leaves a cell's rerun variance unknown, not zero. `is None`,
-    # not falsy: a zero-variance eval is measured, and must not suppress the others.
-    if any(
-        row_a["pass_rate_stdev"] is None or row_b["pass_rate_stdev"] is None
-        for row_a, row_b in paired
-    ):
+    variance, capped = 0.0, 0
+    for row_a, row_b in paired:
+        var_a, capped_a = _cell_variance(row_a, arm_a["n"])
+        var_b, capped_b = _cell_variance(row_b, arm_b["n"])
+        variance += var_a + var_b
+        capped += capped_a + capped_b
+    # Every cell capped means nothing was measured and the band would be pure bound.
+    if capped == 2 * len(paired):
         return None
-    variance = sum(
-        (row_a["samples"] / arm_a["n"]) ** 2 * row_a["pass_rate_stdev"] ** 2 / row_a["samples"]
-        + (row_b["samples"] / arm_b["n"]) ** 2 * row_b["pass_rate_stdev"] ** 2 / row_b["samples"]
-        for row_a, row_b in paired
-    )
-    return 100 * math.sqrt(variance), len(paired)
+    return 100 * math.sqrt(variance), len(paired), capped
 
 
 def _headline_lines(benchmark: dict) -> list[str]:
@@ -457,7 +468,7 @@ def _headline_lines(benchmark: dict) -> list[str]:
                 seg += " — single sample, no noise band"
             else:
                 # Multi-sample yet unbandable: say so, or the bare Δ reads as measured.
-                seg += " — no noise band (uneven evals or a one-sample cell)"
+                seg += " — no noise band (an eval only one arm graded)"
         lines.append(seg)
     # Baseline-only sweep: no contrast arm to take a Δ against, so show the baseline's
     # own rate rather than an empty headline.
@@ -864,8 +875,9 @@ def build_benchmark(
         The benchmark dict: format_version, label, baseline, max_samples, unbanded,
         roster, arms, scoped, runner, binder, planned_arms, observed_arms. Each
         non-baseline arm's `delta_noise_pp` is None at one sample per cell, however many
-        evals ran, and `delta_noise_evals` counts the evals behind it. `unbanded` is
-        True when a baseline exists and some arm carries a Δ
+        evals ran; `delta_noise_evals` counts the evals behind it and
+        `delta_noise_capped_cells` how many contributed a capped rather than a measured
+        spread. `unbanded` is True when a baseline exists and some arm carries a Δ
         against it but no arm's Δ has a noise band — a comparison the reader can't weigh.
         `scoped` holds, per line some arm skipped, each arm's own verdict.
     """
@@ -923,6 +935,9 @@ def build_benchmark(
             stats["delta_noise_pp"] = None if banded is None else banded[0]
             # Evals behind the band; its presence also marks the band as paired.
             stats["delta_noise_evals"] = None if banded is None else banded[1]
+            # Cells whose spread was capped rather than measured, so a band widened by
+            # a flaky cell is legible instead of mysterious.
+            stats["delta_noise_capped_cells"] = None if banded is None else banded[2]
 
     # The roster comes from the eval dirs on disk, not the per-eval union — so an
     # all-errored eval (which _arm_stats skips) still yields a matrix row.
