@@ -1,0 +1,181 @@
+{
+  "v0": {
+    "instructions": {
+      "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+      "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
+      "punt_when": [
+        "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+        "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+        "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
+      ]
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single path (file or directory) exists or was created. Nothing else.",
+      "not_file_exists": "The assertion says a single path is gone or never existed. A pure path-absence claim.",
+      "glob_count": "The assertion says exactly N, or at least N, files match a glob pattern.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v1": {
+    "instructions": {
+      "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+      "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
+      "punt_when": [
+        "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+        "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+        "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
+      ],
+      "sufficiency_test": "Before choosing a checker, apply this test: would that ONE checker verify EVERY clause of the assertion? Read the assertion word by word. If any clause would be left unverified — a qualifier, a purpose, a relationship, what something names or refers to, or how much of the tree it covers — then the checker is insufficient and the answer is punt. A checker that verifies most of the assertion is still the wrong answer."
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single, specific path (file or directory) exists or was created. Nothing else. A claim about how many files, or about a whole directory tree, is not this.",
+      "not_file_exists": "The assertion says a single, specific path is gone or never existed. This checker looks at exactly ONE path. A claim that nothing matching some description exists anywhere under a tree is NOT this — that is glob_count.",
+      "glob_count": "The assertion says exactly N, or at least N, files match a glob pattern.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix, AND that is the whole claim. If the assertion also says what that line must mean, name, refer to, or describe, a regex cannot verify it — punt.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v2": {
+    "instructions": {
+      "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+      "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
+      "punt_when": [
+        "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+        "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+        "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
+      ],
+      "sufficiency_test": "Before choosing a checker, apply this test: would that ONE checker verify EVERY clause of the assertion? Read the assertion word by word. If any clause would be left unverified — a qualifier, a purpose, a relationship, what something names or refers to, or how much of the tree it covers — then the checker is insufficient and the answer is punt. A checker that verifies most of the assertion is still the wrong answer.",
+      "counting_claims": "A claim about HOW MANY files exist in a location is mechanically checkable with glob_count, even when phrased as prose rather than as a glob. 'All three are flat markdown files under X' is a count of 3. 'Both files are present at X' is a count of 2. A parenthetical listing the expected filenames, or contrasting with a layout that was not used ('not wrapped in per-source subfolders'), is elaboration of that same count, not a second fact — a flat glob already distinguishes those layouts.",
+      "file_versus_content": "CRITICAL distinction for absence claims. Absence of a FILE is countable: 'no spec file was written under ./docs/specs/', 'no file was written to disk', 'no file named X anywhere under ./' are all glob_count with a count of 0. Absence of CONTENT INSIDE a file that already exists is NOT countable: 'no new archive entry was written to ./logs/today.md', 'the section was left unchanged' — punt those."
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single, specific path (file or directory) exists or was created. Nothing else. A claim about how many files, or about a whole directory tree, is not this.",
+      "not_file_exists": "The assertion says a single, specific path is gone or never existed. This checker looks at exactly ONE path. A claim that nothing matching some description exists anywhere under a tree is NOT this — that is glob_count.",
+      "glob_count": "Exactly N, or at least N, files match a glob pattern — N may be 0. The assertion may state the count in prose rather than as a glob, and may use a placeholder such as {TODAY} or <slug> in the path, which a glob covers.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix, AND that is the whole claim. If the assertion also says what that line must mean, name, refer to, or describe, a regex cannot verify it — punt.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v3": {
+    "instructions": {
+      "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+      "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
+      "punt_when": [
+        "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+        "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+        "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
+      ],
+      "sufficiency_test": "Before choosing a checker, apply this test: would that ONE checker verify EVERY clause of the assertion? Read the assertion word by word. If any clause would be left unverified — a qualifier, a purpose, a relationship, what something names or refers to, or how much of the tree it covers — then the checker is insufficient and the answer is punt. A checker that verifies most of the assertion is still the wrong answer.",
+      "counting_claims": "A claim about HOW MANY files exist in a location is mechanically checkable with glob_count, even when phrased as prose rather than as a glob. 'All three are flat markdown files under X' is a count of 3. 'Both files are present at X' is a count of 2. A parenthetical listing the expected filenames, or contrasting with a layout that was not used ('not wrapped in per-source subfolders'), is elaboration of that same count, not a second fact — a flat glob already distinguishes those layouts.",
+      "file_versus_content": "CRITICAL distinction for absence claims. Absence of a FILE is countable: 'no spec file was written under ./docs/specs/', 'no file was written to disk', 'no file named X anywhere under ./' are all glob_count with a count of 0. Absence of CONTENT INSIDE a file that already exists is NOT countable: 'no new archive entry was written to ./logs/today.md', 'the section was left unchanged' — punt those.",
+      "elaboration_versus_second_fact": "Apply the sufficiency test to FACTS, not to clauses. A clause that restates the same fact in other words, explains why it holds, or spells out what the path or glob already encodes, is elaboration — there is nothing extra to verify. Example: 'The capture now lives at ./A/B/x.md — a flat markdown file under a dated folder (NOT a per-source subfolder, NOT renamed to index.md)' is ONE fact: that exact path exists. Checking that path already proves every contrast in the parenthetical. Example: 'No file was written to disk — the handoff exists only as the emitted message' is ONE fact: zero files were written. Treat a clause as a SECOND fact only when verifying it would require looking at something the checker does not look at — above all, at what file content MEANS, names, or refers to."
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single, specific path (file or directory) exists or was created. Nothing else. A claim about how many files, or about a whole directory tree, is not this.",
+      "not_file_exists": "The assertion says a single, specific path is gone or never existed. This checker looks at exactly ONE path. A claim that nothing matching some description exists anywhere under a tree is NOT this — that is glob_count.",
+      "glob_count": "Exactly N, or at least N, files match a glob pattern — N may be 0. The assertion may state the count in prose rather than as a glob, and may use a placeholder such as {TODAY} or <slug> in the path, which a glob covers.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix, AND that is the whole claim. If the assertion also says what that line must mean, name, refer to, or describe, a regex cannot verify it — punt.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v4": {
+    "instructions": {
+      "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+      "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
+      "punt_when": [
+        "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+        "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+        "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
+      ],
+      "sufficiency_test": "Before choosing a checker, apply this test: would that ONE checker verify EVERY clause of the assertion? Read the assertion word by word. If any clause would be left unverified — a qualifier, a purpose, a relationship, what something names or refers to, or how much of the tree it covers — then the checker is insufficient and the answer is punt. A checker that verifies most of the assertion is still the wrong answer.",
+      "counting_claims": "A claim about HOW MANY files exist in a location is mechanically checkable with glob_count, even when phrased as prose rather than as a glob. 'All three are flat markdown files under X' is a count of 3. 'Both files are present at X' is a count of 2. A parenthetical listing the expected filenames, or contrasting with a layout that was not used ('not wrapped in per-source subfolders'), is elaboration of that same count, not a second fact — a flat glob already distinguishes those layouts.",
+      "file_versus_content": "CRITICAL distinction for absence claims. Absence of a FILE is countable: 'no spec file was written under ./docs/specs/', 'no file was written to disk', 'no file named X anywhere under ./' are all glob_count with a count of 0. Absence of CONTENT INSIDE a file that already exists is NOT countable: 'no new archive entry was written to ./logs/today.md', 'the section was left unchanged' — punt those.",
+      "elaboration_versus_second_fact": "Apply the sufficiency test to FACTS, not to clauses. A clause that restates the same fact in other words, explains why it holds, or spells out what the path or glob already encodes, is elaboration — there is nothing extra to verify. Example: 'The capture now lives at ./A/B/x.md — a flat markdown file under a dated folder (NOT a per-source subfolder, NOT renamed to index.md)' is ONE fact: that exact path exists. Checking that path already proves every contrast in the parenthetical. Example: 'No file was written to disk — the handoff exists only as the emitted message' is ONE fact: zero files were written. Treat a clause as a SECOND fact only when verifying it would require looking at something the checker does not look at — above all, at what file content MEANS, names, or refers to.",
+      "glob_writability_test": "A count-zero claim binds ONLY if you can write the ONE literal glob string it counts, using the words of the assertion. Try to write it before answering. 'No file named .gitkeep exists anywhere under ./' gives you `**/.gitkeep` — bind. 'No spec file was written under ./docs/specs/' gives you `docs/specs/*` — bind. But 'no duplicate or backup of the profile page' names an open-ended set (.bak, '(1)', a second copy anywhere, under any name) with no single glob — punt. And 'no archive category folder other than Sources was created' needs both directory matching and an exclusion, which a glob count cannot express — punt. If the glob you would write is a guess, or needs 'except', or has to match directories rather than files, punt."
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single, specific path (file or directory) exists or was created. Nothing else. A claim about how many files, or about a whole directory tree, is not this.",
+      "not_file_exists": "The assertion says a single, specific path is gone or never existed. This checker looks at exactly ONE path. A claim that nothing matching some description exists anywhere under a tree is NOT this — that is glob_count.",
+      "glob_count": "Exactly N, or at least N, files match a glob pattern — N may be 0. The assertion may state the count in prose rather than as a glob, and may use a placeholder such as {TODAY} or <slug> in the path, which a glob covers.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix, AND that is the whole claim. If the assertion also says what that line must mean, name, refer to, or describe, a regex cannot verify it — punt.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v5": {
+    "instructions": {
+      "task": "Pick the one checker that settles this assertion, or punt. Do not judge whether the assertion is true — only whether one checker can decide it.",
+      "test": "For each checker you consider: imagine it runs and PASSES. Could the assertion still be false? If yes, that checker is wrong — punt. You must also be able to write its arguments from the words of the assertion; if you would be guessing, punt. Punting is free. A checker that passes on wrong output is the only unacceptable error."
+    },
+    "criteria": {
+      "file_exists": "Tests one exact path for existence.",
+      "not_file_exists": "Tests one exact path for non-existence. It looks at that path and nowhere else.",
+      "glob_count": "Counts the files matching one glob pattern and compares that count to a number. Counts files only, never directories, and the pattern cannot express an exception.",
+      "regex": "Tests whether one named file has a line matching a pattern. It cannot tell what the matched text means or refers to.",
+      "frontmatter_has": "Tests whether one named file's YAML frontmatter has a key, optionally a value.",
+      "sha256_match": "Tests whether one file's bytes are identical to another named file's.",
+      "skill_invoked": "Tests whether the named skill was invoked. It sees nothing about what the skill did.",
+      "not_skill_invoked": "Tests whether the named skill was not invoked. It sees nothing about what else happened.",
+      "punt": "No single checker above settles this assertion. Send it to the LLM judge."
+    }
+  },
+  "v6": {
+    "instructions": {
+      "task": "Pick the one checker that settles this assertion, or punt. Do not judge whether the assertion is true — only whether one checker can decide it.",
+      "test": "For each checker you consider: imagine it runs and PASSES. Could the assertion still be false? If yes, that checker is wrong — punt. You must also be able to write its arguments from the words of the assertion; if you would be guessing, punt. Punting is free. A checker that passes on wrong output is the only unacceptable error."
+    },
+    "criteria": {
+      "file_exists": "The assertion says a single path (file or directory) exists or was created. Nothing else.",
+      "not_file_exists": "The assertion says a single path is gone or never existed. A pure path-absence claim.",
+      "glob_count": "The assertion says exactly N, or at least N, files match a glob pattern.",
+      "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix.",
+      "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+      "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+      "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+      "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+      "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
+    }
+  },
+  "v7": {
+    "instructions": {
+      "task": "Pick the one checker that settles this assertion, or punt. Do not judge whether the assertion is true — only whether one checker can decide it.",
+      "test": "For each checker you consider: imagine it runs and PASSES. Could the assertion still be false? If yes, that checker is wrong — punt. You must also be able to write its arguments from the words of the assertion; if you would be guessing, punt. Punting is free. A checker that passes on wrong output is the only unacceptable error.",
+      "punt_when": [
+        "The assertion depends on what content means, says, names or refers to — not merely that some content is present.",
+        "The assertion states more than one independent fact. One checker settles one fact. A clause that only restates or explains the same fact does not count as a second one.",
+        "The assertion claims something did not change, or that nothing else happened. A checker sees the current state, never the absence of an action. The exception is an explicit byte-identical claim, which sha256_match does settle."
+      ]
+    },
+    "criteria": {
+      "file_exists": "Tests one exact path for existence.",
+      "not_file_exists": "Tests one exact path for non-existence. It looks at that path and nowhere else.",
+      "glob_count": "Counts the files matching one glob pattern and compares that count to a number. Counts files only, never directories, and the pattern cannot express an exception.",
+      "regex": "Tests whether one named file has a line matching a pattern. It cannot tell what the matched text means or refers to.",
+      "frontmatter_has": "Tests whether one named file's YAML frontmatter has a key, optionally a value.",
+      "sha256_match": "Tests whether one file's bytes are identical to another named file's.",
+      "skill_invoked": "Tests whether the named skill was invoked. It sees nothing about what the skill did.",
+      "not_skill_invoked": "Tests whether the named skill was not invoked. It sees nothing about what else happened.",
+      "punt": "No single checker above settles this assertion. Send it to the LLM judge."
+    }
+  }
+}

@@ -75,7 +75,9 @@ include = [
     "docs/*.md",
     "docs/style",
     "Makefile",
-    "README.md",
+    # Anchored: an unanchored `README.md` matches at any depth, so a README anywhere
+    # under docs/ would ship too.
+    "/README.md",
     "LICENSE",
     "pyproject.toml",
 ]
