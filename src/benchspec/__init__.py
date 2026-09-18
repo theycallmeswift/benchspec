@@ -10,7 +10,7 @@ arm's delta against the set's baseline.
 
 from __future__ import annotations
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 from benchspec.agents import CodingAgent, make_agent
 
