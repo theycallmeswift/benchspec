@@ -109,36 +109,32 @@ POST /v1/systemone
     "route": {
       "type": "choice",
       "instructions": {
-        "task":   "Can this assertion be verified mechanically by exactly one
-                   deterministic checker, WITHOUT reading file content for meaning?",
-        "stance": "You are a conservative classifier. Punting is always free —
-                   a punted assertion goes to an LLM judge instead. The ONLY
-                   unacceptable error is a checker that could pass on WRONG
-                   output. When in any doubt, punt.",
+        "task": "Decide whether this single eval assertion can be verified mechanically by exactly one deterministic checker, WITHOUT reading file content for meaning. Do not judge whether the assertion is true — only whether it is mechanically checkable.",
+        "stance": "You are a conservative classifier. Declining (punt) is always free: a punted assertion is graded by an LLM judge instead. The ONLY unacceptable error is choosing a checker that could pass on WRONG output. When in any doubt, punt.",
         "punt_when": [
-          "Needs content read for meaning — 'reflects the facts', 'is accurate'",
-          "Bundles two or more facts — 'exists and contains all six templates'",
-          "Claims something was NOT changed/removed/duplicated/added"
+          "Needs content read for meaning — 'reflects the facts', 'is accurate', 'the summary states X'.",
+          "Bundles two or more facts — 'exists and contains all six templates'; a skill line that also says what was written.",
+          "Claims something was NOT changed, removed, duplicated or added — 'still present', 'left intact', 'not duplicated', 'no new entry was written'. A surface check cannot see the '...and nothing else happened' half. The one exception is an explicit byte-identical/sha256 claim."
         ]
       },
       "criteria": {
-        "file_exists":       "A single path exists or was created. Nothing else.",
-        "not_file_exists":   "A single path is gone. A pure path-absence claim.",
-        "glob_count":        "Exactly N, or at least N, files match a glob.",
-        "regex":             "A named file has a line matching a stated pattern.",
-        "frontmatter_has":   "A named file's frontmatter has a given key.",
-        "sha256_match":      "A file is byte-identical to a named file.",
-        "skill_invoked":     "A bare activation line: skill X was invoked.",
-        "not_skill_invoked": "A bare non-activation line: skill X was not invoked.",
-        "punt":              "Anything else."
+        "file_exists": "The assertion says a single path (file or directory) exists or was created. Nothing else.",
+        "not_file_exists": "The assertion says a single path is gone or never existed. A pure path-absence claim.",
+        "glob_count": "The assertion says exactly N, or at least N, files match a glob pattern.",
+        "regex": "The assertion says a named file has a line matching a stated pattern or literal prefix.",
+        "frontmatter_has": "The assertion says a named file's YAML frontmatter has a given key (optionally a given value).",
+        "sha256_match": "The assertion explicitly claims a file is byte-identical to a named file or to its own pre-run content.",
+        "skill_invoked": "A bare activation line: skill X was invoked. Nothing about what it wrote.",
+        "not_skill_invoked": "A bare non-activation line: skill X was not invoked. Nothing about what it wrote.",
+        "punt": "Anything else. Choose this when the assertion needs content read for meaning, bundles two or more facts, or claims something was NOT changed/removed/duplicated/added."
       }
     }
   }
 }
 ```
 
-Every example below carries a **[Playground link][pg-payload]** that opens the
-exact state and question we sent. They only restore the payload if you are
+That payload is verbatim — it is the prompt these results were measured with.
+Every example below carries a **[Playground link][pg-payload]** that opens it. They only restore the payload if you are
 already signed in — a cold link bounces through `/login?returnTo=%2Fdecode`,
 which drops the `#share/` fragment. TypeSafe's own docs links behave the same
 way.
@@ -346,8 +342,65 @@ for a logged-out reader. `/decode#share/<blob>` redirects to
 empty Playground. Their own docs links behave the same way — confirmed in a
 browser against both.
 
-[pg-leak1]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABOjgB3PgBtUAcz70GCAJ59uYJHzB8A5ElRUEFOFnVioggWBrGpDXnxqpc-VADM+V-uohyKGALQBrOHLoqAxwho6ooqSIfMYMqDEMKmC63FD2pHxRSAzGYDkYxCAQCKg0EIks7JzAADrofHw1ICVUIU1YfLX1DY0gDHIQcO29FNyoUHpNRHU9vcbZCFQU+ehIw12zDU0Myr7DTQDCYPVWUElISIgrfABG-PYIUI5QcBl0o8cTYKKiCjcKbDAy1+fAw-CiIQQ5nQZxyFD4ozgFH8CCIfAA6gBJJgACQA8gBVJh8BBwMCkCx8Z6ifheRgyKmoBA2Mkw9ASAD8Uxmmya2WOk2wvQAmtpVKTVAiMJcELg8mlaaJlChnogAHR8AAKVEYlLOqlEQjAchUjlJ-EAKASSiA6kIZZVXND1CSoOAqOKqeoAGS9AFk+AArKikCT8eYhckanj8PEAOS9wr4OqBenKYBuNOkCBKzP1akRyOiVjyUqokT4EGVoPq6IASnGAOKg1o2hga9G8erGT0KchUG4MNE2xhq7ndWZNYcMAD6Qk7wwA2jzNr1Y3BXio6SFGCSyRlwsy6J92XwrepSY4act3dZHEDEuo0eo8xRqAg8qExyutiAAEI60gaXdIR4iZGwmX4O9r1PDQ2FhJJ0AyLcwHmA1RD4FBWBcOAyiVEIkHUL9v0OJUoBoFQtDoU4TyNFRYzxYkPnZV4AHpSVsdIWNIKgIFEL47RY8kolIJplx6ABdMSAF9pnHEZHkhKAwHWMSf2pOBpzg7I1iFJoAEEMIsTNKysaRWHg0FmVohFSQ-UgNVjYJUhPOBREuUdiFU3oghndTNPM7T9hAAyUHZYy8m4GIVBdQQNQMm0JRM7hvHTS50D0BFSJoDzZJXJoJHEG5py8W0goAUVYe8QVjNEwJLGllAYPgaqpKAgJsPJRklArUBuHKvKaUlQ1YIKDPQMxXlazMlCSIwTBoTrnKkNR+TtCs8khdB+rktSSkYBaGEhacZtG0w6H3NrQlNPaGAOyFFGUbqFXqfw5G2vKQCQJQACYAFYADZpwO0ZTvUqLbjkEJvCgKJdQob4XHiNRxvOqa4He3lPt8NrRGnYxcFQfwRN04LbmSfh7zSeUMDm-QMOxn4+AADT4az8cJ14MYnEAfOnJAGdx9midOm5yYEHxKbla4+MEDp+Zx5nWcenyYnQAmia5npJ1Kkm9PQSGlukNz0dEuSpJ5c30CkwpLivO1fVQKI3OwBcQADOBcG8PC3Q4cSpKAA
-[pg-leak2]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABAAUEqAEYAbODT5I4FBmnR8qMpHzFgRcCaT4iqYiQ1UAKOADoA5mb4BlAJ40IDVFID0fAMIYkDBGCiMAJREfOioDHw0+vIAtDKM9BT8EGB+Fn4Q3EjEIBDCjkYs7JzAADqKfKUgwlQMcFVYfGUVfJUgDHYQ9dhtFNyoUElVROWtrVUBPghUcgpIDU2jY+PtYEgA1gtVHmCKDNxQqmsyCPIYuvy4iFAAZlBwOnR9u4NgBna6H2xgcmIfGPxSHA6ggaAFDvIKHw+rJ1ogQgB1ACSTAAEgB5ACqTD4CDgYFIAQsfDuEmhGDqjBJqAQkXx6CJAH5hktllUfLshj0qgBNVBUPipfhgcnoE64MDyK7Q9RIFB3RDWARURhEviHQViADuYDsqhueP4gBQCQV8CAquo6Y6IM6KCyoOCqZyCxQAGVdAFk+AArKikCz8SZ1AnWHj8dEAOVdPKU6B+SScGjJiGEtI1IphFDhtP2kvJ+h0KTlfHOCIASpGAOIl2rmhjWBG8RQBF0fchUEQMELmxhmFktMZVHsMAD6WqbCwA2qzlm0I3AHqoKBT6BE8QTqbS6C90MSTQByPE3CRyJ28Ek-Iz7kL79MUah+Or7-uzwcgABCKtIEidWtQJa3Gl+BuS9VAPNgISOdAdGXRh-DFTUxGkKBWD4OpHHUOokGfYgZzZEAPHUKAaFUJAXGBA5dz4HVVAjdEcWeXcHlcPEaFQK5SFcUgqAgMRXktVwCSBUgqjwvgAF0ZwAXxGAcqgoBAoBBKAwAWZpXyqUk4BHCCfHmbkQAAQWQ3cyRSfY+F0owAOotZoXXS1rAjcJKOJLQZD7XCBxWMJRy0nTWEgrYjJMiwzMlbh1VUe10HMPhjPNPEzQimINHiJIZX8GhPNkjSQDC0QR2XC1goAUVYS8-j4CMQhpQUIgkNYIhqkkoB-SJJT6U0CpEHKxKqPEA1YYLjLjOgdC0vhuDskU+NijqGD6NURQ5S1koYEF0D67y2gNCkaElEER2m-TGiqUawHG1qJH3fVhEYA6NsQKaZr4CwoCuRQ4Tsba8qQaaACYAFYADYR0evoRuuwNVBEOw6hiKAgVVCg3jQ-8RTGh5od+2d2XWNqxBHAJcFQOERIM4yRCFQVZglW01ACOBGg2Qm+AADVs1QSbJh5cfw3yR1ZgxifQUnyah6mkrCdBUrpyUFEZ2KWYJgwOa50JwnVMXedIfm32HEb0Hh1zLLEDzRIHKSlmt9ApJyGQT0tD1UCBc3sEnEBvTgXAYkwx0OHEqSgA
-[pg-gitkeep]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF7owdUrwB0AcygMA1nDgRebKEgZJeYdAE8A7gAtEoqulKIZAemIgICVDQjaW7TsAA66Xry8gTlQMcAFYvN6+fv4gDPoQodgxFMaoUBSJRD7RMVDoWghUFAxo+WER2TkxDGBIiuUBAMJ6vAzGmrpISIglGLwARqK4iFCCcFJ0KXrpYEJC+gMLbGDF87wYolYhCDR5miUUvClwFMoIRLwA6gCSTAASAPIAqky8CHBgpHmyAsKiFBgQowBKgELw6NN0LIAPwBLJRHIBLR6DINEAATVQVF0710Rww3QQuDAJWGRyEtRQYwQ0l4AAULCUobwOrNDGB9Dp+O9RIAUAjxEEZ406hN6vlkqDgOgYfBaABk5QBZXgAKyopFkojyWg+pFpTFMvAeXDl6N4FhWGVcYH6InUCCcYNZR1Mp2sbRJ+KoQikEEp618lwASsaAOLrYKChi0y6mXx5XQGXjkKj9BgXQWMaRwyqIhyMgD6Jno5QA2rmqgEuCpSDoAYx6Aw3rqQWCIehvrx+QByd78ETFaWG-grbTdi7d1kUagIElwbs5hGVkAAIQspBE0sMfFB4NBohHg67vG7Gi0Oj0UnrNW1ujmvBQrFacBcFJCSAXxArecaFKgNB0JBnDgNpO3ZHQuAeV4pihcYbHeGhUGGUgbFIKgICEGYQhQz4rFIAJv14ABdCsAF94TzCgEAUEYwHKSIqhiQQRALM9tDRABBB9vjtP02nUVh9h0XdwKOd45z1XgeFA5k4CEbpsy-Jc-ACdBUAYAtmLgVjBPPTjuKhXiSWMFkdAldA4FpLjBVxPjjAAWhtbp0AyckwH-RSKOXWQhFQfoCwBRk0QAUVYUc1i4C5d09ERaibSLfk3cESRSPEfL8zzCICd5NVYfTxEkRLRGMWo8UwizkoYFJOzAB8amw3g+O2dBMuUpinEYGgSW2AsSqQfKJGFLTuy5DqGC6hhtl4Pq0qgYZfGUfRWsYpESoAJgAVgANgLCaUn0rTTMWEJ7KgKxGBmIRWllMRBqkLTluXOphCEAs8lwVBlHwpIAi4-owFxUc5pJUpeHKuBwme+8AA1eFE97PvGR68zUjSodehGvv0-7cTU9BHOKYGxTBvIIYfRQXt4WHRNRll0A+r7keiAJMwYTiDBkn45IUgil1Iyp+fQUj7G6AdsMVVArHk7BSxAFU4Fwey3ylDgiNIoA
-[pg-overpunt]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF4B3MEnEIoDBvV4M+pKEgDWvQCgEigBaidYdOX79ebVQykYhAT16TdouDVnzSvOkiRgA5nGIgEAioNBCWLOycwAA66Ly80SDBVPKJWLwxcfEJIAw2EHBpORQ6qFAUhcSx2TlQ6EgMCFQUDGj1RZk18YkMkmpFiQDChrqq9l6IrRi8AEaiuIhQgnDudCWG5WBCtrN2bGAtOxiipHDyCC7oFuW8JXAUaohEvADqAJJMABIA8gCqTLwEHAwCp0D4BMJRBQMPJGAJUAgPMCrmCAPyJIjVLqJBqGCoDEAATVQVHsQPstwwSEQuDArQWtyEkhQywQADpeAAFKiMOrgsZbCQ2KT8IGibRgXgQHlucbUhBTOI+VBwKRKexxAAymoAsrwAFZUUh+Xh1BrA0gcph6XjfLiawm8HkHCphMAzERmBDBREC256B6IXR0ylUITuCDM3jTF4AJTtAHFoylpQwOS89HE6hq7OQqDMGM9pYw2RisTVEsWGAB9MSZooAbXL2O4cBWUmhjHoDEBFvhiLoGzBWl4AHIgfwRC01Tb+AdLKPnqOBRRqAg6XBR2Wsl0cgAhHmkERqsR8BEeBGiOfTkej8wNKSGdyd3pm+zbXgoViKZwQJnyJAtyqHcW0GJkoBoKQkBCM4dD5cQHC4b4AXWMEVgAeiBGhUAWUh0NIKg-02Nx0JBU5SESZt4gAXWbABfTEQMSCgZHOKAwA6KickEERq3vSwCQAQU-PlPUjBgdDMVgLCsREJA7IEN0tXgeAk+C4CEalS2A3dEnQVAax4uA+Okh8hJEsExLpSSxmVdA4A5YTpXJcSdAAWndal0AqRkwAg7TGN0kAfCEVAZmraEZQJABRVh5x2LhnnPEMREkHtEohY8PDpEoKRCsKAq4xIgT8VhzPQMA6HcIzeAMR9eCEOpRBoHK4OHSVcVlcTznQQqQO6EBRRhFq5EQas6vKyqVkyzcRWCRgRvOWqHElHwoAWOJHhsPqgqQAwACYAFYADZqxGkpzJqsYZhseQ3KgU5eQoLZFD4SUKqqmadpbdRhCEas6lwVBHgo7AcmEmYwHJed1rpNoGqa9Jfo-AANBCpEB4GVm+isQH0mtkf+zGQfMyHyX09APJaWHFQR+ykbUP7eDR+TeHx010CBkGceySsorBxJBPQW62vBDStMokC6KxaX0DogJqSnNwdVQU5NOwBsQH1OBcDc-9VQ4ai6KAA
-[pg-payload]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgMAWcABADoA9ACMqUADakhfUlARwKDVAgCefdKgDufNlCQMkfMOlJ8KGBmCjojYCRL49+FmtAlwzYJEjiHiIBAIqG6GLOycwAA66Hx8USDBVAxwCVh80bFx8VyqEKnYORTcqFAUBUQx2Tk2BghUSmi2aRlV1TlWSADWLQkAwiZO3PrGPogMTXwi-LiIUABmUJ58dMUmZfYS6iLqbGBKW3wY-KR+iDQ2+hMU5rwUXYhEfADqAJJMABIA8gCqTHwKMBydAAcz4iw85ks9AY4JUKzg61BAH4EpUstUEgYTOVeiAAJqoKjGBTGKG2RC4MATWbmCTeFCLRACPgABSojBsYJG9i0YFURnmCn4gBQCMkQDkpLxjBATDB8EGoOBGZTGWIAGXVAFk+AArKikEH8WopIEspi8PhfABy6vxfA5+3KECsIkhiGCCD4PNuigeXp41KhVCkfAgDKOsWeACUbQBxI7JCUMFnPXixGxq9TkKgiBhPCWMARotqYwKSgD6WnTLQA2qX2glrXBPEYLIwYQDEWZ5vC6EiwWKAOQKeYeJQqy3zfaGIdPIc8ijUBDUuBDksYxsgABCHNIHhVWlQRy9NBU-GnE74w70BjspnJVlqxgcfBQrCccDc9JSSHXxAbMs+npKAaCMJAQj8YZQT4PkjGtL5-jWUFPCEBQz1maRSCoCAJA2KUhCBU5SASQC+AAXQbABfdEywoBAoBSBiwBaTJ2hyCE4ArW9DDxABBN8uUhcMeF0VgriMeE4PMQEpRZa1UB4LldAkXxiwAzc4gSTQGArTjuPEu9+ME0FhOpbhvSMRV0DgFkBIlUkRO4ABaMARF8dByjpawaHU2itxBCRUBECsLElPEAFFWBnQ5rSeeEgw8bxYTi8FJGVFZqWKMlAuCvyyISBQjVYYz0DAOge3SvhuG8Mk8JszKGGKZSwDfKwpTDakmPQfLNI44JGBoLrEArGqkFK8rlk4odBQGhghoYJjqtq1qQSgWZYgeVRevYrEaoAJgAVgANgrBbimMzjLKmVQUmcqBTk5Ch7CcY9WrKiq0o8Hat26SQJArGxcFQB4SMKBIBJEMBSRndbqUmeq4HSP7XwADVg2qgZBzwfrLHSKxRgGsdB4yodJTR0FcxoqTlWJEeRrp-r4dHpJ0710GB0HceyBJCwYfj0Fu6CwTgVTbNIzcqLaKX0CogJfHHKUtVQU5VOwWsQF1OBcGcn9lQ4ciqKAA
+[pg-leak1]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABOjgB3PgBtUAcz70GCAJ59uYJHzB8A5ElRUEFOFnVioggWBrGpDXnxqpc-VADM+V-uohyKGALQBrOHLoqAxwho6ooqSIfMYMqDEMKmC63FD2pHxRSAzGYDkYxCAQCKg0EIks7JzAADrofHw1ICVUIU1YfLX1DY0gDHIQcO29FNyoUHpNRHU9vcbZCFQU+ehIw12zDU0Myr7DTQAicBRQUXxCvK4ILqkqKOgSovxwuGCiqkhIiCt8FGD1ACN+PYEFBHFA4Bk6KN-hM3qIFACFGwwMsEXwMPwoiEEOZ0FBshNfrwKP4EEQ+AB1ACSTAAEgB5ACqTD4CDgYFIFj44KevwwIUYPNQ1zosIeADo+Ad4kEGHwAFZUUgSfgXOBXG78ZRfBA-AkuRb8QAoBBj0Oj1ZqoPKDdClPi-qJ0aNjr4wACnhKpjNNk1sv9JthegBNbSqdmqfmrRCvHL2X6iHVgiEIKVHCiiYzcgAUECojAAlDEkqIhGA5CpHOz9JG84xIR9dfqVBIEJyG0jVPUADLdgCyiuVqpiqxCnKlPH4DIAct3g3x86i9OV3XzECVrgbRqhUPcpGoXaTolY8vyqJE+BAdWaqQAlGcAcQxrTzDCllN49WMXYU5CoAIYCk6zfb1ulmJpgIAfXVdBhgAbR9TZemnOBIRULx6yFdlOWFUUOXxB4+FNdR2UcJ5lhUVweVRRJ1ApdQDSXHQ8lCeiqKQWgaGSBR-RCFQAA11C9YhEN9EAACF81IJ5KKEeIRRsEV+EcGiVGItgCUSLsMgwnZ5lUJ0+BQVgXDgMpEz49QAG5IyQXwoEMzMTBPeU3i0IzyxUC5TzLLzQQYQVhOmMCxIAYUTKAaDuUoNVSQjfL4acGVZGEHkhCl2VsdIKVIKgIEzP4QgyBTOSiDJiMJQzijgL5GDojQnkcG1GBo+r1DlTI8oKljSDaoIBGEaRGHkc5lHOfzBSEvgAEEjJ0FS9GJV1fn+Dqvn4KihIlCV-gyOU4qkOBRC+RRIEGQRetO0RHAnaxMWkVhl2bLsHvyiZrT4JEQm8U4ZDhUQAHokCUAAmABWAA2BMwEi4TRIaABdUSAF9gvAkAKH8xAoDAdZ4d6Xk4EgjTsjWIMmknRtvjQeokE82yLD5K8rD4bNCYxa4uXZZYRTkIsSa0hSEsxjkiqladggO6RjrgIL8aaOVIMJ4nWE0smOgp6wdWpjAPIrBmHiZvJuGLPgJHuhTBBBB7NMhKVZrzCNme4bx3VqxaMxhmg5ZCrYQEeVAAUgrx8wYfYuC1z4ddp+mUTRBRpwpEr5SeZR5UTnkHJqmw8lGSMA4BS88hxdAfaQpp2VVVhw8p7W9RpvWklMOgMnZpQm6c-guIYUZuTUXiG2ZkuOaMHE3kvUioFYMuxKrAVu5xSD25ryOmwbun9bUdAzAbQnND4YNpr7bseRKRgF+idv87Seg+H8BRs1QcoafhBQ1AkG-6leUQqDgAsZ-RsDMA4MIaQW7qMFe2oo7111mwN6JwGDOgilFSM7MDRfTgD9KIjB-ouHiFvHercs4jziAkFQqAhD1Gqt4RY9RdIyAAT0P09knSQWMLgVA-hSDh1mgCZI2plhpDyA3TuHQ7IOXePxUaKh2GcLtolSWfcATaHlN5G0qiSghEYX7RW4jWGyK4Twz6-CBA+BokIn4oijIsMkdI0xzUOFcPFoowi7oVHnCUOo8awRZagXLkUUOPD0ByCsNyI6XwpShTGLuDatwPG3yonXH4gg0JRkFPKbCrcFJigIhICkAIpIyRcHJEetgIwLUSEna4ntIrRToKE+KY0kopXtKqUgANMp2EhADXK8CeoA1KnbJoKMfTIzqMjQoXxyJFT7KgKIx1sBwRAAqF43gLI1Q4AjZGQA
+[pg-leak2]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYhMAWcABAAUEqAEYAbODT5I4FBmnR8qMpHzFgRcCaT4iqYiQ1UAKOADoA5mb4BlAJ40IDVFID0fAMIYkDBGCiMAJREfOioDHw0+vIAtDKM9BT8EGB+Fn4Q3EjEIBDCjkYs7JzAADqKfKUgwlQMcFVYfGUVfJUgDHYQ9dhtFNyoUElVROWtrVUBPghUcgpIDU2jY+PtYEgA1gtVACKyUKT8AO68DLwIfKdQqijoFhJ8cLhgYnxrMgjyGHwUYIqafLhEFAAGZQOA6Oh9X6DZ5iOy6eFsMByOF8DD8A51BA0AJXeQUb68CjrRAhADqAEkmAAJADyAFUmHwEHAwKQAhY+KD7hQMHVGFzUOc6NDbtZtqhQuE+AArKikCxHE5nC68V5Id6fRRXC7TfiAFAI0ehUcc4KdEHwoBEdZDuNCfgZ4X1ZOsNBIzMMlssqj5fkMelUAJqoKivFmvb7eRBPeSA77qDUgsEIcWyMS4258YwQKhBS2qZ6HMB2VTAllwRpgPg5hI6N6ILX5vjpNnghGvRQAGU7AFlZfLFZb0D5WaRrDx+LSAHKdwNKdDIpJON38RDCc46vqoVA3TlV53Ei2nMARXn6HQpDVGvhkgBK04A4mjajmGNYybxtYpfvDyFQRAwIQ1m+notGMVTAQA+qa6ALAA2l6yxtFOcDgqovIJAKLJsoKwqsugHJ8IaADkLLAhIciqOaXLIkYxEhMROqLlQfh1PRfDEdRSC0DQqTwr6dSqAAGsRHrEIh3ogAAQrmpASFRhySkKkRCvwwK0aoJFsHiBboDoGEMP4w6vAY0hQKwFySBA6iCcRADcEYbFApnpug-DHhEzxIJKSDFqoxwnnwRb+QgVr8mJIxgZJHjqFANDXC4ZrcIRwV8FOtJMlCtzgiELI0KggKkCEpBUNZMJ1DoylsgcOgkT4zkvHkcDxAw7HERIwLWowtFtWEEQlWVPwVb1kpuYcDyMAg8KpYcoUMPyol8AAgtILHqUkhIut8vx9dIqGqvwolmGYvw6H1yWZloMh8HaEBdG5pDETdzzAuOarog8rBLo2TGKGwg1WgidQxPs9D4s8rhIHaABMACsABs8b+DQYkSXwAC6iEAL6RZJFBzUCYALM0SFtNycCQdpPjzAGXBqvWHwKNIfmORy9wpKcWbk2i5zsiychCnYgSfTpPNBWs3zYRV1hTuEF2cld5igaTVR9ZB5OU6wOlbHT-AM42vklqztzsye3BNhYH3KW5gLnFT0vLdWLHJGbMQaPEG0ULFKPK0hVR3KIkFnowOsTuqmpM4bqhIii8JTiEVURBIawRPHXLOc1kQnn0EYByI1Ynli6ARWjVQsoqrCh-TGoNpHLNVgudA6NzdoFmoAT8LxDB9IRVYCW2HNF2L6ZYs81ZkeZJdRWTwiMF3WKQa3Vd6zXjNfFHEaN225PEaogZLT2nZcrPDDzxare51AgKKCS8LGKgTgKLC8JVhYV-0ACzxUHAgRTyrIBQzAHDeGkEu59GXuHWuXx-rpgoFaVEXtkZt25jqEQdhgag0YDCF4zhN5gCbune4ylcFWlUKgQ4igmoxGmIoAyYM-5+wAesBqkEAi4FQCSUgOsVoiFSHrWYMYmauQrNIZhpkhLi1UGwjh4IZZy17iIEMEQArWmUcIOoDDJJqycgYVh6B2GcO4boPhUp0BuwESeIRHdGg6JeBI1Ku1pGcLkZcTMGglFBTtKooK6ilbiWnhBXMDBuHoHQfLB4YgZDWA8P0Hc7lkr+U-AdSBa9FBuTQpGTCERsLN2UiKAitwQh6D0vJC4ikxb5XDOtIwCdziILiglOgrjOSpXSplO02VSCuDygVcErgBqwJPH06qsiqjYyWFjcoWMcgyAohVHsqADiROwHBEAMpHgxBss1Dg6MsZAA
+[pg-gitkeep]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF7owdUrwB0AcygMA1nDgRebKEgZJeYdAE8A7gAtEoqulKIZAemIgICVDQjaW7TsAA66Xry8gTlQMcAFYvN6+fv4gDPoQodgxFMaoUBSJRD7RMVDoWghUFAxo+WER2TkxDGBIiuUBACJwFFBWvCZwDKYIvN2avCjosiLquGBCukhIiCUYvBR6vABGoriIUIJwUnQpeukTQvorx2xgxUe8GKJWIQg0eZolFAumFMoIRLwA6gCSTAAJADyAFUmLwEHAwKQ8rIBMJRBQMCFGAJUL06PthtJeI0+OhUAxeAArKikWSiTrdazUqYzBBzXwDBiFUSAFAIruhLlSerwFHydLtjPtFkJLikWoowMsRNIAlkojkAlo9BkGiAAJqoKi6SG6BYYenjErrBZCWooLYIHHNChCR7DXgACggFgYAEoBbohIYwPodPxIXBwmBeK7GNs6bNSl7ZAhoZHlsclgAZFMAWRJZIpfPyIWhOKYpl4QK4KY1vAs5wyrmlo0QTl6AxSqFQQzhoYl7xpwqJSKoQikEAtnJ+ACVSwBxK7BV0MHHfUxM3x6Y7kKjLBhfcPz+WVJUON0AfU66HKAG191UAlwVKQdEiI6jIdC0RioehYbwOQBySH8ERih0Wl+HObQfy+H8BmrKh4xCCDeB-WkkFoGgwAQY4VRCHQAA0fzlYgrwPAAhCxSBEYDDD4dFeBodFRFAoDv0QjQtB0PQpEfGo8nYsVBigVg+jgFxzWwn8AG59TqYRJntdBRG6MAiQmJA+CQP0dBMJSOlqDoEAUFECIVKpogCABhc0oBoHRVLofpHV9HQuCBcE9mGbYvkhOj1lIL5SCoCB7UWEIpBo6ErCkX8tBksNIRmRgEJ-ER+CJPIamKRKCSJfzAoOELMvxOBDHURgMJ0zT9IYFF8N4ABBQZYMYxE3kUBY9CywYVD6Yt8OkaQOLEQljC-OAhBmXhhQgBJ5NIH8JomfhC2La51FYGtGS9JY2Fy1oiSTEIAFo2noZ4JhsJBhQAJgAVgANjNMArIIojeAAXSvABfYzTJAChKo2MBykiEyAkEEQj1Y7R1SLUQLWjeZ1P9KTYVGYdumdMHRBomFIWKdF9E9SGdBoxyFhfEKcR4ey4VGmYjJegIsqPTGIdYJ4kGh4s4YZGNEfY-jhlRpTjFjFaaPk9Zekh7YcXq109TR4wDuleKMgep690VH6RlQZYj37RhOdh6Z4d8PnVrAy4uC+MKiREWoiWt+EKNopSUn1HXljDJS7nQemtb8AJIQpVgjajHmEY0-VxEkZ3RGFfm5NENCGBSL9QywyM0d9q5entO4JliuBBFYf2QZAQNkRTu4jwTsPuY283QxjyNMZ-HQNVq9MUwEJxGGr6wE49qB1l8ZRjidVBXFKQ5k14eRR94cYhCoOB3TL68QAusAbtuo8U5SeuTYj3xtqChRxUs6z9Uxr19rgI6rEYA5JgYPhm4kVuEVzvo+AUYnDC+EcA-QovguInQ3geaSYojx5FwKgZQpB1T1WWOhWGxQR5KRjEncI0DJg4XKrmeBiDKZDXTssbURItKpSoU4EIkCfpMzwbA9AxDtjIJWGgwa6BlYYONNgvIwZBiKBigQ0mHU4EIJlrwKmw1HTSkoR0XsfJaGEjgAwwOh5DZJACLVAw1N1BjXUbwMyqQ2wKWGppJc3Vjb0g2vJbYD5kQnQhFCKQ-AaKYk-MML4ywyIuwYFRH+dE9SMW0DbXodpHrX1sl0ORcJSbOVcsKdypAbBeVQD5GwOUgpKW2DYcKMsAifUqB9HwH17AzEAiFdMqArBjWwOeEAxI4C4AOqJOAWgQCvQ+kAA
+[pg-overpunt]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgByqABAGZQANnF4B3MEnEIoDBvV4M+pKEgDWvQCgEigBaidYdOX79ebVQykYhAT16TdouDVnzSvOkiRgA5nGIgEAioNBCWLOycwAA66Ly80SDBVPKJWLwxcfEJIAw2EHBpORQ6qFAUhcSx2TlQ6EgMCFQUDGj1RZk18YkMkmpFiQAicBRQpKJiegx6CLqqvCjoPiJmuGBC9l6IrRi8FIa8AEaiuIhQgnDudCWG5eu2R3ZsYC0PGKLj8ggu6Bble3oKGpEEReAB1ACSTAAEgB5ACqTF4CDgYBUSwEwlEFAw8kYAlQszotyWADpeIM+OhUAxeAArKikPziKYzRybJDbNq8eaNKiibTWOyTODTRA82nza4GX77IQPEojNRgQ4iUmJIjVLqJBqGCoDEAATVQVHsKPsewwnIQa1apz2QkkKAuCHJwwoQjqdR8vAAFBAqIwAJQ8qTrCQ2KT8FFwdJgXgBxiXDlc3bzHwINHJw52A4AGTzAFl6YzmXUGqjSOSmHpeLCuHnDbxAy8KmEVStEMFZvMSqhUIsffHFUDxdMwLScVQhO4IE7eLswQAlesAcQXKQDDHJYL0cTq9nQdnIVEODFBie3Gq1NUSl4A+iL0EUANo37XcOCXKQ4pP4lFogSRKor8GLaAA5Ci-AiC0UhigILyWOBoLgfMrZUJm8jIbw4HwUgtA0GACB2Lq8hSAAGuB6pVFkXQ5AAQoGpAiHBYh8ISHiEqI-CIVIEHmA0YZGJajBgOW9jygsUCsIozgQI6ZHgQA3Ba6jCBsnroKI460usSB8N4kYshO4gOGIMhyPQ1GarRH4AMKOlANBSPpdDTN6plSFwsJIjcSyXKCKI0KgpykKCpBUPJdxuAusxouM7gQQ06kJiinKMNh4EiPwkqiS0mXUrSEVRfsbgFVScBiGYjDEZ50iuPQVG8AAggsGE8RUAJKnshiFQsX7slRpKkoY7iFToHlwEInK8AYEAFFppDgbN6z8NWtbvGYrBtjs+5CVtJWyI88gALRjPQrRygA9EgBgAEwAKwAGwOmJNDUe+8QALrvgAvjZt4gBQFlnGAHSfTkggiPeAmWAaNaiE6qZxIZYZSUsKxztMfpQ6IHEqCiLSEjYIaw1YswSD+AFuOSPDuRiU2ctZEOJIV964zDrAWEg8O1kjCC7QsYBGfGg6YxOOihrwPibRxWmnLMsOXOSrUBuaWM6CdKrpZ1HpvcztndCAyyoIc95TowvOI1sAvcqjW2IQ8XCghxJkiJItLO5iLEeBOJQWibhwJhOXzoAbdGJCifisFbKa27s9vxugYB0O4uMrWjmmiIRDAlB5ou9DFWOh7FvCel86ypXAgisOHH7RriOdfPeBg89gOQI3HguJ7wyep97cDgVIhrNYWeYCMEjBN+KrcB1ApxxMCdi+qgYRtPcubS-PChrEI-JBnXgO3WAj1PfeOclLH-OC2wh0MAqjnORa6fzDmp3nYwdwbEoFp98m6ccR-rIKwYg4hBDgCdJocRfx4ivDRCOIA1LynvHUXAqBgSkANK1Q4RFEYtHnhObkWd0hII2OROqqD0HK14HTCaGIVQmlpJMEyR1zI0jgIfbIrMaT3lISg9AaCMFYKOLg3uGAtb4NtEQuosYFhqBSuQymYjcqCOobQ-OhxGHGUlEw4I8hOFG0vFgo89MfSMw4bwOypQBzaQmlIJ87Jr7ci0t+ESsDkSViAh4EC3pQSHCYj7BgbFS7BXNB1SwLtZh6yci5EIoo6E+iUd5XyMo-CkCukFEKlwrrFU9KVbJ8VlaJD+lqX6sRfoBE5DBNwhZUDjGmtgF8IA6RwFwCdBScAGggC+r9IAA
+[pg-payload]: https://console.typesafe.ai/decode#share/N4IghgDglgagpgJwM5QPYDsQC4QDcCMIANCACaoDGArgLZzoAuAKnAB4PYgMAWcABADoA9ACMqUADakhfUlARwKDVAgCefdKgDufNlCQMkfMOlJ8KGBmCjojYCRL49+FmtAlwzYJEjiHiIBAIqG6GLOycwAA66Hx8USDBVAxwCVh80bFx8VyqEKnYORTcqFAUBUQx2Tk2BghUSmi2aRlV1TlWSADWLQkAIopQpPxavM4ITtz6fCjoAOYeurj2xj6IDE3mJnwi-LiIUABmUJ58dMUmZfYS6iLqbGBKN3wY-MMpCDQ2+hsU5rwULqIIh8ADqAEkmAAJADyAFUmHwFGA5PM+MdFhZGPQGOiVGc4Jd5gI+H1UBpULiAFZUUhzEZjXgTZyrXwIDYYPjTBj1fiAFAIXuhnqM-EyubjpuduJcKNd1MVFF0wCIPAIEpUstUEgYTOVeiAAJqoKjGBTGcwYNnLDb7cwSbwoY6IEkDCgSb5ogAUECojAAlFy7BItGBVEZDgo4OkwHwfdivGt2ZtpnMECjTndjLEADLZgCyfBpdP4tRSKJJTF4fBhADlswa+L7HuUIFYVfxEMEJtNiqhULM5uaFYDEJMwLiLFQpLGHYKwQAlWsAcReyR9DBJoN4sRsWfU5CoIgYILjG-VbS1gV9DAA+iL0C0ANoX9oJGtwTxGLEpRhIwlmQ58ToIlBwFAByBRDg8JQjBZQ5HkMMCQTA6ZmyoNMUiQvgwJZJBaBoMA1BmKwUiMAANMC1WIF9LwAIV9UgPFgrRySAlR+HgmC+HAvQDDsUwLUYaxbGMBwZigVgnDgNx7VIsCAG5zW6SRHHddB+B4cdRKQckkFDIxRi0kMDIQKAGB-KiNXabIEgAYXtKAaCMHS6B4GxB2MvgaxhRELnmTwQQUGhUH2UgQVIKgIHdWUUjMfEUWGMxwIMFTYwUXxGCwsCPEOCUhKULLNFxCKoquWLCvJdSdBxIjPK0UzzPoSi+AAQRmdDOJcAEui2dAipmD9Jn4SiBAEEwzCKqY0TgCRfD4aUIHydTSDA+b7EOCsq1eXRWBbDkd34nbSooMydlUFIAFohhxK4JCEJBpQAJgAVgANjtawaComi+AAXRfABfKybJACgGoOMAWkyayEgxOAb14wx9UrfgHXWTY9LDJT3MWCBx24PhPThl4JjkBQlBUVQA0Rox8U8sHCVikka0pKbBxm3xLJ+hIipvOGEdYH4kGRqs0aTTlMbscT5lx-HAz4OZtvxdT9gmRHPBJNqfTNPGeAu5UMvKD7HK5zUQYWVARBvSdGBF1HE32mZ9J2hDnhrEF4txDxvFxd30UkOAjAIhhinNC2RBnRqEHQU2YcSOB6VYO3WXRiXnZjdAwDoACA7WqW1P4YPincpSSNOXWPlifF3Q+FYgjgY5WFj18QAjSxg4+G9pWFwoEhRlPxdiSXzUz7P-Y8MCjANFq82zdFgkYDvR27sOoH2WIgXUT1UFbJo5VX9e+GWCQqDgP1m8vB6wBe16byL7hk7Fx22GOsznjdT6peJ6Y7ku67GFuk4ckGcs6nGJviZQ4paZaFiPXC69RYjfhxBfEGykHA3hsLgVAQJSD6jaiIQiqNGjWk2AXdIaDHBkT4J5TB2CNZeVZiXZUxpcSGQlKw4IKQUFxB5pSG8FCMHoCwTgvBOxCEUnQPrYh45SE2CjDMLoqUqGeX6rQnBzNGFomYckah0p2HUM4XAbhORTx4PQOdNmuhZpGL4LZEo-YNJTAMtuIaA9HbqU-IJH8uJkQASAoSdA7kQRiFMExJwLESZnHYuiBCSAPYTA-o5ZyIRRQl08t5Xy0p-LSCCiFTwQgSrRXHPkhKGsEiAzaADGIAMAi+GgrFPMqBhizWwI+EAVI4C4AurJQOHBfoAyAA
+
+---
+
+## Addendum, 2026-09-18: prompt tuning removes the false positives
+
+The three dangerous results above are fixable by prompt alone. A tuning loop over
+the same corpus, with a stratified 72/67 train/test split (seed 20260918), landed
+on a variant with **zero leaks and zero mismatches, and higher retention than
+either baseline**.
+
+| | leaks | mismatches | retention | cost/pass |
+| --- | --- | --- | --- | --- |
+| jev, original prompt | 2/86 | 1/53 | 0.811 | $0.0049 |
+| **jev, tuned prompt** | **0/86** | **0/53** | **0.925** | $0.0098 |
+| gemini-3.5-flash-lite | 0/86 | 0/53 | 0.792 | $0.0738 |
+
+Still deterministic: two independent passes of the tuned prompt agreed on
+139/139 assertions, so one sample per assertion is still enough. The prompt is
+about twice as long, so cost doubles — still 7.5x under Gemini.
+
+Four additions to `instructions` did the work, in the order they were found:
+
+1. **A sufficiency test.** "Would that ONE checker verify EVERY clause? If any
+   clause is left unverified — a qualifier, a purpose, what something names or
+   refers to — the checker is insufficient; punt." This alone cleared the
+   `regex` leak at no retention cost.
+2. **Counting guidance.** Prose phrasings of a countable fact are `glob_count`,
+   with the sharp line that absence of a *file* is countable while absence of
+   *content inside an existing file* is not.
+3. **Elaboration vs. second fact.** Apply the sufficiency test to facts, not
+   clauses — a clause restating the same fact, or spelling out what the path
+   already encodes, adds nothing to verify. This took retention 0.857 → 0.929.
+4. **A glob-writability test.** A count-zero claim binds only if you can write
+   the one literal glob from the words of the assertion. Additions 2 and 3 were
+   too permissive without it.
+
+### What the split caught
+
+After addition 3 the train split showed zero dangerous results and looked
+solved. The held-out split had two — *different* ones: "no duplicate or backup
+of the profile page" and "no archive category folder other than 'Sources'" both
+bound to `glob_count`, neither expressible as a single glob. Tuning on the whole
+corpus would have shipped that regression. Addition 4 fixed it, and the fix held
+on both splits.
+
+### Caveats
+
+- Addition 4 was written after seeing the held-out failures, so the test split
+  is no longer a clean holdout. The 0.925 is *selected on this corpus* and needs
+  fresh assertions to confirm.
+- Retention was deliberately not pushed past 0.925. The four remaining
+  over-punts include cases where binding looks unsafe: `glob_count` matches
+  files only, so "no `docs/specs/` directory was created" is not covered by a
+  count of 0, and `{TODAY}-*.md` does not exclude a `-design` suffix. Jev
+  punting those is correct.
+- This changes the outlook but not yet the recommendation. Confirm on a fresh
+  corpus, and settle argument-filling, before revisiting the swap.
