@@ -8,7 +8,11 @@ background below exists because none of it is obvious from outside this repo. No
 code changes; nothing here is wired into `src/`.
 
 Sources: [docs.typesafe.ai](https://docs.typesafe.ai) (`/api`, `/primitives`,
-`/models`), and two throwaway scripts run against `evals/binder/corpus.yaml`.
+`/models`), and scripts run against `evals/binder/corpus.yaml`.
+
+Every prompt, script and result behind the numbers below is in
+[`typesafe-binder-routing/`](typesafe-binder-routing/) — see its
+[README](typesafe-binder-routing/README.md) to re-run any of it.
 
 ## Answer up front
 
