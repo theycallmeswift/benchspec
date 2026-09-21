@@ -8,7 +8,9 @@ set and its Codex judge) and the real `evals/e2e/hello/` suite against the live 
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -20,6 +22,7 @@ import pytest
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.binder_config import resolve_binder_config
 from benchspec.grading.judges.config import resolve_judge_config
+from benchspec.orchestration.room import render_history
 from benchspec.specs import scope
 from benchspec.specs.discovery import discover_eval_cases, pyproject_table
 from tests.support.cli import run_benchspec
@@ -116,6 +119,7 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
         ("hello", "greets-by-name"),
         ("hello-file", "writes-greeting-file"),
         ("hello-outside", "allows-filesystem-traversal"),
+        ("hello-transcript", "greets-from-transcript"),
     }
     for case in cases:
         assert case.prompt
@@ -143,7 +147,41 @@ def test_hello_evals_exercise_history_and_seeded_workspace() -> None:
     assert greeting_case.workspace_dir is None
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
+def test_hello_transcript_history_reaches_the_rendered_prompt_verbatim() -> None:
+    """Verify the live JSONL fixture is valid, necessary context with a foreign token."""
+    cases = discover_eval_cases(REPO_ROOT)
+    transcript_case = next(case for case in cases if case.eval_id == "greets-from-transcript")
+
+    history = transcript_case.history
+    assert history
+    history_lines = [entry for entry in history if isinstance(entry, str)]
+    # The path form yields raw lines, not turns; every one must be real JSONL.
+    assert len(history_lines) == len(history)
+    for entry in history_lines:
+        json.loads(entry)
+    assert "Carol" in "\n".join(history_lines)
+    assert "Carol" not in transcript_case.prompt
+
+    foreign_tokens = {
+        token
+        for entry in history_lines
+        for token in re.findall(r"\{[A-Z_]+\}", entry)
+        if token != "{TODAY}"
+    }
+    assert foreign_tokens == {"{CLAUDE_PLUGIN_ROOT}"}
+
+    rendered = render_history(history, today="2099-01-01")
+    expected = "<transcript>\n" + "\n".join(history_lines) + "\n</transcript>\n\n"
+    prompt = rendered + transcript_case.prompt
+
+    assert rendered == expected
+    assert prompt.startswith(expected)
+    assert prompt.index("</transcript>") < prompt.index(transcript_case.prompt)
+
+
+@pytest.mark.parametrize(
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+)
 def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     """Verify setup.sh parses as valid bash without executing any of it."""
     setup_sh = REPO_ROOT / "evals/e2e/hello/evals" / group / "setup.sh"
@@ -155,7 +193,9 @@ def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
+@pytest.mark.parametrize(
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+)
 def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: str) -> None:
     """Verify the baseline branch exits without running an install command."""
     eval_dir = REPO_ROOT / "evals/e2e/hello/evals" / group
@@ -185,7 +225,9 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: s
     assert not command_log.exists()
 
 
-@pytest.mark.parametrize("group", ["hello", "hello-file", "hello-outside"])
+@pytest.mark.parametrize(
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+)
 def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
     tmp_path: Path, group: str
 ) -> None:
@@ -376,8 +418,9 @@ def test_hello_trigger_lines_carry_the_baseline_clause() -> None:
     assert {eval_id for eval_id, _ in trigger_clauses} == {
         "greets-by-name",
         "allows-filesystem-traversal",
+        "greets-from-transcript",
     }
-    assert len(trigger_clauses) == 2
+    assert len(trigger_clauses) == 3
     assert trigger_clauses == dict.fromkeys(trigger_clauses, TRIGGER_CLAUSE)
 
 

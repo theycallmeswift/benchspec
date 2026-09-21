@@ -288,9 +288,9 @@ The microsandbox opt-in (`sandbox = "microsandbox"`) adds two of its own:
 ## Where to go next
 
 - The in-repo [`evals/e2e/hello/`](../evals/e2e/hello/) suite is this walkthrough
-  as living code: three evals, three arms, authored `history:`, and a seeded
-  `workspace/`. It runs with `make e2e`, three samples per cell across six
-  sandboxes by default (`COUNT=N` and `WORKERS=N` to change).
+  as living code: four evals, three arms, inline and JSONL `history:`, and a
+  seeded `workspace/`. It runs with `make e2e`, three samples per cell across
+  six sandboxes by default (`COUNT=N` and `WORKERS=N` to change).
 - [`writing-evals.md`](writing-evals.md): the full eval format and grading model.
 - [`configuration.md`](configuration.md): multi-harness sets, model sweeps, the
   judge, and every flag.

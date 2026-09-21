@@ -219,11 +219,11 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 2. **Confirm the suite collects.** Needs no credentials and no Docker:
 
    ```bash
-   make e2e EVAL_ARGS="--collect-only -q"   # 27 cells: 3 evals × 3 arms × 3 samples, then 36 through OpenRouter
+   make e2e EVAL_ARGS="--collect-only -q"   # 36 cells: 4 evals × 3 arms × 3 samples, then 48 through OpenRouter
    ```
 
 3. **Set up the credentials.** `make e2e` runs [`evals/e2e/hello/`](evals/e2e/hello/)
-   twice: three evals across three Claude Code arms, judged by Codex; then the same
+   twice: four evals across three Claude Code arms, judged by Codex; then the same
    evals across Claude Code, Codex, and OpenCode arms with the binder, the judge,
    and every arm on OpenRouter. It needs `claude` and `codex` on `PATH`, a running
    Docker daemon, and four credentials in `.env`:
