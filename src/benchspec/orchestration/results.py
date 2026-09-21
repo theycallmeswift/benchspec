@@ -65,11 +65,14 @@ def sum_tokens(usage: dict) -> int:
     return sum(int(usage.get(field, 0) or 0) for field in _TOKEN_FIELDS)
 
 
+def substitute_today(text: str, today: str | None = None) -> str:
+    """Substitute {TODAY} without rejecting other placeholder-shaped text."""
+    return text.replace("{TODAY}", today) if today is not None else text
+
+
 def substitute_prompt(prompt: str, today: str | None = None) -> str:
     """Substitute {TODAY} in a prompt and reject unknown placeholders."""
-    result = prompt
-    if today is not None:
-        result = result.replace("{TODAY}", today)
+    result = substitute_today(prompt, today)
     residual = _PLACEHOLDER.findall(result)
     if residual:
         raise ValueError(

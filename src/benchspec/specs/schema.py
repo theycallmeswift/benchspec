@@ -156,6 +156,46 @@ def _validate_history(history: object, path: str) -> None:
                 raise SchemaError(f"{turn_path}.{key}: must be non-empty")
 
 
+def _validate_history_path(history_path: str, eval_path: Path) -> list[str]:
+    """Read and validate a JSONL history file contained by its eval folder."""
+    if Path(history_path).suffix != ".jsonl":
+        raise SchemaError(f"{eval_path}: history path {history_path!r} must name a `.jsonl` file")
+
+    try:
+        eval_folder = eval_path.parent.resolve()
+        resolved_path = (eval_path.parent / history_path).resolve()
+    except (OSError, RuntimeError) as error:
+        raise SchemaError(
+            f"{eval_path}: could not resolve history path {history_path!r}: {error}"
+        ) from error
+    if not resolved_path.is_relative_to(eval_folder):
+        raise SchemaError(
+            f"{eval_path}: history path {history_path!r} resolves outside the eval folder"
+        )
+
+    try:
+        transcript = resolved_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise SchemaError(
+            f"{eval_path}: could not read history path {history_path!r}: {error}"
+        ) from error
+
+    lines: list[str] = []
+    for line_number, line in enumerate(transcript.splitlines(), start=1):
+        # Blank lines are skipped wherever they occur; non-blank line bytes stay untouched.
+        if not line.strip():
+            continue
+        try:
+            json.loads(line)
+        except json.JSONDecodeError as error:
+            raise SchemaError(
+                f"{eval_path}: history path {history_path!r}, line {line_number}: "
+                f"invalid JSON: {error.msg}"
+            ) from error
+        lines.append(line)
+    return lines
+
+
 def _validate_evals_v1(data: dict) -> None:
     """Validate an benchspec/v1 output-eval document."""
     _reject_extra_keys(data, {"$schema", "evals"}, "root")

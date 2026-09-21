@@ -101,6 +101,23 @@ def test_history_extra_key_rejected() -> None:
         )
 
 
+def test_json_document_history_still_rejects_path_form() -> None:
+    """Verify benchspec/v1 documents retain their inline-list-only contract."""
+    with pytest.raises(SchemaError, match="expected list"):
+        _validate(
+            _doc(
+                [
+                    {
+                        "id": "a",
+                        "prompt": "p",
+                        "assertions": ["x"],
+                        "history": "session.jsonl",
+                    }
+                ]
+            )
+        )
+
+
 def test_assertions_must_be_strings() -> None:
     """Verify assertions must be strings."""
     with pytest.raises(SchemaError):

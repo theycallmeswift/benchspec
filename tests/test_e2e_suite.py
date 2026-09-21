@@ -131,7 +131,9 @@ def test_hello_evals_exercise_history_and_seeded_workspace() -> None:
     request_file = REPO_ROOT / "evals/e2e/hello/evals/hello-file/workspace/request.md"
 
     assert context_case.history
-    assert any("Bob" in turn["content"] for turn in context_case.history)
+    assert any(
+        isinstance(turn, dict) and "Bob" in turn["content"] for turn in context_case.history
+    )
     assert "Bob" not in context_case.prompt
     assert context_case.workspace_dir == request_file.parent
     assert request_file.is_file()

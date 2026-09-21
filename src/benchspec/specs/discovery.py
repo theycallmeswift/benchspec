@@ -59,8 +59,8 @@ class EvalCase:
         return self.eval.get("clauses") or [None] * len(self.assertions)
 
     @property
-    def history(self) -> list[dict]:
-        """Return prior-context turns for this discovered case."""
+    def history(self) -> list[dict | str]:
+        """Return prior-context turns or verbatim transcript lines for this case."""
         return self.eval.get("history", [])
 
     @property
