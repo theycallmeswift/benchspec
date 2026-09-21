@@ -12,11 +12,11 @@ its scope clause, kept raw beside it (`clauses`, aligned by index). A clause sco
 `- [ ]` line directly above it; a display-only parent is never graded, so it cannot carry one.
 
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
-(`history:` only — an optional list of `{role, content}` turns) + `## Prompt` prose
-(required) + `## Assertions` checklist (required, all prose; H3 subheadings are
-display-only groups, flattened in document order). The eval id is the parent folder name
-for `eval.md`, or the `<stem>` for `<stem>.eval.md`. Single-turn only: `history:` carries
-any prior context; there is no `## Turn` syntax.
+(`history:` only — an optional list of `{role, content}` turns or sibling JSONL path) +
+`## Prompt` prose (required) + `## Assertions` checklist (required, all prose; H3
+subheadings are display-only groups, flattened in document order). The eval id is the
+parent folder name for `eval.md`, or the `<stem>` for `<stem>.eval.md`. Single-turn only:
+`history:` carries any prior context; there is no `## Turn` syntax.
 """
 
 from __future__ import annotations
@@ -284,8 +284,17 @@ def parse_eval_md(path: Path) -> dict:
         # Validate here so the single-file path is as strict as discovery: a bare
         # parse_eval_md call (linter, per-file tooling) must still reject a malformed
         # history block, not defer that to schema inside discovery.
-        schema._validate_history(fm["history"], f"{path}: history")
-        result["history"] = fm["history"]
+        history = fm["history"]
+        if isinstance(history, list):
+            schema._validate_history(history, f"{path}: history")
+            result["history"] = history
+        elif isinstance(history, str):
+            result["history"] = schema._validate_history_path(history, path)
+        else:
+            raise MdFormatError(
+                f"{path}: history: expected list or string path, "
+                f"got {type(history).__name__}"
+            )
 
     sections = _sections(body_lines, path)
     prompt = None

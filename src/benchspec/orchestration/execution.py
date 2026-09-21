@@ -1,7 +1,8 @@
 """Orchestrate one `(eval, arm)`: run the agent, grade it, write the artifacts.
 
-The eval is single-turn: a `history:` transcript block (context) is prepended to the one
-graded prompt. Both arms grade identically — there is no with-skill invocation gate.
+The eval is single-turn: a `history:` transcript block of authored turns or verbatim
+JSONL lines is prepended to the one graded prompt. Both arms grade identically — there is
+no with-skill invocation gate.
 Activation is an ordinary prose assertion (`` - Skill `X` invoked ``) the binder maps to
 the `skill_invoked` checker, graded True on a firing arm and False on a non-firing one off
 the arm's dispatched-skills set, not a harness assert. A line whose scope clause does not

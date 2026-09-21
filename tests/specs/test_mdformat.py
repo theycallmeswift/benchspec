@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import textwrap
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 import pytest
 
+from benchspec.orchestration.room import render_history
 from benchspec.specs import mdformat, schema
 
 
@@ -131,6 +136,351 @@ def test_parse_eval_md_with_history(tmp_path: Path) -> None:
     ]
 
 
+def test_parse_eval_md_with_history_path_reads_raw_jsonl_lines(tmp_path: Path) -> None:
+    """Verify a history path stores non-blank JSONL lines without normalization."""
+    eval_path = _write_slug(
+        tmp_path,
+        "captured-session",
+        """\
+        ---
+        history: ./session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue the session.
+
+        ## Assertions
+
+        - [ ] the session continued
+    """,
+    )
+    transcript_lines = [
+        '  {"type":"assistant","message":{"content":"first"}}  ',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}',
+    ]
+    (eval_path.parent / "session.jsonl").write_text(
+        f"{transcript_lines[0]}\n\n   \n{transcript_lines[1]}\n", encoding="utf-8"
+    )
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["history"] == transcript_lines
+
+
+def test_parse_eval_md_history_path_splits_records_only_on_lf(tmp_path: Path) -> None:
+    """Verify a raw Unicode line separator stays inside its JSONL record."""
+    eval_path = _write_slug(
+        tmp_path,
+        "unicode-line-separator",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    transcript_line = '{"content":"a\u2028b"}'
+    (eval_path.parent / "session.jsonl").write_text(transcript_line + "\n", encoding="utf-8")
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["history"] == [transcript_line]
+    assert render_history(ev["history"]) == (
+        f"<transcript>\n{transcript_line}\n</transcript>\n\n"
+    )
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo") or not hasattr(signal, "SIGALRM"),
+    reason="requires POSIX FIFOs and alarm signals",
+)
+def test_parse_eval_md_rejects_fifo_history_target_without_blocking(tmp_path: Path) -> None:
+    """Verify a FIFO history target fails promptly as a non-regular file."""
+    eval_path = _write_slug(
+        tmp_path,
+        "fifo-transcript",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    history_path = eval_path.parent / "session.jsonl"
+    os.mkfifo(history_path)
+
+    def fail_on_timeout(signal_number: int, frame: FrameType | None) -> NoReturn:
+        """Fail instead of letting a FIFO read hang the test process."""
+        raise AssertionError("history FIFO validation blocked")
+
+    previous_handler = signal.signal(signal.SIGALRM, fail_on_timeout)
+    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    try:
+        with pytest.raises(schema.SchemaError) as exc_info:
+            mdformat.parse_eval_md(eval_path)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "session.jsonl" in str(exc_info.value)
+
+
+def test_parse_eval_md_wraps_nul_history_path_error(tmp_path: Path) -> None:
+    """Verify a NUL path becomes a location-rich collection error."""
+    eval_path = _write_slug(
+        tmp_path,
+        "nul-transcript-path",
+        """\
+        ---
+        history: "foo\\0.jsonl"
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    history_path = "foo\0.jsonl"
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert repr(history_path) in str(exc_info.value)
+
+
+def test_parse_eval_md_rejects_non_jsonl_history_path(tmp_path: Path) -> None:
+    """Verify history path files require the documented JSONL suffix."""
+    eval_path = _write_slug(
+        tmp_path,
+        "wrong-transcript-suffix",
+        """\
+        ---
+        history: session.json
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    (eval_path.parent / "session.json").write_text('{}\n', encoding="utf-8")
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "session.json" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("history", ["7", "{format: jsonl}"])
+def test_parse_eval_md_rejects_unsupported_history_types(
+    tmp_path: Path, history: str
+) -> None:
+    """Verify history type dispatch rejects every form other than list or path."""
+    eval_path = _write_slug(
+        tmp_path,
+        "bad-history-type",
+        f"""\
+        ---
+        history: {history}
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "expected list or string path" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("history_path", ["../outside.jsonl", "nested/../../outside.jsonl"])
+def test_parse_eval_md_rejects_history_path_escape(
+    tmp_path: Path, history_path: str
+) -> None:
+    """Verify resolved parent traversals cannot escape the eval folder."""
+    eval_path = _write_slug(
+        tmp_path,
+        "path-escape",
+        f"""\
+        ---
+        history: {history_path}
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    (eval_path.parent.parent / "outside.jsonl").write_text('{}\n', encoding="utf-8")
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert history_path in str(exc_info.value)
+    assert "outside the eval folder" in str(exc_info.value)
+
+
+def test_parse_eval_md_rejects_history_symlink_escape(tmp_path: Path) -> None:
+    """Verify a transcript symlink cannot resolve outside the eval folder."""
+    eval_path = _write_slug(
+        tmp_path,
+        "symlink-escape",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{}\n', encoding="utf-8")
+    (eval_path.parent / "session.jsonl").symlink_to(outside)
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "session.jsonl" in str(exc_info.value)
+    assert "outside the eval folder" in str(exc_info.value)
+
+
+def test_parse_eval_md_allows_history_symlink_inside_eval_folder(tmp_path: Path) -> None:
+    """Verify an in-folder transcript symlink resolves and renders."""
+    eval_path = _write_slug(
+        tmp_path,
+        "symlink-inside",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    transcript_line = '{"role":"user","content":"captured"}'
+    (eval_path.parent / "capture.jsonl").write_text(transcript_line + "\n", encoding="utf-8")
+    (eval_path.parent / "session.jsonl").symlink_to("capture.jsonl")
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["history"] == [transcript_line]
+    assert render_history(ev["history"]) == (
+        f"<transcript>\n{transcript_line}\n</transcript>\n\n"
+    )
+
+
+def test_parse_eval_md_rejects_first_invalid_jsonl_line(tmp_path: Path) -> None:
+    """Verify transcript validation names its path and first invalid source line."""
+    eval_path = _write_slug(
+        tmp_path,
+        "malformed-transcript",
+        """\
+        ---
+        history: transcript.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    (eval_path.parent / "transcript.jsonl").write_text(
+        '{"valid":1}\n\n{"broken":}\nnot-json\n', encoding="utf-8"
+    )
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    message = str(exc_info.value)
+    assert str(eval_path) in message
+    assert "transcript.jsonl" in message
+    assert "line 3" in message
+    assert "line 4" not in message
+
+
+def test_empty_history_file_matches_omitted_history_rendering(tmp_path: Path) -> None:
+    """Verify an empty transcript produces no prefix, exactly like no history."""
+    eval_path = _write_slug(
+        tmp_path,
+        "empty-transcript",
+        """\
+        ---
+        history: transcript.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    (eval_path.parent / "transcript.jsonl").write_text("", encoding="utf-8")
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["history"] == []
+    assert render_history(ev["history"]) == render_history(None)
+
+
 def test_parse_eval_md_malformed_history_rejected(tmp_path: Path) -> None:
     """Verify parse eval md malformed history rejected."""
     # A bare parse_eval_md call must validate history itself, not defer to discovery.
@@ -152,6 +502,31 @@ def test_parse_eval_md_malformed_history_rejected(tmp_path: Path) -> None:
     """,
     )
     with pytest.raises(schema.SchemaError, match="history"):
+        mdformat.parse_eval_md(eval_path)
+
+
+def test_parse_eval_md_rejects_bare_string_inline_history_turn(tmp_path: Path) -> None:
+    """Verify list dispatch keeps rejecting malformed inline turns."""
+    eval_path = _write_slug(
+        tmp_path,
+        "bare-history-turn",
+        """\
+        ---
+        history:
+          - set up my vault
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+
+    with pytest.raises(schema.SchemaError, match=r"history\[0\].*expected object"):
         mdformat.parse_eval_md(eval_path)
 
 

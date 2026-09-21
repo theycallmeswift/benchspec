@@ -16,7 +16,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from benchspec.orchestration.results import substitute_prompt
+from benchspec.orchestration.results import process_substitutions, substitute_prompt
 from benchspec.specs.schema import SchemaError
 
 
@@ -63,13 +63,25 @@ def seed_room(workspace_dir: Path | None, workdir: Path, today: str | None = Non
     return shas
 
 
-def render_history(history: list[dict] | None, today: str | None = None) -> str:
-    """Render history turns into the transcript prefix for an agent prompt."""
+def render_history(history: list[dict | str] | None, today: str | None = None) -> str:
+    """Render history turns or verbatim JSONL lines into an agent prompt prefix."""
     if not history:
         return ""
     lines = ["<transcript>"]
+    verbatim = isinstance(history[0], str)
     for turn_index, turn in enumerate(history):
+        if verbatim:
+            if not isinstance(turn, str):
+                raise SchemaError(
+                    f"history[{turn_index}]: all entries must use the same representation"
+                )
+            lines.append(process_substitutions(turn, today))
+            continue
         if not isinstance(turn, dict):
+            if isinstance(turn, str):
+                raise SchemaError(
+                    f"history[{turn_index}]: all entries must use the same representation"
+                )
             raise SchemaError(f"history[{turn_index}]: turn must be a mapping with role/content")
         for key in ("role", "content"):
             val = turn.get(key)

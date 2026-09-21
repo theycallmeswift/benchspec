@@ -81,7 +81,7 @@ Read ./notes/standup.md and write a summary to ./reports/{TODAY}/standup.md.
 | Part | Required | Rules |
 |---|---|---|
 | Frontmatter | yes | The `---`/`---` delimiters are required even when empty. `history` is the **only** allowed key. |
-| `history` | no | A list of `{role, content}` turns, each non-empty. Rendered as a transcript prefix before the graded prompt, so prior context works on any harness because it rides in the prompt rather than in session state. Only the final prompt is graded. |
+| `history` | no | A list of non-empty `{role, content}` turns, or a path to a `.jsonl` transcript in the eval folder. Rendered as a transcript prefix before the graded prompt, so prior context works on any harness because it rides in the prompt rather than in session state. Only the final prompt is graded. |
 | `## Prompt` | yes | The agent's instruction. Non-empty prose. |
 | `## Assertions` | yes | A `- [ ]` checklist, at least one item. |
 
@@ -89,6 +89,44 @@ Anything else is a hard error: unknown headings, prose before the first `##`,
 plain `-` bullets, unknown frontmatter keys. `### ` subheadings are legal only
 inside `## Assertions`, where they are display-only groups: no semantics ride on
 the title, and the items flatten in document order.
+
+### Captured JSONL history
+
+Point `history` at a `.jsonl` capture to carry a session that really happened,
+tool calls and results included:
+
+```yaml
+---
+history: ./session.jsonl
+---
+```
+
+The path resolves against the eval folder and must stay inside it, so sibling
+`*.eval.md` files can share one transcript. A symlink is allowed when its target
+also resolves inside — a deliberate exception to the discovery walk, which skips
+symlinks.
+
+Every non-blank line must parse as JSON on its own. Blank lines are skipped; the
+rest render verbatim, in file order. An empty file is valid and produces the same
+prefix as omitting `history`.
+
+Claude Code events, Codex item events, and native role/content turns all work:
+
+```jsonl
+{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}
+{"role":"assistant","content":"Done."}
+```
+
+Those are authoring guidance, not recognized formats — benchspec never branches
+on shape or normalizes fields. Curate a capture down to the context the eval
+needs, keeping vendor IDs consistent. Nothing enforces that, and there is no size
+ceiling.
+
+`{TODAY}` still substitutes. Other `{UPPERCASE}` tokens survive, making
+transcripts the one place they reach the agent — necessary, since real captures
+carry `{CLAUDE_PLUGIN_ROOT}` and the like. The cost: a literal `{TODAY}` in a
+capture is silently replaced.
 
 ### Decomposing compound assertions
 
@@ -160,10 +198,13 @@ per-arm table instead ([`results.md`](results.md#benchmarkmd-section-by-section)
 `{TODAY}` substitutes to the host's UTC date (`YYYY-MM-DD`) in the prompt,
 assertions, history content, and in workspace file contents *and file names*, so
 date-stamped fixtures and date-sensitive assertions stay honest on any day the
-suite runs. Any other `{UPPERCASE}` token in a prompt, history turn, or assertion
-is rejected before the agent runs rather than leaked to it: eval prompts must be
-self-contained, so put values in the workspace, not in placeholders (a scope
-clause's `{VAR}` is its own vocabulary, [above](#scoping-an-assertion-to-arms)).
+suite runs. Any other `{UPPERCASE}` token in a prompt, inline history turn, or
+assertion is rejected before the agent runs rather than leaked to it: eval
+prompts must be self-contained, so put values in the workspace, not in
+placeholders (a scope clause's `{VAR}` is its own vocabulary,
+[above](#scoping-an-assertion-to-arms)). Raw JSONL history is the deliberate
+exception: unknown uppercase tokens survive, as described
+[above](#captured-jsonl-history).
 
 ## The workspace and the clean room
 
@@ -310,7 +351,9 @@ suite: it is a report, not a gate.
 - `group` and `eval_id` must match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case).
 - `## Prompt` and `## Assertions` are required and non-empty; assertions are
   non-empty strings.
-- `history` must be a list of `{role, content}` turns, both fields non-empty.
+- `history` must be a list of `{role, content}` turns with both fields non-empty,
+  or an eval-folder-relative `.jsonl` path whose resolved target stays in the
+  eval folder and whose non-blank lines each parse as JSON.
 - `history` is the only frontmatter key; unknown keys are rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
 - A graded line may carry one `- if:` / `- unless:` sub-bullet; a second clause,

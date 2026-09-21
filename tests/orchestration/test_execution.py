@@ -25,6 +25,7 @@ from benchspec.orchestration.room import Facts
 from benchspec.sandbox.backend import FingerprintInputs, LiveSandbox
 from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.sandbox.sandbox import TurnRunner, ensure_snapshot
+from benchspec.specs import mdformat
 from benchspec.specs.discovery import EnvConfig, EvalCase
 from benchspec.specs.schema import SchemaError
 from benchspec.testing import FakeSandbox
@@ -1116,6 +1117,50 @@ def test_seed_block_prepended_to_graded_prompt(tmp_path: Path) -> None:
         "<transcript>\nuser: scope my plan\nassistant: which part?\n</transcript>"
     )
     assert sent.index("<transcript>") < sent.index("the deeper question")
+
+
+def test_jsonl_history_reaches_agent_ahead_of_graded_prompt(tmp_path: Path) -> None:
+    """Verify a parsed history path reaches the agent as a verbatim prompt prefix."""
+    workspace.set_current_iteration("iteration_01")
+    eval_dir = tmp_path / "skills" / "myskill" / "evals" / "captured"
+    eval_dir.mkdir(parents=True)
+    eval_file = eval_dir / "eval.md"
+    eval_file.write_text(
+        "---\nhistory: session.jsonl\n---\n\n"
+        "## Prompt\n\nthe graded prompt\n\n## Assertions\n\n- [ ] continued\n",
+        encoding="utf-8",
+    )
+    transcript_line = '{"type":"assistant","message":{"content":"captured"}}'
+    (eval_dir / "session.jsonl").write_text(transcript_line + "\n", encoding="utf-8")
+    eval_case = EvalCase(
+        group="myskill",
+        eval_dir=eval_dir,
+        eval_file=eval_file,
+        eval=mdformat.parse_eval_md(eval_file),
+    )
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    session_factory = _RecordedSession(
+        RunResult("captured", "trial", "out", 1, 1, False, session_id="session", fired=True)
+    )
+
+    run_eval_arm(
+        eval_case,
+        TRIAL,
+        workdir,
+        {},
+        tmp_path,
+        today="2099-01-01",
+        repo_root=tmp_path,
+        sample=0,
+        session_factory=session_factory,
+        grade=_grade_all_pass,
+        bind=_punt_all,
+    )
+
+    assert session_factory.prompts == [
+        f"<transcript>\n{transcript_line}\n</transcript>\n\nthe graded prompt"
+    ]
 
 
 def test_empty_seed_leaves_prompt_unchanged(tmp_path: Path) -> None:

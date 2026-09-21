@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.orchestration import cases
 from benchspec.specs import discovery, schema
 from benchspec.specs.discovery import (
     discover_eval_cases,
@@ -344,6 +345,28 @@ def test_discover_eval_cases_raises_on_bad_schema(tmp_path: Path) -> None:
         discover_eval_cases(tmp_path)
 
     assert str(bad) in str(exc_info.value)  # the offending file is named
+
+
+def test_malformed_transcript_fails_collection_before_runtime_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify collection validates transcripts before resolving any runnable arms."""
+    group_dir = _write_eval(tmp_path, "evals", "bad-transcript")
+    (group_dir / "eval.md").write_text(
+        "---\nhistory: session.jsonl\n---\n\n"
+        "## Prompt\n\nContinue.\n\n## Assertions\n\n- [ ] continued\n",
+        encoding="utf-8",
+    )
+    (group_dir / "session.jsonl").write_text('{"broken":}\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        cases,
+        "run_set_when_needed",
+        lambda *args, **kwargs: pytest.fail("runtime arm setup reached"),
+    )
+
+    with pytest.raises(schema.SchemaError, match="session.jsonl.*line 1"):
+        cases.eval_arm_params(_FakeConfig(repo_root=str(tmp_path)))
 
 
 def test_resolve_eval_paths_defaults_when_unset(tmp_path: Path) -> None:
