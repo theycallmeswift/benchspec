@@ -164,13 +164,17 @@ def _validate_history_path(history_path: str, eval_path: Path) -> list[str]:
     try:
         eval_folder = eval_path.parent.resolve()
         resolved_path = (eval_path.parent / history_path).resolve()
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, ValueError) as error:
         raise SchemaError(
             f"{eval_path}: could not resolve history path {history_path!r}: {error}"
         ) from error
     if not resolved_path.is_relative_to(eval_folder):
         raise SchemaError(
             f"{eval_path}: history path {history_path!r} resolves outside the eval folder"
+        )
+    if not resolved_path.is_file():
+        raise SchemaError(
+            f"{eval_path}: history path {history_path!r} must resolve to a regular file"
         )
 
     try:
@@ -181,7 +185,7 @@ def _validate_history_path(history_path: str, eval_path: Path) -> list[str]:
         ) from error
 
     lines: list[str] = []
-    for line_number, line in enumerate(transcript.splitlines(), start=1):
+    for line_number, line in enumerate(transcript.split("\n"), start=1):
         # Blank lines are skipped wherever they occur; non-blank line bytes stay untouched.
         if not line.strip():
             continue

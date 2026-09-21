@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import textwrap
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 import pytest
 
@@ -162,6 +166,135 @@ def test_parse_eval_md_with_history_path_reads_raw_jsonl_lines(tmp_path: Path) -
     ev = mdformat.parse_eval_md(eval_path)
 
     assert ev["history"] == transcript_lines
+
+
+def test_parse_eval_md_history_path_splits_records_only_on_lf(tmp_path: Path) -> None:
+    """Verify a raw Unicode line separator stays inside its JSONL record."""
+    eval_path = _write_slug(
+        tmp_path,
+        "unicode-line-separator",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    transcript_line = '{"content":"a\u2028b"}'
+    (eval_path.parent / "session.jsonl").write_text(transcript_line + "\n", encoding="utf-8")
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["history"] == [transcript_line]
+    assert render_history(ev["history"]) == (
+        f"<transcript>\n{transcript_line}\n</transcript>\n\n"
+    )
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo") or not hasattr(signal, "SIGALRM"),
+    reason="requires POSIX FIFOs and alarm signals",
+)
+def test_parse_eval_md_rejects_fifo_history_target_without_blocking(tmp_path: Path) -> None:
+    """Verify a FIFO history target fails promptly as a non-regular file."""
+    eval_path = _write_slug(
+        tmp_path,
+        "fifo-transcript",
+        """\
+        ---
+        history: session.jsonl
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    history_path = eval_path.parent / "session.jsonl"
+    os.mkfifo(history_path)
+
+    def fail_on_timeout(signal_number: int, frame: FrameType | None) -> NoReturn:
+        """Fail instead of letting a FIFO read hang the test process."""
+        raise AssertionError("history FIFO validation blocked")
+
+    previous_handler = signal.signal(signal.SIGALRM, fail_on_timeout)
+    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    try:
+        with pytest.raises(schema.SchemaError) as exc_info:
+            mdformat.parse_eval_md(eval_path)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "session.jsonl" in str(exc_info.value)
+
+
+def test_parse_eval_md_wraps_nul_history_path_error(tmp_path: Path) -> None:
+    """Verify a NUL path becomes a location-rich collection error."""
+    eval_path = _write_slug(
+        tmp_path,
+        "nul-transcript-path",
+        """\
+        ---
+        history: "foo\\0.jsonl"
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    history_path = "foo\0.jsonl"
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert repr(history_path) in str(exc_info.value)
+
+
+def test_parse_eval_md_rejects_non_jsonl_history_path(tmp_path: Path) -> None:
+    """Verify history path files require the documented JSONL suffix."""
+    eval_path = _write_slug(
+        tmp_path,
+        "wrong-transcript-suffix",
+        """\
+        ---
+        history: session.json
+        ---
+
+        ## Prompt
+
+        Continue.
+
+        ## Assertions
+
+        - [ ] continued
+    """,
+    )
+    (eval_path.parent / "session.json").write_text('{}\n', encoding="utf-8")
+
+    with pytest.raises(schema.SchemaError) as exc_info:
+        mdformat.parse_eval_md(eval_path)
+
+    assert str(eval_path) in str(exc_info.value)
+    assert "session.json" in str(exc_info.value)
 
 
 @pytest.mark.parametrize("history", ["7", "{format: jsonl}"])
