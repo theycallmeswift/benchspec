@@ -92,8 +92,8 @@ the title, and the items flatten in document order.
 
 ### Captured JSONL history
 
-Point `history` at a captured transcript when hand-authored turns would lose the
-tool calls and results that shaped a real session:
+Point `history` at a `.jsonl` capture to carry a session that really happened,
+tool calls and results included:
 
 ```yaml
 ---
@@ -101,19 +101,16 @@ history: ./session.jsonl
 ---
 ```
 
-The path resolves relative to the eval folder and its resolved target must remain
-inside that folder. An eval folder may therefore share one transcript across
-sibling `*.eval.md` files. A transcript symlink is allowed when its target also
-resolves inside the eval folder; this deliberately differs from eval discovery,
-whose directory walk skips symlinks.
+The path resolves against the eval folder and must stay inside it, so sibling
+`*.eval.md` files can share one transcript. A symlink is allowed when its target
+also resolves inside — a deliberate exception to the discovery walk, which skips
+symlinks.
 
-Every non-blank line must parse independently as JSON. Blank lines are skipped
-wherever they occur, while every other line is stored and rendered verbatim in
-file order. An empty file is valid and produces the same prompt prefix as
-omitting `history`.
+Every non-blank line must parse as JSON on its own. Blank lines are skipped; the
+rest render verbatim, in file order. An empty file is valid and produces the same
+prefix as omitting `history`.
 
-Common source shapes include Claude Code events, Codex item events, and native
-role/content turns:
+Claude Code events, Codex item events, and native role/content turns all work:
 
 ```jsonl
 {"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}
@@ -121,16 +118,15 @@ role/content turns:
 {"role":"assistant","content":"Done."}
 ```
 
-These are authoring guidance, not recognized formats: benchspec never branches
-on their shape or normalizes their fields. Curate captures down to the context
-the eval needs, including any vendor IDs that must remain consistent. That is an
-unenforced authoring discipline; transcript files have no size ceiling.
+Those are authoring guidance, not recognized formats — benchspec never branches
+on shape or normalizes fields. Curate a capture down to the context the eval
+needs, keeping vendor IDs consistent. Nothing enforces that, and there is no size
+ceiling.
 
-`{TODAY}` is still substituted inside each raw line. Other `{UPPERCASE}` tokens
-survive unchanged, making transcript files the one place such tokens reach the
-agent. This avoids rejecting ordinary captures containing values such as
-`{CLAUDE_PLUGIN_ROOT}`, but it also means a literal `{TODAY}` captured from a
-real session is silently replaced.
+`{TODAY}` still substitutes. Other `{UPPERCASE}` tokens survive, making
+transcripts the one place they reach the agent — necessary, since real captures
+carry `{CLAUDE_PLUGIN_ROOT}` and the like. The cost: a literal `{TODAY}` in a
+capture is silently replaced.
 
 ### Decomposing compound assertions
 

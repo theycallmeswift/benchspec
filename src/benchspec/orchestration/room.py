@@ -16,7 +16,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from benchspec.orchestration.results import substitute_prompt, substitute_today
+from benchspec.orchestration.results import process_substitutions, substitute_prompt
 from benchspec.specs.schema import SchemaError
 
 
@@ -75,7 +75,7 @@ def render_history(history: list[dict | str] | None, today: str | None = None) -
                 raise SchemaError(
                     f"history[{turn_index}]: all entries must use the same representation"
                 )
-            lines.append(substitute_today(turn, today))
+            lines.append(process_substitutions(turn, today))
             continue
         if not isinstance(turn, dict):
             if isinstance(turn, str):
