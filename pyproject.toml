@@ -154,6 +154,21 @@ arms = [
   { name = "trial-opencode", harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
 ]
 
+# Placebo experiment: the stub skill carries the real name and description with a noop
+# body, so trial vs placebo isolates the skill's content from its mere presence.
+[tool.benchspec.sets.e2e-placebo]
+harness  = "claude-code"
+provider = "openrouter"
+model    = "anthropic/claude-sonnet-4.6"
+effort   = "medium"
+baseline = "baseline"
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "baseline" },  # installs no skill
+  { name = "placebo" },   # installs the noop stub
+  { name = "trial" },     # installs the skill
+]
+
 [tool.benchspec.judge]
 harness = "codex"
 model   = "gpt-5.5"
