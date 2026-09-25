@@ -151,7 +151,7 @@ def test_microsandbox_imported_only_under_allowlist() -> None:
     """No source file outside the allowlist imports the microsandbox package.
 
     `microsandbox.py` is the ONLY source file that imports microsandbox at all: agent
-    credentials are backend-neutral `Credential`s (rendered to a microsandbox `Secret`
+    credentials are backend-neutral `Credential`s (rendered to microsandbox secret specs
     only inside `microsandbox_secrets`), and every microsandbox error is translated to
     the neutral `SandboxError` before it leaves the backend. This guards that boundary
     so a future edit cannot reintroduce a scattered `import microsandbox` elsewhere.

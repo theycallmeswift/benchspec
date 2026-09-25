@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from benchspec.agents.base import Credential
+from benchspec.agents.base import FIXED_SKILLS_HOME, Credential
 from benchspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
-from benchspec.grading.trajectory import skills_dispatched
+from benchspec.grading.trajectory import render_process_facts, skills_dispatched
 from benchspec.sandbox.errors import SandboxError
 from tests.agents.doubles import SLOW_EXEC_SECONDS, SlowSandbox, exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
@@ -1127,8 +1127,6 @@ def test_parse_opencode_jsonl_trajectory_feeds_shared_consumers() -> None:
     """Verify parse opencode jsonl trajectory feeds shared consumers."""
     # The normalized trajectory must work with the agent-agnostic helpers, so the
     # judge process-facts payoff covers OpenCode evals too.
-    from benchspec.grading.trajectory import render_process_facts, skills_dispatched
-
     stream = json.dumps(
         {
             "type": "tool_use",
@@ -1156,8 +1154,6 @@ def test_parse_opencode_jsonl_trajectory_empty_without_tool_uses() -> None:
 
 def test_opencode_fired_and_skills_dispatched_agree_on_name(tmp_path: Path) -> None:
     """Verify opencode fired and skills dispatched agree on name."""
-    from benchspec.grading.trajectory import skills_dispatched
-
     line = json.dumps(
         {
             "type": "tool_use",
@@ -1178,8 +1174,6 @@ def test_opencode_non_completed_skill_neither_fires_nor_trajectories() -> None:
     # A skill dispatch seen only in a non-completed frame is dropped by the
     # trajectory's completed-frame gate; `fired` must honor the same gate so the two
     # stay consistent (no fired=True with an empty process-facts trajectory).
-    from benchspec.grading.trajectory import skills_dispatched
-
     stream = "\n".join(
         [
             json.dumps(
@@ -1294,8 +1288,6 @@ def test_parse_opencode_jsonl_trajectory_keeps_rejected_tool_calls() -> None:
 
 def test_parse_opencode_jsonl_rejected_tool_call_feeds_shared_consumers() -> None:
     """A rejected entry passes through the agent-agnostic trajectory helpers."""
-    from benchspec.grading.trajectory import render_process_facts, skills_dispatched
-
     stream = json.dumps(
         {
             "type": "tool_use",
@@ -1325,8 +1317,6 @@ def test_opencode_skill_load_dir_is_config_path() -> None:
 
 def test_opencode_bridge_script_symlinks_fixed_home() -> None:
     """Verify opencode bridge script symlinks fixed home."""
-    from benchspec.agents.base import FIXED_SKILLS_HOME
-
     script = OpenCodeAgent().bridge_skills_home_script()
 
     assert FIXED_SKILLS_HOME in script

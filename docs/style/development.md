@@ -85,9 +85,11 @@ for _ in range(retry_budget): ...            # unused -> _
   size caps.
 - **Package by feature** (`sandbox/`, `binder/`, `runner/`), not by layer
   (`models/`, `utils/`).
-- **Imports at the top of the file.** Absolute (`from benchspec.sandbox import
-  provision`), never relative. Grouped and ordered stdlib → third-party →
-  local, linter-enforced.
+- **Imports at the top of the file — always.** Absolute (`from benchspec.sandbox
+  import provision`), never relative. Grouped and ordered stdlib → third-party →
+  local, linter-enforced. No function-level imports: guard optional
+  dependencies (see [Python](#python)), and break an import cycle by moving
+  code, not by deferring the import.
 - **Paradigm-agnostic.** Functions, classes, or procedural code per the shape
   of the problem — functional pipelines for transforms, classes for stateful
   services, procedural for scripts.
@@ -255,6 +257,31 @@ prompt = dedent("""\
 prompt = """
     Summarize this in one sentence.
 """
+```
+
+- **Optional dependencies get a guarded top-level import.** Import the module,
+  fall back to `None`, and check `is None` where it's used, so every call stays
+  type-checked. Don't import bare names in the `try`: a missing package then
+  fails as a `NameError`. Tests stub the module attribute, not `sys.modules`.
+
+```python
+try:
+    import microsandbox
+    import microsandbox.errors
+except ImportError:  # the optional extra is absent
+    microsandbox = None
+
+
+async def restore(snapshot: str, name: str) -> Sandbox:
+    if microsandbox is None:
+        raise SandboxError("microsandbox is not installed")
+
+    return await microsandbox.Sandbox.restore(snapshot, name=name)
+
+# Wrong — the import hides inside the function body
+async def restore(snapshot: str, name: str) -> Sandbox:
+    from microsandbox import Sandbox
+    return await Sandbox.restore(snapshot, name=name)
 ```
 
 ## Non-goals

@@ -9,19 +9,28 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import shutil
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from benchspec.agents.base import AgentCapabilities
+from benchspec.config.arms import Arm, Set
+from benchspec.grading import binder
 from benchspec.grading.binder_config import BinderConfig
-from benchspec.orchestration import workspace
+from benchspec.grading.judges import JudgeConfig, resolve_judge_config
+from benchspec.grading.judges.registry import run_judge
+from benchspec.orchestration import cases, workspace
 from benchspec.orchestration.execution import ArmOutcome
 from benchspec.reporting import report
 from benchspec.runners import pytest as plugin
 from benchspec.runners.run import PluginOptions
+from benchspec.sandbox import sandbox
 from benchspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from benchspec.specs.schema import SchemaError
 from tests.support import seed_arm
 
 ALPHA_MD = textwrap.dedent(
@@ -277,9 +286,6 @@ def test_preflight_session_sandbox_uses_resolved_set_backend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify the resolved set's .sandbox — not DEFAULT_SANDBOX — drives sandbox.preflight."""
-    from benchspec.config.arms import Arm, Set
-    from benchspec.orchestration import cases
-
     fake_set = Set(
         "s",
         [Arm("a", "claude-code", "opus"), Arm("b", "codex", "gpt-5.5")],
@@ -311,8 +317,6 @@ def test_preflight_session_sandbox_trigger_only_uses_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify a trigger-only run passes None so preflight resolves the default backend."""
-    from benchspec.orchestration import cases
-
     monkeypatch.setattr(cases, "session_run_set", lambda config: None)
     preflight_calls: list[tuple[str | None, list[tuple[str, str]]]] = []
     monkeypatch.setattr(
@@ -333,10 +337,6 @@ def test_preflight_grading_reports_binder_and_judge_failures_together(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A missing Gemini key does not hide a judge that cannot authenticate."""
-    from benchspec.grading import binder
-    from benchspec.grading.judges import JudgeConfig
-    from benchspec.orchestration import cases
-
     def reject_gemini(config: BinderConfig) -> None:
         """Reject the binder credential the way the real check does."""
         raise RuntimeError("GEMINI_API_KEY is required")
@@ -365,10 +365,6 @@ def test_preflight_grading_skips_the_credential_probe_when_the_judge_binary_is_m
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A missing judge binary is reported as such, never as a failed login on top of it."""
-    from benchspec.grading import binder
-    from benchspec.grading.judges import JudgeConfig
-    from benchspec.orchestration import cases
-
     def reject_binary(config: JudgeConfig) -> None:
         """Reject the judge binary the way the real check does."""
         raise RuntimeError("judge harness `codex` binary `codex` not found on PATH")
@@ -390,10 +386,6 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify test_eval passes the resolved set's .sandbox as run_eval_arm(sandbox_name=...)."""
-    from benchspec.grading import binder
-    from benchspec.orchestration import cases
-    from benchspec.sandbox import sandbox
-
     _make_project(pytester)  # set with sandbox default = docker
     captured: list[str] = []
 
@@ -1160,10 +1152,6 @@ def test_judge_preflight_fixture_raises_when_binary_missing(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify judge preflight fixture raises when binary missing."""
-    import shutil
-
-    from benchspec.sandbox import sandbox
-
     _make_project(pytester)
     monkeypatch.setattr(shutil, "which", lambda name: None)
     # Neither the Gemini key preflight (which judge_config runs first) nor the sandbox
@@ -1196,10 +1184,6 @@ def test_gemini_key_preflight_fixture_raises_when_missing(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify the judge_config fixture fails fast on a missing GEMINI_API_KEY."""
-    import shutil
-
-    from benchspec.sandbox import sandbox
-
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude")  # binary IS present
@@ -1226,8 +1210,6 @@ def test_gemini_key_preflight_skipped_under_collect_only(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify --collect-only never triggers the GEMINI_API_KEY preflight."""
-    from benchspec.sandbox import sandbox
-
     _make_project(pytester)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
@@ -1649,20 +1631,11 @@ def test_unset_judge_env_fixture_passes_collection_but_fails_at_judge_exec_time(
     # and a microVM — out of scope for `make test`; see tests/grading/judges/test_judge_registry.py
     # ::test_run_judge_env_unset_var_raises_schemaerror for the unit-level proof, and
     # tests/config/test_arms.py for expand_env's own unset-var coverage (the same function).
-    import tomllib
-
-    from benchspec.grading.judges import resolve_judge_config
-
     with (_FIXTURES / "unset-judge-env.toml").open("rb") as fixture_file:
         raw = tomllib.load(fixture_file)
     judge_table = raw["tool"]["benchspec"]["judge"]
     config = resolve_judge_config(pyproject_table=judge_table)  # no raise — structural only
     assert config.env == {"SOME_JUDGE_KEY": "$BENCHSPEC_JUDGE_FIXTURE_UNSET_VAR"}
-
-    import os
-
-    from benchspec.grading.judges.registry import run_judge
-    from benchspec.specs.schema import SchemaError
 
     os.environ.pop("BENCHSPEC_JUDGE_FIXTURE_UNSET_VAR", None)
     with pytest.raises(SchemaError, match="BENCHSPEC_JUDGE_FIXTURE_UNSET_VAR"):
