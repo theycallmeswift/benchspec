@@ -65,12 +65,16 @@ def test_image_identity_unavailable_with_error_when_read_raises(
     assert identity.image_digest_error == "snapshot not found"
 
 
-def test_image_identity_unavailable_when_microsandbox_not_installed() -> None:
-    """Without the microsandbox package installed, image_identity degrades, never raises.
+def test_image_identity_unavailable_when_microsandbox_not_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a usable microsandbox runtime, image_identity degrades, never raises.
 
-    This environment genuinely lacks the `microsandbox` package, so this exercises the
-    defensive wrapping end-to-end (no mocking) rather than relying on a faked failure.
+    The runtime path is pinned to nothing, so this exercises the defensive wrapping
+    end-to-end rather than relying on a faked failure — and keeps the backend's runtime
+    pin from writing `MSB_PATH` into the rest of the test process.
     """
+    monkeypatch.setenv("MSB_PATH", str(tmp_path / "missing-msb"))
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
 
     identity = microsandbox_backend.image_identity("any-snapshot")
