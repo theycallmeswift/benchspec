@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -27,7 +27,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
-from benchspec.grading.trigger import TriggerWatch
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -367,26 +367,6 @@ class CodexAgent(BaseAgent):
                 f"codex auth copy failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """Return whether streamed output shows meaningful agent activity."""
-        activity_events = {
-            "turn.started",
-            "item.started",
-            "item.completed",
-            "turn.completed",
-        }
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict) and event.get("type") in activity_events:
-                return True
-        return False
-
     async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
         res = await sandbox.shell(self.provision_script(), env=self.guest_env())
@@ -411,7 +391,7 @@ class CodexAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
-        watch: TriggerWatch | None = None,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -427,11 +407,11 @@ class CodexAgent(BaseAgent):
         env = {**self.guest_env(), **(extra_env or {})}
         try:
             await self._write_auth_json(sandbox)
-            if watch is not None:
+            if stop is not None:
                 return await self.invoke_watched(
                     sandbox,
                     cmd,
-                    watch=watch,
+                    stop=stop,
                     parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
                     cwd=workdir,
                     env=env,

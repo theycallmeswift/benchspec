@@ -75,11 +75,10 @@ an all-errored one.
 pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
 `PASSWORD`, or `AUTH` have their values masked), time per sample (task + judge),
 tokens per sample, an errored-sample count, and a per-eval table with sample
-counts and flakiness (the stdev across samples). An arm with
-[trigger-only](writing-evals.md#trigger-evals) samples that were stopped early
-adds a `Stopped early` line (the count per reason),
-and each affected eval row notes `N stopped early`: those samples' time and
-tokens are the cost of a routing decision, not of the full task.
+counts and flakiness (the stdev across samples). An arm with samples that
+[stopped early](writing-evals.md#runs-that-stop-early) adds a `Stopped early`
+line, and each affected eval row notes `N stopped early`: those samples' time
+and tokens are the cost of a routing decision, not of the full task.
 
 **Provenance.** One line per arm: the agent version observed *inside the guest*,
 the snapshot it ran from, and the pulled image digest. An arm that never produced
@@ -209,9 +208,9 @@ group, then `kind`, `eval_id`, `arm`, `sample`), the arm's three core axes
 (`harness`, `model`, `effort`) denormalized onto the row so no join with
 `meta.json` is needed, `errored`, `passed`/`total`/`scoped`/`skipped` assertion
 counts (`total` excludes skipped lines), and the timing and token figures from
-the sample's `timing.json`, including `stopped` (`null` for a run that ended on
-its own). Derivable from the tree; persisted so tools never
-hardcode the layout.
+the sample's `timing.json`, including `stopped` (`false` for a run that ended
+on its own). Derivable from the tree; persisted so tools never hardcode the
+layout.
 
 ### `benchmark.json`
 
@@ -221,7 +220,7 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
 (pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, `delta_noise_capped_cells`, errored and
-binder-degraded counts, `stopped_samples` keyed by reason, per-eval rows with a
+binder-degraded and `stopped_samples` counts, per-eval rows with their own
 `stopped_samples` count), the `scoped` rows (`group`, `eval_id`,
 `index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
 `runner` and `binder` identity, and the same
@@ -237,14 +236,14 @@ binder-degraded counts, `stopped_samples` keyed by reason, per-eval rows with a
   "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.
 - `timing.json`: `duration_ms`, `judge_ms`, and the token split
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
-  `cache_creation_tokens`; zero where the harness does not report them). A
-  [trigger-only](writing-evals.md#trigger-evals) run cut short adds `stopped`:
-  `"decided"` (every verdict was fixed) or `"timeout"` (it worked past the turn
-  timeout without firing); the key is absent for a run that ended on its own. A
+  `cache_creation_tokens`; zero where the harness does not report them). A run
+  that [stopped early](writing-evals.md#runs-that-stop-early) adds
+  `"stopped": true`; the key is absent for a run that ended on its own. A
   stopped run's `duration_ms` is the process wall time up to the stop, CLI
-  startup included, and its tokens are only what the harness reported before it: Claude Code's per-message usage, OpenCode's
-  finished steps, and nothing from Codex, which reports usage only when a turn
-  completes. When nothing was reported the token fields are `null`, never `0`.
+  startup included, and its tokens are only what the harness reported before
+  it: Claude Code's per-message usage, OpenCode's finished steps, and nothing
+  from Codex, which reports usage only when a turn completes. When nothing was
+  reported the token fields are `null`, never `0`.
 - `transcript.json`: a per-turn summary: prompt, result text, `is_error`, the
   CLI's `result_subtype`, `tool_call_count`, the final `workdir_tree`, and the
   skills dispatched (when any).

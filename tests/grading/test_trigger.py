@@ -1,14 +1,9 @@
-"""Tests for the skill-activation primitives and the trigger-only stop rule."""
+"""Tests for the skill-activation primitives and the activation stop rule."""
 
 import json
 
 from benchspec.grading.trajectory import extract_trajectory
-from benchspec.grading.trigger import (
-    STOP_DECIDED,
-    TriggerWatch,
-    detect_skill_fired,
-    streamed_activity,
-)
+from benchspec.grading.trigger import detect_skill_fired, settled_once_dispatched
 
 
 def _skill_line(skill_value: str) -> str:
@@ -136,10 +131,15 @@ def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
     assert detect_skill_fired(_malformed_shape_lines(), "bootstrap") is False
 
 
-def _watch_lines(watch: TriggerWatch, lines: list[str]) -> list[str | None]:
-    """Feed `lines` to a fresh watcher over Claude's trajectory, one verdict per line."""
-    watcher = watch.line_watcher(extract_trajectory)
-    return [watcher(line) for line in lines]
+def _settled_after(skills: set[str], lines: list[str]) -> list[bool]:
+    """Whether the rule over `skills` is settled after each of `lines`, read as Claude's stream."""
+    stop = settled_once_dispatched(skills)
+    trajectory: list[dict] = []
+    verdicts = []
+    for line in lines:
+        trajectory.extend(extract_trajectory(line))
+        verdicts.append(stop(trajectory))
+    return verdicts
 
 
 def _read_line() -> str:
@@ -147,73 +147,44 @@ def _read_line() -> str:
     return _named_tool_line("Read")
 
 
-def test_invoked_line_stops_on_its_skills_first_dispatch() -> None:
-    """Verify `X invoked` alone is decided by X's dispatch."""
-    watch = TriggerWatch(frozenset({"hello"}))
+def test_invoked_line_is_settled_by_its_skills_first_dispatch() -> None:
+    """Verify `X invoked` alone is settled by X's dispatch."""
+    verdicts = _settled_after({"hello"}, ['{"type":"system"}', _skill_line("hello")])
 
-    verdicts = _watch_lines(watch, ['{"type":"system"}', _skill_line("hello")])
-
-    assert verdicts == [None, STOP_DECIDED]
+    assert verdicts == [False, True]
 
 
 def test_two_skills_stay_open_until_both_fire() -> None:
-    """Verify `X invoked` + `Y not invoked` does not stop on X alone."""
-    watch = TriggerWatch(frozenset({"hello", "goodbye"}))
+    """Verify `X invoked` + `Y not invoked` is not settled by X alone."""
+    verdicts = _settled_after({"hello", "goodbye"}, [_skill_line("hello"), _skill_line("goodbye")])
 
-    verdicts = _watch_lines(watch, [_skill_line("hello"), _skill_line("goodbye")])
-
-    assert verdicts == [None, STOP_DECIDED]
+    assert verdicts == [False, True]
 
 
-def test_an_unrelated_skill_dispatch_does_not_decide() -> None:
-    """Verify another skill firing leaves the watched skill's verdict open."""
-    watch = TriggerWatch(frozenset({"hello"}))
+def test_an_unrelated_skill_dispatch_does_not_settle() -> None:
+    """Verify another skill firing leaves the named skill's verdict open."""
+    verdicts = _settled_after({"hello"}, [_skill_line("hello-world"), _skill_line("other:hello2")])
 
-    verdicts = _watch_lines(watch, [_skill_line("hello-world"), _skill_line("other:hello2")])
-
-    assert verdicts == [None, None]
+    assert verdicts == [False, False]
 
 
-def test_a_namespaced_or_fallback_dispatch_decides() -> None:
-    """Verify both fire shapes grading recognizes also decide the run."""
-    watch = TriggerWatch(frozenset({"hello"}))
-
-    namespaced = _watch_lines(watch, [_skill_line("greetings:hello")])
-    fallback = _watch_lines(watch, [_named_tool_line("greetings:hello")])
-
-    assert namespaced == [STOP_DECIDED]
-    assert fallback == [STOP_DECIDED]
+def test_a_namespaced_or_fallback_dispatch_settles() -> None:
+    """Verify both fire shapes grading recognizes also settle the run."""
+    assert _settled_after({"hello"}, [_skill_line("greetings:hello")]) == [True]
+    assert _settled_after({"hello"}, [_named_tool_line("greetings:hello")]) == [True]
 
 
-def test_an_undecided_run_is_never_stopped() -> None:
-    """Verify tool calls and text alone never stop a run whose skill has not fired."""
-    watch = TriggerWatch(frozenset({"hello"}))
+def test_an_unsettled_run_is_never_stopped() -> None:
+    """Verify tool calls and text alone never settle a run whose skill has not fired."""
     text = json.dumps(
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}
     )
 
-    verdicts = _watch_lines(watch, [_read_line()] * 20 + [text])
+    verdicts = _settled_after({"hello"}, [_read_line()] * 20 + [text])
 
-    assert verdicts == [None] * 21
-
-
-def test_each_watcher_starts_fresh() -> None:
-    """Verify one watch hands every run its own open skills."""
-    watch = TriggerWatch(frozenset({"hello", "goodbye"}))
-
-    first = _watch_lines(watch, [_skill_line("hello"), _skill_line("goodbye")])
-    second = _watch_lines(watch, [_skill_line("goodbye")])
-
-    assert first == [None, STOP_DECIDED]
-    assert second == [None]
+    assert verdicts == [False] * 21
 
 
-def test_streamed_activity_true_when_turn_began() -> None:
-    """Verify streamed_activity is true once an assistant event is seen."""
-    lines = ['{"type":"system"}', _skill_line("bootstrap")]
-    assert streamed_activity(lines) is True
-
-
-def test_streamed_activity_false_on_startup_only() -> None:
-    """Verify streamed_activity is false when only a startup/init line streamed."""
-    assert streamed_activity(['{"type":"system"}', "", "not json"]) is False
+def test_no_skills_is_settled_at_once() -> None:
+    """Verify a rule over no skills has nothing to wait for."""
+    assert settled_once_dispatched(set())([]) is True

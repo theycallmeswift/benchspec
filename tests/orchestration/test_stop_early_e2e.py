@@ -1,4 +1,4 @@
-"""End-to-end artifact tests for trigger-only evals: derived before the run, stopped early.
+"""End-to-end artifact tests for runs that stop once every verdict is fixed.
 
 Each test writes a real `eval.md`, parses it with `mdformat.parse_eval_md`, and drives it
 through the real `run_eval_arm` and artifact writer. Only the guest is a double: a session
@@ -16,7 +16,6 @@ from textwrap import dedent
 import pytest
 
 from benchspec.config.arms import Arm
-from benchspec.grading.trigger import TriggerWatch
 from benchspec.orchestration import workspace
 from benchspec.orchestration.execution import run_eval_arm
 from benchspec.orchestration.results import RunResult
@@ -58,17 +57,17 @@ def _no_real_vm(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-class _WatchRecordingSession:
-    """A session factory double that records the `watch` it was opened with."""
+class _StopRecordingSession:
+    """A session factory double that records the `stop` rule it was opened with."""
 
     def __init__(self, result: RunResult) -> None:
         """Hold the canned result the one turn returns."""
         self._result = result
-        self.watches: list[object] = []
+        self.stops: list[object] = []
 
-    def __call__(self, **kwargs: object) -> _WatchRecordingSession:
+    def __call__(self, **kwargs: object) -> _StopRecordingSession:
         """Record the session's stop rule; `run_eval_arm` enters the returned session."""
-        self.watches.append(kwargs["watch"])
+        self.stops.append(kwargs["stop"])
         return self
 
     async def __aenter__(self) -> TurnRunner:
@@ -116,12 +115,12 @@ def _eval_case(tmp_path: Path, checklist: str, eval_id: str = "alpha") -> EvalCa
 
 def _run(
     tmp_path: Path, eval_case: EvalCase, arm: Arm, result: RunResult
-) -> tuple[_WatchRecordingSession, dict, dict]:
+) -> tuple[_StopRecordingSession, dict, dict]:
     """Run sample 0 of `arm`; return the session double, grading.json, and timing.json."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir(exist_ok=True)
-    session = _WatchRecordingSession(result)
+    session = _StopRecordingSession(result)
 
     run_eval_arm(
         eval_case, arm, workdir, {}, tmp_path,
@@ -135,16 +134,19 @@ def _run(
     return session, grading, timing
 
 
-def test_trigger_only_eval_is_watched_and_graded_from_the_stopped_run(tmp_path: Path) -> None:
-    """Verify an all-activation eval gets a stop rule and a decided stop grades a pass."""
+def test_all_activation_eval_gets_a_stop_rule_and_grades_the_stopped_run(tmp_path: Path) -> None:
+    """Verify an all-activation eval gets a stop rule and a stopped run grades a pass."""
     eval_case = _eval_case(tmp_path, "- [ ] Skill `hello` invoked\n")
     stopped = RunResult(
-        "alpha", "trial", "", 1200, 0, False, trajectory=HELLO_DISPATCH, stopped="decided"
+        "alpha", "trial", "", 1200, 0, False, trajectory=HELLO_DISPATCH, stopped=True
     )
 
     session, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, stopped)
 
-    assert session.watches == [TriggerWatch(frozenset({"hello"}))]
+    (stop,) = session.stops
+    assert callable(stop)
+    assert stop([]) is False
+    assert stop(HELLO_DISPATCH) is True
     assert grading["errored"] is False
     assert grading["assertions"] == [
         {
@@ -154,7 +156,7 @@ def test_trigger_only_eval_is_watched_and_graded_from_the_stopped_run(tmp_path: 
             "type": "deterministic",
         }
     ]
-    assert timing["stopped"] == "decided"
+    assert timing["stopped"] is True
     assert timing["duration_ms"] == 1200
     assert timing["total_tokens"] is None
     assert timing["input_tokens"] is None
@@ -162,20 +164,21 @@ def test_trigger_only_eval_is_watched_and_graded_from_the_stopped_run(tmp_path: 
 
 def test_stopped_run_keeps_the_usage_it_did_report(tmp_path: Path) -> None:
     """Verify partial usage from a stopped run is recorded as numbers, not nulled."""
-    eval_case = _eval_case(tmp_path, "- [ ] Skill `hello` not invoked\n")
+    eval_case = _eval_case(tmp_path, "- [ ] Skill `hello` invoked\n")
     stopped = RunResult(
-        "alpha", "trial", "", 900, 210, False, input_tokens=20, output_tokens=10, stopped="timeout"
+        "alpha", "trial", "", 900, 210, False, input_tokens=20, output_tokens=10,
+        trajectory=HELLO_DISPATCH, stopped=True,
     )
 
     _, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, stopped)
 
     assert grading["assertions"][0]["passed"] is True
-    assert timing["stopped"] == "timeout"
+    assert timing["stopped"] is True
     assert (timing["total_tokens"], timing["input_tokens"]) == (210, 20)
 
 
-def test_mixed_eval_is_never_watched(tmp_path: Path) -> None:
-    """Verify one outcome line beside a trigger line keeps the run whole and unmarked."""
+def test_mixed_eval_gets_no_stop_rule(tmp_path: Path) -> None:
+    """Verify one outcome line beside an activation line keeps the run whole and unmarked."""
     eval_case = _eval_case(
         tmp_path, "- [ ] Skill `hello` invoked\n- [ ] The greeting is warm\n"
     )
@@ -183,13 +186,13 @@ def test_mixed_eval_is_never_watched(tmp_path: Path) -> None:
 
     session, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, full)
 
-    assert session.watches == [None]
+    assert session.stops == [None]
     assert [entry["passed"] for entry in grading["assertions"]] == [True, True]
     assert "stopped" not in timing
     assert timing["total_tokens"] == 900
 
 
-def test_baseline_with_its_only_trigger_line_scoped_off_runs_unwatched(tmp_path: Path) -> None:
+def test_baseline_with_its_only_activation_line_scoped_off_runs_whole(tmp_path: Path) -> None:
     """Verify an arm whose every line is scoped off runs as before, with nothing graded."""
     eval_case = _eval_case(
         tmp_path, "- [ ] Skill `hello` invoked\n  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}\n"
@@ -198,18 +201,18 @@ def test_baseline_with_its_only_trigger_line_scoped_off_runs_unwatched(tmp_path:
 
     session, grading, _ = _run(tmp_path, eval_case, BASELINE_ARM, full)
 
-    assert session.watches == [None]
+    assert session.stops == [None]
     assert grading["assertions"][0]["skipped"] is True
 
 
 def test_a_line_the_binder_punts_makes_the_run_whole(tmp_path: Path) -> None:
-    """Verify a trigger line that did not bind to an activation checker is not trigger-only."""
+    """Verify a line that did not bind to an activation checker keeps the run whole."""
     eval_case = _eval_case(tmp_path, "- [ ] The hello skill was used\n")
     full = RunResult("alpha", "trial", "Hi Dana!", 16000, 900, False)
 
     session, _, _ = _run(tmp_path, eval_case, TRIAL_ARM, full)
 
-    assert session.watches == [None]
+    assert session.stops == [None]
 
 
 def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path) -> None:
@@ -218,32 +221,30 @@ def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path)
     _run(
         tmp_path, decided, TRIAL_ARM,
         RunResult("fires", "trial", "", 1200, 0, False, trajectory=HELLO_DISPATCH,
-                  stopped="decided"),
+                  stopped=True),
     )
     quiet = _eval_case(tmp_path, "- [ ] Skill `hello` not invoked\n", eval_id="quiet")
     _run(
         tmp_path, quiet, TRIAL_ARM,
-        RunResult("quiet", "trial", "", 3000, 400, False, stopped="timeout"),
+        RunResult("quiet", "trial", "", 3000, 400, False, trajectory=HELLO_DISPATCH,
+                  stopped=True),
     )
     skill_dir = workspace.skill_dir(tmp_path, "hello")
 
     rows = report.index_rows(skill_dir, "hello")
     benchmark = report.build_benchmark(
         report.discover_eval_dirs(skill_dir.parent),
-        label="trigger",
+        label="routing",
         arm_meta={"trial": {"harness": "claude-code", "model": "sonnet"}},
     )
     markdown = report._format_markdown(benchmark)
 
-    assert {row["eval_id"]: row["stopped"] for row in rows} == {
-        "fires": "decided",
-        "quiet": "timeout",
-    }
-    assert benchmark["arms"]["trial"]["stopped_samples"] == {"decided": 1, "timeout": 1}
+    assert {row["eval_id"]: row["stopped"] for row in rows} == {"fires": True, "quiet": True}
+    assert benchmark["arms"]["trial"]["stopped_samples"] == 2
     assert benchmark["arms"]["trial"]["tokens_mean"] == 400
     assert (
-        "- Stopped early: 2 trigger-only sample(s) (1 decided, 1 timeout); "
-        "their time and tokens are trigger costs, not full-task costs"
+        "- Stopped early: 2 sample(s) ended once every verdict was fixed; "
+        "their time and tokens are not full-task costs"
     ) in markdown
     assert "| fires | 1 | 1 | 1 | 100% |  | 1 stopped early |" in markdown
 
@@ -261,12 +262,12 @@ def test_stopped_samples_are_counted_when_every_line_is_scoped_off_the_rates(
     _run(
         tmp_path, eval_case, TRIAL_ARM,
         RunResult("alpha", "trial", "", 3200, 0, False, trajectory=HELLO_DISPATCH,
-                  stopped="decided"),
+                  stopped=True),
     )
 
     benchmark = report.build_benchmark(
-        report.discover_eval_dirs(workspace.skills_root(tmp_path)), label="trigger"
+        report.discover_eval_dirs(workspace.skills_root(tmp_path)), label="routing"
     )
 
-    assert benchmark["arms"]["trial"]["stopped_samples"] == {"decided": 1}
-    assert benchmark["arms"]["baseline"]["stopped_samples"] == {}
+    assert benchmark["arms"]["trial"]["stopped_samples"] == 1
+    assert benchmark["arms"]["baseline"]["stopped_samples"] == 0

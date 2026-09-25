@@ -52,9 +52,9 @@ class RunResult:
     result_subtype: str = ""
     # {display-path: content} for authored skill files outside the workdir mount.
     artifacts: dict[str, str] = field(default_factory=dict)
-    # Why a trigger-only run was cut short (`decided`, `timeout`); None when
-    # it ended on its own. A stopped run's usage covers only what streamed before the stop.
-    stopped: str | None = None
+    # True when the run was stopped once every graded verdict was fixed, rather than
+    # ending on its own. A stopped run's usage covers only what streamed before the stop.
+    stopped: bool = False
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:

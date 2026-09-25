@@ -135,12 +135,12 @@ integration surface. An adapter declares:
 - **Invocation**: `build_command(...)` (validate `harness_args` against your
   reserved flags here) and `invoke(...)`, which parses the CLI's stream into a
   `RunResult`, surfacing agent failures as `is_error=True`, not exceptions.
-  Given a `watch` (a trigger-only turn), `invoke` hands the command and its
-  parser to `BaseAgent.invoke_watched`, which streams it and stops it early.
-- **Detection**: `stream_tool_calls` / `streamed_activity`, the stream probes
-  behind an early stop. `stream_tool_calls` returns the trajectory tool calls
-  one raw output line carries, exactly as the adapter's parser records them for
-  the whole stream, so the stop and the grade agree on whether a skill fired. A
+  Given a `stop` rule, `invoke` hands the command and its parser to
+  `BaseAgent.invoke_watched`, which streams the run and ends it once every
+  graded verdict is fixed.
+- **Detection**: `stream_tool_calls`, the trajectory tool calls one raw output
+  line carries, exactly as the adapter's parser records them for the whole
+  stream, so an early stop and the grade agree on whether a skill fired. A
   dispatch is whatever the CLI observably does to load a skill: its native
   skill event where it has one, otherwise a read of
   `<skill_load_dir>/<name>/SKILL.md` (the Codex adapter works this way).

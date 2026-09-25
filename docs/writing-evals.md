@@ -323,12 +323,13 @@ measuring, unless the line is [scoped](#scoping-an-assertion-to-arms) off the
 baseline. A trial arm that fails its own activation assertion is a routing
 finding: the skill was there and the agent did not use it.
 
-### Trigger evals
+### Runs that stop early
 
-An eval whose every graded line is an activation line is **trigger-only**, and
-it runs cheaper. Nothing declares it: when every line that applies to an arm
-binds to `skill_invoked` or `not_skill_invoked`, that arm's run is streamed and
-stopped as soon as the answer is known, instead of paying for the whole task.
+There is no separate eval kind for this. An activation line is settled the
+moment its skill is dispatched: `invoked` passes from then on and `not invoked`
+fails. So when every line that applies to an arm binds to `skill_invoked` or
+`not_skill_invoked`, that arm's run is streamed and ended as soon as every
+named skill has fired, instead of paying for the whole task.
 
 ```markdown
 ## Prompt
@@ -341,32 +342,24 @@ Say hi to Dana for me.
   - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
 ```
 
-- **The stop rule.** Each skill a line names is settled by its first dispatch:
-  `invoked` passes from then on, `not invoked` fails. The run is killed once
-  every named skill has fired and graded from what streamed so far
-  (`stopped: "decided"`). `` Skill `X` invoked `` alone stops at X's dispatch;
-  adding `` Skill `Y` not invoked `` keeps the run going until Y fires too.
-- **A run that never fires runs to its end.** Nothing fires, so there is
-  nothing to stop on: a should-not-trigger prompt, or a should-trigger prompt
-  the model misses, costs whatever the task costs.
-- **The timeout still applies.** A run that works past the arm's `timeout`
-  without firing is a genuine non-fire (`stopped: "timeout"`). One that never
-  showed model activity before the timeout is a launch stall, recorded as an
-  errored sample like any other.
-- **Any other line makes the run whole.** One outcome line, or an activation
-  line the binder did not bind, and the arm runs to its end exactly as a
-  mixed eval always has. An arm whose every line is scoped off also runs to
-  its end.
+- `` Skill `X` invoked `` alone ends the run at X's dispatch. Adding
+  `` Skill `Y` not invoked `` keeps it going until Y fires too.
+- A run that never fires runs to its end. Nothing fires, so there is nothing
+  to stop on: a should-not-trigger prompt, or a should-trigger prompt the
+  model misses, costs whatever the task costs, and one that outlives the arm's
+  `timeout` is an errored sample like any other.
+- Any other line makes the run whole: one outcome line, or an activation line
+  the binder did not bind, and the arm runs to its end exactly as a mixed eval
+  always has. So does an arm whose every line is scoped off.
 
 Write should-not-trigger prompts as ordinary tasks that sit near the skill's
 territory without asking for it: `List the files in this directory.` against a
-greeting skill, graded with `` Skill `hello` not invoked ``. Keep negatives
-small: a correct negative runs to its own end, so a prompt that is a long task
-costs a long task.
+greeting skill, graded with `` Skill `hello` not invoked ``. Keep them small: a
+correct negative runs to its own end, so a long task costs a long task.
 
-Stopped samples carry `stopped` in `timing.json` and `index.jsonl`, and the
-report says how many stopped per arm and per eval, so their time and tokens
-read as trigger costs (see [results](results.md)).
+Stopped samples carry `"stopped": true` in `timing.json` and `index.jsonl`, and
+the report says how many stopped per arm and per eval, so their time and tokens
+read as routing costs (see [results](results.md)).
 
 ## The authoring loop: `lint`, then `analyze`
 

@@ -103,18 +103,18 @@ def _stdout_events(*chunks: bytes) -> list[FakeExecEvent]:
     return [FakeExecEvent("stdout", data=chunk) for chunk in chunks]
 
 
-def _watch_for(stop_line: str, reason: str = "decided") -> Callable[[str], str | None]:
+def _watch_for(stop_line: str) -> Callable[[str], bool]:
     """A watcher that stops on one exact line."""
 
-    def watch(line: str) -> str | None:
+    def watch(line: str) -> bool:
         """Stop on `stop_line`."""
-        return reason if line == stop_line else None
+        return line == stop_line
 
     return watch
 
 
 def _exec_watched(
-    guest: FakeSandbox, watch: Callable[[str], str | None], *, timeout: float = 5
+    guest: FakeSandbox, watch: Callable[[str], bool], *, timeout: float = 5
 ) -> WatchedProc:
     """Stream a fake harness command through `GuestSandbox.exec_watched`."""
     return asyncio.run(
@@ -135,10 +135,9 @@ def test_exec_watched_kills_the_process_when_the_watcher_stops_it() -> None:
 
     proc = _exec_watched(guest, _watch_for("stop"))
 
-    assert proc.stopped == "decided"
+    assert proc.stopped is True
     assert proc.stdout == "first\nstop"
     assert proc.exit_code is None
-    assert proc.timed_out is False
     assert guest.streams[0].killed is True
 
 
@@ -154,7 +153,7 @@ def test_exec_watched_runs_to_the_end_when_the_watcher_never_stops_it() -> None:
 
     proc = _exec_watched(guest, _watch_for("absent"))
 
-    assert proc.stopped is None
+    assert proc.stopped is False
     assert proc.exit_code == 3
     assert proc.stdout == "one\ntwo"
     assert proc.stderr == "warning"
@@ -173,7 +172,7 @@ def test_exec_watched_reassembles_lines_split_across_chunks() -> None:
 
     proc = _exec_watched(guest, _watch_for('{"text":"héllo"}'))
 
-    assert proc.stopped == "decided"
+    assert proc.stopped is True
 
 
 def test_exec_watched_keeps_a_trailing_line_without_a_newline() -> None:
@@ -187,15 +186,13 @@ def test_exec_watched_keeps_a_trailing_line_without_a_newline() -> None:
     assert proc.stdout == "one\ntail"
 
 
-def test_exec_watched_kills_and_keeps_output_on_timeout() -> None:
-    """A process that outlives its timeout is killed, with the lines it streamed kept."""
+def test_exec_watched_kills_and_raises_on_timeout() -> None:
+    """A process that outlives its timeout is killed and raises, as a buffered exec does."""
     guest = FakeSandbox(stream_events=_stdout_events(b"working\n"), stream_stalls=True)
 
-    proc = _exec_watched(guest, _watch_for("absent"), timeout=0.05)
+    with pytest.raises(TimeoutError, match="claude timed out after 0.05s"):
+        _exec_watched(guest, _watch_for("absent"), timeout=0.05)
 
-    assert proc.timed_out is True
-    assert proc.stopped is None
-    assert proc.stdout == "working"
     assert guest.streams[0].killed is True
 
 

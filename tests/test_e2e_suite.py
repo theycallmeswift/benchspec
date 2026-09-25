@@ -120,8 +120,8 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
         ("hello-file", "writes-greeting-file"),
         ("hello-outside", "allows-filesystem-traversal"),
         ("hello-transcript", "greets-from-transcript"),
-        ("hello-trigger", "fires-on-a-greeting"),
-        ("hello-trigger", "stays-quiet-on-a-listing"),
+        ("hello-routing", "fires-on-a-greeting"),
+        ("hello-routing", "stays-quiet-on-a-listing"),
     }
     for case in cases:
         assert case.prompt
@@ -182,7 +182,7 @@ def test_hello_transcript_history_reaches_the_rendered_prompt_verbatim() -> None
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-routing"]
 )
 def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     """Verify setup.sh parses as valid bash without executing any of it."""
@@ -196,7 +196,7 @@ def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-routing"]
 )
 def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: str) -> None:
     """Verify the baseline branch exits without running an install command."""
@@ -228,7 +228,7 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: s
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-routing"]
 )
 def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
     tmp_path: Path, group: str

@@ -1,84 +1,52 @@
-"""Skill-activation detection primitives and the early-stop rule for trigger-only runs.
+"""Skill-activation detection primitives over an agent run.
 
 `_tool_uses` yields the tool_use blocks in one Claude stream-json line;
 `detect_skill_fired` decides whether a given skill fired anywhere in a stream;
-`streamed_activity` tells a timed-out run that did real work from a launch stall.
-`TriggerWatch` is the stop rule for a trigger-only run: every graded line is a skill
-activation check, so the run can stop the moment every verdict is fixed.
+`settled_once_dispatched` is the stop rule for a run whose every graded line is a skill
+activation check, so the run can end the moment every verdict is fixed.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
 
 from benchspec.grading.trajectory import skills_dispatched
 
-# Why a watched run was stopped before it ended on its own; recorded as `stopped`.
-STOP_DECIDED = "decided"
-STOP_TIMEOUT = "timeout"
-
-# Maps one raw stream line to the trajectory events it carries (the adapter's parser).
-LineTrajectory = Callable[[str], list[dict]]
-# Fed each stream line in order; returns a stop reason once the run should end.
-LineWatcher = Callable[[str], "str | None"]
+# Whether every graded verdict of a run is fixed, read from the trajectory streamed so far.
+StopRule = Callable[[list[dict]], bool]
 
 
-def _names_skill(dispatched: str, skill: str) -> bool:
-    """Whether a dispatched name is `skill`, exactly or namespaced (`plugin:skill`)."""
-    return dispatched == skill or dispatched.endswith(f":{skill}")
+def settled_once_dispatched(skills: Iterable[str]) -> StopRule:
+    """The stop rule for a run whose every graded line is a skill activation check.
 
+    A skill's first dispatch fixes its verdict for good (`invoked` passes and
+    `not invoked` fails from then on), so the run is settled once every named skill has
+    fired, and it runs on until then. A dispatch is read the way grading reads it: a
+    `Skill` call naming the skill, or a tool call named for it, bare or namespaced
+    (`plugin:skill`).
 
-@dataclass(frozen=True)
-class TriggerWatch:
-    """The stop rule for a trigger-only run.
-
-    Every open verdict belongs to one of `skills`, and each is fixed by that skill's
-    first dispatch: `skill_invoked` passes and `not_skill_invoked` fails from then on.
-    So the run is decided once every skill has fired; until then it runs on.
-
-    Attributes:
+    Args:
         skills: The skills the run's activation lines name.
+
+    Returns:
+        A pure function of the trajectory so far.
     """
+    wanted = frozenset(skills)
 
-    skills: frozenset[str]
+    def settled(trajectory: list[dict]) -> bool:
+        """Whether every named skill has been dispatched."""
+        return all(_dispatched(trajectory, skill) for skill in wanted)
 
-    def line_watcher(self, line_trajectory: LineTrajectory) -> LineWatcher:
-        """Start a fresh watcher for one run.
+    return settled
 
-        A dispatch is read from the same trajectory events grading reads, so the stop
-        and the verdict can never disagree about whether a skill fired.
 
-        Args:
-            line_trajectory: The adapter's per-line trajectory parser.
-
-        Returns:
-            A watcher that returns `STOP_DECIDED` once every verdict is fixed, and None
-            until then.
-        """
-        open_skills = set(self.skills)
-
-        def watch(line: str) -> str | None:
-            """Advance the rule over one stream line."""
-            for event in line_trajectory(line):
-                if event.get("kind") != "tool_call":
-                    continue
-
-                fired = {
-                    skill
-                    for skill in open_skills
-                    if any(
-                        _names_skill(name, skill) for name in skills_dispatched([event], skill)
-                    )
-                }
-                open_skills.difference_update(fired)
-                if not open_skills:
-                    return STOP_DECIDED
-
-            return None
-
-        return watch
+def _dispatched(trajectory: list[dict], skill: str) -> bool:
+    """Whether `skill` was dispatched, exactly or namespaced, anywhere in `trajectory`."""
+    return any(
+        name == skill or name.endswith(f":{skill}")
+        for name in skills_dispatched(trajectory, skill)
+    )
 
 
 def _tool_uses(line: str) -> Iterator[dict]:
@@ -125,22 +93,3 @@ def detect_skill_fired(stream_lines: Iterable[str], skill_name: str) -> bool:
                 return True
     return False
 
-
-def streamed_activity(stream_lines: Iterable[str]) -> bool:
-    """True if the model began a turn (an `assistant` event), not just the startup line.
-
-    A trigger-only run that times out after real activity is a genuine non-fire (the
-    agent worked but never routed); one that streamed only the `system`/init line is a
-    launch stall, an infra error.
-    """
-    for line in stream_lines:
-        text = line.strip()
-        if not text:
-            continue
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "assistant":
-            return True
-    return False

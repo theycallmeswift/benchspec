@@ -29,7 +29,7 @@ from benchspec.grading import binder, checkers
 from benchspec.grading.judge import grade_run
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
-from benchspec.grading.trigger import TriggerWatch
+from benchspec.grading.trigger import StopRule, settled_once_dispatched
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import RunResult, substitute_assertions, substitute_prompt
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
@@ -58,7 +58,7 @@ Grader = Callable[..., dict]
 # Binds one prose assertion to a checker spec, or None to punt it to the judge.
 Binder = Callable[[str], "dict | None"]
 
-# The checkers a skill's first dispatch settles for good: the lines a trigger-only run holds.
+# The checkers a skill's first dispatch settles for good.
 ACTIVATION_CHECKERS = ("skill_invoked", "not_skill_invoked")
 
 
@@ -90,9 +90,8 @@ class _ArmRun:
     total_cache_creation: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    # Why a trigger-only run was stopped early (`decided`, `timeout`); None
-    # when it ended on its own.
-    stopped: str | None = None
+    # True when the run was stopped once every graded verdict was fixed.
+    stopped: bool = False
     # Guest task-harness version probed inside the live snapshot. The default is the
     # not-probed sentinel: version None + a non-empty reason, which the available/
     # unavailable contract accepts as an explained-unavailable field.
@@ -192,24 +191,24 @@ def _bind_all(assertions: Sequence[str], bind: Binder) -> tuple[list[dict | None
     return specs, binder_degraded
 
 
-def _trigger_watch(specs: list[dict | None]) -> TriggerWatch | None:
+def _stop_rule(specs: list[dict | None]) -> StopRule | None:
     """The stop rule for a run whose every graded line is a skill activation check, else None.
 
-    Trigger-only is derived from the bindings, never declared: one outcome line, or one
-    line the binder punted or degraded (spec None), means the run must reach its end. No
-    graded line at all (every line scoped off) is not trigger-only either.
+    Derived from the bindings, never declared: one outcome line, or one line the binder
+    punted or degraded (spec None), means the run must reach its end, and so does no
+    graded line at all (every line scoped off).
 
     Args:
         specs: The binder's spec for each active assertion.
 
     Returns:
-        A watch over the skills the lines name, or None for a full run.
+        A rule over the skills the lines name, or None for a full run.
     """
-    if not specs:
+    if not specs or any(
+        spec is None or spec["checker"] not in ACTIVATION_CHECKERS for spec in specs
+    ):
         return None
-    if any(spec is None or spec["checker"] not in ACTIVATION_CHECKERS for spec in specs):
-        return None
-    return TriggerWatch(frozenset(spec["skill"] for spec in specs if spec is not None))
+    return settled_once_dispatched(spec["skill"] for spec in specs if spec is not None)
 
 
 def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
@@ -225,7 +224,7 @@ def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
         "input_tokens": arm_run.total_input_tokens,
         "output_tokens": arm_run.total_output_tokens,
     }
-    if arm_run.stopped is not None and arm_run.total_tokens == 0:
+    if arm_run.stopped and arm_run.total_tokens == 0:
         return dict.fromkeys(fields)
     return fields
 
@@ -304,7 +303,7 @@ async def _run_arm_turns(
     baseline: str = "",
     harness_args: list[str] | None = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
-    watch: TriggerWatch | None = None,
+    stop: StopRule | None = None,
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm."""
     # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
@@ -328,7 +327,7 @@ async def _run_arm_turns(
         baseline=baseline,
         harness_args=harness_args,
         timeout=timeout,
-        watch=watch,
+        stop=stop,
         backend=backend,
     ) as run:
         # Probe the task-harness binary INSIDE the live snapshot before the task runs, so
@@ -535,11 +534,11 @@ def run_eval_arm(
 
     # Bind once, up front: the binder's own output is the source of truth for which
     # assertions are activation checks — no separate recognizer — and knowing that before
-    # the run is what lets a trigger-only run stop once its verdicts are fixed. Binding is
-    # a pure function of the assertion text, so its place in the order changes no verdict.
-    # A BinderAuthError propagates here, before the sandbox spends anything.
+    # the run is what lets a run stop once its verdicts are fixed. Binding is a pure
+    # function of the assertion text, so its place in the order changes no verdict. A
+    # BinderAuthError propagates here, before the sandbox spends anything.
     specs, binder_degraded = _bind_all(active_assertions, bind)
-    watch = _trigger_watch(specs)
+    stop = _stop_rule(specs)
 
     arm_run = asyncio.run(
         _run_arm_turns(
@@ -563,7 +562,7 @@ def run_eval_arm(
             baseline=baseline or "",
             harness_args=arm.harness_args,
             timeout=arm.timeout,
-            watch=watch,
+            stop=stop,
         )
     )
 
@@ -635,16 +634,16 @@ def run_eval_arm(
         "assertions": merged,
     }
     # duration_ms = task time; judge_ms = grading time — separate so the benchmark can
-    # decompose where the wall-clock goes (task vs judge). `stopped` marks a trigger-only
-    # run cut short, so its time and tokens never read as a full task's. run_dir was
-    # created above when provenance was persisted.
-    timing: dict[str, int | str | None] = {
+    # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
+    # once its verdicts were fixed, so its time and tokens never read as a full task's.
+    # run_dir was created above when provenance was persisted.
+    timing: dict[str, int | bool | None] = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
         **_usage_fields(arm_run),
     }
-    if arm_run.stopped is not None:
-        timing["stopped"] = arm_run.stopped
+    if arm_run.stopped:
+        timing["stopped"] = True
     (run_dir / "timing.json").write_text(json.dumps(timing) + "\n")
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
     (run_dir / "transcript.json").write_text(json.dumps(arm_run.transcript, indent=2) + "\n")

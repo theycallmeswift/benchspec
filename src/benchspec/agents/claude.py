@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
@@ -27,7 +27,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import extract_trajectory
-from benchspec.grading.trigger import TriggerWatch, streamed_activity
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import (
     RunResult,
@@ -358,10 +358,6 @@ class ClaudeCodeAgent(BaseAgent):
         """Return the tool calls one stream-json line carries, as the trajectory records them."""
         return [event for event in extract_trajectory(line) if event["kind"] == "tool_call"]
 
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """True if the model began a turn (an `assistant` event), not just started up."""
-        return streamed_activity(lines)
-
     async def invoke(
         self,
         sandbox: LiveSandbox,
@@ -378,7 +374,7 @@ class ClaudeCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
-        watch: TriggerWatch | None = None,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -393,11 +389,11 @@ class ClaudeCodeAgent(BaseAgent):
         # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over guest_env(),
         # arm env winning.
         env = {**self.guest_env(), **(extra_env or {})}
-        if watch is not None:
+        if stop is not None:
             return await self.invoke_watched(
                 sandbox,
                 cmd,
-                watch=watch,
+                stop=stop,
                 parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
                 cwd=workdir,
                 env=env,

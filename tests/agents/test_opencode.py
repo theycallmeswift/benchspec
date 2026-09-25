@@ -186,18 +186,6 @@ def test_stream_tool_calls_counts_other_tools_and_skips_non_tool_lines() -> None
     assert agent.stream_tool_calls("not json") == []
 
 
-def test_opencode_streamed_activity_true_when_turn_began() -> None:
-    """Verify opencode streamed activity true when turn began."""
-    agent = OpenCodeAgent()
-    assert agent.streamed_activity(_fixture_lines("opencode_route_nofire.jsonl")) is True
-
-
-def test_opencode_streamed_activity_false_on_no_events() -> None:
-    """Verify opencode streamed activity false on no events."""
-    agent = OpenCodeAgent()
-    assert agent.streamed_activity(["", "not json", "  "]) is False
-
-
 def test_parse_opencode_jsonl_populates_run_result() -> None:
     """Verify parse opencode jsonl populates run result."""
     # OpenCode emits step_start / text / tool_use / step_finish events, no

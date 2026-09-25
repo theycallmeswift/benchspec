@@ -651,13 +651,6 @@ def test_claude_stream_tool_calls_reads_tool_uses_and_skips_results() -> None:
     assert agent.stream_tool_calls("not json") == []
 
 
-def test_claude_streamed_activity_true_on_assistant_event() -> None:
-    """Verify claude streamed activity true on assistant event."""
-    agent = ClaudeCodeAgent()
-    assert agent.streamed_activity([json.dumps({"type": "assistant", "message": {}})]) is True
-    assert agent.streamed_activity([json.dumps({"type": "system"})]) is False
-
-
 def test_wrong_shape_json_object_does_not_raise_uncaught() -> None:
     """Verify wrong shape json object does not raise uncaught."""
     # A valid-but-wrong-shape JSON *object* (the only malformed shape `claude -p

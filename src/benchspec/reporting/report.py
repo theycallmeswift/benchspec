@@ -19,7 +19,6 @@ each arm reports its absolute pass rate.
 
 from __future__ import annotations
 
-import collections
 import json
 import math
 import re
@@ -209,7 +208,7 @@ def _arm_stats(
     durations: list[int] = []
     judge_ms: list[int] = []
     tokens: list[int] = []
-    stopped: collections.Counter[str] = collections.Counter()
+    stopped_total = 0
     errored_total = 0
     binder_degraded_total = 0
 
@@ -234,10 +233,10 @@ def _arm_stats(
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
-            # Counted before the pooled-out skip: a trigger-only line scoped off the baseline
-            # leaves no pooled rate, but the sample was still stopped early.
+            # Counted before the pooled-out skip: an activation line scoped off the
+            # baseline leaves no pooled rate, but the sample was still stopped early.
             if timing and timing.get("stopped"):
-                stopped[timing["stopped"]] += 1
+                stopped_total += 1
                 stopped_count += 1
 
             assertions = [
@@ -293,7 +292,7 @@ def _arm_stats(
         "tokens_mean": statistics.mean(tokens) if tokens else None,
         "tokens_stdev": statistics.stdev(tokens) if len(tokens) > 1 else None,
         "errored_samples": errored_total,
-        "stopped_samples": dict(sorted(stopped.items())),
+        "stopped_samples": stopped_total,
         "binder_degraded": binder_degraded_total,
         "n": len(pair_rates),
         "per_eval": per_eval,
@@ -387,7 +386,7 @@ def index_rows(
                         "total_tokens": timing.get("total_tokens"),
                         "input_tokens": timing.get("input_tokens"),
                         "output_tokens": timing.get("output_tokens"),
-                        "stopped": timing.get("stopped"),
+                        "stopped": bool(timing.get("stopped")),
                     }
                 )
     return rows
@@ -850,13 +849,10 @@ def _format_markdown(benchmark: dict) -> str:
 
 
 def _stopped_line(stats: dict) -> str:
-    """Render the per-arm note on trigger-only samples that were stopped early."""
-    stopped = stats["stopped_samples"]
-    total = sum(stopped.values())
-    reasons = ", ".join(f"{count} {reason}" for reason, count in stopped.items())
+    """Render the per-arm note on samples stopped once every verdict was fixed."""
     return (
-        f"- Stopped early: {total} trigger-only sample(s) ({reasons}); "
-        "their time and tokens are trigger costs, not full-task costs"
+        f"- Stopped early: {stats['stopped_samples']} sample(s) ended once every "
+        "verdict was fixed; their time and tokens are not full-task costs"
     )
 
 

@@ -20,7 +20,7 @@ from benchspec.agents import (
     resolve_agent_name,
 )
 from benchspec.config.arms import parse_sets, resolve_set
-from benchspec.grading.trigger import TriggerWatch
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import (
@@ -284,7 +284,7 @@ class SandboxSession:
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
-        watch: TriggerWatch | None = None,
+        stop: StopRule | None = None,
     ) -> None:
         """Initialize the instance."""
         self._agent = agent
@@ -303,8 +303,8 @@ class SandboxSession:
         self._harness_args = harness_args
         # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
         self._timeout = timeout
-        # A trigger-only arm's stop rule, handed to `invoke`; None runs every turn to its end.
-        self._watch = watch
+        # The arm's stop rule, handed to `invoke`; None runs every turn to its end.
+        self._stop = stop
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
@@ -380,7 +380,7 @@ class SandboxSession:
             extra_env=self._arm_env,
             harness_args=self._harness_args,
             timeout=self._timeout,
-            watch=self._watch,
+            stop=self._stop,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
@@ -415,7 +415,7 @@ def arm_session(
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
-    watch: TriggerWatch | None = None,
+    stop: StopRule | None = None,
 ) -> SandboxSession:
     """Open an async arm session around one sandboxed eval cell."""
     return SandboxSession(
@@ -436,7 +436,7 @@ def arm_session(
         project_marker=project_marker,
         harness_args=harness_args,
         timeout=timeout,
-        watch=watch,
+        stop=stop,
     )
 
 

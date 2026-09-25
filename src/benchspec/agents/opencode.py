@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
@@ -42,7 +42,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
-from benchspec.grading.trigger import TriggerWatch
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -445,7 +445,7 @@ class OpenCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
-        watch: TriggerWatch | None = None,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -459,11 +459,11 @@ class OpenCodeAgent(BaseAgent):
         )
         # Per-arm extra_env merges over guest_env(), arm env winning.
         env = {**self.guest_env(), **(extra_env or {})}
-        if watch is not None:
+        if stop is not None:
             return await self.invoke_watched(
                 sandbox,
                 cmd,
-                watch=watch,
+                stop=stop,
                 parse=lambda stdout: parse_opencode_jsonl(stdout, eval_id, config, detect_skill),
                 cwd=workdir,
                 env=env,
@@ -542,27 +542,6 @@ class OpenCodeAgent(BaseAgent):
         Running and pending frames are not calls yet, so a dispatch counts once it completes.
         """
         return _opencode_trajectory(list(iter_events(line)))
-
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """Return true when the OpenCode stream proves the model began a turn.
-
-        OpenCode emits step_start/text/tool_use/step_finish (never Claude's `assistant`),
-        so any of those proves the agent worked; a budget timeout after one is a clean
-        non-fire, not a launch stall.
-        """
-        turn_events = {"step_start", "text", "tool_use", "step_finish"}
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict) and event.get("type") in turn_events:
-                return True
-        return False
-
 
 def _skill_dispatch_name(part: dict) -> str | None:
     """Return the skill name from a `skill` dispatcher tool_use."""

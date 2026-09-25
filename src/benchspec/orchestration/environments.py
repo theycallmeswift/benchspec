@@ -59,8 +59,8 @@ class ProcResult:
 class WatchedProc:
     """The outcome of a harness process streamed past a line watcher.
 
-    Exactly one of three endings holds: the watcher stopped it (`stopped` names why),
-    it outlived its timeout (`timed_out`), or it exited on its own (`exit_code`).
+    Either the watcher stopped it (`stopped`, and `exit_code` is None) or it exited on its
+    own. A process that outlives its timeout raises instead, as a buffered exec does.
     """
 
     command: list[str]
@@ -68,8 +68,7 @@ class WatchedProc:
     stderr: str
     duration_ms: int
     exit_code: int | None = None
-    stopped: str | None = None
-    timed_out: bool = False
+    stopped: bool = False
 
 
 @runtime_checkable
@@ -167,27 +166,29 @@ class GuestSandbox:
         *,
         env: Mapping[str, str],
         timeout: float,
-        watch: Callable[[str], str | None],
+        watch: Callable[[str], bool],
         cwd: str | None = None,
         stdin: bytes | None = None,
     ) -> WatchedProc:
         """Stream `command` inside the guest, feeding each stdout line to `watch`.
 
-        The process is killed the moment `watch` returns a reason, or once it outlives
-        `timeout`; either way the lines streamed so far are kept. Chunks are reassembled
-        into whole lines first, since a stream chunk can split a JSONL record (or a
-        multibyte character) anywhere.
+        The process is killed the moment `watch` returns True, keeping the lines streamed
+        so far. Chunks are reassembled into whole lines first, since a stream chunk can
+        split a JSONL record (or a multibyte character) anywhere.
 
         Args:
             command: The harness argv.
             env: The process environment.
             timeout: Wall-clock cap, seconds.
-            watch: Returns a stop reason for a line, or None to let the process run on.
+            watch: Whether the process can stop after this line.
             cwd: Working directory inside the guest.
             stdin: Bytes fed to the process; `b""` closes it.
 
         Returns:
             The streamed output and how the process ended.
+
+        Raises:
+            TimeoutError: After killing the process, when it outlives `timeout`.
         """
         started = time.monotonic()
         handle = await self._sandbox.exec_stream(
@@ -196,7 +197,7 @@ class GuestSandbox:
         lines: list[str] = []
         stderr_parts: list[str] = []
         exit_code: int | None = None
-        stopped: str | None = None
+        stopped = False
 
         async def drain() -> None:
             """Collect stdout lines until the watcher stops the process or it exits."""
@@ -210,8 +211,8 @@ class GuestSandbox:
                     while "\n" in pending:
                         line, pending = pending.split("\n", 1)
                         lines.append(line)
-                        stopped = watch(line)
-                        if stopped is not None:
+                        if watch(line):
+                            stopped = True
                             await _kill_quietly(handle)
                             return
                 elif event.event_type == "stderr":
@@ -224,12 +225,11 @@ class GuestSandbox:
             if pending.strip():
                 lines.append(pending)
 
-        timed_out = False
         try:
             await asyncio.wait_for(drain(), timeout=timeout)
-        except TimeoutError:
-            timed_out = True
+        except TimeoutError as error:
             await _kill_quietly(handle)
+            raise TimeoutError(f"{command[0]} timed out after {timeout}s") from error
 
         return WatchedProc(
             command=command,
@@ -238,7 +238,6 @@ class GuestSandbox:
             duration_ms=_elapsed_ms(started),
             exit_code=exit_code,
             stopped=stopped,
-            timed_out=timed_out,
         )
 
 

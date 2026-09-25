@@ -560,21 +560,6 @@ def test_skills_dispatched_reports_codex_skill_md_read() -> None:
     assert skills_dispatched(res.trajectory) == ["hello"]
 
 
-def test_codex_streamed_activity_true_when_turn_began() -> None:
-    """Verify codex streamed activity true when turn began."""
-    assert _agent().streamed_activity(_lines("codex_route_nofire.jsonl")) is True
-
-
-def test_codex_streamed_activity_false_on_startup_only() -> None:
-    """Verify codex streamed activity false on startup only."""
-    assert _agent().streamed_activity(['{"type":"thread.started","thread_id":"t"}']) is False
-
-
-def test_codex_streamed_activity_false_on_empty_or_invalid_lines() -> None:
-    """Verify codex streamed activity false on empty or invalid lines."""
-    assert _agent().streamed_activity(["", "not json"]) is False
-
-
 def test_parse_codex_jsonl_populates_run_result() -> None:
     """Verify parse codex jsonl populates run result."""
     res = parse_codex_jsonl(
