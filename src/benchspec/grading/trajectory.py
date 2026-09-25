@@ -211,9 +211,11 @@ def opencode_skill_dispatch_name(part: dict) -> str | None:
     """Return the skill name from a `skill` dispatcher tool_use."""
     if part.get("tool") != "skill":
         return None
+
     state = dict_or_empty(part.get("state"))
     inp = dict_or_empty(state.get("input"))
     name = inp.get("name")
+
     return name if isinstance(name, str) and name else None
 
 
@@ -239,10 +241,12 @@ def opencode_trajectory(events: list[dict]) -> list[dict]:
     for event in events:
         if event.get("type") != "tool_use":
             continue
+
         part = dict_or_empty(event.get("part"))
         tool = part.get("tool")
         if not isinstance(tool, str):
             continue
+
         state = dict_or_empty(part.get("state"))
         inp = dict_or_empty(state.get("input"))
         if opencode_tool_call_was_rejected(part):
@@ -256,8 +260,10 @@ def opencode_trajectory(events: list[dict]) -> list[dict]:
                 }
             )
             continue
+
         if state.get("status") != "completed":
             continue
+
         if tool == "skill":
             skill = opencode_skill_dispatch_name(part)
             traj.append(
@@ -270,6 +276,7 @@ def opencode_trajectory(events: list[dict]) -> list[dict]:
             )
         else:
             traj.append({"kind": "tool_call", "id": "", "name": tool, "arguments": inp})
+
     return traj
 
 
