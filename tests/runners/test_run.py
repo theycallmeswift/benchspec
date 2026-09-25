@@ -75,7 +75,6 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
             "harness",
             "effort",
             "timeout",
-            "trigger_budget",
             "eval_paths",
             "fail_under",
             "judge_harness",
@@ -159,15 +158,6 @@ def test_translates_timeout_to_benchspec_timeout() -> None:
     tokens = translate_run_flags(args)
 
     assert "--benchspec-timeout=5" in tokens
-
-
-def test_translates_trigger_budget_to_benchspec_trigger_budget() -> None:
-    """Verify --trigger-budget becomes a --benchspec-trigger-budget token."""
-    args = _run_namespace(Path("repo"), trigger_budget=3)
-
-    tokens = translate_run_flags(args)
-
-    assert "--benchspec-trigger-budget=3" in tokens
 
 
 def test_translates_models_and_eval_paths_and_fail_under() -> None:

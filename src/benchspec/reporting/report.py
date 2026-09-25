@@ -71,7 +71,6 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
                 "model": arm.model,
                 "effort": arm.effort,
                 "timeout": arm.timeout,
-                "trigger_budget": arm.trigger_budget,
                 "env": redact_env(arm.env),
                 "harness_args": arm.harness_args,
                 "requested_version": agent.version(),
@@ -855,10 +854,8 @@ def _stopped_line(stats: dict) -> str:
     stopped = stats["stopped_samples"]
     total = sum(stopped.values())
     reasons = ", ".join(f"{count} {reason}" for reason, count in stopped.items())
-    budget = stats.get("trigger_budget")
-    budget_note = f", budget {budget} tool calls" if budget is not None else ""
     return (
-        f"- Stopped early: {total} trigger-only sample(s) ({reasons}{budget_note}); "
+        f"- Stopped early: {total} trigger-only sample(s) ({reasons}); "
         "their time and tokens are trigger costs, not full-task costs"
     )
 
@@ -943,7 +940,6 @@ def build_benchmark(
         stats["model"] = metadata.get("model")
         stats["effort"] = metadata.get("effort")
         stats["timeout"] = metadata.get("timeout")
-        stats["trigger_budget"] = metadata.get("trigger_budget")
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
 

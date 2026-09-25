@@ -42,12 +42,6 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
         "--timeout", type=int, help="agent turn timeout in seconds (--benchspec-timeout)"
     )
     run_parser.add_argument(
-        "--trigger-budget",
-        type=int,
-        help="tool calls a trigger-only eval may make before it is stopped "
-        "(--benchspec-trigger-budget)",
-    )
-    run_parser.add_argument(
         "--eval-paths", help="comma-separated search paths (--benchspec-eval-paths)"
     )
     run_parser.add_argument("--fail-under", help="pass-rate gate (--benchspec-fail-under)")

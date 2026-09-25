@@ -4,7 +4,6 @@ import json
 
 from benchspec.grading.trajectory import extract_trajectory
 from benchspec.grading.trigger import (
-    STOP_BUDGET,
     STOP_DECIDED,
     TriggerWatch,
     detect_skill_fired,
@@ -150,7 +149,7 @@ def _read_line() -> str:
 
 def test_invoked_line_stops_on_its_skills_first_dispatch() -> None:
     """Verify `X invoked` alone is decided by X's dispatch."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=5)
+    watch = TriggerWatch(frozenset({"hello"}))
 
     verdicts = _watch_lines(watch, ['{"type":"system"}', _skill_line("hello")])
 
@@ -159,7 +158,7 @@ def test_invoked_line_stops_on_its_skills_first_dispatch() -> None:
 
 def test_two_skills_stay_open_until_both_fire() -> None:
     """Verify `X invoked` + `Y not invoked` does not stop on X alone."""
-    watch = TriggerWatch(frozenset({"hello", "goodbye"}), budget=5)
+    watch = TriggerWatch(frozenset({"hello", "goodbye"}))
 
     verdicts = _watch_lines(watch, [_skill_line("hello"), _skill_line("goodbye")])
 
@@ -168,7 +167,7 @@ def test_two_skills_stay_open_until_both_fire() -> None:
 
 def test_an_unrelated_skill_dispatch_does_not_decide() -> None:
     """Verify another skill firing leaves the watched skill's verdict open."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=5)
+    watch = TriggerWatch(frozenset({"hello"}))
 
     verdicts = _watch_lines(watch, [_skill_line("hello-world"), _skill_line("other:hello2")])
 
@@ -177,7 +176,7 @@ def test_an_unrelated_skill_dispatch_does_not_decide() -> None:
 
 def test_a_namespaced_or_fallback_dispatch_decides() -> None:
     """Verify both fire shapes grading recognizes also decide the run."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=5)
+    watch = TriggerWatch(frozenset({"hello"}))
 
     namespaced = _watch_lines(watch, [_skill_line("greetings:hello")])
     fallback = _watch_lines(watch, [_named_tool_line("greetings:hello")])
@@ -186,44 +185,26 @@ def test_a_namespaced_or_fallback_dispatch_decides() -> None:
     assert fallback == [STOP_DECIDED]
 
 
-def test_budget_stops_at_exactly_n_tool_calls() -> None:
-    """Verify an undecided run stops on its Nth tool call, not before."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=3)
+def test_an_undecided_run_is_never_stopped() -> None:
+    """Verify tool calls and text alone never stop a run whose skill has not fired."""
+    watch = TriggerWatch(frozenset({"hello"}))
     text = json.dumps(
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}
     )
 
-    verdicts = _watch_lines(watch, [_read_line(), text, _read_line(), _read_line()])
+    verdicts = _watch_lines(watch, [_read_line()] * 20 + [text])
 
-    assert verdicts == [None, None, None, STOP_BUDGET]
-
-
-def test_a_deciding_dispatch_on_the_last_budgeted_call_is_decided() -> None:
-    """Verify a dispatch is checked before it is counted against the budget."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=2)
-
-    verdicts = _watch_lines(watch, [_read_line(), _skill_line("hello")])
-
-    assert verdicts == [None, STOP_DECIDED]
-
-
-def test_a_dispatch_counts_toward_the_budget() -> None:
-    """Verify a dispatch that leaves a verdict open still spends a tool call."""
-    watch = TriggerWatch(frozenset({"hello", "goodbye"}), budget=2)
-
-    verdicts = _watch_lines(watch, [_read_line(), _skill_line("hello")])
-
-    assert verdicts == [None, STOP_BUDGET]
+    assert verdicts == [None] * 21
 
 
 def test_each_watcher_starts_fresh() -> None:
-    """Verify one watch hands every run its own counters."""
-    watch = TriggerWatch(frozenset({"hello"}), budget=2)
+    """Verify one watch hands every run its own open skills."""
+    watch = TriggerWatch(frozenset({"hello", "goodbye"}))
 
-    first = _watch_lines(watch, [_read_line(), _read_line()])
-    second = _watch_lines(watch, [_read_line()])
+    first = _watch_lines(watch, [_skill_line("hello"), _skill_line("goodbye")])
+    second = _watch_lines(watch, [_skill_line("goodbye")])
 
-    assert first == [None, STOP_BUDGET]
+    assert first == [None, STOP_DECIDED]
     assert second == [None]
 
 

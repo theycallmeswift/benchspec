@@ -41,7 +41,7 @@ HELLO_DISPATCH = [
     {"kind": "tool_call", "id": "t1", "name": "Skill", "arguments": {"skill": "hello"}}
 ]
 
-TRIAL_ARM = Arm("trial", "claude-code", "sonnet", trigger_budget=7)
+TRIAL_ARM = Arm("trial", "claude-code", "sonnet")
 BASELINE_ARM = Arm("baseline", "claude-code", "sonnet")
 
 
@@ -144,7 +144,7 @@ def test_trigger_only_eval_is_watched_and_graded_from_the_stopped_run(tmp_path: 
 
     session, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, stopped)
 
-    assert session.watches == [TriggerWatch(frozenset({"hello"}), budget=7)]
+    assert session.watches == [TriggerWatch(frozenset({"hello"}))]
     assert grading["errored"] is False
     assert grading["assertions"] == [
         {
@@ -164,13 +164,13 @@ def test_stopped_run_keeps_the_usage_it_did_report(tmp_path: Path) -> None:
     """Verify partial usage from a stopped run is recorded as numbers, not nulled."""
     eval_case = _eval_case(tmp_path, "- [ ] Skill `hello` not invoked\n")
     stopped = RunResult(
-        "alpha", "trial", "", 900, 210, False, input_tokens=20, output_tokens=10, stopped="budget"
+        "alpha", "trial", "", 900, 210, False, input_tokens=20, output_tokens=10, stopped="timeout"
     )
 
     _, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, stopped)
 
     assert grading["assertions"][0]["passed"] is True
-    assert timing["stopped"] == "budget"
+    assert timing["stopped"] == "timeout"
     assert (timing["total_tokens"], timing["input_tokens"]) == (210, 20)
 
 
@@ -223,7 +223,7 @@ def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path)
     quiet = _eval_case(tmp_path, "- [ ] Skill `hello` not invoked\n", eval_id="quiet")
     _run(
         tmp_path, quiet, TRIAL_ARM,
-        RunResult("quiet", "trial", "", 3000, 400, False, stopped="budget"),
+        RunResult("quiet", "trial", "", 3000, 400, False, stopped="timeout"),
     )
     skill_dir = workspace.skill_dir(tmp_path, "hello")
 
@@ -231,18 +231,18 @@ def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path)
     benchmark = report.build_benchmark(
         report.discover_eval_dirs(skill_dir.parent),
         label="trigger",
-        arm_meta={"trial": {"harness": "claude-code", "model": "sonnet", "trigger_budget": 7}},
+        arm_meta={"trial": {"harness": "claude-code", "model": "sonnet"}},
     )
     markdown = report._format_markdown(benchmark)
 
     assert {row["eval_id"]: row["stopped"] for row in rows} == {
         "fires": "decided",
-        "quiet": "budget",
+        "quiet": "timeout",
     }
-    assert benchmark["arms"]["trial"]["stopped_samples"] == {"budget": 1, "decided": 1}
+    assert benchmark["arms"]["trial"]["stopped_samples"] == {"decided": 1, "timeout": 1}
     assert benchmark["arms"]["trial"]["tokens_mean"] == 400
     assert (
-        "- Stopped early: 2 trigger-only sample(s) (1 budget, 1 decided, budget 7 tool calls); "
+        "- Stopped early: 2 trigger-only sample(s) (1 decided, 1 timeout); "
         "their time and tokens are trigger costs, not full-task costs"
     ) in markdown
     assert "| fires | 1 | 1 | 1 | 100% |  | 1 stopped early |" in markdown

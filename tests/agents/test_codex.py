@@ -409,7 +409,7 @@ def test_stream_tool_calls_counts_an_item_once_it_completes() -> None:
 
 
 def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
-    """Verify a non-skill command is a call (it spends budget) and a message is not."""
+    """Verify a non-skill command is a call and a message is not."""
     command_item = {"id": "i1", "type": "command_execution", "command": "ls"}
     command = json.dumps({"type": "item.completed", "item": command_item})
     message = json.dumps(

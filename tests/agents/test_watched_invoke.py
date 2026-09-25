@@ -12,7 +12,7 @@ from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 from benchspec.grading.trajectory import skills_dispatched
-from benchspec.grading.trigger import STOP_BUDGET, STOP_DECIDED, STOP_TIMEOUT, TriggerWatch
+from benchspec.grading.trigger import STOP_DECIDED, STOP_TIMEOUT, TriggerWatch
 from benchspec.orchestration.results import RunResult
 from benchspec.testing import FakeExecEvent, FakeSandbox
 
@@ -133,7 +133,7 @@ def test_watched_invoke_stops_on_the_deciding_dispatch(harness_name: str) -> Non
         )
     )
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5))
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
     assert result.stopped == STOP_DECIDED
     assert result.is_error is False
@@ -144,21 +144,21 @@ def test_watched_invoke_stops_on_the_deciding_dispatch(harness_name: str) -> Non
 
 
 @pytest.mark.parametrize("harness_name", sorted(HARNESSES))
-def test_watched_invoke_stops_an_undecided_run_at_its_budget(harness_name: str) -> None:
-    """A run that never fires is stopped on its Nth tool call and graded as it stands."""
+def test_watched_invoke_lets_a_run_that_never_fires_reach_its_end(harness_name: str) -> None:
+    """Tool calls that are not the watched skill never stop the run."""
     harness = HARNESSES[harness_name]
     guest = FakeSandbox(
         stream_events=_stream(
-            harness.startup, harness.plain_tool_call, harness.plain_tool_call, exit_code=0
+            harness.startup, *[harness.plain_tool_call] * 8, exit_code=0
         )
     )
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=2))
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
-    assert result.stopped == STOP_BUDGET
-    assert result.is_error is False
+    assert result.stopped is None
+    assert len(result.trajectory) == 8
     assert skills_dispatched(result.trajectory, "hello") == []
-    assert guest.streams[0].killed is True
+    assert guest.streams[0].killed is False
 
 
 @pytest.mark.parametrize("harness_name", sorted(HARNESSES))
@@ -167,7 +167,7 @@ def test_watched_invoke_that_ends_on_its_own_is_not_marked_stopped(harness_name:
     harness = HARNESSES[harness_name]
     guest = FakeSandbox(stream_events=_stream(harness.startup, exit_code=2))
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5))
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
     assert result.stopped is None
     assert result.is_error is True
@@ -180,7 +180,7 @@ def test_watched_invoke_reads_partial_usage_from_a_stopped_claude_stream() -> No
         stream_events=_stream(harness.startup, harness.plain_tool_call, harness.hello_dispatch)
     )
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5))
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
     assert result.stopped == STOP_DECIDED
     assert (result.input_tokens, result.cache_read_tokens, result.output_tokens) == (20, 180, 10)
@@ -194,7 +194,7 @@ def test_watched_invoke_times_out_after_model_activity_as_a_graded_non_fire() ->
                                                                           "text": "thinking"}]}})
     guest = FakeSandbox(stream_events=_stream(harness.startup, working), stream_stalls=True)
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5), timeout=1)
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})), timeout=1)
 
     assert result.stopped == STOP_TIMEOUT
     assert result.is_error is False
@@ -205,7 +205,7 @@ def test_watched_invoke_stall_with_no_model_activity_is_an_infra_error() -> None
     harness = HARNESSES["claude-code"]
     guest = FakeSandbox(stream_events=_stream(harness.startup), stream_stalls=True)
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5), timeout=1)
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})), timeout=1)
 
     assert result.is_error is True
     assert result.stopped is None
@@ -251,7 +251,7 @@ def test_watched_invoke_keeps_the_harness_own_duration_when_its_events_carry_one
     )
     guest = FakeSandbox(stream_events=_stream(step_start, dispatch))
 
-    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5))
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
     assert result.stopped == STOP_DECIDED
     assert result.duration_ms == 364

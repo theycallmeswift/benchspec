@@ -52,7 +52,7 @@ class RunResult:
     result_subtype: str = ""
     # {display-path: content} for authored skill files outside the workdir mount.
     artifacts: dict[str, str] = field(default_factory=dict)
-    # Why a trigger-only run was cut short (`decided`, `budget`, `timeout`); None when
+    # Why a trigger-only run was cut short (`decided`, `timeout`); None when
     # it ended on its own. A stopped run's usage covers only what streamed before the stop.
     stopped: str | None = None
 

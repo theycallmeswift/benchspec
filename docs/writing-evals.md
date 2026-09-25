@@ -345,19 +345,10 @@ Say hi to Dana for me.
   `invoked` passes from then on, `not invoked` fails. The run is killed once
   every named skill has fired and graded from what streamed so far
   (`stopped: "decided"`). `` Skill `X` invoked `` alone stops at X's dispatch;
-  adding `` Skill `Y` not invoked `` keeps the run going until Y fires too, or
-  the budget runs out.
-- **The budget.** A run that never fires is capped by tool calls, not seconds,
-  so the cap means the same on a slow model and a fast one. After
-  `trigger_budget` tool calls (default 5; set it per set, per arm, or with
-  `--trigger-budget`, see [configuration](configuration.md)) with verdicts still
-  open, the run is stopped and graded as it stands (`stopped: "budget"`):
-  `not invoked` passes and `invoked` fails. A skill dispatch counts toward the
-  budget, but a dispatch that settles the run stops it as decided.
-- **Late invocation counts as not invoked.** A skill the agent would have
-  loaded after the budget is graded as never invoked. For a routing question
-  ("does this description pull in this prompt?") that is the right answer;
-  raise the budget for a prompt that legitimately explores before it routes.
+  adding `` Skill `Y` not invoked `` keeps the run going until Y fires too.
+- **A run that never fires runs to its end.** Nothing fires, so there is
+  nothing to stop on: a should-not-trigger prompt, or a should-trigger prompt
+  the model misses, costs whatever the task costs.
 - **The timeout still applies.** A run that works past the arm's `timeout`
   without firing is a genuine non-fire (`stopped: "timeout"`). One that never
   showed model activity before the timeout is a launch stall, recorded as an
@@ -369,8 +360,9 @@ Say hi to Dana for me.
 
 Write should-not-trigger prompts as ordinary tasks that sit near the skill's
 territory without asking for it: `List the files in this directory.` against a
-greeting skill, graded with `` Skill `hello` not invoked ``. A correct negative
-ends on its own or at the budget, never at the full task.
+greeting skill, graded with `` Skill `hello` not invoked ``. Keep negatives
+small: a correct negative runs to its own end, so a prompt that is a long task
+costs a long task.
 
 Stopped samples carry `stopped` in `timing.json` and `index.jsonl`, and the
 report says how many stopped per arm and per eval, so their time and tokens

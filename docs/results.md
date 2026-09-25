@@ -77,7 +77,7 @@ pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
 tokens per sample, an errored-sample count, and a per-eval table with sample
 counts and flakiness (the stdev across samples). An arm with
 [trigger-only](writing-evals.md#trigger-evals) samples that were stopped early
-adds a `Stopped early` line (the count per reason and the arm's tool-call budget),
+adds a `Stopped early` line (the count per reason),
 and each affected eval row notes `N stopped early`: those samples' time and
 tokens are the cost of a routing decision, not of the full task.
 
@@ -197,7 +197,7 @@ versus observed**:
 | `run_id` / `commit` / `config_hash` | Identity for cross-run joins. `config_hash` covers only planned selectors, never what happened to run or which binary versions were probed, so two runs of identical config hash identically. |
 | `iteration` / `started_at` / `benchspec_version` | Run bookkeeping. |
 | `set` / `runner` | The resolved set name and runner. |
-| `arms` | The **planned** roster: every configured arm (name, harness, model, effort, timeout, trigger_budget, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
+| `arms` | The **planned** roster: every configured arm (name, harness, model, effort, timeout, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
 | `observed_arms` | The **observed** side, keyed by arm name: only arms with a persisted runtime record appear. Each carries the guest-probed `actual_version` and the sandbox identity (backend, snapshot, fingerprint and its inputs, pulled `image_digest`). Probes that fail record an explicit `*_status: "unavailable"` plus an error, never a silent null. |
 | `judge` | The resolved judge (harness, model, effort, timeout, redacted env, args) plus its host-probed `actual_version`. |
 | `binder` | The binder's transport identity: provider, model, API path. Never key material. |
@@ -239,8 +239,8 @@ binder-degraded counts, `stopped_samples` keyed by reason, per-eval rows with a
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
   `cache_creation_tokens`; zero where the harness does not report them). A
   [trigger-only](writing-evals.md#trigger-evals) run cut short adds `stopped`:
-  `"decided"` (every verdict was fixed), `"budget"` (it spent its tool-call
-  budget), or `"timeout"` (it worked past the turn timeout without firing); the
+  `"decided"` (every verdict was fixed) or `"timeout"` (it worked past the turn
+  timeout without firing); the
   key is absent for a run that ended on its own. A stopped run's
   `duration_ms` is measured as the harness measures a full run where its events
   carry timestamps (OpenCode), else by the wall clock up to the stop, which

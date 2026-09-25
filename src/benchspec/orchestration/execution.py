@@ -90,7 +90,7 @@ class _ArmRun:
     total_cache_creation: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    # Why a trigger-only run was stopped early (`decided`, `budget`, `timeout`); None
+    # Why a trigger-only run was stopped early (`decided`, `timeout`); None
     # when it ended on its own.
     stopped: str | None = None
     # Guest task-harness version probed inside the live snapshot. The default is the
@@ -192,7 +192,7 @@ def _bind_all(assertions: Sequence[str], bind: Binder) -> tuple[list[dict | None
     return specs, binder_degraded
 
 
-def _trigger_watch(specs: list[dict | None], budget: int) -> TriggerWatch | None:
+def _trigger_watch(specs: list[dict | None]) -> TriggerWatch | None:
     """The stop rule for a run whose every graded line is a skill activation check, else None.
 
     Trigger-only is derived from the bindings, never declared: one outcome line, or one
@@ -201,7 +201,6 @@ def _trigger_watch(specs: list[dict | None], budget: int) -> TriggerWatch | None
 
     Args:
         specs: The binder's spec for each active assertion.
-        budget: The tool calls allowed before an undecided run is stopped.
 
     Returns:
         A watch over the skills the lines name, or None for a full run.
@@ -210,9 +209,7 @@ def _trigger_watch(specs: list[dict | None], budget: int) -> TriggerWatch | None
         return None
     if any(spec is None or spec["checker"] not in ACTIVATION_CHECKERS for spec in specs):
         return None
-    return TriggerWatch(
-        frozenset(spec["skill"] for spec in specs if spec is not None), budget=budget
-    )
+    return TriggerWatch(frozenset(spec["skill"] for spec in specs if spec is not None))
 
 
 def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
@@ -542,7 +539,7 @@ def run_eval_arm(
     # a pure function of the assertion text, so its place in the order changes no verdict.
     # A BinderAuthError propagates here, before the sandbox spends anything.
     specs, binder_degraded = _bind_all(active_assertions, bind)
-    watch = _trigger_watch(specs, arm.trigger_budget)
+    watch = _trigger_watch(specs)
 
     arm_run = asyncio.run(
         _run_arm_turns(

@@ -4,8 +4,7 @@
 `detect_skill_fired` decides whether a given skill fired anywhere in a stream;
 `streamed_activity` tells a timed-out run that did real work from a launch stall.
 `TriggerWatch` is the stop rule for a trigger-only run: every graded line is a skill
-activation check, so the run can stop the moment every verdict is fixed, or once it has
-spent its tool-call budget without fixing them.
+activation check, so the run can stop the moment every verdict is fixed.
 """
 
 from __future__ import annotations
@@ -18,13 +17,7 @@ from benchspec.grading.trajectory import skills_dispatched
 
 # Why a watched run was stopped before it ended on its own; recorded as `stopped`.
 STOP_DECIDED = "decided"
-STOP_BUDGET = "budget"
 STOP_TIMEOUT = "timeout"
-
-# Tool calls a trigger-only run may make with verdicts still open before it is stopped.
-# Every in-repo sample that fires does so by its second call; a few calls of headroom
-# keep a prompt that reads a file before routing honest.
-DEFAULT_TRIGGER_BUDGET = 5
 
 # Maps one raw stream line to the trajectory events it carries (the adapter's parser).
 LineTrajectory = Callable[[str], list[dict]]
@@ -43,38 +36,31 @@ class TriggerWatch:
 
     Every open verdict belongs to one of `skills`, and each is fixed by that skill's
     first dispatch: `skill_invoked` passes and `not_skill_invoked` fails from then on.
-    So the run is decided once every skill has fired. A run that makes `budget` tool
-    calls with verdicts still open is stopped and graded as it stands.
+    So the run is decided once every skill has fired; until then it runs on.
 
     Attributes:
         skills: The skills the run's activation lines name.
-        budget: The tool calls allowed before an undecided run is stopped.
     """
 
     skills: frozenset[str]
-    budget: int = DEFAULT_TRIGGER_BUDGET
 
     def line_watcher(self, line_trajectory: LineTrajectory) -> LineWatcher:
         """Start a fresh watcher for one run.
 
         A dispatch is read from the same trajectory events grading reads, so the stop
-        and the verdict can never disagree about whether a skill fired. A dispatch
-        counts toward the budget, but is checked first: the call that decides the run
-        stops it as decided.
+        and the verdict can never disagree about whether a skill fired.
 
         Args:
             line_trajectory: The adapter's per-line trajectory parser.
 
         Returns:
-            A watcher that returns `STOP_DECIDED` or `STOP_BUDGET` once the run should
-            stop, and None until then.
+            A watcher that returns `STOP_DECIDED` once every verdict is fixed, and None
+            until then.
         """
         open_skills = set(self.skills)
-        tool_calls_seen = 0
 
         def watch(line: str) -> str | None:
             """Advance the rule over one stream line."""
-            nonlocal tool_calls_seen
             for event in line_trajectory(line):
                 if event.get("kind") != "tool_call":
                     continue
@@ -89,10 +75,6 @@ class TriggerWatch:
                 open_skills.difference_update(fired)
                 if not open_skills:
                     return STOP_DECIDED
-
-                tool_calls_seen += 1
-                if tool_calls_seen >= self.budget:
-                    return STOP_BUDGET
 
             return None
 

@@ -165,7 +165,7 @@ def test_stream_tool_calls_counts_a_dispatch_once_it_completes() -> None:
 
 
 def test_stream_tool_calls_counts_other_tools_and_skips_non_tool_lines() -> None:
-    """Verify a plain tool is a call (it spends budget); text and junk are not."""
+    """Verify a plain tool is a call; text and junk are not."""
     agent = _opencode_agent()
     bash = json.dumps(
         {
