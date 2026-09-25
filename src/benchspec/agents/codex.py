@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -27,6 +27,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -344,6 +345,13 @@ class CodexAgent(BaseAgent):
             prompt,
         ]
 
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one `codex exec --json` line carries, as the trajectory has them.
+
+        Only a completed item is a call, so a dispatch counts once its item completes.
+        """
+        return _codex_trajectory(list(iter_events(line)))
+
     async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
@@ -358,26 +366,6 @@ class CodexAgent(BaseAgent):
             raise RuntimeError(
                 f"codex auth copy failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
-
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """Return whether streamed output shows meaningful agent activity."""
-        activity_events = {
-            "turn.started",
-            "item.started",
-            "item.completed",
-            "turn.completed",
-        }
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict) and event.get("type") in activity_events:
-                return True
-        return False
 
     async def provision(self, sandbox: LiveSandbox) -> None:
         """Install the agent CLI and credentials inside the guest."""
@@ -403,6 +391,7 @@ class CodexAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -415,12 +404,25 @@ class CodexAgent(BaseAgent):
             harness_args=harness_args,
             workdir=workdir,
         )
+        env = {**self.guest_env(), **(extra_env or {})}
         try:
             await self._write_auth_json(sandbox)
+            if stop is not None:
+                return await self.invoke_watched(
+                    sandbox,
+                    cmd,
+                    stop=stop,
+                    parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
+                    cwd=workdir,
+                    env=env,
+                    timeout=timeout,
+                    eval_id=eval_id,
+                    config=config,
+                )
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
-                env={**self.guest_env(), **(extra_env or {})},
+                env=env,
                 timeout=timeout,
                 stdin=b"",
             )

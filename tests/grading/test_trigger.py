@@ -1,11 +1,9 @@
-"""Tests for the retained skill-activation detection primitives in benchspec.grading.trigger."""
+"""Tests for the skill-activation primitives and the activation stop rule."""
 
 import json
 
-from benchspec.grading.trigger import (
-    detect_skill_fired,
-    streamed_activity,
-)
+from benchspec.grading.trajectory import extract_trajectory
+from benchspec.grading.trigger import detect_skill_fired, settled_once_dispatched
 
 
 def _skill_line(skill_value: str) -> str:
@@ -133,12 +131,64 @@ def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
     assert detect_skill_fired(_malformed_shape_lines(), "bootstrap") is False
 
 
-def test_streamed_activity_true_when_turn_began() -> None:
-    """Verify streamed_activity is true once an assistant event is seen."""
-    lines = ['{"type":"system"}', _skill_line("bootstrap")]
-    assert streamed_activity(lines) is True
+def _settled_after(skills: set[str], lines: list[str]) -> list[bool]:
+    """Whether the rule over `skills` is settled after each of `lines`, read as Claude's stream."""
+    stop = settled_once_dispatched(skills)
+    trajectory: list[dict] = []
+    verdicts = []
+    for line in lines:
+        trajectory.extend(extract_trajectory(line))
+        verdicts.append(stop(trajectory))
+    return verdicts
 
 
-def test_streamed_activity_false_on_startup_only() -> None:
-    """Verify streamed_activity is false when only a startup/init line streamed."""
-    assert streamed_activity(['{"type":"system"}', "", "not json"]) is False
+def _read_line() -> str:
+    """A non-skill tool call."""
+    return _named_tool_line("Read")
+
+
+def test_invoked_line_is_settled_by_its_skills_first_dispatch() -> None:
+    """Verify `X invoked` alone is settled by X's dispatch."""
+    verdicts = _settled_after({"hello"}, ['{"type":"system"}', _skill_line("hello")])
+
+    assert verdicts == [False, True]
+
+
+def test_two_skills_stay_open_until_both_fire() -> None:
+    """Verify `X invoked` + `Y not invoked` is not settled by X alone."""
+    verdicts = _settled_after({"hello", "goodbye"}, [_skill_line("hello"), _skill_line("goodbye")])
+
+    assert verdicts == [False, True]
+
+
+def test_an_unrelated_skill_dispatch_does_not_settle() -> None:
+    """Verify another skill firing leaves the named skill's verdict open."""
+    verdicts = _settled_after({"hello"}, [_skill_line("hello-world"), _skill_line("other:hello2")])
+
+    assert verdicts == [False, False]
+
+
+def test_a_namespaced_dispatch_settles() -> None:
+    """Verify a `Skill` call naming `plugin:hello` settles a rule over `hello`."""
+    assert _settled_after({"hello"}, [_skill_line("greetings:hello")]) == [True]
+
+
+def test_a_fallback_dispatch_settles() -> None:
+    """Verify a tool call named for the skill, the second fire shape grading reads, settles."""
+    assert _settled_after({"hello"}, [_named_tool_line("greetings:hello")]) == [True]
+
+
+def test_an_unsettled_run_is_never_stopped() -> None:
+    """Verify tool calls and text alone never settle a run whose skill has not fired."""
+    text = json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}
+    )
+
+    verdicts = _settled_after({"hello"}, [_read_line()] * 20 + [text])
+
+    assert verdicts == [False] * 21
+
+
+def test_no_skills_is_settled_at_once() -> None:
+    """Verify a rule over no skills has nothing to wait for."""
+    assert settled_once_dispatched(set())([]) is True

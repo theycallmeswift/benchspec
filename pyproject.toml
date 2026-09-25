@@ -119,8 +119,9 @@ testpaths = ["tests", "evals"]
 markers = [
     "binder_corpus: live Gemini binder corpus eval (costs money; run via `make evals`)",
     "benchspec: skill-eval cases run via `benchspec run` or `make e2e` (declared here too so importing benchspec.orchestration.cases in the unit suite, where the plugin isn't loaded, stays warning-free)",
+    "e2e: live run of the in-repo suite that asserts on its artifacts (costs money; run via `make e2e`)",
 ]
-addopts = "-m 'not binder_corpus'"
+addopts = "-m 'not binder_corpus and not e2e'"
 
 [tool.benchspec]
 default-set = "e2e"

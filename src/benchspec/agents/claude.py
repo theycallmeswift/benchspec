@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
@@ -26,7 +26,8 @@ from benchspec.agents.base import (
     BaseAgent,
     Credential,
 )
-from benchspec.grading.trigger import streamed_activity
+from benchspec.grading.trajectory import extract_trajectory
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import (
     RunResult,
@@ -353,12 +354,9 @@ class ClaudeCodeAgent(BaseAgent):
         token = {**os.environ, **config_env}.get(OPENROUTER_AUTH_ENV, "")
         return {**_openrouter_routing_env(), _OPENROUTER_TOKEN_ENV: token}
 
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """True if the model began a turn (an `assistant` event), distinguishing a.
-
-        clean non-fire from a retryable launch stall. Delegates to the shared helper.
-        """
-        return streamed_activity(lines)
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one stream-json line carries, as the trajectory records them."""
+        return [event for event in extract_trajectory(line) if event["kind"] == "tool_call"]
 
     async def invoke(
         self,
@@ -376,6 +374,7 @@ class ClaudeCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -387,13 +386,27 @@ class ClaudeCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+        # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over guest_env(),
+        # arm env winning.
+        env = {**self.guest_env(), **(extra_env or {})}
+        if stop is not None:
+            return await self.invoke_watched(
+                sandbox,
+                cmd,
+                stop=stop,
+                parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
+                cwd=workdir,
+                env=env,
+                timeout=timeout,
+                eval_id=eval_id,
+                config=config,
+            )
+
         try:
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
-                # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
-                # guest_env(), arm env winning.
-                env={**self.guest_env(), **(extra_env or {})},
+                env=env,
                 timeout=timeout,
                 stdin=b"",
             )

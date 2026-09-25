@@ -208,6 +208,7 @@ def _arm_stats(
     durations: list[int] = []
     judge_ms: list[int] = []
     tokens: list[int] = []
+    stopped_total = 0
     errored_total = 0
     binder_degraded_total = 0
 
@@ -219,6 +220,7 @@ def _arm_stats(
         passed_total = 0
         total_total = 0
         errored_count = 0
+        stopped_count = 0
         pooled_out = excluded.get(_eval_key(eval_dir), set())
 
         for sample_dir in _sample_dirs(arm_dir):
@@ -231,6 +233,10 @@ def _arm_stats(
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
+            # Before the pooled-out skip: a sample with no pooled rate was still stopped.
+            if timing and timing.get("stopped"):
+                stopped_total += 1
+                stopped_count += 1
 
             assertions = [
                 assertion
@@ -249,7 +255,7 @@ def _arm_stats(
                     durations.append(timing["duration_ms"])
                 if "judge_ms" in timing:
                     judge_ms.append(timing["judge_ms"])
-                if "total_tokens" in timing:
+                if timing.get("total_tokens") is not None:
                     tokens.append(timing["total_tokens"])
 
         errored_total += errored_count
@@ -265,6 +271,7 @@ def _arm_stats(
                 "eval_id": eval_id,
                 "samples": len(sample_rates),
                 "errored_samples": errored_count,
+                "stopped_samples": stopped_count,
                 "passed_total": passed_total,
                 "total_total": total_total,
                 "pass_rate_mean": statistics.mean(sample_rates),
@@ -282,6 +289,7 @@ def _arm_stats(
         "tokens_mean": statistics.mean(tokens) if tokens else None,
         "tokens_stdev": statistics.stdev(tokens) if len(tokens) > 1 else None,
         "errored_samples": errored_total,
+        "stopped_samples": stopped_total,
         "binder_degraded": binder_degraded_total,
         "n": len(pair_rates),
         "per_eval": per_eval,
@@ -375,6 +383,7 @@ def index_rows(
                         "total_tokens": timing.get("total_tokens"),
                         "input_tokens": timing.get("input_tokens"),
                         "output_tokens": timing.get("output_tokens"),
+                        "stopped": bool(timing.get("stopped")),
                     }
                 )
     return rows
@@ -807,6 +816,8 @@ def _format_markdown(benchmark: dict) -> str:
                 f"- Errored: {stats['errored_samples']} sample(s) excluded "
                 "from rates (infra, not skill)"
             )
+        if stats["stopped_samples"]:
+            lines.append(_stopped_line(stats))
 
         lines += [""]
         lines.append("| Eval | Samples | Passed | Total | Rate | Flakiness | Note |")
@@ -819,6 +830,8 @@ def _format_markdown(benchmark: dict) -> str:
             notes = []
             if row["errored_samples"]:
                 notes.append(f"{row['errored_samples']} errored")
+            if row["stopped_samples"]:
+                notes.append(f"{row['stopped_samples']} stopped early")
             lines.append(
                 f"| {row['eval_id']} | {row['samples']} | {row['passed_total']} "
                 f"| {row['total_total']} | {row['pass_rate_mean']:.0%} | {flakiness} "
@@ -830,6 +843,14 @@ def _format_markdown(benchmark: dict) -> str:
     lines += _provenance_lines(benchmark)
 
     return "\n".join(lines)
+
+
+def _stopped_line(stats: dict) -> str:
+    """Render the per-arm note on samples stopped once every verdict was fixed."""
+    return (
+        f"- Stopped early: {stats['stopped_samples']} sample(s) ended once every "
+        "verdict was fixed; their time and tokens are not full-task costs"
+    )
 
 
 def _inline_code(value: str) -> str:

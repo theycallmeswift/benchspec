@@ -265,8 +265,8 @@ serves every harness in a mixed set.
 ## How assertions are graded
 
 This is the part worth internalizing, because it shapes how you word assertions.
-Every assertion takes one of two paths, and the split is decided per line, at
-grade time, by the **binder**: a conservative classifier (a fixed
+Every assertion takes one of two paths, and the split is made per line, just
+before the agent runs, by the **binder**: a conservative classifier (a fixed
 `gemini-3.5-flash-lite` call, which is why its credential, `GEMINI_API_KEY` by
 default or `OPENROUTER_API_KEY` under `[tool.benchspec.binder] provider =
 "openrouter"`, is always required).
@@ -323,6 +323,47 @@ measuring, unless the line is [scoped](#scoping-an-assertion-to-arms) off the
 baseline. A trial arm that fails its own activation assertion is a routing
 finding: the skill was there and the agent did not use it.
 
+### Runs that stop early
+
+There is no separate eval kind for this. An activation line is settled the
+moment its skill is dispatched: `invoked` passes from then on and `not invoked`
+fails. So when every line that applies to an arm binds to `skill_invoked` or
+`not_skill_invoked`, that arm's run is streamed and ended as soon as every
+named skill has fired, instead of paying for the whole task.
+
+```markdown
+## Prompt
+
+Say hi to Dana for me.
+
+## Assertions
+
+- [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+```
+
+- `` Skill `X` invoked `` alone ends the run at X's dispatch. Adding
+  `` Skill `Y` not invoked `` keeps it going until Y fires too.
+- A run that never fires runs to its end: a should-not-trigger prompt, or a
+  should-trigger prompt the model misses, costs whatever the task costs, and
+  one that outlives the arm's `timeout` is an errored sample like any other.
+- Any other line makes the run whole: one outcome line, an activation line the
+  binder did not bind, or an arm whose every line is scoped off, and the arm
+  runs to its end as a mixed eval always has.
+
+To keep a run whole anyway, say so in the frontmatter: `stop_early: false`.
+The run then ends on its own, like a mixed eval, and every other rule above
+still holds.
+
+Write should-not-trigger prompts as ordinary tasks that sit near the skill's
+territory without asking for it: `List the files in this directory.` against a
+greeting skill, graded with `` Skill `hello` not invoked ``. Keep them small: a
+correct negative runs to its own end, so a long task costs a long task.
+
+Stopped samples carry `"stopped": true` in `timing.json` and `index.jsonl`, and
+the report says how many stopped per arm and per eval, so their time and tokens
+read as routing costs (see [results](results.md)).
+
 ## The authoring loop: `lint`, then `analyze`
 
 Two commands close the loop before a paid run.
@@ -354,7 +395,9 @@ suite: it is a report, not a gate.
 - `history` must be a list of `{role, content}` turns with both fields non-empty,
   or an eval-folder-relative `.jsonl` path whose resolved target stays in the
   eval folder and whose non-blank lines each parse as JSON.
-- `history` is the only frontmatter key; unknown keys are rejected.
+- `stop_early`, when present, is `true` or `false`.
+- `history` and `stop_early` are the only frontmatter keys; unknown keys are
+  rejected.
 - Eval files must be named `eval.md` or `<stem>.eval.md`; anything else errors.
 - A graded line may carry one `- if:` / `- unless:` sub-bullet; a second clause,
   a clause with no item above it or on a display-only parent, or an empty

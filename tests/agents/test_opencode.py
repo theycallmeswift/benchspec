@@ -124,16 +124,70 @@ def test_build_command_ignores_plugin_and_resume() -> None:
     assert "sess-X" not in cmd
 
 
-def test_opencode_streamed_activity_true_when_turn_began() -> None:
-    """Verify opencode streamed activity true when turn began."""
-    agent = OpenCodeAgent()
-    assert agent.streamed_activity(_fixture_lines("opencode_route_nofire.jsonl")) is True
+def _skill_tool_line(name: str, status: str = "completed") -> str:
+    """An OpenCode `skill` dispatcher tool_use line for `name` in the given state."""
+    return json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"status": status, "input": {"name": name}},
+            },
+        }
+    )
 
 
-def test_opencode_streamed_activity_false_on_no_events() -> None:
-    """Verify opencode streamed activity false on no events."""
-    agent = OpenCodeAgent()
-    assert agent.streamed_activity(["", "not json", "  "]) is False
+def test_stream_tool_calls_reads_the_skill_dispatch_in_a_route_stream() -> None:
+    """Verify the fixture stream's `skill` tool_use reads as an `archive` dispatch."""
+    agent = _opencode_agent()
+
+    calls = [
+        call
+        for line in _fixture_lines("opencode_route_fired.jsonl")
+        for call in agent.stream_tool_calls(line)
+    ]
+
+    assert calls == [
+        {"kind": "tool_call", "id": "", "name": "Skill", "arguments": {"skill": "archive"}}
+    ]
+
+
+def test_stream_tool_calls_counts_a_dispatch_once_it_completes() -> None:
+    """Verify a running frame is not a call yet, matching the parser's trajectory."""
+    agent = _opencode_agent()
+
+    running = agent.stream_tool_calls(_skill_tool_line("archive", status="running"))
+    completed = agent.stream_tool_calls(_skill_tool_line("knowledge-base:archive"))
+
+    assert running == []
+    assert skills_dispatched(completed) == ["knowledge-base:archive"]
+
+
+def test_stream_tool_calls_counts_other_tools_and_skips_non_tool_lines() -> None:
+    """Verify a plain tool is a call; text and junk are not."""
+    agent = _opencode_agent()
+    bash = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "bash",
+                "state": {"status": "completed", "input": {"command": "ls"}},
+            },
+        }
+    )
+    text = json.dumps({"type": "text", "part": {"type": "text", "text": "hi"}})
+
+    bash_calls = agent.stream_tool_calls(bash)
+    text_calls = agent.stream_tool_calls(text)
+    junk_calls = agent.stream_tool_calls("not json")
+
+    assert bash_calls == [
+        {"kind": "tool_call", "id": "", "name": "bash", "arguments": {"command": "ls"}}
+    ]
+    assert text_calls == []
+    assert junk_calls == []
 
 
 def test_parse_opencode_jsonl_populates_run_result() -> None:

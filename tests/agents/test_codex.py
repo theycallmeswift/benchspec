@@ -370,6 +370,71 @@ def test_codex_cell_env_carries_benchspec_vars() -> None:
     assert env["BENCHSPEC_BASELINE"] == "baseline"
 
 
+def _stream_tool_calls(lines: list[str]) -> list[dict]:
+    """Every tool call the adapter reads off `lines`, one line at a time."""
+    agent = _agent()
+    return [call for line in lines for call in agent.stream_tool_calls(line)]
+
+
+def test_stream_tool_calls_reads_the_skill_md_read_in_a_real_stream() -> None:
+    """Verify a captured Codex 0.154.0 stream yields the SKILL.md read as a `hello` dispatch."""
+    calls = _stream_tool_calls(_lines("codex_skill_md_read.jsonl"))
+
+    assert calls[0] == {
+        "kind": "tool_call",
+        "id": "item_1",
+        "name": "Skill",
+        "arguments": {"skill": "hello"},
+    }
+    assert skills_dispatched(calls, "hello") == ["hello"]
+
+
+def test_stream_tool_calls_matches_the_whole_stream_trajectory() -> None:
+    """Verify the per-line view agrees with the parser's trajectory for the whole stream."""
+    stream = _text("codex_skill_md_read.jsonl")
+
+    calls = _stream_tool_calls(stream.splitlines())
+
+    assert calls == parse_codex_jsonl(stream, "e1", "trial", None).trajectory
+
+
+def test_stream_tool_calls_counts_an_item_once_it_completes() -> None:
+    """Verify a started item is not a call yet; its completion is."""
+    item = {"id": "i1", "type": "skill_invocation", "name": "knowledge-base:archive"}
+    started = json.dumps({"type": "item.started", "item": item})
+    completed = json.dumps({"type": "item.completed", "item": item})
+
+    started_calls = _agent().stream_tool_calls(started)
+    completed_calls = _agent().stream_tool_calls(completed)
+
+    assert started_calls == []
+    assert skills_dispatched(completed_calls) == ["knowledge-base:archive"]
+
+
+def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
+    """Verify a non-skill command is a call and a message is not."""
+    command_item = {"id": "i1", "type": "command_execution", "command": "ls"}
+    command = json.dumps({"type": "item.completed", "item": command_item})
+    message = json.dumps(
+        {"type": "item.completed", "item": {"id": "i2", "type": "agent_message", "text": "hi"}}
+    )
+
+    command_calls = _agent().stream_tool_calls(command)
+    message_calls = _agent().stream_tool_calls(message)
+    junk_calls = _agent().stream_tool_calls("not json")
+
+    assert command_calls == [
+        {
+            "kind": "tool_call",
+            "id": "i1",
+            "name": "command_execution",
+            "arguments": {"command": "ls"},
+        }
+    ]
+    assert message_calls == []
+    assert junk_calls == []
+
+
 @pytest.mark.parametrize("skills_home", ["/home/benchspec/skills", "/root/.codex/skills"])
 def test_skill_dispatch_name_resolves_command_reading_skill_md(skills_home: str) -> None:
     """Verify a command_execution reading a skill's SKILL.md resolves to that skill's name."""
@@ -500,21 +565,6 @@ def test_skills_dispatched_reports_codex_skill_md_read() -> None:
     res = parse_codex_jsonl(stream, "e1", "trial", detect_skill=None)
 
     assert skills_dispatched(res.trajectory) == ["hello"]
-
-
-def test_codex_streamed_activity_true_when_turn_began() -> None:
-    """Verify codex streamed activity true when turn began."""
-    assert _agent().streamed_activity(_lines("codex_route_nofire.jsonl")) is True
-
-
-def test_codex_streamed_activity_false_on_startup_only() -> None:
-    """Verify codex streamed activity false on startup only."""
-    assert _agent().streamed_activity(['{"type":"thread.started","thread_id":"t"}']) is False
-
-
-def test_codex_streamed_activity_false_on_empty_or_invalid_lines() -> None:
-    """Verify codex streamed activity false on empty or invalid lines."""
-    assert _agent().streamed_activity(["", "not json"]) is False
 
 
 def test_parse_codex_jsonl_populates_run_result() -> None:

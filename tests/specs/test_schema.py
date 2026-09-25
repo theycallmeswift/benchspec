@@ -247,3 +247,14 @@ def test_missing_schema_key_says_how_to_add_it() -> None:
     msg = str(ei.value)
     assert "benchspec/v1" in msg
     assert "first key" in msg
+
+
+def test_stop_early_accepts_a_boolean() -> None:
+    """Verify `stop_early: false` validates."""
+    _validate(_doc([{"id": "a", "prompt": "p", "assertions": ["x"], "stop_early": False}]))
+
+
+def test_stop_early_rejects_a_non_boolean() -> None:
+    """Verify `stop_early` must be a boolean, not a truthy string."""
+    with pytest.raises(SchemaError, match="stop_early: expected bool"):
+        _validate(_doc([{"id": "a", "prompt": "p", "assertions": ["x"], "stop_early": "no"}]))

@@ -1,16 +1,52 @@
-"""Skill-activation detection primitives over a Claude Code stream-json run.
+"""Skill-activation detection primitives over an agent run.
 
-`_tool_uses` yields the tool_use blocks in one stream-json line; `detect_skill_fired`
-decides whether a given skill fired anywhere in a stream; `streamed_activity` tells a
-timed-out run that did real work from a launch stall. `streamed_activity` is public so a
-`CodingAgent.streamed_activity` impl can reuse the Claude Code event-shape match without
-crossing a private boundary.
+`_tool_uses` yields the tool_use blocks in one Claude stream-json line;
+`detect_skill_fired` decides whether a given skill fired anywhere in a stream;
+`settled_once_dispatched` is the stop rule for a run whose every graded line is a skill
+activation check, so the run can end the moment every verdict is fixed.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+
+from benchspec.grading.trajectory import skills_dispatched
+
+# Whether every graded verdict of a run is fixed, read from the trajectory streamed so far.
+StopRule = Callable[[list[dict]], bool]
+
+
+def settled_once_dispatched(skills: Iterable[str]) -> StopRule:
+    """The stop rule for a run whose every graded line is a skill activation check.
+
+    A skill's first dispatch fixes its verdict for good (`invoked` passes and
+    `not invoked` fails from then on), so the run is settled once every named skill has
+    fired, and it runs on until then. A dispatch is read the way grading reads it: a
+    `Skill` call naming the skill, or a tool call named for it, bare or namespaced
+    (`plugin:skill`).
+
+    Args:
+        skills: The skills the run's activation lines name.
+
+    Returns:
+        A pure function of the trajectory so far.
+    """
+    wanted = frozenset(skills)
+
+    def settled(trajectory: list[dict]) -> bool:
+        """Whether every named skill has been dispatched."""
+        return all(_dispatched(trajectory, skill) for skill in wanted)
+
+    return settled
+
+
+def _dispatched(trajectory: list[dict], skill: str) -> bool:
+    """Whether `skill` was dispatched, exactly or namespaced, anywhere in `trajectory`."""
+    return any(
+        name == skill or name.endswith(f":{skill}")
+        for name in skills_dispatched(trajectory, skill)
+    )
 
 
 def _tool_uses(line: str) -> Iterator[dict]:
@@ -57,21 +93,3 @@ def detect_skill_fired(stream_lines: Iterable[str], skill_name: str) -> bool:
                 return True
     return False
 
-
-def streamed_activity(stream_lines: Iterable[str]) -> bool:
-    """True if the model began a turn (an `assistant` event), not just the startup line.
-
-    A timeout after real activity is a genuine non-fire (the agent worked but never
-    fired); a timeout that streamed only the `system`/init line is a launch stall.
-    """
-    for line in stream_lines:
-        text = line.strip()
-        if not text:
-            continue
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "assistant":
-            return True
-    return False

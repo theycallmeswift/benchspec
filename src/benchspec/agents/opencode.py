@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
@@ -48,6 +48,7 @@ from benchspec.grading.trajectory import (
     opencode_tool_call_was_rejected,
     opencode_trajectory,
 )
+from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -449,6 +450,7 @@ class OpenCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -460,11 +462,22 @@ class OpenCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+        # Per-arm extra_env merges over guest_env(), arm env winning.
+        env = {**self.guest_env(), **(extra_env or {})}
+        if stop is not None:
+            return await self.invoke_watched(
+                sandbox,
+                cmd,
+                stop=stop,
+                parse=lambda stdout: parse_opencode_jsonl(stdout, eval_id, config, detect_skill),
+                cwd=workdir,
+                env=env,
+                timeout=timeout,
+                eval_id=eval_id,
+                config=config,
+            )
 
         try:
-            # Per-arm extra_env merges over guest_env(), arm env winning.
-            env = {**self.guest_env(), **(extra_env or {})}
-
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
@@ -528,25 +541,12 @@ class OpenCodeAgent(BaseAgent):
             raise RuntimeError(f"opencode judge made no successful model call: {detail}")
         return json.dumps({"result": result.result_text})
 
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """Return true when the OpenCode stream proves the model began a turn.
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one OpenCode JSONL line carries, as the trajectory has them.
 
-        OpenCode emits step_start/text/tool_use/step_finish (never Claude's `assistant`),
-        so any of those proves the agent worked; a budget timeout after one is a clean
-        non-fire, not a launch stall.
+        Running and pending frames are not calls yet, so a dispatch counts once it completes.
         """
-        turn_events = {"step_start", "text", "tool_use", "step_finish"}
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict) and event.get("type") in turn_events:
-                return True
-        return False
+        return opencode_trajectory(list(iter_events(line)))
 
 
 def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:

@@ -2321,41 +2321,26 @@ def test_capture_error_on_real_arm_raises_loudly(
     assert not (run_dir / "provenance.json").exists()  # failed loudly, wrote nothing
 
 
-def test_provenance_json_survives_binder_failure_after_sandbox_use(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A sandbox that ran remains observed when later binding aborts the arm."""
+def test_binder_auth_failure_aborts_before_the_sandbox_runs(tmp_path: Path) -> None:
+    """Binding runs before the agent, so a rejected binder key never spends a sandbox run."""
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()
-    agent = _FakeAgent()
-    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
-    monkeypatch.setattr(
-        "benchspec.orchestration.execution.make_agent",
-        lambda harness=None, provider="default": agent,
-    )
-    monkeypatch.setattr(
-        "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
-    )
     eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
-    result = RunResult("alpha", "trial", "done", 1, 1, False, session_id="s1", fired=True)
+    session_factory = _RecordedSession(RunResult("alpha", "trial", "done", 1, 1, False))
 
     def bind(text: str) -> NoReturn:
-        """Simulate an authentication failure after the sandbox task completed."""
+        """Simulate the binder's credential being rejected."""
         raise BinderAuthError("gemini api key rejected")
 
     with pytest.raises(BinderAuthError):
         run_eval_arm(
             eval_case, TRIAL, workdir, {}, tmp_path,
             today="2099-01-01", repo_root=tmp_path, sample=0,
-            session_factory=_live_sandbox_session_factory(FakeSandbox(), result),
-            grade=_grade_all_pass, bind=bind,
+            session_factory=session_factory, grade=_grade_all_pass, bind=bind,
         )
 
-    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
-    provenance = json.loads((run_dir / "provenance.json").read_text())
-    assert provenance["actual_version"] == "1.2.3"
-    assert provenance["sandbox"]["snapshot"] == "snap"
+    assert session_factory.calls == []
 
 
 def test_provenance_fingerprint_uses_environment_that_selected_snapshot(

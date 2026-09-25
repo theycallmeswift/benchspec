@@ -20,11 +20,14 @@ import hashlib
 import re
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from benchspec.orchestration.results import RunResult
+from benchspec.grading.trigger import StopRule
+from benchspec.orchestration.environments import GuestSandbox
+from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
+from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
@@ -210,6 +213,79 @@ class BaseAgent(ABC):
     def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
 
+    @abstractmethod
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the trajectory tool calls one raw stream line carries, in order.
+
+        The per-line view of the trajectory the adapter's parser builds for the whole
+        stream, so an early stop and the grade read a dispatch identically.
+        """
+
+    async def invoke_watched(
+        self,
+        sandbox: LiveSandbox,
+        command: list[str],
+        *,
+        stop: StopRule,
+        parse: Callable[[str], RunResult],
+        cwd: str,
+        env: dict[str, str],
+        timeout: int,
+        eval_id: str,
+        config: str,
+    ) -> RunResult:
+        """Stream one turn, stopping it once `stop` says every verdict is fixed.
+
+        A stop is ours, not a crash: the killed process's exit is ignored and the run is
+        graded from the stream so far. Everything else ends as a buffered run does: a
+        timeout or a sandbox failure is an infra error, a nonzero exit is marked errored.
+        The run's duration is the harness's own when its parser reports one (Claude
+        Code's closing `result`), else the process wall time.
+
+        Args:
+            sandbox: The live guest.
+            command: The harness argv.
+            stop: The run's stop rule, over the trajectory streamed so far.
+            parse: The adapter's stream parser, bound to this turn.
+            cwd: Working directory inside the guest.
+            env: The process environment.
+            timeout: Wall-clock cap, seconds.
+            eval_id: The eval the turn belongs to.
+            config: The arm name.
+
+        Returns:
+            The parsed run, with `stopped` set when it was cut short.
+        """
+        trajectory: list[dict] = []
+
+        def watch(line: str) -> bool:
+            """Whether the tool calls this line adds settle every verdict."""
+            calls = self.stream_tool_calls(line)
+            trajectory.extend(calls)
+            return bool(calls) and stop(trajectory)
+
+        try:
+            proc = await GuestSandbox(sandbox).exec_watched(
+                command,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                watch=watch,
+                # Force EOF on stdin so the harness cannot block on an open pipe.
+                stdin=b"",
+            )
+        except (TimeoutError, SandboxError, OSError) as error:
+            message = f"<sandbox-error> {error}"[-2000:]
+            return RunResult(eval_id, config, message, 0, 0, is_error=True)
+
+        parsed = parse(proc.stdout)
+        result = replace(parsed, duration_ms=parsed.duration_ms or proc.duration_ms)
+        if proc.stopped:
+            return replace(result, is_error=False, stopped=True)
+        if proc.exit_code != 0:
+            return mark_errored_by_nonzero_exit(result, proc.stderr)
+        return result
+
     def provision_script(self) -> str:
         """The fully-resolved commands this instance runs to install the CLI in the guest.
 
@@ -384,8 +460,13 @@ class CodingAgent(Protocol):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        stop: StopRule | None = None,
     ) -> RunResult:
-        """Run one prompt through the agent inside the guest."""
+        """Run one prompt through the agent inside the guest.
+
+        With a `stop` rule the turn streams and ends once every graded verdict is fixed
+        (`BaseAgent.invoke_watched`). Without one, it runs to its own end.
+        """
         ...
 
     async def judge(
@@ -415,6 +496,6 @@ class CodingAgent(Protocol):
         """Return a remediation message when this host-bound instance cannot authenticate."""
         ...
 
-    def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """Return whether streamed output shows meaningful agent activity."""
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the trajectory tool calls one raw stream line carries, in order."""
         ...
