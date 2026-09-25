@@ -31,6 +31,9 @@ _RESULT_CONTENT_LIMIT = 2000
 # writer (execution.py) and the reader (split_session) can't drift.
 TURN_DELIM = "turn"
 
+# OpenCode reports a tool call the guest refused to approve as an error with this text.
+_OPENCODE_PERMISSION_REJECTED_MARKER = "rejected permission"
+
 
 def iter_events(text: str) -> Iterator[dict]:
     """Yield each JSON-object event from a stream-json/JSONL text, skipping blank.
@@ -85,7 +88,7 @@ def _result_text(content: object) -> str:
 def _claude_trajectory(events: list[dict]) -> list[dict]:
     """Ordered tool_call/tool_result events from already-parsed Claude stream events.
 
-    The events-in counterpart to extract_trajectory, mirroring _opencode_trajectory so a
+    The events-in counterpart to extract_trajectory, mirroring opencode_trajectory so a
     caller holding parsed events needn't re-parse the stream.
     """
     traj: list[dict] = []
@@ -204,6 +207,72 @@ def split_session(session_text: str) -> list[tuple[int, str]]:
     return turns
 
 
+def opencode_skill_dispatch_name(part: dict) -> str | None:
+    """Return the skill name from a `skill` dispatcher tool_use."""
+    if part.get("tool") != "skill":
+        return None
+    state = dict_or_empty(part.get("state"))
+    inp = dict_or_empty(state.get("input"))
+    name = inp.get("name")
+    return name if isinstance(name, str) and name else None
+
+
+def opencode_tool_call_was_rejected(part: dict) -> bool:
+    """True when a tool_use `part` errored because the guest could not grant permission."""
+    state = dict_or_empty(part.get("state"))
+
+    if state.get("status") != "error":
+        return False
+
+    error = state.get("error")
+    return isinstance(error, str) and _OPENCODE_PERMISSION_REJECTED_MARKER in error
+
+
+def opencode_trajectory(events: list[dict]) -> list[dict]:
+    """Canonical trajectory from OpenCode events.
+
+    Completed tool calls are recorded as-is; a call the guest could not approve is kept
+    with `"status": "rejected"` so the judge sees what the agent tried. Running and
+    pending frames are skipped.
+    """
+    traj: list[dict] = []
+    for event in events:
+        if event.get("type") != "tool_use":
+            continue
+        part = dict_or_empty(event.get("part"))
+        tool = part.get("tool")
+        if not isinstance(tool, str):
+            continue
+        state = dict_or_empty(part.get("state"))
+        inp = dict_or_empty(state.get("input"))
+        if opencode_tool_call_was_rejected(part):
+            traj.append(
+                {
+                    "kind": "tool_call",
+                    "id": "",
+                    "name": tool,
+                    "arguments": inp,
+                    "status": "rejected",
+                }
+            )
+            continue
+        if state.get("status") != "completed":
+            continue
+        if tool == "skill":
+            skill = opencode_skill_dispatch_name(part)
+            traj.append(
+                {
+                    "kind": "tool_call",
+                    "id": "",
+                    "name": "Skill",
+                    "arguments": {"skill": skill} if skill else {},
+                }
+            )
+        else:
+            traj.append({"kind": "tool_call", "id": "", "name": tool, "arguments": inp})
+    return traj
+
+
 def _looks_like_opencode(events: list[dict]) -> bool:
     """Route a regenerated turn to the right extractor.
 
@@ -230,10 +299,7 @@ def trajectory_from_session(session_text: str) -> list[dict]:
     for turn_idx, raw in split_session(session_text):
         events = list(iter_events(raw))
         if _looks_like_opencode(events):
-            # Lazy import breaks the cycle: opencode.py imports iter_events from here.
-            from benchspec.agents.opencode import _opencode_trajectory
-
-            turn_traj = _opencode_trajectory(events)
+            turn_traj = opencode_trajectory(events)
         else:
             turn_traj = _claude_trajectory(events)
         for event in turn_traj:

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from benchspec.agents.base import AgentCapabilities
+from benchspec.config.arms import Arm, Set
 from benchspec.reporting import report
 from tests.support import seed_arm
 
@@ -1269,8 +1270,6 @@ def test_terminal_matrix_never_colorizes_the_header_line(tmp_path: Path) -> None
 
 def test_planned_arms_carry_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify each planned arm records its provider beside harness and model."""
-    from benchspec.config.arms import Arm, Set
-
     class _StubAgent:
         """The slice of `CodingAgent` the planned-arm roster reads."""
 
@@ -1300,8 +1299,6 @@ def test_planned_arms_carry_the_provider(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_planned_arms_carry_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify each planned arm records its agent-turn timeout beside effort."""
-    from benchspec.config.arms import Arm, Set
-
     class _StubAgent:
         """The slice of `CodingAgent` the planned-arm roster reads."""
 

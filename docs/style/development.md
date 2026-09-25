@@ -85,9 +85,11 @@ for _ in range(retry_budget): ...            # unused -> _
   size caps.
 - **Package by feature** (`sandbox/`, `binder/`, `runner/`), not by layer
   (`models/`, `utils/`).
-- **Imports at the top of the file.** Absolute (`from benchspec.sandbox import
-  provision`), never relative. Grouped and ordered stdlib → third-party →
-  local, linter-enforced.
+- **Imports at the top of the file — always.** Absolute (`from benchspec.sandbox
+  import provision`), never relative. Grouped and ordered stdlib → third-party →
+  local, linter-enforced. No imports inside functions: an optional dependency
+  gets a guarded top-level import (see [Python](#python)), and an import cycle
+  means code is in the wrong module — move it rather than deferring the import.
 - **Paradigm-agnostic.** Functions, classes, or procedural code per the shape
   of the problem — functional pipelines for transforms, classes for stateful
   services, procedural for scripts.
@@ -255,6 +257,35 @@ prompt = dedent("""\
 prompt = """
     Summarize this in one sentence.
 """
+```
+
+- **Optional dependencies import at the top under a guard.** Import the package
+  as a module, bind it to `None` when absent, and narrow with an explicit
+  `is None` check at each entry point that uses it. The type checker then keeps
+  checking every call into the package. Ruff's `PLC0415` enforces the no
+  function-level imports rule. Don't bind individual names inside the
+  `try`: the checker won't flag them as possibly unbound, so a missing package
+  fails at runtime with a `NameError` instead of a clear error. Tests swap the
+  module attribute (`monkeypatch.setattr(module, "microsandbox", stub)`), not
+  `sys.modules`.
+
+```python
+try:
+    import microsandbox
+    import microsandbox.errors
+except ImportError:  # the optional extra is absent
+    microsandbox = None
+
+
+async def restore(snapshot: str, name: str) -> Sandbox:
+    if microsandbox is None:
+        raise SandboxError("microsandbox is not installed")
+    return await microsandbox.Sandbox.restore(snapshot, name=name)
+
+# Wrong — the import hides inside the function body
+async def restore(snapshot: str, name: str) -> Sandbox:
+    from microsandbox import Sandbox
+    return await Sandbox.restore(snapshot, name=name)
 ```
 
 ## Non-goals

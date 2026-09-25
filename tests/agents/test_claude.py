@@ -8,7 +8,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from benchspec.agents.base import Credential
+from benchspec.agents.base import FIXED_SKILLS_HOME, Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.orchestration.results import parse_run_json, parse_stream_run
 from benchspec.sandbox.errors import SandboxError
@@ -663,8 +663,6 @@ def test_claude_skill_load_dir() -> None:
 
 def test_claude_bridge_script_symlinks_fixed_home() -> None:
     """Verify claude bridge script symlinks fixed home."""
-    from benchspec.agents.base import FIXED_SKILLS_HOME
-
     s = ClaudeCodeAgent().bridge_skills_home_script()
 
     assert FIXED_SKILLS_HOME in s

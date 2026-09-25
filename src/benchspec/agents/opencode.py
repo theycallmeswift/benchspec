@@ -41,7 +41,13 @@ from benchspec.agents.base import (
     BaseAgent,
     Credential,
 )
-from benchspec.grading.trajectory import dict_or_empty, iter_events
+from benchspec.grading.trajectory import (
+    dict_or_empty,
+    iter_events,
+    opencode_skill_dispatch_name,
+    opencode_tool_call_was_rejected,
+    opencode_trajectory,
+)
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -94,7 +100,6 @@ _RESERVED_HARNESS_SHORT_FLAGS = {
 }
 # Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
 _EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
-_PERMISSION_REJECTED_MARKER = "rejected permission"
 
 
 def openrouter_model_error(model: str) -> str | None:
@@ -544,79 +549,13 @@ class OpenCodeAgent(BaseAgent):
         return False
 
 
-def _skill_dispatch_name(part: dict) -> str | None:
-    """Return the skill name from a `skill` dispatcher tool_use."""
-    if part.get("tool") != "skill":
-        return None
-    state = dict_or_empty(part.get("state"))
-    inp = dict_or_empty(state.get("input"))
-    name = inp.get("name")
-    return name if isinstance(name, str) and name else None
-
-
 def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
     """True if this tool_use event's `part` block dispatches the named skill."""
-    name = _skill_dispatch_name(part)
+    name = opencode_skill_dispatch_name(part)
     if name is not None and (name == skill_name or name.endswith(f":{skill_name}")):
         return True
     tool = part.get("tool")
     return isinstance(tool, str) and (tool == skill_name or tool.endswith(f":{skill_name}"))
-
-
-def _tool_call_was_rejected(part: dict) -> bool:
-    """True when a tool_use `part` errored because the guest could not grant permission."""
-    state = dict_or_empty(part.get("state"))
-
-    if state.get("status") != "error":
-        return False
-
-    error = state.get("error")
-    return isinstance(error, str) and _PERMISSION_REJECTED_MARKER in error
-
-
-def _opencode_trajectory(events: list[dict]) -> list[dict]:
-    """Canonical trajectory from OpenCode events.
-
-    Completed tool calls are recorded as-is; a call the guest could not approve is kept
-    with `"status": "rejected"` so the judge sees what the agent tried. Running and
-    pending frames are skipped.
-    """
-    traj: list[dict] = []
-    for event in events:
-        if event.get("type") != "tool_use":
-            continue
-        part = dict_or_empty(event.get("part"))
-        tool = part.get("tool")
-        if not isinstance(tool, str):
-            continue
-        state = dict_or_empty(part.get("state"))
-        inp = dict_or_empty(state.get("input"))
-        if _tool_call_was_rejected(part):
-            traj.append(
-                {
-                    "kind": "tool_call",
-                    "id": "",
-                    "name": tool,
-                    "arguments": inp,
-                    "status": "rejected",
-                }
-            )
-            continue
-        if state.get("status") != "completed":
-            continue
-        if tool == "skill":
-            skill = _skill_dispatch_name(part)
-            traj.append(
-                {
-                    "kind": "tool_call",
-                    "id": "",
-                    "name": "Skill",
-                    "arguments": {"skill": skill} if skill else {},
-                }
-            )
-        else:
-            traj.append({"kind": "tool_call", "id": "", "name": tool, "arguments": inp})
-    return traj
 
 
 def _debug_tail(events: list[dict]) -> str:
@@ -684,7 +623,7 @@ def parse_opencode_jsonl(
         elif event_type == "tool_use":
             state = dict_or_empty(part.get("state"))
 
-            if _tool_call_was_rejected(part):
+            if opencode_tool_call_was_rejected(part):
                 last_tool_rejected = True
             elif state.get("status") == "completed":
                 last_tool_rejected = False
@@ -705,7 +644,7 @@ def parse_opencode_jsonl(
         session_id=session_id,
         fired=fired,
         raw=stdout,
-        trajectory=_opencode_trajectory(events),
+        trajectory=opencode_trajectory(events),
         cache_read_tokens=cache_read_tokens,
         cache_creation_tokens=cache_creation_tokens,
         input_tokens=input_tokens,
