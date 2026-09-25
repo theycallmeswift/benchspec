@@ -179,6 +179,7 @@ def _streamed_usage(stdout: str) -> dict[str, int]:
     once per message id, from the last event seen for it.
     """
     usage_by_message: dict[str, dict] = {}
+
     for event in iter_events(stdout):
         if event.get("type") != "assistant":
             continue
@@ -186,6 +187,7 @@ def _streamed_usage(stdout: str) -> dict[str, int]:
         usage = dict_or_empty(message.get("usage"))
         if usage:
             usage_by_message[str(message.get("id") or len(usage_by_message))] = usage
+
     return {
         field: sum(int(usage.get(field, 0) or 0) for usage in usage_by_message.values())
         for field in _TOKEN_FIELDS

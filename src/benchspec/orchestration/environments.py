@@ -205,6 +205,7 @@ class GuestSandbox:
             stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             stderr_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             pending = ""
+
             async for event in handle:
                 if event.event_type == "stdout":
                     pending += stdout_decoder.decode(event.data or b"")
@@ -222,6 +223,7 @@ class GuestSandbox:
                 elif event.event_type == "failed":
                     # A failure event may carry no code; a real exit code 0 is preserved.
                     exit_code = event.code if event.code is not None else 1
+
             if pending.strip():
                 lines.append(pending)
 

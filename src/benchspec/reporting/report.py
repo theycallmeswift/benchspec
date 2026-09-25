@@ -233,8 +233,7 @@ def _arm_stats(
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
-            # Counted before the pooled-out skip: an activation line scoped off the
-            # baseline leaves no pooled rate, but the sample was still stopped early.
+            # Before the pooled-out skip: a sample with no pooled rate was still stopped.
             if timing and timing.get("stopped"):
                 stopped_total += 1
                 stopped_count += 1
@@ -256,8 +255,6 @@ def _arm_stats(
                     durations.append(timing["duration_ms"])
                 if "judge_ms" in timing:
                     judge_ms.append(timing["judge_ms"])
-                # A stopped run whose harness reported no usage before the stop records
-                # null tokens, never a fake zero.
                 if timing.get("total_tokens") is not None:
                     tokens.append(timing["total_tokens"])
 

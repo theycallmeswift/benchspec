@@ -90,7 +90,6 @@ class _ArmRun:
     total_cache_creation: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    # True when the run was stopped once every graded verdict was fixed.
     stopped: bool = False
     # Guest task-harness version probed inside the live snapshot. The default is the
     # not-probed sentinel: version None + a non-empty reason, which the available/

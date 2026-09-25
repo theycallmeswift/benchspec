@@ -303,7 +303,6 @@ class SandboxSession:
         self._harness_args = harness_args
         # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
         self._timeout = timeout
-        # The arm's stop rule, handed to `invoke`; None runs every turn to its end.
         self._stop = stop
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
