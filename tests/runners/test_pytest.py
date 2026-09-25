@@ -416,6 +416,68 @@ def test_eval_threads_resolved_set_sandbox_into_run_eval_arm(
     assert set(captured) == {"docker"}  # every arm got the resolved set's sandbox
 
 
+def _run_cells_with_stubbed_arms(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *extra: str
+) -> pytest.RunResult:
+    """Run the dummy cells for real, with every paid or environment-bound step stubbed."""
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
+    monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+    return pytester.runpytest(
+        "-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path), *extra
+    )
+
+
+def test_a_run_that_reports_eval_cells_claims_its_iteration(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify session end writes the manifest once cells have reported."""
+    _make_project(pytester)
+    skill_results_dir = pytester.path / "tmp" / "evals" / "iteration_01" / "skills" / "myskill"
+
+    def seed(*args: object, **kwargs: object) -> ArmOutcome:
+        """Stand in for the sandbox run by seeding one graded sample."""
+        seed_arm(skill_results_dir, "alpha", "baseline", passes=1, total=1)
+        return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
+
+    monkeypatch.setattr(cases, "run_eval_arm", seed)
+
+    result = _run_cells_with_stubbed_arms(pytester, monkeypatch, "-k", "alpha-baseline")
+
+    assert result.ret == 0
+    assert (skill_results_dir.parent.parent / "meta.json").exists()
+
+
+def test_a_session_without_eval_cells_leaves_the_iteration_alone(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a plain test run never claims the iteration another process filled meanwhile."""
+    _make_project(pytester)
+    iteration_root = pytester.path / "tmp" / "evals" / "iteration_01"
+    pytester.makepyfile(
+        test_other=f"""
+from pathlib import Path
+
+def test_something_else_writes_artifacts_there():
+    sample = Path(r"{iteration_root}") / "skills" / "archive" / "eval-alpha" / "ghost" / "sample-0"
+    sample.mkdir(parents=True)
+    (sample / "grading.json").write_text('{{"assertions": [], "errored": false}}')
+"""
+    )
+    monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+
+    result = pytester.runpytest(
+        "-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path),
+        "test_other.py",
+    )
+
+    assert result.ret == 0
+    assert not (iteration_root / "meta.json").exists()
+
+
 def test_count_two_parametrizes_sample_index(pytester: pytest.Pytester, tmp_path: Path) -> None:
     """Verify count two parametrizes sample index."""
     # --count 2 must yield 8 items (2 evals × 2 arms × 2 samples) AND the
@@ -548,7 +610,8 @@ def _configured_plugin(
 
 
 def _session(config: pytest.Config) -> pytest.Session:
-    """A real session on `config`, carrying the OK exit status pytest sets before its hooks."""
+    """A real session on `config` that ran eval cells, with the OK exit status pytest sets first."""
+    config.stash[plugin._RAN_CELLS] = True
     session = pytest.Session.from_config(config)
     session.exitstatus = 0
     return session

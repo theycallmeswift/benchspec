@@ -36,6 +36,8 @@ from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_ro
 _CASES = Path(cases.__file__)
 
 _STARTED_AT = pytest.StashKey[str]()
+# Set once any eval cell reports, so session end knows the iteration is this run's.
+_RAN_CELLS = pytest.StashKey[bool]()
 _SUMMARY_LINES = pytest.StashKey[list[str]]()
 
 
@@ -291,6 +293,24 @@ def pytest_configure(config: pytest.Config) -> None:
         config.stash[_STARTED_AT] = datetime.datetime.now(datetime.UTC).isoformat(
             timespec="seconds"
         )
+        config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
+
+
+class _CellTracker:
+    """Flags the config once an eval cell reports, on the process that finishes the session.
+
+    Under xdist the controller collects nothing itself; it learns that cells ran only from
+    the reports the workers send, which carry the `benchspec` marker as a keyword.
+    """
+
+    def __init__(self, config: pytest.Config) -> None:
+        """Bind to the config whose stash carries the flag."""
+        self._config = config
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """Flag the session once any eval cell reports."""
+        if "benchspec" in report.keywords:
+            self._config.stash[_RAN_CELLS] = True
 
 
 def _workerinput(config: pytest.Config) -> MutableMapping[str, object] | None:
@@ -319,13 +339,14 @@ def pytest_configure_node(node: _WorkerNode) -> None:
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Aggregate binder corpus records after the pytest session."""
-    # Controller-only, and only when a run actually produced artifacts (a
-    # --collect-only run never creates skills_root). Runs before
-    # pytest_terminal_summary (plain impls fire inside TerminalReporter's
-    # wrapper), so the summary can read what this wrote and a CI gate can still
-    # change session.exitstatus.
+    # Controller-only, and only when this session ran eval cells: a session that ran none
+    # (`--collect-only`, or an unrelated pytest run with the plugin autoloaded) picked an
+    # iteration name it never used, and another process may have filled that name in the
+    # meantime. Runs before pytest_terminal_summary (plain impls fire inside
+    # TerminalReporter's wrapper), so the summary can read what this wrote and a CI gate
+    # can still change session.exitstatus.
     config = session.config
-    if _workerinput(config) is not None:
+    if _workerinput(config) is not None or not config.stash.get(_RAN_CELLS, False):
         return
     iteration = workspace.current_iteration_or_none()
     if iteration is None:
