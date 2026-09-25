@@ -241,11 +241,10 @@ class BaseAgent(ABC):
         """Stream one trigger-only turn, stopping it once `watch` says the verdict is fixed.
 
         A stop is ours, not a crash: the killed process's exit is ignored and the run is
-        graded from the stream so far. Its duration is measured the way the harness
-        measures a full run when the stream allows (event timestamps), else by the wall
-        clock up to the stop (the harness never wrote its closing summary). A timeout
-        after real model activity is graded the same way; a timeout with none is a
-        launch stall and stays an infra error.
+        graded from the stream so far. A timeout after real model activity is graded the
+        same way; a timeout with none is a launch stall and stays an infra error. The
+        run's duration is the harness's own when its parser reports one (Claude Code's
+        closing `result`), else the process wall time, as a buffered run records it.
 
         Args:
             sandbox: The live guest.
@@ -275,18 +274,14 @@ class BaseAgent(ABC):
             message = f"<sandbox-error> {error}"[-2000:]
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
 
-        result = parse(proc.stdout)
-        duration_ms = result.duration_ms or proc.elapsed_ms
+        parsed = parse(proc.stdout)
+        result = replace(parsed, duration_ms=parsed.duration_ms or proc.duration_ms)
         if proc.stopped is not None:
-            return replace(
-                result, is_error=False, stopped=proc.stopped, duration_ms=duration_ms
-            )
+            return replace(result, is_error=False, stopped=proc.stopped)
 
         if proc.timed_out:
             if self.streamed_activity(proc.stdout.splitlines()):
-                return replace(
-                    result, is_error=False, stopped=STOP_TIMEOUT, duration_ms=duration_ms
-                )
+                return replace(result, is_error=False, stopped=STOP_TIMEOUT)
             message = f"<sandbox-error> no model activity before the {timeout}s timeout"
             return RunResult(eval_id, config, message, 0, 0, is_error=True, raw=proc.stdout)
 

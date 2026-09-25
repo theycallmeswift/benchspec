@@ -9,11 +9,11 @@ scoped to `openrouter.ai`. Nothing about the snapshot changes.
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
@@ -455,7 +455,11 @@ class CodexAgent(BaseAgent):
                 0,
                 is_error=True,
             )
-        result = parse_codex_jsonl(res.stdout, eval_id, config, detect_skill)
+        # `codex exec --json` events carry no timing, so the run's time is the process's.
+        result = replace(
+            parse_codex_jsonl(res.stdout, eval_id, config, detect_skill),
+            duration_ms=res.duration_ms,
+        )
         if res.exit_code != 0:
             return mark_errored_by_nonzero_exit(result, res.stderr)
         return result
@@ -554,21 +558,6 @@ def _item_dispatches_skill(item: dict, skill_name: str) -> bool:
     return isinstance(name, str) and _skill_name_matches(name, skill_name)
 
 
-def _timestamp_ms(value: object) -> int | None:
-    """Convert a timestamp value to milliseconds when possible."""
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        text = value.replace("Z", "+00:00")
-        try:
-            return int(datetime.datetime.fromisoformat(text).timestamp() * 1000)
-        except ValueError:
-            return None
-    return None
-
-
 def _debug_tail(events: list[dict]) -> str:
     """Format the trailing Codex events for diagnostics."""
     return json.dumps(events[-3:]) if events else ""
@@ -663,6 +652,9 @@ def parse_codex_jsonl(
     transports it recovers from (a websocket that fails and falls back to HTTP logs
     "Reconnecting..." and then completes the turn normally), so an `error` followed by
     `turn.completed` is not a failure; the recovered messages stay in `raw`.
+
+    The stream carries no timing, so `duration_ms` is 0; `invoke` stamps the measured
+    process wall time over it.
     """
     events = list(iter_events(stdout))
     session_id = ""
@@ -674,15 +666,8 @@ def parse_codex_jsonl(
     is_error = False
     error_text = ""
     fired = False
-    first_ts: int | None = None
-    last_ts: int | None = None
 
     for event in events:
-        ts = _timestamp_ms(event.get("timestamp"))
-        if ts is not None:
-            first_ts = ts if first_ts is None else min(first_ts, ts)
-            last_ts = ts if last_ts is None else max(last_ts, ts)
-
         etype = event.get("type")
         if etype == "thread.started":
             tid = event.get("thread_id") or event.get("threadId") or event.get("id")
@@ -710,13 +695,12 @@ def parse_codex_jsonl(
             error_text = _error_message(event) or error_text
 
     total_tokens = input_tokens + cache_read_tokens + output_tokens + reasoning_tokens
-    duration_ms = (last_ts - first_ts) if first_ts is not None and last_ts is not None else 0
     result_text = "\n\n".join(text_parts) or error_text or _debug_tail(events)
     return RunResult(
         eval_id=eval_id,
         config=config,
         result_text=result_text,
-        duration_ms=duration_ms,
+        duration_ms=0,
         total_tokens=total_tokens,
         is_error=is_error,
         session_id=session_id,

@@ -13,7 +13,7 @@ from benchspec.agents.base import Credential
 from benchspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
-from tests.agents.doubles import exec_call, shell_call
+from tests.agents.doubles import SLOW_EXEC_SECONDS, SlowSandbox, exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -248,11 +248,75 @@ def test_parse_opencode_jsonl_populates_run_result() -> None:
     res = parse_opencode_jsonl(stream, "e1", "with_skill", detect_skill="archive")
 
     assert res.result_text == "done"
-    assert res.duration_ms == 3321  # 4321 - 1000
     assert res.total_tokens == 15
     assert res.session_id == "sess-1"
     assert res.is_error is False
     assert res.fired is True
+
+
+def test_parse_opencode_jsonl_reads_the_token_split_from_a_real_run_stream() -> None:
+    """A real `opencode run --format json` run splits each step's tokens; reasoning is output."""
+    stream = (FIXTURES / "opencode_run_openrouter.jsonl").read_text()
+
+    res = parse_opencode_jsonl(stream, "e1", "trial", None)
+
+    assert res.result_text == "Hello, Alice!"
+    assert res.total_tokens == 10866 + 10932
+    assert res.input_tokens == 3 + 1
+    assert res.output_tokens == 52 + 7
+    assert res.cache_read_tokens == 0 + 10811
+    assert res.cache_creation_tokens == 10811 + 113
+    assert res.total_tokens == (
+        res.input_tokens + res.output_tokens + res.cache_read_tokens + res.cache_creation_tokens
+    )
+
+
+def test_parse_opencode_jsonl_counts_reasoning_tokens_as_output() -> None:
+    """Reasoning is billed as output, so it lands in output_tokens like Claude's thinking."""
+    stream = json.dumps(
+        {
+            "type": "step_finish",
+            "part": {
+                "type": "step-finish",
+                "tokens": {
+                    "total": 130,
+                    "input": 100,
+                    "output": 10,
+                    "reasoning": 20,
+                    "cache": {"read": 0, "write": 0},
+                },
+            },
+        }
+    )
+
+    res = parse_opencode_jsonl(stream, "e1", "trial", None)
+
+    assert res.output_tokens == 30
+
+
+def test_invoke_times_the_harness_process_not_the_event_span() -> None:
+    """Event timestamps miss boot and the first model call, so duration is the process's."""
+    stream = (FIXTURES / "opencode_run_openrouter.jsonl").read_text()
+    sandbox = SlowSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=stream)])
+
+    res = asyncio.run(
+        _opencode_agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="provider/model",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert res.is_error is False
+    assert res.duration_ms >= SLOW_EXEC_SECONDS * 1000
+    assert res.output_tokens > 0
 
 
 def test_parse_opencode_jsonl_sums_tokens_across_step_finishes() -> None:
@@ -725,7 +789,6 @@ def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
     assert res.raw == stream
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
-    assert res.duration_ms == parsed.duration_ms
 
 
 def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:

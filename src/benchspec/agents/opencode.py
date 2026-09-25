@@ -12,8 +12,9 @@ there is NO terminal `result` event. A tool call the guest could not approve is 
 to use this specific tool call."}`; a run that ends on one with no final text is
 classified as errored, not as a clean failure. A skill dispatch is
 `{"type":"tool_use","part":{"tool":"skill","state":{"input":{"name":"<skill>"}}}}`;
-the final message concatenates every non-empty `part.text` (blank-line joined); totals
-are `step_finish.part.tokens.total`.
+the final message concatenates every non-empty `part.text` (blank-line joined); usage is
+`step_finish.part.tokens`: `total` plus its `input` / `output` / `reasoning` /
+`cache.read` / `cache.write` split.
 
 OpenCode reaches OpenRouter natively (`OPENROUTER_API_KEY` plus an `openrouter/<slug>`
 model), so `provider = "openrouter"` only makes that path deterministic: the credential
@@ -27,6 +28,7 @@ import json
 import os
 import tomllib
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -242,9 +244,8 @@ class OpenCodeAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.config/opencode/skills"
     # multi_turn: invoke() accepts resume_session_id but does not
-    # honor it — each call is a fresh session. token_split: OpenCode usage events
-    # carry no cache split, so cost would be a guess.
-    capabilities = AgentCapabilities(multi_turn=False, token_split=False)
+    # honor it — each call is a fresh session.
+    capabilities = AgentCapabilities(multi_turn=False, token_split=True)
 
     def provision_script(self) -> str:
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
@@ -489,7 +490,12 @@ class OpenCodeAgent(BaseAgent):
                 0,
                 is_error=True,
             )
-        result = parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill)
+        # Event timestamps start only once the first model step returns, missing boot and
+        # the first model call, so the run's time is the process's.
+        result = replace(
+            parse_opencode_jsonl(res.stdout, eval_id, config, detect_skill),
+            duration_ms=res.duration_ms,
+        )
         if res.exit_code != 0:
             return mark_errored_by_nonzero_exit(result, res.stderr)
         return result
@@ -642,6 +648,12 @@ def _debug_tail(events: list[dict]) -> str:
     return json.dumps(events[-3:]) if events else ""
 
 
+def _token_count(tokens: dict, name: str) -> int:
+    """Return one integer count from an OpenCode `tokens` object, 0 when absent."""
+    value = tokens.get(name)
+    return value if isinstance(value, int) else 0
+
+
 def parse_opencode_jsonl(
     stdout: str,
     eval_id: str,
@@ -653,22 +665,23 @@ def parse_opencode_jsonl(
     A run is errored when it spent no tokens (the harness never reached the model) or
     when its last tool call was rejected for permission and no final text followed: the
     stream was cut short by a prompt the guest cannot answer, not by the agent finishing.
+
+    Reasoning counts as output, as it is billed; `duration_ms` is 0 because `invoke`
+    stamps the measured process wall time over it.
     """
     events = list(iter_events(stdout))
 
     text_parts: list[str] = []
     total_tokens = 0
+    input_tokens = 0
+    output_tokens = 0
+    cache_read_tokens = 0
+    cache_creation_tokens = 0
     session_id = ""
     fired = False
     last_tool_rejected = False
-    first_ts: int | None = None
-    last_ts: int | None = None
 
     for event in events:
-        timestamp = event.get("timestamp")
-        if isinstance(timestamp, int):
-            first_ts = timestamp if first_ts is None else min(first_ts, timestamp)
-            last_ts = timestamp if last_ts is None else max(last_ts, timestamp)
         parsed_session_id = event.get("sessionID")
         if isinstance(parsed_session_id, str) and parsed_session_id:
             session_id = parsed_session_id
@@ -678,9 +691,12 @@ def parse_opencode_jsonl(
 
         if event_type == "step_finish":
             tokens = dict_or_empty(part.get("tokens"))
-            token_total = tokens.get("total")
-            if isinstance(token_total, int):
-                total_tokens += token_total
+            cache = dict_or_empty(tokens.get("cache"))
+            total_tokens += _token_count(tokens, "total")
+            input_tokens += _token_count(tokens, "input")
+            output_tokens += _token_count(tokens, "output") + _token_count(tokens, "reasoning")
+            cache_read_tokens += _token_count(cache, "read")
+            cache_creation_tokens += _token_count(cache, "write")
         elif event_type == "text":
             text_value = part.get("text")
             if isinstance(text_value, str) and text_value.strip():
@@ -696,7 +712,6 @@ def parse_opencode_jsonl(
                 if detect_skill and _tool_dispatches_skill(part, detect_skill):
                     fired = True
 
-    duration_ms = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else 0
     result_text = "\n\n".join(text_parts) or _debug_tail(events)
     is_error = total_tokens == 0 or (last_tool_rejected and not text_parts)
 
@@ -704,12 +719,15 @@ def parse_opencode_jsonl(
         eval_id=eval_id,
         config=config,
         result_text=result_text,
-        duration_ms=duration_ms,
+        duration_ms=0,
         total_tokens=total_tokens,
         is_error=is_error,
         session_id=session_id,
         fired=fired,
         raw=stdout,
         trajectory=_opencode_trajectory(events),
-        # OpenCode currently reports only total tokens and no terminal result subtype.
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )

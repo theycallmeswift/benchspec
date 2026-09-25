@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import pytest
@@ -14,7 +15,7 @@ from benchspec.agents.opencode import OpenCodeAgent
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.grading.trigger import STOP_DECIDED, STOP_TIMEOUT, TriggerWatch
 from benchspec.orchestration.results import RunResult
-from benchspec.testing import FakeExecEvent, FakeSandbox
+from benchspec.testing import FakeExecEvent, FakeExecStream, FakeSandbox
 
 
 @dataclass(frozen=True)
@@ -235,23 +236,35 @@ def test_unwatched_invoke_keeps_the_buffered_exec() -> None:
     assert [call[0] for call in guest.calls] == ["exec"]
 
 
-def test_watched_invoke_keeps_the_harness_own_duration_when_its_events_carry_one() -> None:
-    """A stopped OpenCode run is timed from its event timestamps, like a full run."""
-    harness = HARNESSES["opencode"]
-    step_start = json.dumps(
-        {"type": "step_start", "timestamp": 1000, "part": {"type": "step-start"}}
-    )
-    dispatch = json.dumps(
-        {
-            "type": "tool_use",
-            "timestamp": 1364,
-            "part": {"type": "tool", "tool": "skill",
-                     "state": {"status": "completed", "input": {"name": "hello"}}},
-        }
-    )
-    guest = FakeSandbox(stream_events=_stream(step_start, dispatch))
+SLOW_STREAM_SECONDS = 0.05
+
+
+class _SlowStreamSandbox(FakeSandbox):
+    """A fake guest whose stream takes a measurable moment before its first event."""
+
+    async def exec_stream(
+        self,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        stdin: bytes | None = None,
+    ) -> FakeExecStream:
+        """Pause before handing back the canned stream, as a booting CLI would."""
+        await asyncio.sleep(SLOW_STREAM_SECONDS)
+        return await super().exec_stream(cmd, args, cwd=cwd, env=env, stdin=stdin)
+
+
+@pytest.mark.parametrize("harness_name", ["codex", "opencode"])
+def test_watched_invoke_times_a_run_by_its_process_when_the_stream_has_no_timing(
+    harness_name: str,
+) -> None:
+    """A stopped Codex or OpenCode run records the process wall time, not a parsed 0."""
+    harness = HARNESSES[harness_name]
+    guest = _SlowStreamSandbox(stream_events=_stream(harness.startup, harness.hello_dispatch))
 
     result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"})))
 
     assert result.stopped == STOP_DECIDED
-    assert result.duration_ms == 364
+    assert result.duration_ms >= SLOW_STREAM_SECONDS * 1000

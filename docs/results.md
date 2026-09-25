@@ -240,12 +240,9 @@ binder-degraded counts, `stopped_samples` keyed by reason, per-eval rows with a
   `cache_creation_tokens`; zero where the harness does not report them). A
   [trigger-only](writing-evals.md#trigger-evals) run cut short adds `stopped`:
   `"decided"` (every verdict was fixed) or `"timeout"` (it worked past the turn
-  timeout without firing); the
-  key is absent for a run that ended on its own. A stopped run's
-  `duration_ms` is measured as the harness measures a full run where its events
-  carry timestamps (OpenCode), else by the wall clock up to the stop, which
-  includes CLI startup (Claude Code, Codex); its tokens are only what
-  the harness reported before it: Claude Code's per-message usage, OpenCode's
+  timeout without firing); the key is absent for a run that ended on its own. A
+  stopped run's `duration_ms` is the process wall time up to the stop, CLI
+  startup included, and its tokens are only what the harness reported before it: Claude Code's per-message usage, OpenCode's
   finished steps, and nothing from Codex, which reports usage only when a turn
   completes. When nothing was reported the token fields are `null`, never `0`.
 - `transcript.json`: a per-turn summary: prompt, result text, `is_error`, the

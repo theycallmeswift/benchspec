@@ -32,6 +32,7 @@ class ProcResult:
     exit_code: int
     stdout: str
     stderr: str
+    duration_ms: int
 
     def require_success(self) -> ProcResult:
         """Return self on a zero exit; raise RuntimeError (with output tail) otherwise.
@@ -65,7 +66,7 @@ class WatchedProc:
     command: list[str]
     stdout: str
     stderr: str
-    elapsed_ms: int
+    duration_ms: int
     exit_code: int | None = None
     stopped: str | None = None
     timed_out: bool = False
@@ -125,11 +126,14 @@ class Host:
                 timeout=timeout, env=run_env, cwd=cwd, stdin=subprocess.DEVNULL,
             )
 
+        started = time.monotonic()
         try:
             proc = await asyncio.to_thread(run_on_host)
         except FileNotFoundError as error:
             raise RuntimeError(f"host {command[0]} CLI not found on PATH") from error
-        return ProcResult(command, proc.returncode, proc.stdout, proc.stderr)
+        return ProcResult(
+            command, proc.returncode, proc.stdout, proc.stderr, _elapsed_ms(started)
+        )
 
 
 class GuestSandbox:
@@ -149,10 +153,13 @@ class GuestSandbox:
         stdin: bytes | None = None,
     ) -> ProcResult:
         """Run `command` inside the guest via the sandbox's exec primitive."""
+        started = time.monotonic()
         res = await self._sandbox.exec(
             command[0], command[1:], cwd=cwd, env=env, timeout=timeout, stdin=stdin,
         )
-        return ProcResult(command, res.exit_code, res.stdout_text, res.stderr_text)
+        return ProcResult(
+            command, res.exit_code, res.stdout_text, res.stderr_text, _elapsed_ms(started)
+        )
 
     async def exec_watched(
         self,
@@ -228,7 +235,7 @@ class GuestSandbox:
             command=command,
             stdout="\n".join(lines),
             stderr="".join(stderr_parts),
-            elapsed_ms=int((time.monotonic() - started) * 1000),
+            duration_ms=_elapsed_ms(started),
             exit_code=exit_code,
             stopped=stopped,
             timed_out=timed_out,
@@ -239,3 +246,8 @@ async def _kill_quietly(handle: ExecStream) -> None:
     """Kill a streamed guest process; one already gone or unreachable is not an error."""
     with contextlib.suppress(SandboxError, TimeoutError, OSError):
         await handle.kill()
+
+
+def _elapsed_ms(started: float) -> int:
+    """Milliseconds elapsed since the `time.monotonic()` reading `started`."""
+    return int((time.monotonic() - started) * 1000)
