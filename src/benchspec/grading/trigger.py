@@ -103,8 +103,7 @@ def _tool_uses(line: str) -> Iterator[dict]:
     """Yield each tool_use block in one stream-json line; skip empty/malformed lines.
 
     Names/inputs can be null in a partial event, so callers guard their own string ops —
-    a stray null must not crash routing (the call site retries subprocess failures, not
-    AttributeErrors, so a crash here would be fatal).
+    a stray null must not crash the parse of a run that already happened.
     """
     line = line.strip()
     if not line:

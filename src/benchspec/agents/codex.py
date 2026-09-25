@@ -395,19 +395,6 @@ class CodexAgent(BaseAgent):
                 f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        await self._write_auth_json(sandbox)
-        dest = self.skill_load_dir
-        await sandbox.shell(
-            f"mkdir -p {dest} && "
-            f"for src in {project_mount}/skills {project_mount}/.agents/skills "
-            f"{project_mount}/.claude/skills; do "
-            f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
-            f"done",
-            env=self.guest_env(),
-        )
-
     async def invoke(
         self,
         sandbox: LiveSandbox,

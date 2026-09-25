@@ -541,15 +541,6 @@ def test_layer_build_config_rejects_non_table_sets(tmp_path: Path) -> None:
         sandbox._layer_build_config({}, str(config))
 
 
-def test_plugin_dir_for(tmp_path: Path) -> None:
-    """Verify plugin dir for."""
-    assert sandbox._plugin_dir_for(None) is None
-    assert sandbox._plugin_dir_for(tmp_path) is None  # no .claude-plugin/plugin.json
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text("{}")
-    assert sandbox._plugin_dir_for(tmp_path) == sandbox.PROJECT_MOUNT
-
-
 def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: Path) -> None:
     """Verify agent extra volumes mounts codex auth json."""
     auth = tmp_path / "auth.json"

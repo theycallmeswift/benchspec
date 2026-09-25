@@ -449,10 +449,6 @@ class CodingAgent(Protocol):
         """Install the agent CLI and credentials inside the guest."""
         ...
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        ...
-
     async def invoke(
         self,
         sandbox: LiveSandbox,

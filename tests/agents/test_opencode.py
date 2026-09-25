@@ -650,25 +650,6 @@ def test_provision_raises_on_failure() -> None:
         asyncio.run(_opencode_agent().provision(sandbox))
 
 
-def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> None:
-    """Verify stage project assets copies skills into opencode discovery dir."""
-    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
-
-    asyncio.run(_opencode_agent().stage_project_assets(sandbox, "/project"))
-
-    script = shell_call(sandbox).script
-    # Stage from all three plugin-shaped layouts (merged into one dest dir).
-    # `skills/` (no leading dot) is the canonical Claude Code plugin layout; leaving it
-    # out makes the eval skill invisible to OpenCode even when .claude/skills/ is staged.
-    assert "/project/skills" in script
-    assert "/project/.opencode/skills" in script
-    assert "/project/.claude/skills" in script
-    # Staging target MUST be OpenCode's personal-discovery path. $HOME/.opencode/skills
-    # is NOT discovered (regression guard: skills staged there silently never fire).
-    assert f"{OpenCodeAgent.guest_home}/.config/opencode/skills" in script
-    assert f"{OpenCodeAgent.guest_home}/.opencode/skills" not in script
-
-
 def test_provision_script_verifies_warmed_db() -> None:
     """Verify provision script verifies warmed db."""
     script = OpenCodeAgent().provision_script()

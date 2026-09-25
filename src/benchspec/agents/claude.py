@@ -318,18 +318,6 @@ class ClaudeCodeAgent(BaseAgent):
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
-        # the project's local skills there for a clean per-run tree. The agent-neutral
-        # name covers other agents that stage more than just .claude/skills.
-        await sandbox.shell(
-            f"mkdir -p {self.guest_home}/.claude && "
-            f"if [ -d {project_mount}/.claude/skills ]; then "
-            f"cp -r {project_mount}/.claude/skills {self.guest_home}/.claude/skills; fi",
-            env={"HOME": self.guest_home},
-        )
-
     async def judge(
         self,
         prompt: str,

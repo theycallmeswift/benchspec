@@ -428,18 +428,6 @@ class OpenCodeAgent(BaseAgent):
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        dest = f"{self.guest_home}/.config/opencode/skills"
-        await sandbox.shell(
-            f"mkdir -p {dest} && "
-            f"for src in {project_mount}/skills {project_mount}/.opencode/skills "
-            f"{project_mount}/.claude/skills; do "
-            f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
-            f"done",
-            env=self.guest_env(),
-        )
-
     async def invoke(
         self,
         sandbox: LiveSandbox,

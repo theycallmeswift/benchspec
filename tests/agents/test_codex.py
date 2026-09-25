@@ -752,21 +752,6 @@ def test_provision_raises_on_failure() -> None:
         asyncio.run(_agent().provision(sandbox))
 
 
-def test_stage_project_assets_copies_skills_into_codex_discovery_dir() -> None:
-    """Verify stage project assets copies skills into codex discovery dir."""
-    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
-
-    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
-
-    staging_call = shell_call(sandbox)
-    script = staging_call.script
-    assert "/project/skills" in script
-    assert "/project/.agents/skills" in script
-    assert "/project/.claude/skills" in script
-    assert "/root/.codex/skills" in script
-    assert staging_call.env["HOME"] == "/root"
-
-
 def test_invoke_success_parses_codex_jsonl_and_closes_stdin() -> None:
     """Verify invoke success parses codex jsonl and closes stdin."""
     sandbox = FakeSandbox(

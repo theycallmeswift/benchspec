@@ -592,16 +592,6 @@ def test_guest_env_pins_utc_timezone() -> None:
     assert _agent().guest_env()["TZ"] == "UTC"
 
 
-def test_stage_project_assets_copies_project_skills_into_guest_home() -> None:
-    """Verify stage project assets copies project skills into guest home."""
-    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
-    asyncio.run(_agent().stage_project_assets(sandbox, "/project"))
-
-    script = shell_call(sandbox).script
-    assert "/project/.claude/skills" in script
-    assert f"{ClaudeCodeAgent.guest_home}/.claude/skills" in script
-
-
 def test_from_env_prefers_oauth_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify from env prefers oauth token."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")

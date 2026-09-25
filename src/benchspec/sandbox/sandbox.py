@@ -193,20 +193,6 @@ def _sandbox_run_name(eval_id: str, config: str) -> str:
 DEFAULT_PROJECT_MARKER = ".claude-plugin/plugin.json"
 
 
-def _plugin_dir_for(
-    host_repo_root: Path | None, marker: str = DEFAULT_PROJECT_MARKER
-) -> str | None:
-    """Resolve the plugin directory mounted for an eval run."""
-    # --plugin-dir only when the project has the configured marker. Local skills reach the
-    # guest by the trigger path's stage_project_assets (_create_trigger_sandbox); output
-    # evals install per-cell via setup.sh instead.
-    if host_repo_root is None:
-        return None
-    if (Path(host_repo_root) / marker).is_file():
-        return PROJECT_MOUNT
-    return None
-
-
 def _agent_extra_volumes(
     agent: CodingAgent, volume_cls: VolumeBinder[MountT]
 ) -> dict[str, MountT]:
