@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib.metadata
 import json
 import os
 import platform
@@ -60,8 +59,7 @@ def msb_binary() -> Path | None:
     """Return the `msb` runtime binary benchspec drives, or None when unavailable.
 
     An `MSB_PATH` override wins, else the binary bundled inside the `microsandbox`
-    wheel. Neither `$PATH` nor a standalone install under `~/.microsandbox/bin` is
-    used — the SDK would prefer the latter, so `_pin_runtime` overrides it.
+    wheel. Nothing on `$PATH` is consulted.
     """
     override = os.environ.get("MSB_PATH")
     if override:
@@ -71,35 +69,6 @@ def msb_binary() -> Path | None:
     except ImportError:
         return None
     return msb_path()
-
-
-def _pin_runtime() -> None:
-    """Make the SDK drive the runtime `msb_binary()` reports, not a standalone install.
-
-    The SDK prefers `~/.microsandbox/bin/msb` over the wheel-bundled binary, and a stale
-    standalone install there cannot restore snapshots the bundled SDK writes. The SDK
-    also caches its resolution process-wide on first use.
-
-    WARNING: call before the first SDK call in the process — a later `MSB_PATH` is
-    ignored.
-    """
-    binary = msb_binary()
-    if binary is not None:
-        os.environ.setdefault("MSB_PATH", str(binary))
-
-
-def snapshot_runtime() -> str:
-    """Return the microsandbox major.minor that snapshots are built under, or "".
-
-    Minor releases change the on-disk snapshot layout (0.7 made 0.6 snapshots
-    unreachable by name), so the snapshot fingerprint folds this in; patch releases
-    keep the cache.
-    """
-    try:
-        version = importlib.metadata.version("microsandbox")
-    except importlib.metadata.PackageNotFoundError:
-        return ""
-    return "microsandbox " + ".".join(version.split(".")[:2])
 
 
 def microsandbox_secrets(agent: CodingAgent) -> dict[str, SecretModifySpec]:
@@ -274,7 +243,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
 
     def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
         """Return the structured inputs and digest behind the snapshot cache fingerprint."""
-        return fingerprint_inputs_for(self.id, agent, env, runtime=snapshot_runtime())
+        return fingerprint_inputs_for(self.id, agent, env)
 
     def cache_fingerprint(self, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the snapshot cache fingerprint for this backend, agent, and env."""
@@ -298,7 +267,6 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """Open `snapshot` and return its native image manifest digest."""
         from microsandbox import Snapshot
 
-        _pin_runtime()
         handle = await Snapshot.open(snapshot)
         return handle.image_manifest_digest
 
@@ -310,9 +278,9 @@ class MicrosandboxBackend(SharedBackendBehavior):
         runtime means nothing to prune; a runtime that resolves but is not actually on
         disk raises `FileNotFoundError` per invocation, which is tolerated the same way.
 
-        Snapshots are removed by path: a bare name selects only a group's head, and an
-        ungrouped pre-0.7 snapshot is reachable by path alone. `msb` has no group
-        removal, so a group left with no member snapshots is deleted directly.
+        Each snapshot group's members are removed by path, since a bare name selects
+        only the group's head. `msb` has no group removal, so the emptied group
+        directory is deleted directly.
         """
         binary = msb_binary()
 
@@ -337,9 +305,6 @@ class MicrosandboxBackend(SharedBackendBehavior):
                     _msb("stop", entry.name)
                     _msb("rm", "-f", entry.name)
                     continue
-                if not (entry / "group.json").is_file():
-                    _msb("snapshot", "rm", "--force", str(entry))
-                    continue
                 for member in sorted(entry.glob("snap_*")):
                     _msb("snapshot", "rm", "--force", str(member))
                 if binary is not None and not any(entry.glob("snap_*")):
@@ -353,7 +318,6 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """Provision and seal the reusable microsandbox snapshot asynchronously."""
         from microsandbox import Sandbox, Snapshot
 
-        _pin_runtime()
         base_image = env.base_image or BASE_IMAGE
         build_name = f"{NAME_PREFIX}build-{agent.id}"
         async with _translate_runtime_errors():
@@ -427,7 +391,6 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """
         from microsandbox import ModificationPolicy, Sandbox
 
-        _pin_runtime()
         async with _translate_runtime_errors():
             await _destroy_if_present(name)
             native = await Sandbox.restore(

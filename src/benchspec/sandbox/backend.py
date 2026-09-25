@@ -261,7 +261,7 @@ class SandboxBackend(Protocol):
 
 
 def fingerprint_inputs_for(
-    backend_id: str, agent: CodingAgent, env: EnvConfig, *, runtime: str = ""
+    backend_id: str, agent: CodingAgent, env: EnvConfig
 ) -> FingerprintInputs:
     """Return the structured inputs and digest behind one backend's snapshot fingerprint.
 
@@ -269,8 +269,7 @@ def fingerprint_inputs_for(
     configured — benchspec does not resolve it to a digest; a floating tag is therefore
     not reproducible across time/machines, and the backend records the actual pulled
     digest in Phase-8 artifacts), the agent install fingerprint (installer inputs beyond
-    `version()`), the raw environment script bytes, and — when the backend supplies one
-    — its snapshot-format runtime version. `snapshot_name()` and provenance
+    `version()`), and the raw environment script bytes. `snapshot_name()` and provenance
     capture both reach this through the backend instead of re-hashing or parsing the
     snapshot name. The backend id leads, so one agent+env never shares a snapshot across
     two backends.
@@ -279,8 +278,6 @@ def fingerprint_inputs_for(
         backend_id: The resolving backend's `id`.
         agent: The agent whose installer inputs the snapshot bakes in.
         env: The host environment config folded into the snapshot.
-        runtime: The backend's snapshot-format version, when its snapshots do not
-            survive a runtime upgrade; empty leaves the digest as if it were absent.
 
     Returns:
         The raw ingredients and the digest hashed from them.
@@ -288,15 +285,14 @@ def fingerprint_inputs_for(
     base_image_ref = env.base_image or BASE_IMAGE
     install_fingerprint = agent.install_fingerprint()
     env_script_sha256 = hashlib.sha256(env.script).hexdigest()
-    ingredients = [
-        backend_id.encode(),
-        base_image_ref.encode(),
-        install_fingerprint.encode(),
-        env.script,
-    ]
-    if runtime:
-        ingredients.append(runtime.encode())
-    payload = b"\0".join(ingredients)
+    payload = b"\0".join(
+        (
+            backend_id.encode(),
+            base_image_ref.encode(),
+            install_fingerprint.encode(),
+            env.script,
+        )
+    )
     digest = hashlib.sha256(payload).hexdigest()[:8]
 
     return FingerprintInputs(

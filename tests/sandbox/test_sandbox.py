@@ -1387,10 +1387,7 @@ def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) 
             return None
 
     # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and imports
-    # `MicrosandboxError` / `SandboxNotFoundError` — stub the module surface. The runtime
-    # pin writes `MSB_PATH` only when unset, so setting it here keeps the pin out of
-    # the rest of the test process.
-    monkeypatch.setenv("MSB_PATH", "/nonexistent/msb")
+    # `MicrosandboxError` / `SandboxNotFoundError` — stub the module surface.
     monkeypatch.setitem(
         sys.modules,
         "microsandbox",

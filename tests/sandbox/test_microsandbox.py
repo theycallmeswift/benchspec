@@ -65,16 +65,12 @@ def test_image_identity_unavailable_with_error_when_read_raises(
     assert identity.image_digest_error == "snapshot not found"
 
 
-def test_image_identity_unavailable_when_microsandbox_not_installed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Without a usable microsandbox runtime, image_identity degrades, never raises.
+def test_image_identity_unavailable_when_microsandbox_not_installed() -> None:
+    """Without the microsandbox package installed, image_identity degrades, never raises.
 
-    The runtime path is pinned to nothing, so this exercises the defensive wrapping
-    end-to-end rather than relying on a faked failure — and keeps the backend's runtime
-    pin from writing `MSB_PATH` into the rest of the test process.
+    This environment genuinely lacks the `microsandbox` package, so this exercises the
+    defensive wrapping end-to-end (no mocking) rather than relying on a faked failure.
     """
-    monkeypatch.setenv("MSB_PATH", str(tmp_path / "missing-msb"))
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
 
     identity = microsandbox_backend.image_identity("any-snapshot")
@@ -177,27 +173,6 @@ def test_microsandbox_snapshot_exists_false_when_group_head_was_removed(
     assert microsandbox_backend.snapshot_exists(name) is False
 
 
-def test_microsandbox_snapshot_exists_false_for_an_ungrouped_pre_0_7_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A pre-0.7 snapshot directory is unreachable by bare name, so it is not a cache hit."""
-    monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
-    microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
-    name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
-    legacy = tmp_path / ".microsandbox" / "snapshots" / name
-    legacy.mkdir(parents=True)
-    (legacy / "snapshot.json").write_text("{}", encoding="utf-8")
-
-    assert microsandbox_backend.snapshot_exists(name) is False
-
-
-def test_snapshot_runtime_keeps_major_minor_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only a minor release changes the snapshot runtime; a patch release keeps the cache."""
-    monkeypatch.setattr(microsandbox_mod.importlib.metadata, "version", lambda _: "0.7.3")
-
-    assert microsandbox_mod.snapshot_runtime() == "microsandbox 0.7"
-
-
 def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -210,9 +185,6 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
     group = snapshots / "benchspec-microsandbox-claude-code-latest-ab12cd34"
     (group / "snap_abc").mkdir(parents=True)
     (group / "group.json").write_text('{"head": "snap_abc"}', encoding="utf-8")
-    legacy = snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4"
-    legacy.mkdir()
-    (legacy / "snapshot.json").write_text("{}", encoding="utf-8")
     (snapshots / "unrelated-snapshot").mkdir()
     monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: home)
     shim = home / "msb"
@@ -240,7 +212,6 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
     assert sorted(command_log.read_text(encoding="utf-8").splitlines()) == [
         "rm -f benchspec-eval-hello-trial-gw0",
         f"snapshot rm --force {group / 'snap_abc'}",
-        f"snapshot rm --force {legacy}",
         "stop benchspec-eval-hello-trial-gw0",
     ]
 
@@ -351,7 +322,6 @@ def _patch_restore_primitives(monkeypatch: pytest.MonkeyPatch, native: _Restored
     stub.__dict__.update(
         Sandbox=_FakeSandboxCls, Volume=_FakeVolume, ModificationPolicy=ModificationPolicy
     )
-    monkeypatch.setenv("MSB_PATH", "/nonexistent/msb")
     monkeypatch.setitem(sys.modules, "microsandbox", stub)
 
 
