@@ -205,6 +205,28 @@ def test_baseline_with_its_only_activation_line_scoped_off_runs_whole(tmp_path: 
     assert grading["assertions"][0]["skipped"] is True
 
 
+def test_stop_early_false_keeps_an_all_activation_run_whole(tmp_path: Path) -> None:
+    """Verify the frontmatter opt-out hands the run no stop rule."""
+    eval_dir = tmp_path / "skills" / "hello" / "evals" / "alpha"
+    eval_dir.mkdir(parents=True)
+    eval_file = eval_dir / "eval.md"
+    header = _EVAL_HEADER.replace("---\n---", "---\nstop_early: false\n---")
+    eval_file.write_text(header + "- [ ] Skill `hello` invoked\n")
+    eval_case = EvalCase(
+        group="hello",
+        eval_dir=eval_dir,
+        eval_file=eval_file,
+        eval=mdformat.parse_eval_md(eval_file),
+    )
+    full = RunResult("alpha", "trial", "Hi Dana!", 16000, 900, False, trajectory=HELLO_DISPATCH)
+
+    session, grading, timing = _run(tmp_path, eval_case, TRIAL_ARM, full)
+
+    assert session.stops == [None]
+    assert grading["assertions"][0]["passed"] is True
+    assert "stopped" not in timing
+
+
 def test_a_line_the_binder_punts_makes_the_run_whole(tmp_path: Path) -> None:
     """Verify a line that did not bind to an activation checker keeps the run whole."""
     eval_case = _eval_case(tmp_path, "- [ ] The hello skill was used\n")
@@ -217,9 +239,9 @@ def test_a_line_the_binder_punts_makes_the_run_whole(tmp_path: Path) -> None:
 
 def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path) -> None:
     """Verify `stopped` reaches index.jsonl rows and the per-arm benchmark section."""
-    decided = _eval_case(tmp_path, "- [ ] Skill `hello` invoked\n", eval_id="fires")
+    fires = _eval_case(tmp_path, "- [ ] Skill `hello` invoked\n", eval_id="fires")
     _run(
-        tmp_path, decided, TRIAL_ARM,
+        tmp_path, fires, TRIAL_ARM,
         RunResult("fires", "trial", "", 1200, 0, False, trajectory=HELLO_DISPATCH,
                   stopped=True),
     )

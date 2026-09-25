@@ -281,6 +281,7 @@ def test_make_e2e_runs_the_e2e_set() -> None:
     assert result.returncode == 0, result.stderr
     output = result.stdout
     assert "uv run benchspec run --set e2e " in output
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -m e2e tests/test_e2e_live.py" in output
     assert "verify_e2e_artifacts" not in output
 
 

@@ -532,13 +532,13 @@ def run_eval_arm(
         text for text, holds in zip(graded_assertions, applicable, strict=True) if holds
     ]
 
-    # Bind once, up front: the binder's own output is the source of truth for which
-    # assertions are activation checks — no separate recognizer — and knowing that before
-    # the run is what lets a run stop once its verdicts are fixed. Binding is a pure
-    # function of the assertion text, so its place in the order changes no verdict. A
-    # BinderAuthError propagates here, before the sandbox spends anything.
+    # Bind before the run: the binder's own output is the source of truth for which
+    # assertions are activation checks (no separate recognizer), and the stop rule needs
+    # that before the sandbox starts. Binding is a pure function of the assertion text, so
+    # its place in the order changes no verdict. A BinderAuthError propagates here, before
+    # the sandbox spends anything.
     specs, binder_degraded = _bind_all(active_assertions, bind)
-    stop = _stop_rule(specs)
+    stop = _stop_rule(specs) if eval_case.stop_early else None
 
     arm_run = asyncio.run(
         _run_arm_turns(

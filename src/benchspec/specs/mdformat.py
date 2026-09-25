@@ -12,7 +12,8 @@ its scope clause, kept raw beside it (`clauses`, aligned by index). A clause sco
 `- [ ]` line directly above it; a display-only parent is never graded, so it cannot carry one.
 
 Eval file `evals/<group>/eval.md` (or `evals/<group>/<stem>.eval.md`): YAML frontmatter
-(`history:` only — an optional list of `{role, content}` turns or sibling JSONL path) +
+(`history:`, an optional list of `{role, content}` turns or sibling JSONL path, and
+`stop_early:`, an optional boolean) +
 `## Prompt` prose (required) + `## Assertions` checklist (required, all prose; H3
 subheadings are display-only groups, flattened in document order). The eval id is the
 parent folder name for `eval.md`, or the `<stem>` for `<stem>.eval.md`. Single-turn only:
@@ -34,7 +35,7 @@ _CHECKBOX = re.compile(r"^- \[[ xX]\] +(.*\S)\s*$")
 _CLAUSE = re.compile(r"^- (if|unless): +(.*\S)\s*$")
 _CLAUSE_LIKE = re.compile(r"^- (?i:if|unless)\b")
 
-_EVAL_FM = {"history"}
+_EVAL_FM = {"history", "stop_early"}
 
 _DISPLAY_ONLY_PARENT = (
     "a clause scopes one graded assertion; a display-only parent cannot carry one"
@@ -295,6 +296,12 @@ def parse_eval_md(path: Path) -> dict:
                 f"{path}: history: expected list or string path, "
                 f"got {type(history).__name__}"
             )
+    if "stop_early" in fm:
+        if not isinstance(fm["stop_early"], bool):
+            raise MdFormatError(
+                f"{path}: stop_early: expected true or false, got {type(fm['stop_early']).__name__}"
+            )
+        result["stop_early"] = fm["stop_early"]
 
     sections = _sections(body_lines, path)
     prompt = None

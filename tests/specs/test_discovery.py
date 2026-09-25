@@ -536,3 +536,18 @@ def test_env_config_environment_script_missing_file_raises(tmp_path: Path) -> No
     _write_pyproject(tmp_path, 'environment_script = "nope.sh"\n')
     with pytest.raises(schema.SchemaError, match="file not found: nope.sh"):
         resolve_environment_config(tmp_path)
+
+
+
+def test_discovered_case_stops_early_unless_told_otherwise(tmp_path: Path) -> None:
+    """Verify `stop_early` defaults to true and `stop_early: false` turns it off."""
+    body = "## Prompt\n\nhi\n\n## Assertions\n\n- [ ] Skill `hello` invoked\n"
+    for group, frontmatter in (("quick", ""), ("whole", "stop_early: false\n")):
+        group_dir = tmp_path / "skills" / "hello" / "evals" / group
+        group_dir.mkdir(parents=True)
+        (group_dir / "eval.md").write_text(f"---\n{frontmatter}---\n\n{body}")
+
+    cases = {case.group: case for case in discover_eval_cases(tmp_path)}
+
+    assert cases["quick"].stop_early is True
+    assert cases["whole"].stop_early is False

@@ -26,7 +26,7 @@ class EvalCase:
     group: str  # the evals/<group>/ folder name; also the artifact-path slot
     eval_dir: Path  # evals/<group>/ — holds the eval file(s), workspace/, setup.sh
     eval_file: Path  # eval.md or <stem>.eval.md
-    eval: dict  # {id, prompt, assertions, clauses, history?} from parse_eval_md
+    eval: dict  # {id, prompt, assertions, clauses, history?, stop_early?} from parse_eval_md
 
     @property
     def skill(self) -> str:
@@ -62,6 +62,11 @@ class EvalCase:
     def history(self) -> list[dict | str]:
         """Return prior-context turns or verbatim transcript lines for this case."""
         return self.eval.get("history", [])
+
+    @property
+    def stop_early(self) -> bool:
+        """Whether the run may end once its verdicts are fixed (`stop_early: false` opts out)."""
+        return self.eval.get("stop_early", True)
 
     @property
     def workspace_dir(self) -> Path | None:

@@ -19,9 +19,10 @@ COUNT ?= 3
 # The second run puts the binder, the judge, and every harness on OpenRouter, so one
 # command proves both the default path and the single-key path. The judge stays on
 # Codex but grades on a Google slug: the arms are Anthropic and OpenAI models.
-e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter, COUNT samples per cell (default 3) on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Prerequisites: README, Development
+e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter, COUNT samples per cell (default 3) on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Then the live artifact checks. Prerequisites: README, Development
 	uv run benchspec run --set e2e -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
 	uv run benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model google/gemini-3.5-flash --binder-provider openrouter -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
+	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -m e2e tests/test_e2e_live.py
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection
 	uv run pytest -m binder_corpus -n $(WORKERS) evals/binder $(EVAL_ARGS)

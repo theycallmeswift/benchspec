@@ -1309,3 +1309,53 @@ def test_indented_plain_bullet_that_is_not_a_clause_stays_a_hard_error(tmp_path:
         mdformat.parse_eval_md(eval_path)
 
     assert "just a note, not a clause" in str(exc_info.value)
+
+
+
+def test_parse_eval_md_reads_stop_early(tmp_path: Path) -> None:
+    """Verify `stop_early: false` reaches the parsed eval as a boolean."""
+    eval_path = _write_slug(
+        tmp_path,
+        "whole-run",
+        """\
+        ---
+        stop_early: false
+        ---
+
+        ## Prompt
+
+        Say hi.
+
+        ## Assertions
+
+        - [ ] Skill `hello` invoked
+    """,
+    )
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert ev["stop_early"] is False
+
+
+def test_parse_eval_md_omits_stop_early_when_absent(tmp_path: Path) -> None:
+    """Verify an eval without the key parses without one, leaving the default to discovery."""
+    eval_path = _write_slug(
+        tmp_path, "plain", "---\n---\n\n## Prompt\n\nSay hi.\n\n## Assertions\n\n- [ ] Says hi\n"
+    )
+
+    ev = mdformat.parse_eval_md(eval_path)
+
+    assert "stop_early" not in ev
+
+
+@pytest.mark.parametrize("value", ["nope", "0", "[false]"])
+def test_parse_eval_md_rejects_non_boolean_stop_early(tmp_path: Path, value: str) -> None:
+    """Verify `stop_early` takes only `true` or `false`."""
+    eval_path = _write_slug(
+        tmp_path,
+        "bad-flag",
+        f"---\nstop_early: {value}\n---\n\n## Prompt\n\nhi\n\n## Assertions\n\n- [ ] Says hi\n",
+    )
+
+    with pytest.raises(mdformat.MdFormatError, match="stop_early: expected true or false"):
+        mdformat.parse_eval_md(eval_path)

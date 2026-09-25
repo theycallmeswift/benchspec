@@ -214,7 +214,7 @@ def _validate_evals_v1(data: dict) -> None:
         raise SchemaError("root.evals: must be non-empty")
 
     seen: set[str] = set()
-    allowed_eval = {"id", "history", "prompt", "assertions"}
+    allowed_eval = {"id", "history", "prompt", "assertions", "stop_early"}
     for eval_index, item in enumerate(evals):
         path = f"root.evals[{eval_index}]"
         if not isinstance(item, dict):
@@ -230,6 +230,7 @@ def _validate_evals_v1(data: dict) -> None:
 
         if "history" in item:
             _validate_history(item["history"], f"{path}.history")
+        _optional(item, "stop_early", bool, path)
 
         prompt = _require(
             item,
