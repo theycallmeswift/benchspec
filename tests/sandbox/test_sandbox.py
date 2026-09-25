@@ -1333,6 +1333,10 @@ class _BuildRecorder:
     sealed: bool = False
 
 
+class _FakeSandboxNotFoundError(RuntimeError):
+    """Stand in for microsandbox's `SandboxNotFoundError`."""
+
+
 class _StubModule(types.ModuleType):
     """A module stand-in whose public names are fixed up front, so `from x import y` resolves."""
 
@@ -1367,21 +1371,26 @@ def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) 
             return fake
 
         @staticmethod
-        async def remove(name: str) -> None:
-            """Remove."""
-            return None
+        async def get(name: str) -> NoReturn:
+            """Report the build VM as already gone, the way a stopped-and-removed one is."""
+            raise _FakeSandboxNotFoundError(name)
 
     class _FakeSnapshot:
         """Provide a fake snapshot for tests."""
 
         @staticmethod
-        async def create(name: str, *, from_sandbox: str, record_integrity: bool) -> None:
+        async def create(
+            name: str, *, from_sandbox: str, group: str, record_integrity: bool
+        ) -> None:
             """Mark the snapshot sealed."""
             recorder.sealed = True
             return None
 
-    # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and
-    # `from microsandbox.errors import MicrosandboxError` — stub the module surface.
+    # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and imports
+    # `MicrosandboxError` / `SandboxNotFoundError` — stub the module surface. The runtime
+    # pin writes `MSB_PATH` only when unset, so setting it here keeps the pin out of
+    # the rest of the test process.
+    monkeypatch.setenv("MSB_PATH", "/nonexistent/msb")
     monkeypatch.setitem(
         sys.modules,
         "microsandbox",
@@ -1390,7 +1399,11 @@ def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) 
     monkeypatch.setitem(
         sys.modules,
         "microsandbox.errors",
-        _StubModule("microsandbox.errors", MicrosandboxError=RuntimeError),
+        _StubModule(
+            "microsandbox.errors",
+            MicrosandboxError=RuntimeError,
+            SandboxNotFoundError=_FakeSandboxNotFoundError,
+        ),
     )
     return recorder
 

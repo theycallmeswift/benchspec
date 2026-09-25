@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.metadata
+import json
 import os
 import platform
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -50,15 +53,15 @@ from benchspec.specs.discovery import EnvConfig
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from microsandbox import SecretEntry
+    from microsandbox import MountConfig, SecretModifySpec
 
 
 def msb_binary() -> Path | None:
-    """Return the `msb` runtime binary the SDK will drive, or None when unavailable.
+    """Return the `msb` runtime binary benchspec drives, or None when unavailable.
 
-    Mirrors the SDK's own resolution: an `MSB_PATH` override wins, else the binary
-    bundled inside the `microsandbox` wheel. Nothing on `$PATH` is consulted — a
-    standalone `msb` install is neither required nor used.
+    An `MSB_PATH` override wins, else the binary bundled inside the `microsandbox`
+    wheel. Neither `$PATH` nor a standalone install under `~/.microsandbox/bin` is
+    used — the SDK would prefer the latter, so `_pin_runtime` overrides it.
     """
     override = os.environ.get("MSB_PATH")
     if override:
@@ -70,23 +73,62 @@ def msb_binary() -> Path | None:
     return msb_path()
 
 
-def microsandbox_secrets(agent: CodingAgent) -> list[SecretEntry]:
-    """Render an agent's backend-neutral credentials as microsandbox `Secret` entries.
+def _pin_runtime() -> None:
+    """Make the SDK drive the runtime `msb_binary()` reports, not a standalone install.
+
+    The SDK prefers `~/.microsandbox/bin/msb` over the wheel-bundled binary, and a stale
+    standalone install there cannot restore snapshots the bundled SDK writes. The SDK
+    also caches its resolution process-wide on first use.
+
+    WARNING: call before the first SDK call in the process — a later `MSB_PATH` is
+    ignored.
+    """
+    binary = msb_binary()
+    if binary is not None:
+        os.environ.setdefault("MSB_PATH", str(binary))
+
+
+def snapshot_runtime() -> str:
+    """Return the microsandbox major.minor that snapshots are built under, or "".
+
+    Minor releases change the on-disk snapshot layout (0.7 made 0.6 snapshots
+    unreachable by name), so the snapshot fingerprint folds this in; patch releases
+    keep the cache.
+    """
+    try:
+        version = importlib.metadata.version("microsandbox")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+    return "microsandbox " + ".".join(version.split(".")[:2])
+
+
+def microsandbox_secrets(agent: CodingAgent) -> dict[str, SecretModifySpec]:
+    """Render an agent's backend-neutral credentials as microsandbox secret specs.
 
     Args:
         agent: The `CodingAgent` whose `secrets()` yields `Credential`s.
 
     Returns:
-        One `Secret.env(...)` entry per credential, scoped to its declared allow hosts.
+        One `Sandbox.modify(secrets=...)` spec per credential env var, scoped to its
+        declared allow hosts.
     """
-    from microsandbox import Secret
-
-    return [
-        Secret.env(
-            credential.env_var, value=credential.value, allow_hosts=list(credential.allow_hosts)
-        )
+    return {
+        credential.env_var: {
+            "value": credential.value,
+            "allowed_hosts": list(credential.allow_hosts),
+        }
         for credential in agent.secrets()
-    ]
+    }
+
+
+async def _destroy_if_present(name: str) -> None:
+    """Stop and remove the sandbox `name`, tolerating one that does not exist."""
+    from microsandbox import Sandbox
+    from microsandbox.errors import SandboxNotFoundError
+
+    with contextlib.suppress(SandboxNotFoundError):
+        handle = await Sandbox.get(name)
+        await handle.destroy(force=True)
 
 
 @contextlib.asynccontextmanager
@@ -219,12 +261,20 @@ class MicrosandboxBackend(SharedBackendBehavior):
         return errors
 
     def snapshot_exists(self, name: str) -> bool:
-        """Return whether a named microsandbox snapshot exists on disk."""
-        return (Path.home() / ".microsandbox" / "snapshots" / name).exists()
+        """Return whether the snapshot group `name` exists on disk with a head snapshot.
+
+        Removing a group's head leaves the group directory behind with a null head, so
+        the directory alone is not a restorable snapshot.
+        """
+        group = Path.home() / ".microsandbox" / "snapshots" / name / "group.json"
+        try:
+            return json.loads(group.read_text(encoding="utf-8")).get("head") is not None
+        except (OSError, ValueError):
+            return False
 
     def fingerprint_inputs(self, agent: CodingAgent, env: EnvConfig) -> FingerprintInputs:
         """Return the structured inputs and digest behind the snapshot cache fingerprint."""
-        return fingerprint_inputs_for(self.id, agent, env)
+        return fingerprint_inputs_for(self.id, agent, env, runtime=snapshot_runtime())
 
     def cache_fingerprint(self, agent: CodingAgent, env: EnvConfig) -> str:
         """Return the snapshot cache fingerprint for this backend, agent, and env."""
@@ -248,6 +298,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """Open `snapshot` and return its native image manifest digest."""
         from microsandbox import Snapshot
 
+        _pin_runtime()
         handle = await Snapshot.open(snapshot)
         return handle.image_manifest_digest
 
@@ -258,6 +309,10 @@ class MicrosandboxBackend(SharedBackendBehavior):
         another tool put under `~/.microsandbox` is left alone. A missing SDK-resolved
         runtime means nothing to prune; a runtime that resolves but is not actually on
         disk raises `FileNotFoundError` per invocation, which is tolerated the same way.
+
+        Snapshots are removed by path: a bare name selects only a group's head, and an
+        ungrouped pre-0.7 snapshot is reachable by path alone. `msb` has no group
+        removal, so a group left with no member snapshots is deleted directly.
         """
         binary = msb_binary()
 
@@ -281,8 +336,14 @@ class MicrosandboxBackend(SharedBackendBehavior):
                 if sub == "sandboxes":
                     _msb("stop", entry.name)
                     _msb("rm", "-f", entry.name)
-                else:
-                    _msb("snapshot", "rm", "--force", entry.name)
+                    continue
+                if not (entry / "group.json").is_file():
+                    _msb("snapshot", "rm", "--force", str(entry))
+                    continue
+                for member in sorted(entry.glob("snap_*")):
+                    _msb("snapshot", "rm", "--force", str(member))
+                if binary is not None and not any(entry.glob("snap_*")):
+                    shutil.rmtree(entry)
 
     def build_snapshot(self, agent: CodingAgent, name: str, env: EnvConfig) -> None:
         """Provision and seal the reusable microsandbox snapshot."""
@@ -292,6 +353,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         """Provision and seal the reusable microsandbox snapshot asynchronously."""
         from microsandbox import Sandbox, Snapshot
 
+        _pin_runtime()
         base_image = env.base_image or BASE_IMAGE
         build_name = f"{NAME_PREFIX}build-{agent.id}"
         async with _translate_runtime_errors():
@@ -305,11 +367,15 @@ class MicrosandboxBackend(SharedBackendBehavior):
             await run_environment_script(sandbox, agent, env)
             await sandbox.stop()  # snapshots require a stopped sandbox
             async with _translate_runtime_errors():
-                await Snapshot.create(name, from_sandbox=build_name, record_integrity=True)
+                # The group defaults to the source sandbox; naming it after the snapshot
+                # is what lets `Sandbox.restore(name)` resolve it by bare name.
+                await Snapshot.create(
+                    name, from_sandbox=build_name, group=name, record_integrity=True
+                )
         finally:
             with contextlib.suppress(SandboxError, OSError):
                 async with _translate_runtime_errors():
-                    await Sandbox.remove(build_name)
+                    await _destroy_if_present(build_name)
 
     async def create_sandbox(
         self,
@@ -322,7 +388,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         extra_volumes: ExtraVolumes,
     ) -> MicrosandboxGuest:
         """Create a microsandbox instance from a snapshot for an arm session."""
-        from microsandbox import Sandbox, Volume
+        from microsandbox import Volume
 
         volumes = {GUEST_WORKDIR: Volume.bind(host_mount_path(host_workdir), readonly=False)}
         if host_repo_root is not None:
@@ -330,14 +396,52 @@ class MicrosandboxBackend(SharedBackendBehavior):
             # suite-specific skill without risking a write back into the host checkout.
             volumes[PROJECT_MOUNT] = Volume.bind(host_mount_path(host_repo_root), readonly=True)
         volumes.update(extra_volumes(agent, Volume))
+        return await self._restore(agent=agent, snapshot=snapshot, name=name, volumes=volumes)
+
+    async def _restore(
+        self,
+        *,
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        volumes: Mapping[str, MountConfig],
+    ) -> MicrosandboxGuest:
+        """Restore `snapshot` as a fresh sandbox `name` holding the agent's scoped secrets.
+
+        `Sandbox.restore` accepts neither secrets nor replacement, so a leftover sandbox
+        of the same name is destroyed first and the secrets attach afterwards. Attaching
+        them turns on TLS interception, which only a restart can do. Until then the guest
+        holds no secret at all — never an unscoped one — and nothing runs in it.
+
+        Args:
+            agent: The agent whose credentials become scoped secrets.
+            snapshot: The snapshot group to restore from.
+            name: The sandbox name, replacing any existing sandbox of that name.
+            volumes: Guest mount path to host mount.
+
+        Returns:
+            The running guest, its secrets live.
+
+        Raises:
+            SandboxError: If the restore or the secret attachment fails.
+        """
+        from microsandbox import ModificationPolicy, Sandbox
+
+        _pin_runtime()
         async with _translate_runtime_errors():
-            native = await Sandbox.create(
-                name,
-                from_snapshot=snapshot,
-                volumes=volumes,
-                secrets=microsandbox_secrets(agent),
-                cpus=VM_CPUS,
-                memory=VM_MEMORY_MIB,
-                replace=True,
+            await _destroy_if_present(name)
+            native = await Sandbox.restore(
+                snapshot, name=name, volumes=volumes, cpus=VM_CPUS, memory=VM_MEMORY_MIB
             )
-        return MicrosandboxGuest(native)
+        sandbox = MicrosandboxGuest(native)
+        secrets = microsandbox_secrets(agent)
+        if not secrets:
+            return sandbox
+
+        try:
+            async with _translate_runtime_errors():
+                await native.modify(secrets=secrets, policy=ModificationPolicy.RESTART)
+        except BaseException:
+            await self.stop_quietly(sandbox)
+            raise
+        return sandbox

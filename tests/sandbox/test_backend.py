@@ -147,6 +147,18 @@ def test_fingerprint_inputs_defaults_base_image_ref_when_unset() -> None:
     assert inputs.base_image_ref == backend.BASE_IMAGE
 
 
+def test_fingerprint_runtime_forces_a_new_snapshot_name() -> None:
+    """A backend's snapshot-format runtime is folded into the digest, so upgrades rebuild."""
+    env = EnvConfig()
+
+    unversioned = backend.fingerprint_inputs_for("microsandbox", _agent(), env)
+    versioned = backend.fingerprint_inputs_for(
+        "microsandbox", _agent(), env, runtime="microsandbox 0.7"
+    )
+
+    assert versioned.digest != unversioned.digest
+
+
 def test_microsandbox_imported_only_under_allowlist() -> None:
     """No source file outside the allowlist imports the microsandbox package.
 

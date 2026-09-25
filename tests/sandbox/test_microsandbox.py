@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
 from typing import NoReturn
@@ -13,6 +16,7 @@ import pytest
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import microsandbox as microsandbox_mod
 from benchspec.sandbox.errors import SandboxError
+from benchspec.sandbox.sandbox import _agent_extra_volumes
 from benchspec.testing import FakeSandbox
 
 
@@ -141,16 +145,53 @@ def test_microsandbox_snapshot_exists_false_when_dir_absent(
     assert microsandbox_backend.snapshot_exists(name) is False
 
 
-def test_microsandbox_snapshot_exists_true_when_dir_present(
+def test_microsandbox_snapshot_exists_true_when_group_has_a_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """snapshot_exists is True when ~/.microsandbox/snapshots/<name> exists on disk."""
+    """snapshot_exists is True when the snapshot group `<name>` names a head snapshot."""
     monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
     name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
-    (tmp_path / ".microsandbox" / "snapshots" / name).mkdir(parents=True)
+    group = tmp_path / ".microsandbox" / "snapshots" / name
+    group.mkdir(parents=True)
+    (group / "group.json").write_text('{"head": "snap_abc"}', encoding="utf-8")
 
     assert microsandbox_backend.snapshot_exists(name) is True
+
+
+def test_microsandbox_snapshot_exists_false_when_group_head_was_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A group directory whose head snapshot was removed is not a restorable snapshot."""
+    monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
+    microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
+    name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
+    group = tmp_path / ".microsandbox" / "snapshots" / name
+    group.mkdir(parents=True)
+    (group / "group.json").write_text('{"head": null}', encoding="utf-8")
+
+    assert microsandbox_backend.snapshot_exists(name) is False
+
+
+def test_microsandbox_snapshot_exists_false_for_an_ungrouped_pre_0_7_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-0.7 snapshot directory is unreachable by bare name, so it is not a cache hit."""
+    monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: tmp_path)
+    microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
+    name = "benchspec-microsandbox-claude-code-1.2.3-abcd1234"
+    legacy = tmp_path / ".microsandbox" / "snapshots" / name
+    legacy.mkdir(parents=True)
+    (legacy / "snapshot.json").write_text("{}", encoding="utf-8")
+
+    assert microsandbox_backend.snapshot_exists(name) is False
+
+
+def test_snapshot_runtime_keeps_major_minor_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a minor release changes the snapshot runtime; a patch release keeps the cache."""
+    monkeypatch.setattr(microsandbox_mod.importlib.metadata, "version", lambda _: "0.7.3")
+
+    assert microsandbox_mod.snapshot_runtime() == "microsandbox 0.7"
 
 
 def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
@@ -162,7 +203,12 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
     snapshots = home / ".microsandbox" / "snapshots"
     (sandboxes / "benchspec-eval-hello-trial-gw0").mkdir(parents=True)
     (sandboxes / "unrelated-sandbox").mkdir()
-    (snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4").mkdir(parents=True)
+    group = snapshots / "benchspec-microsandbox-claude-code-latest-ab12cd34"
+    (group / "snap_abc").mkdir(parents=True)
+    (group / "group.json").write_text('{"head": "snap_abc"}', encoding="utf-8")
+    legacy = snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4"
+    legacy.mkdir()
+    (legacy / "snapshot.json").write_text("{}", encoding="utf-8")
     (snapshots / "unrelated-snapshot").mkdir()
     monkeypatch.setattr(microsandbox_mod.Path, "home", lambda: home)
     shim = home / "msb"
@@ -172,7 +218,7 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
         printf "%s\\n" "$*" >> "$BENCHSPEC_COMMAND_LOG"
         case "$1 $2" in
           "rm -f") rm -rf "$HOME/.microsandbox/sandboxes/$3" ;;
-          "snapshot rm") rm -rf "$HOME/.microsandbox/snapshots/$4" ;;
+          "snapshot rm") rm -rf "$4" ;;
         esac
     """)
     )
@@ -189,7 +235,8 @@ def test_microsandbox_prune_removes_only_benchspec_sandboxes_and_snapshots(
     assert sorted(entry.name for entry in snapshots.iterdir()) == ["unrelated-snapshot"]
     assert sorted(command_log.read_text(encoding="utf-8").splitlines()) == [
         "rm -f benchspec-eval-hello-trial-gw0",
-        "snapshot rm --force benchspec-microsandbox-claude-code-latest-c30e39d4",
+        f"snapshot rm --force {group / 'snap_abc'}",
+        f"snapshot rm --force {legacy}",
         "stop benchspec-eval-hello-trial-gw0",
     ]
 
@@ -209,15 +256,15 @@ def test_microsandbox_prune_tolerates_a_missing_runtime(
     assert (home / ".microsandbox" / "sandboxes" / "benchspec-eval-x").is_dir()
 
 
-def test_microsandbox_secrets_render_scoped_secret_entries() -> None:
-    """One neutral credential renders as a microsandbox Secret scoped to its hosts."""
+def test_microsandbox_secrets_render_scoped_secret_specs() -> None:
+    """One neutral credential renders as a microsandbox secret spec scoped to its hosts."""
     agent = _agent()
 
-    entries = microsandbox_mod.microsandbox_secrets(agent)
+    specs = microsandbox_mod.microsandbox_secrets(agent)
 
-    assert [(entry.env_var, entry.value, entry.allow_hosts) for entry in entries] == [
-        ("ANTHROPIC_API_KEY", "test-token", ("api.anthropic.com",))
-    ]
+    assert specs == {
+        "ANTHROPIC_API_KEY": {"value": "test-token", "allowed_hosts": ["api.anthropic.com"]}
+    }
 
 
 def test_microsandbox_guest_translates_runtime_errors() -> None:
@@ -242,3 +289,121 @@ def test_microsandbox_guest_translates_runtime_errors() -> None:
 
     with pytest.raises(SandboxError, match="vm gone"):
         asyncio.run(guest.shell("true"))
+
+
+@dataclass
+class _RestoredSandbox(FakeSandbox):
+    """A restored native sandbox that records its secret attachment into `calls`."""
+
+    modify_error: Exception | None = None
+
+    async def modify(self, *, secrets: Mapping[str, object], policy: str) -> None:
+        """Record the secret attachment, failing with `modify_error` when one is set."""
+        self.calls.append(("modify", secrets, policy))
+        if self.modify_error is not None:
+            raise self.modify_error
+
+
+def _patch_restore_primitives(monkeypatch: pytest.MonkeyPatch, native: _RestoredSandbox) -> None:
+    """Stub the microsandbox lifecycle so `create_sandbox` restores `native`.
+
+    Every lifecycle step appends to `native.calls`, so one list shows their order.
+    """
+    from microsandbox import ModificationPolicy
+
+    class _FakeHandle:
+        """A handle onto a leftover sandbox of the requested name."""
+
+        async def destroy(self, *, force: bool) -> None:
+            """Record the destroy."""
+            native.calls.append(("destroy", force))
+
+    class _FakeSandboxCls:
+        """The `Sandbox` lifecycle statics `create_sandbox` drives."""
+
+        @staticmethod
+        async def get(name: str) -> _FakeHandle:
+            """Find a leftover sandbox named `name`."""
+            native.calls.append(("get", name))
+            return _FakeHandle()
+
+        @staticmethod
+        async def restore(
+            snapshot: str, *, name: str, volumes: Mapping[str, object], cpus: int, memory: int
+        ) -> _RestoredSandbox:
+            """Record the restore and hand back the native sandbox."""
+            native.calls.append(("restore", snapshot, name))
+            return native
+
+    class _FakeVolume:
+        """A `Volume` whose binds are plain tuples."""
+
+        @staticmethod
+        def bind(path: str, *, readonly: bool) -> tuple[str, bool]:
+            """Describe a bind mount."""
+            return (path, readonly)
+
+    stub = types.ModuleType("microsandbox")
+    stub.__dict__.update(
+        Sandbox=_FakeSandboxCls, Volume=_FakeVolume, ModificationPolicy=ModificationPolicy
+    )
+    monkeypatch.setenv("MSB_PATH", "/nonexistent/msb")
+    monkeypatch.setitem(sys.modules, "microsandbox", stub)
+
+
+def test_create_sandbox_replaces_leftover_then_attaches_scoped_secrets_with_a_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A same-named leftover goes first; the secrets attach after restore via a restart."""
+    from microsandbox import ModificationPolicy
+
+    native = _RestoredSandbox()
+    _patch_restore_primitives(monkeypatch, native)
+    microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
+
+    asyncio.run(
+        microsandbox_backend.create_sandbox(
+            agent=_agent(),
+            snapshot="benchspec-snap",
+            name="benchspec-eval-hello-trial-gw0",
+            host_workdir=tmp_path,
+            host_repo_root=None,
+            extra_volumes=_agent_extra_volumes,
+        )
+    )
+
+    assert native.calls == [
+        ("get", "benchspec-eval-hello-trial-gw0"),
+        ("destroy", True),
+        ("restore", "benchspec-snap", "benchspec-eval-hello-trial-gw0"),
+        (
+            "modify",
+            {"ANTHROPIC_API_KEY": {"value": "test-token", "allowed_hosts": ["api.anthropic.com"]}},
+            ModificationPolicy.RESTART,
+        ),
+    ]
+
+
+def test_create_sandbox_stops_the_guest_when_secrets_fail_to_attach(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed secret attachment surfaces as `SandboxError` and never leaks a running VM."""
+    from microsandbox.errors import MicrosandboxError
+
+    native = _RestoredSandbox(modify_error=MicrosandboxError("interception unavailable"))
+    _patch_restore_primitives(monkeypatch, native)
+    microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
+
+    with pytest.raises(SandboxError, match="interception unavailable"):
+        asyncio.run(
+            microsandbox_backend.create_sandbox(
+                agent=_agent(),
+                snapshot="benchspec-snap",
+                name="benchspec-eval-hello-trial-gw0",
+                host_workdir=tmp_path,
+                host_repo_root=None,
+                extra_volumes=_agent_extra_volumes,
+            )
+        )
+
+    assert native.stopped is True
