@@ -40,6 +40,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
+from benchspec.grading.trigger import TriggerWatch
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -455,6 +456,7 @@ class OpenCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        watch: TriggerWatch | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -466,11 +468,22 @@ class OpenCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+        # Per-arm extra_env merges over guest_env(), arm env winning.
+        env = {**self.guest_env(), **(extra_env or {})}
+        if watch is not None:
+            return await self.invoke_watched(
+                sandbox,
+                cmd,
+                watch=watch,
+                parse=lambda stdout: parse_opencode_jsonl(stdout, eval_id, config, detect_skill),
+                cwd=workdir,
+                env=env,
+                timeout=timeout,
+                eval_id=eval_id,
+                config=config,
+            )
 
         try:
-            # Per-arm extra_env merges over guest_env(), arm env winning.
-            env = {**self.guest_env(), **(extra_env or {})}
-
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
@@ -529,42 +542,12 @@ class OpenCodeAgent(BaseAgent):
             raise RuntimeError(f"opencode judge made no successful model call: {detail}")
         return json.dumps({"result": result.result_text})
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """Return true when a line shows any skill route."""
-        text = line.strip()
-        if not text:
-            return False
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            return False
-        if not (isinstance(event, dict) and event.get("type") == "tool_use"):
-            return False
-        part = event.get("part")
-        if not isinstance(part, dict):
-            return False
-        return _part_dispatches_any_skill(part, skill_name)
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one OpenCode JSONL line carries, as the trajectory has them.
 
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Return true when the target skill fired in the OpenCode stream.
-
-        Uses the strict `_tool_dispatches_skill` matcher directly (not `detect_dispatch`,
-        which now early-stops on any skill).
+        Running and pending frames are not calls yet, so a dispatch counts once it completes.
         """
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if not (isinstance(event, dict) and event.get("type") == "tool_use"):
-                continue
-            part = event.get("part")
-            if isinstance(part, dict) and _tool_dispatches_skill(part, skill_name):
-                return True
-        return False
+        return _opencode_trajectory(list(iter_events(line)))
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:
         """Return true when the OpenCode stream proves the model began a turn.
@@ -604,16 +587,6 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
         return True
     tool = part.get("tool")
     return isinstance(tool, str) and (tool == skill_name or tool.endswith(f":{skill_name}"))
-
-
-def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
-    """Return true when a part routes to any skill."""
-    tool = part.get("tool")
-    if not isinstance(tool, str):
-        return False
-    if tool == "skill":
-        return True
-    return bool(skill_name) and (tool == skill_name or tool.endswith(f":{skill_name}"))
 
 
 def _tool_call_was_rejected(part: dict) -> bool:

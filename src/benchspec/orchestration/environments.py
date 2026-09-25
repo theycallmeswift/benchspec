@@ -9,14 +9,19 @@ a parameter, not a code path baked into each harness.
 from __future__ import annotations
 
 import asyncio
+import codecs
+import contextlib
 import os
 import subprocess
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from benchspec.sandbox.errors import SandboxError
+
 if TYPE_CHECKING:
-    from benchspec.sandbox.backend import LiveSandbox
+    from benchspec.sandbox.backend import ExecStream, LiveSandbox
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,23 @@ class ProcResult:
             detail = "  ".join(parts) or "(no output)"
             raise RuntimeError(f"`{self.command[0]}` exited {self.exit_code}: {detail}")
         return self
+
+
+@dataclass(frozen=True)
+class WatchedProc:
+    """The outcome of a harness process streamed past a line watcher.
+
+    Exactly one of three endings holds: the watcher stopped it (`stopped` names why),
+    it outlived its timeout (`timed_out`), or it exited on its own (`exit_code`).
+    """
+
+    command: list[str]
+    stdout: str
+    stderr: str
+    elapsed_ms: int
+    exit_code: int | None = None
+    stopped: str | None = None
+    timed_out: bool = False
 
 
 @runtime_checkable
@@ -131,3 +153,89 @@ class GuestSandbox:
             command[0], command[1:], cwd=cwd, env=env, timeout=timeout, stdin=stdin,
         )
         return ProcResult(command, res.exit_code, res.stdout_text, res.stderr_text)
+
+    async def exec_watched(
+        self,
+        command: list[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float,
+        watch: Callable[[str], str | None],
+        cwd: str | None = None,
+        stdin: bytes | None = None,
+    ) -> WatchedProc:
+        """Stream `command` inside the guest, feeding each stdout line to `watch`.
+
+        The process is killed the moment `watch` returns a reason, or once it outlives
+        `timeout`; either way the lines streamed so far are kept. Chunks are reassembled
+        into whole lines first, since a stream chunk can split a JSONL record (or a
+        multibyte character) anywhere.
+
+        Args:
+            command: The harness argv.
+            env: The process environment.
+            timeout: Wall-clock cap, seconds.
+            watch: Returns a stop reason for a line, or None to let the process run on.
+            cwd: Working directory inside the guest.
+            stdin: Bytes fed to the process; `b""` closes it.
+
+        Returns:
+            The streamed output and how the process ended.
+        """
+        started = time.monotonic()
+        handle = await self._sandbox.exec_stream(
+            command[0], command[1:], cwd=cwd, env=env, stdin=stdin
+        )
+        lines: list[str] = []
+        stderr_parts: list[str] = []
+        exit_code: int | None = None
+        stopped: str | None = None
+
+        async def drain() -> None:
+            """Collect stdout lines until the watcher stops the process or it exits."""
+            nonlocal exit_code, stopped
+            stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            stderr_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            pending = ""
+            async for event in handle:
+                if event.event_type == "stdout":
+                    pending += stdout_decoder.decode(event.data or b"")
+                    while "\n" in pending:
+                        line, pending = pending.split("\n", 1)
+                        lines.append(line)
+                        stopped = watch(line)
+                        if stopped is not None:
+                            await _kill_quietly(handle)
+                            return
+                elif event.event_type == "stderr":
+                    stderr_parts.append(stderr_decoder.decode(event.data or b""))
+                elif event.event_type == "exited":
+                    exit_code = event.code
+                elif event.event_type == "failed":
+                    # A failure event may carry no code; a real exit code 0 is preserved.
+                    exit_code = event.code if event.code is not None else 1
+            if pending.strip():
+                lines.append(pending)
+
+        timed_out = False
+        try:
+            await asyncio.wait_for(drain(), timeout=timeout)
+        except TimeoutError:
+            timed_out = True
+            await _kill_quietly(handle)
+
+        return WatchedProc(
+            command=command,
+            stdout="\n".join(lines),
+            stderr="".join(stderr_parts),
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            exit_code=exit_code,
+            stopped=stopped,
+            timed_out=timed_out,
+        )
+
+
+async def _kill_quietly(handle: ExecStream) -> None:
+    """Kill a streamed guest process; one already gone or unreachable is not an error."""
+    with contextlib.suppress(SandboxError, TimeoutError, OSError):
+        await handle.kill()

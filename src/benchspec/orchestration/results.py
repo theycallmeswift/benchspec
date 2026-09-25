@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import overload
 
-from benchspec.grading.trajectory import extract_trajectory
+from benchspec.grading.trajectory import dict_or_empty, extract_trajectory, iter_events
 from benchspec.grading.trigger import detect_skill_fired
 
 _TOKEN_FIELDS = (
@@ -52,6 +52,9 @@ class RunResult:
     result_subtype: str = ""
     # {display-path: content} for authored skill files outside the workdir mount.
     artifacts: dict[str, str] = field(default_factory=dict)
+    # Why a trigger-only run was cut short (`decided`, `budget`, `timeout`); None when
+    # it ended on its own. A stopped run's usage covers only what streamed before the stop.
+    stopped: str | None = None
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:
@@ -169,8 +172,32 @@ def mark_errored_by_nonzero_exit(result: RunResult, stderr: str) -> RunResult:
     return replace(result, result_text=text, is_error=True)
 
 
+def _streamed_usage(stdout: str) -> dict[str, int]:
+    """Sum the per-message usage the `assistant` events carried, for a stream with no result.
+
+    Each message's usage rides on every event that message streams, so it is counted
+    once per message id, from the last event seen for it.
+    """
+    usage_by_message: dict[str, dict] = {}
+    for event in iter_events(stdout):
+        if event.get("type") != "assistant":
+            continue
+        message = dict_or_empty(event.get("message"))
+        usage = dict_or_empty(message.get("usage"))
+        if usage:
+            usage_by_message[str(message.get("id") or len(usage_by_message))] = usage
+    return {
+        field: sum(int(usage.get(field, 0) or 0) for usage in usage_by_message.values())
+        for field in _TOKEN_FIELDS
+    }
+
+
 def parse_stream_run(stdout: str, eval_id: str, config: str, skill_name: str | None) -> RunResult:
-    """Parse a streamed JSON run and preserve raw trajectory evidence."""
+    """Parse a streamed JSON run and preserve raw trajectory evidence.
+
+    A stream with no closing `result` event (the harness died, or was stopped early) is
+    errored, with the usage its messages reported so far.
+    """
     lines = stdout.splitlines()
     fired = bool(skill_name) and detect_skill_fired(lines, skill_name)
     for line in reversed(lines):
@@ -188,14 +215,19 @@ def parse_stream_run(stdout: str, eval_id: str, config: str, skill_name: str | N
                 raw=stdout,
                 trajectory=extract_trajectory(stdout),
             )
+    usage = _streamed_usage(stdout)
     return RunResult(
         eval_id,
         config,
         stdout[-2000:],
         0,
-        0,
+        sum(usage.values()),
         is_error=True,
         fired=fired,
         raw=stdout,
         trajectory=extract_trajectory(stdout),
+        cache_read_tokens=usage["cache_read_input_tokens"],
+        cache_creation_tokens=usage["cache_creation_input_tokens"],
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
     )

@@ -118,6 +118,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "on one agent turn, seconds (default: 600, or the set/arm `timeout`)",
     )
     group.addoption(
+        "--benchspec-trigger-budget",
+        type=int,
+        default=None,
+        help="scalar override of the selected set's `trigger_budget` default: the tool calls "
+        "a trigger-only eval may make with verdicts still open before it is stopped "
+        "(default: 5, or the set/arm `trigger_budget`)",
+    )
+    group.addoption(
         "--benchspec-env",
         action="append",
         default=[],
@@ -376,6 +384,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                 "model": arm.model,
                 "effort": arm.effort,
                 "timeout": arm.timeout,
+                "trigger_budget": arm.trigger_budget,
                 "env": report.redact_env(arm.env),
                 "harness_args": arm.harness_args,
             }

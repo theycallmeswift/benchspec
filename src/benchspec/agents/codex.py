@@ -27,6 +27,7 @@ from benchspec.agents.base import (
     Credential,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
+from benchspec.grading.trigger import TriggerWatch
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
 from benchspec.sandbox.errors import SandboxError
@@ -344,30 +345,12 @@ class CodexAgent(BaseAgent):
             prompt,
         ]
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """Return whether one stream line shows a skill dispatch."""
-        text = line.strip()
-        if not text:
-            return False
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            return False
-        return _item_dispatches_any_skill(_event_item(event), skill_name)
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one `codex exec --json` line carries, as the trajectory has them.
 
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Return whether stream lines show the expected skill firing."""
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if _item_dispatches_skill(_event_item(event), skill_name):
-                return True
-        return False
+        Only a completed item is a call, so a dispatch counts once its item completes.
+        """
+        return _codex_trajectory(list(iter_events(line)))
 
     async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
@@ -441,6 +424,7 @@ class CodexAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        watch: TriggerWatch | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -453,12 +437,25 @@ class CodexAgent(BaseAgent):
             harness_args=harness_args,
             workdir=workdir,
         )
+        env = {**self.guest_env(), **(extra_env or {})}
         try:
             await self._write_auth_json(sandbox)
+            if watch is not None:
+                return await self.invoke_watched(
+                    sandbox,
+                    cmd,
+                    watch=watch,
+                    parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
+                    cwd=workdir,
+                    env=env,
+                    timeout=timeout,
+                    eval_id=eval_id,
+                    config=config,
+                )
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
-                env={**self.guest_env(), **(extra_env or {})},
+                env=env,
                 timeout=timeout,
                 stdin=b"",
             )
@@ -568,16 +565,6 @@ def _item_dispatches_skill(item: dict, skill_name: str) -> bool:
     """Return whether a Codex item dispatches the expected skill."""
     name = _skill_dispatch_name(item)
     return isinstance(name, str) and _skill_name_matches(name, skill_name)
-
-
-def _item_dispatches_any_skill(item: dict, skill_name: str | None) -> bool:
-    """Return whether a Codex item dispatches any skill."""
-    name = _skill_dispatch_name(item)
-    if name is None:
-        return False
-    if item.get("type") == "tool_call" and item.get("name") != "Skill":
-        return bool(skill_name) and _skill_name_matches(name, skill_name)
-    return True
 
 
 def _timestamp_ms(value: object) -> int | None:

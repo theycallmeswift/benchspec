@@ -33,6 +33,7 @@ _SCALAR_OPTIONS = {
     "harness": "--benchspec-harness",
     "effort": "--benchspec-effort",
     "timeout": "--benchspec-timeout",
+    "trigger_budget": "--benchspec-trigger-budget",
     "eval_paths": "--benchspec-eval-paths",
     "fail_under": "--benchspec-fail-under",
     "judge_harness": "--benchspec-judge-harness",

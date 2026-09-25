@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Callable
 
 import pytest
 
-from benchspec.orchestration.environments import Host, ProcResult
+from benchspec.orchestration.environments import GuestSandbox, Host, ProcResult, WatchedProc
+from benchspec.testing import FakeExecEvent, FakeSandbox
 
 
 def _run_host(
@@ -77,3 +79,119 @@ def test_require_success_reports_no_output_when_both_streams_empty() -> None:
 
     with pytest.raises(RuntimeError, match="`codex` exited 2: .no output."):
         result.require_success()
+
+
+def _stdout_events(*chunks: bytes) -> list[FakeExecEvent]:
+    """Stdout chunk events for a fake stream, in order."""
+    return [FakeExecEvent("stdout", data=chunk) for chunk in chunks]
+
+
+def _watch_for(stop_line: str, reason: str = "decided") -> Callable[[str], str | None]:
+    """A watcher that stops on one exact line."""
+
+    def watch(line: str) -> str | None:
+        """Stop on `stop_line`."""
+        return reason if line == stop_line else None
+
+    return watch
+
+
+def _exec_watched(
+    guest: FakeSandbox, watch: Callable[[str], str | None], *, timeout: float = 5
+) -> WatchedProc:
+    """Stream a fake harness command through `GuestSandbox.exec_watched`."""
+    return asyncio.run(
+        GuestSandbox(guest).exec_watched(
+            ["claude", "-p", "hi"], env={"HOME": "/root"}, timeout=timeout, watch=watch, stdin=b""
+        )
+    )
+
+
+def test_exec_watched_kills_the_process_when_the_watcher_stops_it() -> None:
+    """The tripping line is kept, the process is killed, and nothing after it is read."""
+    guest = FakeSandbox(
+        stream_events=[
+            *_stdout_events(b"first\n", b"stop\n", b"never-read\n"),
+            FakeExecEvent("exited", code=0),
+        ]
+    )
+
+    proc = _exec_watched(guest, _watch_for("stop"))
+
+    assert proc.stopped == "decided"
+    assert proc.stdout == "first\nstop"
+    assert proc.exit_code is None
+    assert proc.timed_out is False
+    assert guest.streams[0].killed is True
+
+
+def test_exec_watched_runs_to_the_end_when_the_watcher_never_stops_it() -> None:
+    """A process that exits on its own reports its exit code, stderr, and every line."""
+    guest = FakeSandbox(
+        stream_events=[
+            *_stdout_events(b"one\n", b"two\n"),
+            FakeExecEvent("stderr", data=b"warning"),
+            FakeExecEvent("exited", code=3),
+        ]
+    )
+
+    proc = _exec_watched(guest, _watch_for("absent"))
+
+    assert proc.stopped is None
+    assert proc.exit_code == 3
+    assert proc.stdout == "one\ntwo"
+    assert proc.stderr == "warning"
+    assert guest.streams[0].killed is False
+
+
+def test_exec_watched_reassembles_lines_split_across_chunks() -> None:
+    """A record split across chunks, even mid-character, reaches the watcher whole."""
+    record = '{"text":"héllo"}'.encode()
+    split_inside_the_accent = record.index("é".encode()) + 1
+    guest = FakeSandbox(
+        stream_events=_stdout_events(
+            record[:split_inside_the_accent], record[split_inside_the_accent:] + b"\n"
+        )
+    )
+
+    proc = _exec_watched(guest, _watch_for('{"text":"héllo"}'))
+
+    assert proc.stopped == "decided"
+
+
+def test_exec_watched_keeps_a_trailing_line_without_a_newline() -> None:
+    """The last line survives even when the process exits without terminating it."""
+    guest = FakeSandbox(
+        stream_events=[*_stdout_events(b"one\n", b"tail"), FakeExecEvent("exited", code=0)]
+    )
+
+    proc = _exec_watched(guest, _watch_for("absent"))
+
+    assert proc.stdout == "one\ntail"
+
+
+def test_exec_watched_kills_and_keeps_output_on_timeout() -> None:
+    """A process that outlives its timeout is killed, with the lines it streamed kept."""
+    guest = FakeSandbox(stream_events=_stdout_events(b"working\n"), stream_stalls=True)
+
+    proc = _exec_watched(guest, _watch_for("absent"), timeout=0.05)
+
+    assert proc.timed_out is True
+    assert proc.stopped is None
+    assert proc.stdout == "working"
+    assert guest.streams[0].killed is True
+
+
+def test_exec_watched_forwards_command_env_and_closed_stdin() -> None:
+    """The guest stream gets the argv split, the env, and an explicit EOF on stdin."""
+    guest = FakeSandbox(stream_events=[FakeExecEvent("exited", code=0)])
+
+    _exec_watched(guest, _watch_for("absent"))
+
+    (call,) = guest.calls
+    assert call == (
+        "exec_stream",
+        "claude",
+        ["-p", "hi"],
+        {"cwd": None, "env": {"HOME": "/root"}, "stdin": b""},
+    )

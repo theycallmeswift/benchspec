@@ -155,6 +155,60 @@ def test_parse_sets_rejects_non_positive_arm_level_timeout(bad_timeout: int) -> 
     assert "`timeout`" in str(excinfo.value)
 
 
+def test_parse_sets_trigger_budget_resolves_arm_over_set_over_default() -> None:
+    """Verify `trigger_budget` inherits like `timeout`: arm, then set, then the built-in 5."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "tuned": {
+                    "model": "sonnet",
+                    "trigger_budget": 8,
+                    "arms": [
+                        {"name": "baseline", "harness": "claude-code"},
+                        {"name": "explorer", "harness": "claude-code", "trigger_budget": 12},
+                    ],
+                },
+                "plain": {
+                    "model": "sonnet",
+                    "arms": [{"name": "baseline", "harness": "claude-code"}],
+                },
+            },
+            default="tuned",
+        )
+    )
+
+    tuned = resolve_set(rawsets, default, environ={})
+    plain = resolve_set(rawsets, default, set_name="plain", environ={})
+
+    assert [arm.trigger_budget for arm in tuned.arms] == [8, 12]
+    assert plain.arms[0].trigger_budget == 5
+
+
+@pytest.mark.parametrize(
+    "bad_budget", [0, -1, "5", True], ids=["zero", "negative", "string", "bool"]
+)
+def test_parse_sets_rejects_a_trigger_budget_that_is_not_a_positive_integer(
+    bad_budget: object,
+) -> None:
+    """Verify a bad arm-level `trigger_budget` fails naming the arm and the key."""
+    table = _sets_table(
+        {
+            "default": {
+                "model": "sonnet",
+                "arms": [
+                    {"name": "baseline", "harness": "claude-code", "trigger_budget": bad_budget}
+                ],
+            },
+        }
+    )
+
+    with pytest.raises(SchemaError) as excinfo:
+        parse_sets(table)
+
+    assert "[tool.benchspec.sets.default] arms[0]" in str(excinfo.value)
+    assert "`trigger_budget`" in str(excinfo.value)
+
+
 def test_parse_sets_rejects_boolean_timeout() -> None:
     """Verify `timeout = true` is rejected even though bool is an int subclass."""
     table = _sets_table(

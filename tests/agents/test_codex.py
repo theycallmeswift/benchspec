@@ -370,67 +370,62 @@ def test_codex_cell_env_carries_benchspec_vars() -> None:
     assert env["BENCHSPEC_BASELINE"] == "baseline"
 
 
-def test_detect_dispatch_matches_skill_invocation_item() -> None:
-    """Verify detect dispatch matches skill invocation item."""
-    line = json.dumps(
-        {
-            "type": "item.started",
-            "item": {"type": "skill_invocation", "name": "knowledge-base:archive"},
-        }
+def _stream_tool_calls(lines: list[str]) -> list[dict]:
+    """Every tool call the adapter reads off `lines`, one line at a time."""
+    agent = _agent()
+    return [call for line in lines for call in agent.stream_tool_calls(line)]
+
+
+def test_stream_tool_calls_reads_the_skill_md_read_in_a_real_stream() -> None:
+    """Verify a captured Codex 0.154.0 stream yields the SKILL.md read as a `hello` dispatch."""
+    calls = _stream_tool_calls(_lines("codex_skill_md_read.jsonl"))
+
+    assert calls[0] == {
+        "kind": "tool_call",
+        "id": "item_1",
+        "name": "Skill",
+        "arguments": {"skill": "hello"},
+    }
+    assert skills_dispatched(calls, "hello") == ["hello"]
+
+
+def test_stream_tool_calls_matches_the_whole_stream_trajectory() -> None:
+    """Verify the per-line view agrees with the parser's trajectory for the whole stream."""
+    stream = _text("codex_skill_md_read.jsonl")
+
+    calls = _stream_tool_calls(stream.splitlines())
+
+    assert calls == parse_codex_jsonl(stream, "e1", "trial", None).trajectory
+
+
+def test_stream_tool_calls_counts_an_item_once_it_completes() -> None:
+    """Verify a started item is not a call yet; its completion is."""
+    item = {"id": "i1", "type": "skill_invocation", "name": "knowledge-base:archive"}
+    started = json.dumps({"type": "item.started", "item": item})
+    completed = json.dumps({"type": "item.completed", "item": item})
+
+    assert _agent().stream_tool_calls(started) == []
+    assert skills_dispatched(_agent().stream_tool_calls(completed)) == ["knowledge-base:archive"]
+
+
+def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
+    """Verify a non-skill command is a call (it spends budget) and a message is not."""
+    command_item = {"id": "i1", "type": "command_execution", "command": "ls"}
+    command = json.dumps({"type": "item.completed", "item": command_item})
+    message = json.dumps(
+        {"type": "item.completed", "item": {"id": "i2", "type": "agent_message", "text": "hi"}}
     )
 
-    assert _agent().detect_dispatch(line, "archive") is True
-
-
-def test_detect_dispatch_early_stops_on_any_skill() -> None:
-    """Verify detect dispatch early stops on any skill."""
-    line = json.dumps(
+    assert _agent().stream_tool_calls(command) == [
         {
-            "type": "item.started",
-            "item": {"type": "skill_invocation", "name": "bootstrap"},
+            "kind": "tool_call",
+            "id": "i1",
+            "name": "command_execution",
+            "arguments": {"command": "ls"},
         }
-    )
-
-    assert _agent().detect_dispatch(line, "archive") is True
-
-
-def test_codex_detect_fired_false_for_other_skill_when_dispatch_detects_any_skill() -> None:
-    """Verify codex detect fired false for other skill when dispatch detects any skill."""
-    line = json.dumps(
-        {
-            "type": "item.started",
-            "item": {"type": "skill_invocation", "name": "bootstrap"},
-        }
-    )
-
-    assert _agent().detect_fired([line], "archive") is False
-
-
-def test_detect_dispatch_false_for_other_tool() -> None:
-    """Verify detect dispatch false for other tool."""
-    line = json.dumps(
-        {
-            "type": "item.started",
-            "item": {"type": "command_execution", "command": "ls"},
-        }
-    )
-
-    assert _agent().detect_dispatch(line, "archive") is False
-
-
-def test_codex_detect_fired_true_on_our_skill() -> None:
-    """Verify codex detect fired true on our skill."""
-    assert _agent().detect_fired(_lines("codex_route_fired.jsonl"), "archive") is True
-
-
-def test_codex_detect_fired_true_on_real_skill_md_read_stream() -> None:
-    """Verify detect fired sees the SKILL.md read in a captured Codex 0.154.0 stream."""
-    assert _agent().detect_fired(_lines("codex_skill_md_read.jsonl"), "hello") is True
-
-
-def test_codex_detect_fired_false_on_other_tool() -> None:
-    """Verify codex detect fired false on other tool."""
-    assert _agent().detect_fired(_lines("codex_route_nofire.jsonl"), "archive") is False
+    ]
+    assert _agent().stream_tool_calls(message) == []
+    assert _agent().stream_tool_calls("not json") == []
 
 
 @pytest.mark.parametrize("skills_home", ["/home/benchspec/skills", "/root/.codex/skills"])
@@ -444,72 +439,12 @@ def test_skill_dispatch_name_resolves_command_reading_skill_md(skills_home: str)
     assert _skill_dispatch_name(item) == "core-data-model"
 
 
-def test_codex_detect_fired_true_on_namespaced_skill_md_read() -> None:
-    """Verify detect fired matches a namespaced skill directory against the bare name."""
-    line = json.dumps(
-        {
-            "type": "item.completed",
-            "item": {
-                "type": "command_execution",
-                "command": (
-                    "/bin/bash -lc 'cat /home/benchspec/skills/knowledge-base:archive/SKILL.md'"
-                ),
-            },
-        }
-    )
-
-    assert _agent().detect_fired([line], "archive") is True
-
-
 @pytest.mark.parametrize("command", _COMMANDS_NOT_READING_SKILL_MD)
 def test_skill_dispatch_name_none_for_command_not_reading_skill_md(command: str) -> None:
     """Verify a sibling file, an out-of-home SKILL.md, and a plain command are not dispatches."""
     item = {"type": "command_execution", "command": command}
 
     assert _skill_dispatch_name(item) is None
-
-
-@pytest.mark.parametrize("command", _COMMANDS_NOT_READING_SKILL_MD)
-def test_codex_detect_fired_false_for_command_not_reading_skill_md(command: str) -> None:
-    """Verify detect fired stays false for commands that do not read a skill's SKILL.md."""
-    line = json.dumps(
-        {
-            "type": "item.completed",
-            "item": {"type": "command_execution", "command": command},
-        }
-    )
-
-    assert _agent().detect_fired([line], "core-data-model") is False
-
-
-def test_detect_dispatch_early_stops_on_other_skill_md_read() -> None:
-    """Verify detect dispatch early stops on a command reading a different skill's SKILL.md."""
-    line = json.dumps(
-        {
-            "type": "item.started",
-            "item": {
-                "type": "command_execution",
-                "command": "/bin/bash -lc 'cat /home/benchspec/skills/bootstrap/SKILL.md'",
-            },
-        }
-    )
-
-    assert _agent().detect_dispatch(line, "archive") is True
-
-
-def test_codex_detect_fired_false_for_other_skill_md_read() -> None:
-    """Verify detect fired stays false when the command reads a different skill's SKILL.md."""
-    line = json.dumps(
-        {
-            "type": "item.started",
-            "item": {
-                "type": "command_execution",
-                "command": "/bin/bash -lc 'cat /home/benchspec/skills/bootstrap/SKILL.md'",
-            },
-        }
-    )
-
-    assert _agent().detect_fired([line], "archive") is False
 
 
 def test_parse_codex_jsonl_fired_true_when_command_reads_skill_md() -> None:

@@ -26,6 +26,7 @@ class _SetConfig:
         harness: str | None = None,
         effort_level: str | None = None,
         timeout: int | None = None,
+        trigger_budget: int | None = None,
         env: list[str] | None = None,
         models: str | None = None,
     ) -> None:
@@ -39,6 +40,7 @@ class _SetConfig:
             "benchspec_harness": harness,
             "benchspec_effort": effort_level,
             "benchspec_timeout": timeout,
+            "benchspec_trigger_budget": trigger_budget,
             "benchspec_env": env or [],
             "benchspec_models": models,
         }
@@ -111,6 +113,28 @@ def test_resolved_run_set_timeout_overrides_set_default_not_arm(tmp_path: Path) 
 
     assert run_set.arms[0].timeout == 300
     assert run_set.arms[1].timeout == 1800
+
+
+def test_resolved_run_set_trigger_budget_overrides_set_default_not_arm(tmp_path: Path) -> None:
+    """Verify --benchspec-trigger-budget replaces the set default while an arm's own stays."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.benchspec]\n"
+        'default-set = "default"\n'
+        "[tool.benchspec.sets.default]\n"
+        'harness = "claude-code"\n'
+        'model = "sonnet"\n'
+        "trigger_budget = 8\n"
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  {name="baseline"},\n'
+        '  {name="explorer", trigger_budget=12},\n'
+        "]\n"
+    )
+
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path, trigger_budget=3))
+
+    assert run_set.arms[0].trigger_budget == 3
+    assert run_set.arms[1].trigger_budget == 12
 
 
 def test_resolved_run_set_set_model_default_not_clobbered(tmp_path: Path) -> None:

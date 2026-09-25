@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import fcntl
 import os
@@ -21,7 +20,7 @@ from benchspec.agents import (
     resolve_agent_name,
 )
 from benchspec.config.arms import parse_sets, resolve_set
-from benchspec.grading.trigger import RoutingError
+from benchspec.grading.trigger import TriggerWatch
 from benchspec.orchestration import workspace
 from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import (
@@ -299,6 +298,7 @@ class SandboxSession:
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        watch: TriggerWatch | None = None,
     ) -> None:
         """Initialize the instance."""
         self._agent = agent
@@ -317,6 +317,8 @@ class SandboxSession:
         self._harness_args = harness_args
         # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
         self._timeout = timeout
+        # A trigger-only arm's stop rule, handed to `invoke`; None runs every turn to its end.
+        self._watch = watch
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
@@ -392,6 +394,7 @@ class SandboxSession:
             extra_env=self._arm_env,
             harness_args=self._harness_args,
             timeout=self._timeout,
+            watch=self._watch,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
@@ -426,6 +429,7 @@ def arm_session(
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
+    watch: TriggerWatch | None = None,
 ) -> SandboxSession:
     """Open an async arm session around one sandboxed eval cell."""
     return SandboxSession(
@@ -446,147 +450,7 @@ def arm_session(
         project_marker=project_marker,
         harness_args=harness_args,
         timeout=timeout,
-    )
-
-
-def _trigger_command(
-    agent: CodingAgent,
-    query: str,
-    repo_root: Path,
-    model: str,
-    effort: str,
-    project_marker: str,
-) -> list[str]:
-    """Build the command that asks an agent to route a trigger query."""
-    plugin = _plugin_dir_for(repo_root, project_marker)
-    # Non-None sentinel requesting streamable routing output.
-    return agent.build_command(
-        query,
-        plugin_dir=plugin,
-        model=model,
-        effort=effort,
-        resume_session_id=None,
-        detect_skill="__route__",
-    )
-
-
-async def _route_in_sandbox_async(
-    query: str,
-    repo_root: Path,
-    model: str,
-    timeout: float,
-    *,
-    effort: str,
-    skill_name: str | None,
-    agent: CodingAgent,
-    snapshot: str,
-    backend: SandboxBackend,
-    project_marker: str = DEFAULT_PROJECT_MARKER,
-) -> list[str]:
-    """Route in sandbox async."""
-    # Snapshot resolution happens before this coroutine because snapshot builds run loops.
-    staged_project = stage_project(repo_root)
-    try:
-        sandbox = await backend.create_trigger_sandbox(
-            agent=agent,
-            snapshot=snapshot,
-            name=f"{NAME_PREFIX}trigger-{_worker_tag()}",
-            host_repo_root=staged_project,
-            extra_volumes=_agent_extra_volumes,
-        )
-    except BaseException:
-        discard_stage(staged_project)
-        raise
-    lines: list[str] = []
-    dispatched = False
-    exit_code: int | None = None
-    try:
-        cmd = _trigger_command(agent, query, repo_root, model, effort, project_marker)
-        handle = await sandbox.exec_stream(
-            cmd[0],
-            cmd[1:],
-            cwd=agent.guest_home,
-            env=agent.guest_env(),
-            # Force EOF on stdin so routing cannot block on an open pipe.
-            stdin=b"",
-        )
-
-        async def _drain() -> None:
-            """Drain streamed exec events into output lines and exit state."""
-            nonlocal dispatched, exit_code
-            # Reassemble arbitrary stdout chunks into complete JSONL lines before detection.
-            buffer = ""
-            async for event in handle:
-                if event.event_type == "stdout":
-                    buffer += (event.data or b"").decode("utf-8", errors="replace")
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        lines.append(line)
-                        if agent.detect_dispatch(line, skill_name):
-                            dispatched = True
-                            await handle.kill()
-                            return
-                elif event.event_type == "exited":
-                    exit_code = event.code
-                elif event.event_type == "failed":
-                    # Preserve real exit code 0.
-                    exit_code = event.code if event.code is not None else 1
-            # Flush a trailing partial JSONL line if the process exits without a newline.
-            if buffer.strip():
-                lines.append(buffer)
-
-        try:
-            await asyncio.wait_for(_drain(), timeout=timeout)
-            timed_out = False
-        except TimeoutError:
-            timed_out = True
-            await backend.kill_quietly(handle)
-    finally:
-        await backend.stop_quietly(sandbox)
-        discard_stage(staged_project)
-
-    if dispatched:
-        return lines
-    if timed_out:
-        if agent.streamed_activity(lines):
-            return lines
-        raise RoutingError(f"routing streamed no model activity before the {timeout}s cutoff")
-    if (exit_code not in (None, 0)) or not any(line.strip() for line in lines):
-        raise RoutingError(
-            f"routing exited {exit_code} with {sum(len(line) for line in lines)} bytes of stdout"
-        )
-    return lines
-
-
-def route_in_sandbox(
-    query: str,
-    repo_root: Path,
-    model: str,
-    timeout: float,
-    *,
-    effort: str = "low",
-    skill_name: str | None = None,
-    project_marker: str = DEFAULT_PROJECT_MARKER,
-) -> list[str]:
-    """Run trigger routing inside a sandbox and return the streamed output lines."""
-    # Resolve agent + snapshot up-front: a missing snapshot triggers build_snapshot
-    # → asyncio.run, which can't nest inside the asyncio.run below.
-    agent = make_agent()
-    backend = resolve_sandbox(DEFAULT_SANDBOX)
-    snapshot = ensure_snapshot(agent, repo_root=repo_root, backend=backend)
-    return asyncio.run(
-        _route_in_sandbox_async(
-            query,
-            repo_root,
-            model,
-            timeout,
-            effort=effort,
-            skill_name=skill_name,
-            agent=agent,
-            snapshot=snapshot,
-            project_marker=project_marker,
-            backend=backend,
-        )
+        watch=watch,
     )
 
 

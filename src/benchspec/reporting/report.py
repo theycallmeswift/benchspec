@@ -19,6 +19,7 @@ each arm reports its absolute pass rate.
 
 from __future__ import annotations
 
+import collections
 import json
 import math
 import re
@@ -70,6 +71,7 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
                 "model": arm.model,
                 "effort": arm.effort,
                 "timeout": arm.timeout,
+                "trigger_budget": arm.trigger_budget,
                 "env": redact_env(arm.env),
                 "harness_args": arm.harness_args,
                 "requested_version": agent.version(),
@@ -208,6 +210,7 @@ def _arm_stats(
     durations: list[int] = []
     judge_ms: list[int] = []
     tokens: list[int] = []
+    stopped: collections.Counter[str] = collections.Counter()
     errored_total = 0
     binder_degraded_total = 0
 
@@ -219,6 +222,7 @@ def _arm_stats(
         passed_total = 0
         total_total = 0
         errored_count = 0
+        stopped_count = 0
         pooled_out = excluded.get(_eval_key(eval_dir), set())
 
         for sample_dir in _sample_dirs(arm_dir):
@@ -249,8 +253,13 @@ def _arm_stats(
                     durations.append(timing["duration_ms"])
                 if "judge_ms" in timing:
                     judge_ms.append(timing["judge_ms"])
-                if "total_tokens" in timing:
+                # A stopped run whose harness reported no usage before the stop records
+                # null tokens, never a fake zero.
+                if timing.get("total_tokens") is not None:
                     tokens.append(timing["total_tokens"])
+                if timing.get("stopped"):
+                    stopped[timing["stopped"]] += 1
+                    stopped_count += 1
 
         errored_total += errored_count
         if not sample_rates:
@@ -265,6 +274,7 @@ def _arm_stats(
                 "eval_id": eval_id,
                 "samples": len(sample_rates),
                 "errored_samples": errored_count,
+                "stopped_samples": stopped_count,
                 "passed_total": passed_total,
                 "total_total": total_total,
                 "pass_rate_mean": statistics.mean(sample_rates),
@@ -282,6 +292,7 @@ def _arm_stats(
         "tokens_mean": statistics.mean(tokens) if tokens else None,
         "tokens_stdev": statistics.stdev(tokens) if len(tokens) > 1 else None,
         "errored_samples": errored_total,
+        "stopped_samples": dict(sorted(stopped.items())),
         "binder_degraded": binder_degraded_total,
         "n": len(pair_rates),
         "per_eval": per_eval,
@@ -375,6 +386,7 @@ def index_rows(
                         "total_tokens": timing.get("total_tokens"),
                         "input_tokens": timing.get("input_tokens"),
                         "output_tokens": timing.get("output_tokens"),
+                        "stopped": timing.get("stopped"),
                     }
                 )
     return rows
@@ -807,6 +819,8 @@ def _format_markdown(benchmark: dict) -> str:
                 f"- Errored: {stats['errored_samples']} sample(s) excluded "
                 "from rates (infra, not skill)"
             )
+        if stats["stopped_samples"]:
+            lines.append(_stopped_line(stats))
 
         lines += [""]
         lines.append("| Eval | Samples | Passed | Total | Rate | Flakiness | Note |")
@@ -819,6 +833,8 @@ def _format_markdown(benchmark: dict) -> str:
             notes = []
             if row["errored_samples"]:
                 notes.append(f"{row['errored_samples']} errored")
+            if row["stopped_samples"]:
+                notes.append(f"{row['stopped_samples']} stopped early")
             lines.append(
                 f"| {row['eval_id']} | {row['samples']} | {row['passed_total']} "
                 f"| {row['total_total']} | {row['pass_rate_mean']:.0%} | {flakiness} "
@@ -830,6 +846,19 @@ def _format_markdown(benchmark: dict) -> str:
     lines += _provenance_lines(benchmark)
 
     return "\n".join(lines)
+
+
+def _stopped_line(stats: dict) -> str:
+    """Render the per-arm note on trigger-only samples that were stopped early."""
+    stopped = stats["stopped_samples"]
+    total = sum(stopped.values())
+    reasons = ", ".join(f"{count} {reason}" for reason, count in stopped.items())
+    budget = stats.get("trigger_budget")
+    budget_note = f", budget {budget} tool calls" if budget is not None else ""
+    return (
+        f"- Stopped early: {total} trigger-only sample(s) ({reasons}{budget_note}); "
+        "their time and tokens are trigger costs, not full-task costs"
+    )
 
 
 def _inline_code(value: str) -> str:
@@ -912,6 +941,7 @@ def build_benchmark(
         stats["model"] = metadata.get("model")
         stats["effort"] = metadata.get("effort")
         stats["timeout"] = metadata.get("timeout")
+        stats["trigger_budget"] = metadata.get("trigger_budget")
         stats["env"] = metadata.get("env", {})
         stats["harness_args"] = metadata.get("harness_args", [])
 

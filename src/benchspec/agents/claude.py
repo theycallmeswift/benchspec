@@ -26,7 +26,8 @@ from benchspec.agents.base import (
     BaseAgent,
     Credential,
 )
-from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
+from benchspec.grading.trajectory import extract_trajectory
+from benchspec.grading.trigger import TriggerWatch, streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import (
     RunResult,
@@ -365,29 +366,12 @@ class ClaudeCodeAgent(BaseAgent):
         token = {**os.environ, **config_env}.get(OPENROUTER_AUTH_ENV, "")
         return {**_openrouter_routing_env(), _OPENROUTER_TOKEN_ENV: token}
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
-
-        A `Skill` tool_use, or a tool_use whose name is `skill_name` (the
-        namespaced-tool fallback). Delegates to the shared `dispatches_skill` helper
-        so the event-shape match lives in one place and `trigger.py` / `sandbox.py`
-        stay agent-agnostic.
-        """
-        return dispatches_skill(line, skill_name)
-
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Tally whether OUR skill fired across the routing stream.
-
-        Delegates to the shared Claude-shape helper so the event-shape match lives in one
-        place.
-        """
-        return detect_skill_fired(lines, skill_name)
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the tool calls one stream-json line carries, as the trajectory records them."""
+        return [event for event in extract_trajectory(line) if event["kind"] == "tool_call"]
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:
-        """True if the model began a turn (an `assistant` event), distinguishing a.
-
-        clean non-fire from a retryable launch stall. Delegates to the shared helper.
-        """
+        """True if the model began a turn (an `assistant` event), not just started up."""
         return streamed_activity(lines)
 
     async def invoke(
@@ -406,6 +390,7 @@ class ClaudeCodeAgent(BaseAgent):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        watch: TriggerWatch | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -417,13 +402,27 @@ class ClaudeCodeAgent(BaseAgent):
             detect_skill=detect_skill,
             harness_args=harness_args,
         )
+        # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over guest_env(),
+        # arm env winning.
+        env = {**self.guest_env(), **(extra_env or {})}
+        if watch is not None:
+            return await self.invoke_watched(
+                sandbox,
+                cmd,
+                watch=watch,
+                parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
+                cwd=workdir,
+                env=env,
+                timeout=timeout,
+                eval_id=eval_id,
+                config=config,
+            )
+
         try:
             res = await GuestSandbox(sandbox).exec(
                 cmd,
                 cwd=workdir,
-                # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over
-                # guest_env(), arm env winning.
-                env={**self.guest_env(), **(extra_env or {})},
+                env=env,
                 timeout=timeout,
                 stdin=b"",
             )

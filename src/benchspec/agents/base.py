@@ -20,11 +20,14 @@ import hashlib
 import re
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from benchspec.orchestration.results import RunResult
+from benchspec.grading.trigger import STOP_TIMEOUT, TriggerWatch
+from benchspec.orchestration.environments import GuestSandbox
+from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
+from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
@@ -210,6 +213,84 @@ class BaseAgent(ABC):
     def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""
 
+    @abstractmethod
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the trajectory tool calls one raw stream line carries, in order.
+
+        The per-line view of the trajectory the adapter's parser builds for the whole
+        stream, so an early stop and the grade read a dispatch identically.
+        """
+
+    @abstractmethod
+    def streamed_activity(self, lines: Iterable[str]) -> bool:
+        """Return whether streamed output shows the model began a turn."""
+
+    async def invoke_watched(
+        self,
+        sandbox: LiveSandbox,
+        command: list[str],
+        *,
+        watch: TriggerWatch,
+        parse: Callable[[str], RunResult],
+        cwd: str,
+        env: dict[str, str],
+        timeout: int,
+        eval_id: str,
+        config: str,
+    ) -> RunResult:
+        """Stream one trigger-only turn, stopping it once `watch` says the verdict is fixed.
+
+        A stop is ours, not a crash: the killed process's exit is ignored and the run is
+        graded from the stream so far, with the wall clock as its duration (the harness
+        never wrote its closing summary). A timeout after real model activity is graded
+        the same way; a timeout with none is a launch stall and stays an infra error.
+
+        Args:
+            sandbox: The live guest.
+            command: The harness argv.
+            watch: The run's stop rule.
+            parse: The adapter's stream parser, bound to this turn.
+            cwd: Working directory inside the guest.
+            env: The process environment.
+            timeout: Wall-clock cap, seconds.
+            eval_id: The eval the turn belongs to.
+            config: The arm name.
+
+        Returns:
+            The parsed run, with `stopped` set when it was cut short.
+        """
+        try:
+            proc = await GuestSandbox(sandbox).exec_watched(
+                command,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                watch=watch.line_watcher(self.stream_tool_calls),
+                # Force EOF on stdin so the harness cannot block on an open pipe.
+                stdin=b"",
+            )
+        except (SandboxError, OSError) as error:
+            message = f"<sandbox-error> {error}"[-2000:]
+            return RunResult(eval_id, config, message, 0, 0, is_error=True)
+
+        result = parse(proc.stdout)
+        if proc.stopped is not None:
+            return replace(
+                result, is_error=False, stopped=proc.stopped, duration_ms=proc.elapsed_ms
+            )
+
+        if proc.timed_out:
+            if self.streamed_activity(proc.stdout.splitlines()):
+                return replace(
+                    result, is_error=False, stopped=STOP_TIMEOUT, duration_ms=proc.elapsed_ms
+                )
+            message = f"<sandbox-error> no model activity before the {timeout}s timeout"
+            return RunResult(eval_id, config, message, 0, 0, is_error=True, raw=proc.stdout)
+
+        if proc.exit_code != 0:
+            return mark_errored_by_nonzero_exit(result, proc.stderr)
+        return result
+
     def provision_script(self) -> str:
         """The fully-resolved commands this instance runs to install the CLI in the guest.
 
@@ -388,8 +469,13 @@ class CodingAgent(Protocol):
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
+        watch: TriggerWatch | None = None,
     ) -> RunResult:
-        """Run one prompt through the agent inside the guest."""
+        """Run one prompt through the agent inside the guest.
+
+        With a `watch`, the turn is trigger-only: it streams and stops once the verdict
+        is fixed (`BaseAgent.invoke_watched`). Without one, it runs to its own end.
+        """
         ...
 
     async def judge(
@@ -419,12 +505,8 @@ class CodingAgent(Protocol):
         """Return a remediation message when this host-bound instance cannot authenticate."""
         ...
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """Return whether one stream line shows a skill dispatch."""
-        ...
-
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Return whether stream lines show the expected skill firing."""
+    def stream_tool_calls(self, line: str) -> list[dict]:
+        """Return the trajectory tool calls one raw stream line carries, in order."""
         ...
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:

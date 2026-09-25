@@ -10,6 +10,7 @@ import pytest
 
 from benchspec.agents.base import Credential
 from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.grading.trajectory import skills_dispatched
 from benchspec.orchestration.results import parse_run_json, parse_stream_run
 from benchspec.sandbox.errors import SandboxError
 from tests.agents.doubles import exec_call, shell_call
@@ -643,11 +644,21 @@ def _skill_line(skill: str) -> str:
     )
 
 
-def test_claude_detect_fired_delegates_to_trigger_helper() -> None:
-    """Verify claude detect fired delegates to trigger helper."""
+def test_claude_stream_tool_calls_reads_tool_uses_and_skips_results() -> None:
+    """Verify a tool_use line is a call and a tool_result line is not."""
     agent = ClaudeCodeAgent()
-    assert agent.detect_fired([_skill_line("knowledge-base:archive")], "archive") is True
-    assert agent.detect_fired([_skill_line("bootstrap")], "archive") is False
+    result_line = json.dumps(
+        {
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        }
+    )
+
+    calls = agent.stream_tool_calls(_skill_line("knowledge-base:archive"))
+
+    assert skills_dispatched(calls) == ["knowledge-base:archive"]
+    assert agent.stream_tool_calls(result_line) == []
+    assert agent.stream_tool_calls("not json") == []
 
 
 def test_claude_streamed_activity_true_on_assistant_event() -> None:

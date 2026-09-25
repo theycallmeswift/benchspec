@@ -107,6 +107,21 @@ def test_run_command_parses_timeout_as_seconds(monkeypatch: pytest.MonkeyPatch) 
     assert seen["timeout"] == 5
 
 
+def test_run_command_parses_trigger_budget_as_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `benchspec run --trigger-budget 3` hands run.run an integer budget."""
+    seen: dict[str, object] = {}
+
+    def capture(args: argparse.Namespace) -> int:
+        seen["trigger_budget"] = args.trigger_budget
+        return 0
+
+    monkeypatch.setattr(__main__.run, "run", capture)
+
+    __main__.main(["run", "--trigger-budget", "3"])
+
+    assert seen["trigger_budget"] == 3
+
+
 def test_run_command_dispatches_to_run_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)

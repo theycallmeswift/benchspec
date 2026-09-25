@@ -12,8 +12,7 @@ import pytest
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import project, registry, sandbox
-from benchspec.sandbox.docker import DockerBackend
-from benchspec.testing import FakeExecEvent, FakeSandbox
+from benchspec.testing import FakeSandbox
 
 
 def _git(repo_root: Path, *args: str) -> None:
@@ -254,38 +253,4 @@ def test_arm_session_removes_the_stage_when_boot_fails(
 
     mounted = create_kwargs["host_repo_root"]
     assert isinstance(mounted, Path)
-    assert not mounted.exists()
-
-
-def test_route_in_sandbox_mounts_a_staged_copy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Verify trigger routing also mounts a stage rather than the checkout."""
-    repo_root = tmp_path / "repo"
-    _git_repo_with_secrets(repo_root)
-    create_kwargs: dict[str, object] = {}
-    # The trigger VM exits cleanly without streaming a single line, which routing reports
-    # as a RoutingError — enough to drive the mount and the teardown under test.
-    trigger_vm = FakeSandbox(stream_events=[FakeExecEvent("exited", data=b"", code=0)])
-
-    async def fake_create_trigger(
-        self: DockerBackend, **kwargs: object
-    ) -> FakeSandbox:
-        """Record the mount and return the fake VM."""
-        create_kwargs.update(kwargs)
-        return trigger_vm
-
-    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
-    monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
-    monkeypatch.setattr(
-        sandbox, "make_agent", lambda *args: ClaudeCodeAgent(auth_value="t", version="v")
-    )
-    monkeypatch.setattr(DockerBackend, "create_trigger_sandbox", fake_create_trigger)
-
-    with pytest.raises(sandbox.RoutingError):
-        sandbox.route_in_sandbox("query", repo_root, "sonnet", 20, skill_name="archive")
-
-    mounted = create_kwargs["host_repo_root"]
-    assert isinstance(mounted, Path)
-    assert mounted != repo_root
     assert not mounted.exists()
