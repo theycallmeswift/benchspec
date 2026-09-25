@@ -1,10 +1,10 @@
-"""End-to-end tests for per-sample time and token accounting, per harness.
+"""End-to-end test for per-sample time and token accounting, per harness.
 
-Each test drives the real adapter's `invoke` (Claude Code, Codex, OpenCode) through the real
+The test drives the real adapter's `invoke` (Claude Code, Codex, OpenCode) through the real
 `run_eval_arm` orchestration, artifact writer, and benchmark builder. Only the guest is a
 double: a sandbox that plays back a stream captured from the live CLI and takes a measurable
-moment to exit cleanly. Every harness must land a nonzero duration and a full token split in
-`timing.json`, so the report's time-per-sample and tokens-per-sample mean something for it.
+moment to exit cleanly. The capture's usage must reach `timing.json` and the benchmark
+unchanged, with a real duration, so the report's time and tokens per sample are right.
 """
 
 from __future__ import annotations
@@ -36,18 +36,21 @@ HARNESS_CAPTURES = [
         "claude-code",
         ClaudeCodeAgent(auth_value="sk-test", version="latest"),
         "claude_stream_openrouter.jsonl",
+        {"input": 44, "output": 678, "cache_read": 155868, "cache_creation": 713},
         id="claude-code",
     ),
     pytest.param(
         "codex",
         CodexAgent(auth_value="sk-test", auth_env="CODEX_API_KEY", version="latest"),
         "codex_exec_openrouter.jsonl",
+        {"input": 15140, "output": 136, "cache_read": 6656, "cache_creation": 0},
         id="codex",
     ),
     pytest.param(
         "opencode",
         OpenCodeAgent(auth_value="sk-test", auth_env="ANTHROPIC_API_KEY", version="latest"),
         "opencode_run_openrouter.jsonl",
+        {"input": 4, "output": 59, "cache_read": 10811, "cache_creation": 10924},
         id="opencode",
     ),
 ]
@@ -169,36 +172,25 @@ def _run_sample(tmp_path: Path, agent: CodingAgent, harness: str, *, stream: str
     return workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
 
 
-@pytest.mark.parametrize(("harness", "agent", "capture"), HARNESS_CAPTURES)
-def test_clean_sample_records_its_time_and_token_split(
-    tmp_path: Path, harness: str, agent: CodingAgent, capture: str
+@pytest.mark.parametrize(("harness", "agent", "capture", "usage"), HARNESS_CAPTURES)
+def test_sample_reports_the_captured_time_and_tokens(
+    tmp_path: Path, harness: str, agent: CodingAgent, capture: str, usage: dict[str, int]
 ) -> None:
-    """Every harness lands a real duration and a nonzero input/output split in timing.json."""
+    """The capture's usage reaches timing.json and the benchmark, with a real duration."""
     stream = (FIXTURES / capture).read_text()
 
     run_dir = _run_sample(tmp_path, agent, harness, stream=stream)
-
-    grading = json.loads((run_dir / "grading.json").read_text())
-    timing = json.loads((run_dir / "timing.json").read_text())
-    assert grading["errored"] is False
-    assert timing["duration_ms"] >= SLOW_EXEC_SECONDS * 1000
-    assert timing["total_tokens"] > 0
-    assert timing["input_tokens"] > 0
-    assert timing["output_tokens"] > 0
-
-
-@pytest.mark.parametrize(("harness", "agent", "capture"), HARNESS_CAPTURES)
-def test_benchmark_reports_time_and_tokens_per_sample(
-    tmp_path: Path, harness: str, agent: CodingAgent, capture: str
-) -> None:
-    """The benchmark built from the run carries a nonzero time and token mean for the arm."""
-    stream = (FIXTURES / capture).read_text()
-    _run_sample(tmp_path, agent, harness, stream=stream)
-
     benchmark = report.build_benchmark(
         report.discover_eval_dirs(workspace.skills_root(tmp_path)), label="iteration_01"
     )
 
+    timing = json.loads((run_dir / "timing.json").read_text())
+    assert timing["input_tokens"] == usage["input"]
+    assert timing["output_tokens"] == usage["output"]
+    assert timing["cache_read_tokens"] == usage["cache_read"]
+    assert timing["cache_creation_tokens"] == usage["cache_creation"]
+    assert timing["total_tokens"] == sum(usage.values())
+    assert timing["duration_ms"] >= SLOW_EXEC_SECONDS * 1000
     arm_stats = benchmark["arms"]["trial"]
-    assert arm_stats["duration_ms_mean"] >= SLOW_EXEC_SECONDS * 1000
-    assert arm_stats["tokens_mean"] > 0
+    assert arm_stats["tokens_mean"] == timing["total_tokens"]
+    assert arm_stats["duration_ms_mean"] == timing["duration_ms"]

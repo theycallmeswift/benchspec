@@ -28,7 +28,7 @@ class ProcResult:
     exit_code: int
     stdout: str
     stderr: str
-    duration_ms: int  # wall-clock time from launch to exit, measured by the environment
+    duration_ms: int
 
     def require_success(self) -> ProcResult:
         """Return self on a zero exit; raise RuntimeError (with output tail) otherwise.

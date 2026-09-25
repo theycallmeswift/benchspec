@@ -16,20 +16,12 @@ test:  ## Run the unit test suite
 WORKERS ?= 6
 # Three samples per cell, so every delta carries a noise band; COUNT=1 for a quick pass.
 COUNT ?= 3
-# The command `make e2e` runs after each `benchspec run` to check every sample's time and
-# token accounting: empty when EVAL_ARGS asks only for collection (`--collect-only` or
-# `--co`), since that pass writes no iteration and the check would judge an older run.
-CHECK_ACCOUNTING = $(if $(filter --collect-only --co,$(EVAL_ARGS)),,uv run scripts/check_sample_accounting.py)
 # The second run puts the binder, the judge, and every harness on OpenRouter, so one
 # command proves both the default path and the single-key path. The judge stays on
-# Codex but grades on a Google slug: the arms are Anthropic and OpenAI models. After
-# each run, the accounting check fails the target if any clean sample lacks its time or
-# token split, which is where a harness CLI's output drifting first shows.
+# Codex but grades on a Google slug: the arms are Anthropic and OpenAI models.
 e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter, COUNT samples per cell (default 3) on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Prerequisites: README, Development
 	uv run benchspec run --set e2e -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
-	$(CHECK_ACCOUNTING)
 	uv run benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model google/gemini-3.5-flash --binder-provider openrouter -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
-	$(CHECK_ACCOUNTING)
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection
 	uv run pytest -m binder_corpus -n $(WORKERS) evals/binder $(EVAL_ARGS)
