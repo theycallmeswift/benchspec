@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import subprocess
 from pathlib import Path
 
 from benchspec.orchestration.room import (
@@ -63,8 +65,6 @@ def test_seed_room_substitutes_today_in_path_names_and_content(
     # SHAs are computed after substitution — they must match the seeded bytes
     article_rel = "Sources/2099-07-04/article.md"
     assert article_rel in shas
-    import hashlib
-
     expected_sha = hashlib.sha256(
         (vault / "Sources" / "2099-07-04" / "article.md").read_bytes()
     ).hexdigest()
@@ -114,8 +114,6 @@ def test_sha_snapshot_script_exits_zero_when_last_dir_missing(tmp_path: Path) ->
     # `[ -d "$d" ] &&` short-circuit to exit 1 — which the caller would read as a failed
     # snapshot and dump the staged tree as "authored". The `; done; true` terminator pins
     # exit 0 regardless of the order in which dirs are present/absent.
-    import subprocess
-
     present = tmp_path
     missing = tmp_path / "nope"
     script = sha_snapshot_script([str(present), str(missing)])  # missing dir last
@@ -133,8 +131,6 @@ def test_sha_snapshot_script_descends_through_a_symlinked_load_dir(
     # the judge. `find -L` must walk the link's target and report the symlink-prefixed path
     # so `to_display_paths` still relabels it `~/...`. Real /bin/sh — a mock can't catch
     # the find-on-symlink interaction.
-    import subprocess
-
     real_home = tmp_path / "home" / "benchspec" / "skills"
     (real_home / "authored" / "evals").mkdir(parents=True)
     (real_home / "authored" / "SKILL.md").write_text("agent wrote this\n")

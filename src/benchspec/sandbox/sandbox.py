@@ -6,6 +6,7 @@ import contextlib
 import fcntl
 import os
 import shlex
+import tomllib
 from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -448,7 +449,6 @@ def _layer_build_config(table: dict, config_path: str | None) -> dict:
     """
     if not config_path:
         return table
-    import tomllib
 
     try:
         raw = tomllib.loads(Path(config_path).read_text(encoding="utf-8"))
