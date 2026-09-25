@@ -299,10 +299,11 @@ def test_make_e2e_checks_sample_accounting_after_each_run() -> None:
         assert lines[run_index + 1] == "uv run scripts/check_sample_accounting.py"
 
 
-def test_make_e2e_collect_only_skips_the_accounting_check() -> None:
+@pytest.mark.parametrize("collect_only_flag", ["--collect-only", "--co"])
+def test_make_e2e_collect_only_skips_the_accounting_check(collect_only_flag: str) -> None:
     """Verify a collect-only pass, which writes no iteration, never checks a stale one."""
     result = subprocess.run(
-        ["make", "--no-print-directory", "-n", "e2e", "EVAL_ARGS=--collect-only -q"],
+        ["make", "--no-print-directory", "-n", "e2e", f"EVAL_ARGS={collect_only_flag} -q"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

@@ -41,6 +41,7 @@ def newest_iteration(root: Path) -> Path:
     ]
     if not iterations:
         raise SystemExit(f"no iteration_NN directory under {root}")
+
     return max(iterations, key=lambda path: int(path.name.removeprefix("iteration_")))
 
 
@@ -90,10 +91,12 @@ def main() -> int:
     if not clean_samples:
         print(f"sample accounting: {iteration.name} has no clean sample to check")
         return 1
+
     if failures:
         print(f"sample accounting incomplete in {iteration.name}:")
         print("\n".join(f"  {failure}" for failure in failures))
         return 1
+
     print(f"sample accounting ok: {iteration.name}, {len(clean_samples)} clean samples")
     return 0
 

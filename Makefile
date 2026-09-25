@@ -16,8 +16,10 @@ test:  ## Run the unit test suite
 WORKERS ?= 6
 # Three samples per cell, so every delta carries a noise band; COUNT=1 for a quick pass.
 COUNT ?= 3
-# A collect-only pass writes no iteration, so it has no accounting to check.
-CHECK_ACCOUNTING = $(if $(findstring --collect-only,$(EVAL_ARGS)),,uv run scripts/check_sample_accounting.py)
+# The command `make e2e` runs after each `benchspec run` to check every sample's time and
+# token accounting: empty when EVAL_ARGS asks only for collection (`--collect-only` or
+# `--co`), since that pass writes no iteration and the check would judge an older run.
+CHECK_ACCOUNTING = $(if $(filter --collect-only --co,$(EVAL_ARGS)),,uv run scripts/check_sample_accounting.py)
 # The second run puts the binder, the judge, and every harness on OpenRouter, so one
 # command proves both the default path and the single-key path. The judge stays on
 # Codex but grades on a Google slug: the arms are Anthropic and OpenAI models. After
