@@ -2,9 +2,7 @@
 
 `_tool_uses` yields the tool_use blocks in one Claude stream-json line;
 `detect_skill_fired` decides whether a given skill fired anywhere in a stream;
-`dispatches_skill` spots the first skill dispatch in a single line (the sandbox router
-early-stops there); `streamed_activity` tells a timed-out run that did real work from a
-launch stall (for the router, a retryable `RoutingError`).
+`streamed_activity` tells a timed-out run that did real work from a launch stall.
 `TriggerWatch` is the stop rule for a trigger-only run: every graded line is a skill
 activation check, so the run can stop the moment every verdict is fixed.
 """
@@ -83,23 +81,11 @@ class TriggerWatch:
         return watch
 
 
-class RoutingError(RuntimeError):
-    """A routing subprocess genuinely failed — a non-zero exit, or no model.
-
-    activity at all (a budget timeout that streamed only the startup line, or nothing).
-    Distinct from a clean run where the skill simply didn't fire — which includes a
-    budget timeout after the agent began a turn but didn't route in time. The difference
-    matters: a failed call counted as a non-fire is a false negative that looks exactly
-    like a real routing result.
-    """
-
-
 def _tool_uses(line: str) -> Iterator[dict]:
     """Yield each tool_use block in one stream-json line; skip empty/malformed lines.
 
     Names/inputs can be null in a partial event, so callers guard their own string ops —
-    a stray null must not crash routing (the call site retries subprocess failures, not
-    AttributeErrors, so a crash here would be fatal).
+    a stray null must not crash the parse of a run that already happened.
     """
     line = line.strip()
     if not line:
@@ -137,31 +123,6 @@ def detect_skill_fired(stream_lines: Iterable[str], skill_name: str) -> bool:
             # Fallback: tool_use whose name itself is the skill (exact or namespaced).
             elif isinstance(name, str) and (name == skill_name or name.endswith(f":{skill_name}")):
                 return True
-    return False
-
-
-def dispatches_skill(line: str, skill_name: str | None = None) -> bool:
-    """True if the line shows a skill being routed to.
-
-    Routing is decided there, so the sandbox router stops rather than wait out the skill's
-    possibly minutes-long work.
-
-    Matches the two fire shapes `detect_skill_fired` recognizes: any `Skill` tool_use
-    (the agent routed to *some* skill), and — when `skill_name` is given — a tool_use
-    whose name is our skill (the namespaced-tool fallback). Keeping the two detectors
-    aligned means a fire via the fallback path isn't missed by the early-stop and then
-    cut by the watchdog.
-    """
-    for block in _tool_uses(line):
-        name = block.get("name")
-        if name == "Skill":
-            return True
-        if (
-            skill_name
-            and isinstance(name, str)
-            and (name == skill_name or name.endswith(f":{skill_name}"))
-        ):
-            return True
     return False
 
 

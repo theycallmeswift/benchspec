@@ -478,7 +478,7 @@ class DockerSandbox:
     """A live container, exposing the guest surface every benchspec caller drives.
 
     Mirrors `MicrosandboxGuest` method for method — `shell`, `exec`, `exec_stream`,
-    `stop` — so agents and the routing driver work against either backend unchanged.
+    `stop` — so agents and sessions work against either backend unchanged.
     """
 
     def __init__(self, name: str, *, binary: Path) -> None:
@@ -719,28 +719,6 @@ class DockerBackend(SharedBackendBehavior):
         mounts.update(extra_volumes(agent, DockerVolume))
 
         return await self._run_container(name, snapshot, mounts=mounts, agent=agent)
-
-    async def create_trigger_sandbox(
-        self,
-        *,
-        agent: CodingAgent,
-        snapshot: str,
-        name: str,
-        host_repo_root: Path,
-        extra_volumes: ExtraVolumes,
-    ) -> DockerSandbox:
-        """Create the container used for trigger-routing probes."""
-        mounts = {PROJECT_MOUNT: DockerVolume.bind(host_mount_path(host_repo_root), readonly=True)}
-        mounts.update(extra_volumes(agent, DockerVolume))
-
-        sandbox = await self._run_container(name, snapshot, mounts=mounts, agent=agent)
-        try:
-            await agent.stage_project_assets(sandbox, PROJECT_MOUNT)
-        except BaseException:
-            await self.stop_quietly(sandbox)
-            raise
-
-        return sandbox
 
     def prune(self) -> None:
         """Remove every `benchspec-*` container and `benchspec-snapshot` image.

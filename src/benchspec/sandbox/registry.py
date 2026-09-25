@@ -16,7 +16,7 @@ from benchspec.sandbox.docker import DockerBackend
 from benchspec.sandbox.microsandbox import MicrosandboxBackend
 from benchspec.specs.schema import SchemaError
 
-# The default every unpinned set, the bare build, and trigger routing inherit; microsandbox
+# The default every unpinned set and the bare build inherit; microsandbox
 # is the microVM opt-in a set asks for by name.
 DEFAULT_SANDBOX = "docker"
 

@@ -99,10 +99,6 @@ class _ProbeAgent(ClaudeCodeAgent):
         if result.exit_code != 0:
             raise RuntimeError(f"probe provision failed (exit {result.exit_code})")
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Stage nothing: the probe has no project assets to copy into the guest."""
-
-
 def _docker_command(*argv: str) -> None:
     """Run one teardown `docker` command, ignoring whatever it reports.
 
