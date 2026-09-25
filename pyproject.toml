@@ -185,6 +185,32 @@ arms = [
   { name = "trial-opencode",    harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
 ]
 
+# Placebo experiment on older and smaller models: does the stub still fire like the skill?
+# Run with -k "not writes-greeting-file" (that eval has no trigger line).
+[tool.benchspec.sets.e2e-placebo-weak]
+provider = "openrouter"
+effort   = "medium"
+timeout  = 180
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "placebo-haiku3", harness = "claude-code", model = "anthropic/claude-3-haiku" },
+  { name = "trial-haiku3", harness = "claude-code", model = "anthropic/claude-3-haiku" },
+  { name = "placebo-haiku45", harness = "claude-code", model = "anthropic/claude-haiku-4.5" },
+  { name = "trial-haiku45", harness = "claude-code", model = "anthropic/claude-haiku-4.5" },
+  { name = "placebo-sonnet4", harness = "claude-code", model = "anthropic/claude-sonnet-4" },
+  { name = "trial-sonnet4", harness = "claude-code", model = "anthropic/claude-sonnet-4" },
+  { name = "placebo-gpt35", harness = "opencode", model = "openrouter/openai/gpt-3.5-turbo" },
+  { name = "trial-gpt35", harness = "opencode", model = "openrouter/openai/gpt-3.5-turbo" },
+  { name = "placebo-gpt4omini", harness = "opencode", model = "openrouter/openai/gpt-4o-mini" },
+  { name = "trial-gpt4omini", harness = "opencode", model = "openrouter/openai/gpt-4o-mini" },
+  { name = "placebo-llama8b", harness = "opencode", model = "openrouter/meta-llama/llama-3.1-8b-instruct" },
+  { name = "trial-llama8b", harness = "opencode", model = "openrouter/meta-llama/llama-3.1-8b-instruct" },
+  { name = "placebo-ministral8b", harness = "opencode", model = "openrouter/mistralai/ministral-8b-2512" },
+  { name = "trial-ministral8b", harness = "opencode", model = "openrouter/mistralai/ministral-8b-2512" },
+  { name = "placebo-gpt41nano", harness = "codex", model = "openai/gpt-4.1-nano" },
+  { name = "trial-gpt41nano", harness = "codex", model = "openai/gpt-4.1-nano" },
+]
+
 [tool.benchspec.judge]
 harness = "codex"
 model   = "gpt-5.5"

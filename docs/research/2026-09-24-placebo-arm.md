@@ -120,6 +120,43 @@ and on OpenCode (`anthropic/claude-sonnet-4.6`), 3 samples each, 72 samples, 0 e
   answered "Hello, Alice!" in chat, and the judge passed it in one arm and failed it in
   the other.
 
+## Follow-up: older and smaller models
+
+The frontier models above fired every time, so they can't show whether the stub and the
+skill part ways when firing is uncertain. Set `e2e-placebo-weak` ran placebo and trial
+arms for eight weaker models through OpenRouter: the three evals with a trigger line,
+5 samples each, 180s turn timeout, 240 samples, 0 errored. Qwen 2.5 7B was dropped
+after it hung to the timeout in a smoke run.
+
+| Harness · model | stub fired | skill fired | p (Fisher) | stub outcome | skill outcome |
+|---|---|---|---|---|---|
+| Claude Code · Claude 3 Haiku | 10/15 | 9/15 | 1.00 | 5/25 | 5/25 |
+| Claude Code · Haiku 4.5 | 15/15 | 15/15 | 1.00 | 5/25 | 24/25 |
+| Claude Code · Sonnet 4 | 15/15 | 15/15 | 1.00 | 4/25 | 23/25 |
+| OpenCode · GPT-3.5 Turbo | 12/15 | 14/15 | 0.60 | 2/25 | 6/25 |
+| OpenCode · GPT-4o mini | 15/15 | 15/15 | 1.00 | 5/25 | 6/25 |
+| OpenCode · Llama 3.1 8B | 14/15 | 11/15 | 0.33 | 4/25 | 8/25 |
+| OpenCode · Ministral 8B | 15/15 | 15/15 | 1.00 | 1/25 | 20/25 |
+| Codex · GPT-4.1 nano | 0/15 | 0/15 | 1.00 | 5/25 | 3/25 |
+| **All** | **96/120** | **94/120** | | | |
+
+"Outcome" counts the five non-trigger lines (three greeting-content checks, one
+file-exists check, one judge line) across the 5 samples.
+
+- **The stub and the skill still fire at the same rate.** No model shows a
+  significant difference, and the misses point both ways (Llama: stub ahead;
+  GPT-3.5: skill ahead). Weak models do sit at intermediate rates (Claude 3 Haiku
+  63%, GPT-3.5 87%), which is where a trigger line pooled into both arms adds the
+  most noise and the least signal.
+- **This is the "doesn't load" case, and the stub doesn't help.** GPT-4.1 nano under
+  Codex never fired either skill (0/15 and 0/15). Pooled, its trigger line fails in
+  both arms, adding nothing to the difference. The trial arm's `0/15` on its own
+  trigger line is what shows it, and `if:` already reports that per arm.
+- **Firing isn't following.** GPT-4o mini fired 15/15 and passed 6/25 outcome lines,
+  roughly its no-content stub rate. Only the outcome lines tell a skill that works
+  apart from one that is merely loaded. That's the lift a pooled trigger line would
+  water down.
+
 ## Where a placebo arm is still useful
 
 As a third arm, with `if:` kept for the trigger line. Trial vs placebo isolates what
