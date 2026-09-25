@@ -571,8 +571,8 @@ def run_eval_arm(
     )
 
     # Persist runtime provenance now — the sandbox has run, and grading below can abort.
-    # An arm whose sandbox actually ran
-    # must stay observed rather than vanish from observed_arms because a later step raised.
+    # An arm whose sandbox actually ran must stay observed rather than vanish from
+    # observed_arms because a later step raised.
     # Absent only on the no-sandbox path (a stubbed-away harness in unit tests).
     run_dir = workspace.arm_dir(repo_root, eval_case.skill, eval_id, arm_name, sample=sample)
     run_dir.mkdir(parents=True, exist_ok=True)

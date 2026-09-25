@@ -265,8 +265,8 @@ serves every harness in a mixed set.
 ## How assertions are graded
 
 This is the part worth internalizing, because it shapes how you word assertions.
-Every assertion takes one of two paths, and the split is decided per line, at
-grade time, by the **binder**: a conservative classifier (a fixed
+Every assertion takes one of two paths, and the split is decided per line, just
+before the agent runs, by the **binder**: a conservative classifier (a fixed
 `gemini-3.5-flash-lite` call, which is why its credential, `GEMINI_API_KEY` by
 default or `OPENROUTER_API_KEY` under `[tool.benchspec.binder] provider =
 "openrouter"`, is always required).
@@ -322,6 +322,59 @@ arm (no skill installed) it fails, and that asymmetry is part of the delta you a
 measuring, unless the line is [scoped](#scoping-an-assertion-to-arms) off the
 baseline. A trial arm that fails its own activation assertion is a routing
 finding: the skill was there and the agent did not use it.
+
+### Trigger evals
+
+An eval whose every graded line is an activation line is **trigger-only**, and
+it runs cheaper. Nothing declares it: when every line that applies to an arm
+binds to `skill_invoked` or `not_skill_invoked`, that arm's run is streamed and
+stopped as soon as the answer is known, instead of paying for the whole task.
+
+```markdown
+## Prompt
+
+Say hi to Dana for me.
+
+## Assertions
+
+- [ ] Skill `hello` invoked
+  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}
+```
+
+- **The stop rule.** Each skill a line names is settled by its first dispatch:
+  `invoked` passes from then on, `not invoked` fails. The run is killed once
+  every named skill has fired and graded from what streamed so far
+  (`stopped: "decided"`). `` Skill `X` invoked `` alone stops at X's dispatch;
+  adding `` Skill `Y` not invoked `` keeps the run going until Y fires too, or
+  the budget runs out.
+- **The budget.** A run that never fires is capped by tool calls, not seconds,
+  so the cap means the same on a slow model and a fast one. After
+  `trigger_budget` tool calls (default 5; set it per set, per arm, or with
+  `--trigger-budget`, see [configuration](configuration.md)) with verdicts still
+  open, the run is stopped and graded as it stands (`stopped: "budget"`):
+  `not invoked` passes and `invoked` fails. A skill dispatch counts toward the
+  budget, but a dispatch that settles the run stops it as decided.
+- **Late invocation counts as not invoked.** A skill the agent would have
+  loaded after the budget is graded as never invoked. For a routing question
+  ("does this description pull in this prompt?") that is the right answer;
+  raise the budget for a prompt that legitimately explores before it routes.
+- **The timeout still applies.** A run that works past the arm's `timeout`
+  without firing is a genuine non-fire (`stopped: "timeout"`). One that never
+  showed model activity before the timeout is a launch stall, recorded as an
+  errored sample like any other.
+- **Any other line makes the run whole.** One outcome line, or an activation
+  line the binder did not bind, and the arm runs to its end exactly as a
+  mixed eval always has. An arm whose every line is scoped off also runs to
+  its end.
+
+Write should-not-trigger prompts as ordinary tasks that sit near the skill's
+territory without asking for it: `List the files in this directory.` against a
+greeting skill, graded with `` Skill `hello` not invoked ``. A correct negative
+ends on its own or at the budget, never at the full task.
+
+Stopped samples carry `stopped` in `timing.json` and `index.jsonl`, and the
+report says how many stopped per arm and per eval, so their time and tokens
+read as trigger costs (see [results](results.md)).
 
 ## The authoring loop: `lint`, then `analyze`
 
