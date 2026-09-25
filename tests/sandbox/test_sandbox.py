@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import sys
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -1338,7 +1337,7 @@ class _FakeSandboxNotFoundError(RuntimeError):
 
 
 class _StubModule(types.ModuleType):
-    """A module stand-in whose public names are fixed up front, so `from x import y` resolves."""
+    """A module stand-in whose public names are fixed up front."""
 
     def __init__(self, name: str, **members: object) -> None:
         """Create the module `name` exposing `members` as its attributes."""
@@ -1386,21 +1385,15 @@ def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) 
             recorder.sealed = True
             return None
 
-    # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and imports
-    # `MicrosandboxError` / `SandboxNotFoundError` — stub the module surface.
-    monkeypatch.setitem(
-        sys.modules,
-        "microsandbox",
-        _StubModule("microsandbox", Sandbox=_FakeSandboxCls, Snapshot=_FakeSnapshot),
-    )
-    monkeypatch.setitem(
-        sys.modules,
+    errors = _StubModule(
         "microsandbox.errors",
-        _StubModule(
-            "microsandbox.errors",
-            MicrosandboxError=RuntimeError,
-            SandboxNotFoundError=_FakeSandboxNotFoundError,
-        ),
+        MicrosandboxError=RuntimeError,
+        SandboxNotFoundError=_FakeSandboxNotFoundError,
+    )
+    monkeypatch.setattr(
+        microsandbox_mod,
+        "microsandbox",
+        _StubModule("microsandbox", Sandbox=_FakeSandboxCls, Snapshot=_FakeSnapshot, errors=errors),
     )
     return recorder
 

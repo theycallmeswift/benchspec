@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -11,7 +10,10 @@ from pathlib import Path
 from textwrap import dedent
 from typing import NoReturn
 
+import microsandbox.errors
 import pytest
+from microsandbox import ModificationPolicy
+from microsandbox.errors import MicrosandboxError
 
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.sandbox import microsandbox as microsandbox_mod
@@ -244,9 +246,6 @@ def test_microsandbox_secrets_render_scoped_secret_specs() -> None:
 
 def test_microsandbox_guest_translates_runtime_errors() -> None:
     """A MicrosandboxError from the native sandbox surfaces as the neutral SandboxError."""
-    # The package is an optional extra: only this test needs it, so the module must not.
-    from microsandbox.errors import MicrosandboxError
-
     class ExplodingSandbox(FakeSandbox):
         """A native sandbox whose shell call fails the way a dead VM does."""
 
@@ -284,7 +283,6 @@ def _patch_restore_primitives(monkeypatch: pytest.MonkeyPatch, native: _Restored
 
     Every lifecycle step appends to `native.calls`, so one list shows their order.
     """
-    from microsandbox import ModificationPolicy
 
     class _FakeHandle:
         """A handle onto a leftover sandbox of the requested name."""
@@ -320,17 +318,18 @@ def _patch_restore_primitives(monkeypatch: pytest.MonkeyPatch, native: _Restored
 
     stub = types.ModuleType("microsandbox")
     stub.__dict__.update(
-        Sandbox=_FakeSandboxCls, Volume=_FakeVolume, ModificationPolicy=ModificationPolicy
+        Sandbox=_FakeSandboxCls,
+        Volume=_FakeVolume,
+        ModificationPolicy=ModificationPolicy,
+        errors=microsandbox.errors,
     )
-    monkeypatch.setitem(sys.modules, "microsandbox", stub)
+    monkeypatch.setattr(microsandbox_mod, "microsandbox", stub)
 
 
 def test_create_sandbox_replaces_leftover_then_attaches_scoped_secrets_with_a_restart(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A same-named leftover goes first; the secrets attach after restore via a restart."""
-    from microsandbox import ModificationPolicy
-
     native = _RestoredSandbox()
     _patch_restore_primitives(monkeypatch, native)
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
@@ -362,8 +361,6 @@ def test_create_sandbox_stops_the_guest_when_secrets_fail_to_attach(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A failed secret attachment surfaces as `SandboxError` and never leaks a running VM."""
-    from microsandbox.errors import MicrosandboxError
-
     native = _RestoredSandbox(modify_error=MicrosandboxError("interception unavailable"))
     _patch_restore_primitives(monkeypatch, native)
     microsandbox_backend = microsandbox_mod.MicrosandboxBackend()
