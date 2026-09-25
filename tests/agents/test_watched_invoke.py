@@ -233,3 +233,25 @@ def test_unwatched_invoke_keeps_the_buffered_exec() -> None:
     )
 
     assert [call[0] for call in guest.calls] == ["exec"]
+
+
+def test_watched_invoke_keeps_the_harness_own_duration_when_its_events_carry_one() -> None:
+    """A stopped OpenCode run is timed from its event timestamps, like a full run."""
+    harness = HARNESSES["opencode"]
+    step_start = json.dumps(
+        {"type": "step_start", "timestamp": 1000, "part": {"type": "step-start"}}
+    )
+    dispatch = json.dumps(
+        {
+            "type": "tool_use",
+            "timestamp": 1364,
+            "part": {"type": "tool", "tool": "skill",
+                     "state": {"status": "completed", "input": {"name": "hello"}}},
+        }
+    )
+    guest = FakeSandbox(stream_events=_stream(step_start, dispatch))
+
+    result = _invoke(harness, guest, TriggerWatch(frozenset({"hello"}), budget=5))
+
+    assert result.stopped == STOP_DECIDED
+    assert result.duration_ms == 364

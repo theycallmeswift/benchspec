@@ -235,6 +235,11 @@ def _arm_stats(
                 # Counted but excluded from rates, so a half-crashed run can't read as clean.
                 errored_count += 1
                 continue
+            # Counted before the pooled-out skip: a trigger-only line scoped off the baseline
+            # leaves no pooled rate, but the sample was still stopped early.
+            if timing and timing.get("stopped"):
+                stopped[timing["stopped"]] += 1
+                stopped_count += 1
 
             assertions = [
                 assertion
@@ -257,9 +262,6 @@ def _arm_stats(
                 # null tokens, never a fake zero.
                 if timing.get("total_tokens") is not None:
                     tokens.append(timing["total_tokens"])
-                if timing.get("stopped"):
-                    stopped[timing["stopped"]] += 1
-                    stopped_count += 1
 
         errored_total += errored_count
         if not sample_rates:

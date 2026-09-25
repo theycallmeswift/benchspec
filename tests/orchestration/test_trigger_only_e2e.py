@@ -246,3 +246,27 @@ def test_stopped_samples_are_counted_in_the_index_and_the_report(tmp_path: Path)
         "their time and tokens are trigger costs, not full-task costs"
     ) in markdown
     assert "| fires | 1 | 1 | 1 | 100% |  | 1 stopped early |" in markdown
+
+
+def test_stopped_samples_are_counted_when_every_line_is_scoped_off_the_rates(
+    tmp_path: Path,
+) -> None:
+    """Verify a stop is reported even when the line's baseline skip leaves no pooled rate."""
+    checklist = "- [ ] Skill `hello` invoked\n  - if: {BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}\n"
+    eval_case = _eval_case(tmp_path, checklist)
+    _run(
+        tmp_path, eval_case, BASELINE_ARM,
+        RunResult("alpha", "baseline", "Hi Dana!", 3000, 30000, False),
+    )
+    _run(
+        tmp_path, eval_case, TRIAL_ARM,
+        RunResult("alpha", "trial", "", 3200, 0, False, trajectory=HELLO_DISPATCH,
+                  stopped="decided"),
+    )
+
+    benchmark = report.build_benchmark(
+        report.discover_eval_dirs(workspace.skills_root(tmp_path)), label="trigger"
+    )
+
+    assert benchmark["arms"]["trial"]["stopped_samples"] == {"decided": 1}
+    assert benchmark["arms"]["baseline"]["stopped_samples"] == {}
