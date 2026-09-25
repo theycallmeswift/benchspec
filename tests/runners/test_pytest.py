@@ -426,6 +426,7 @@ def _run_cells_with_stubbed_arms(
     monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
     monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
+
     return pytester.runpytest(
         "-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path), *extra
     )
@@ -458,14 +459,15 @@ def test_a_session_without_eval_cells_leaves_the_iteration_alone(
     _make_project(pytester)
     iteration_root = pytester.path / "tmp" / "evals" / "iteration_01"
     pytester.makepyfile(
-        test_other=f"""
-from pathlib import Path
+        test_other=textwrap.dedent(f"""\
+            from pathlib import Path
 
-def test_something_else_writes_artifacts_there():
-    sample = Path(r"{iteration_root}") / "skills" / "archive" / "eval-alpha" / "ghost" / "sample-0"
-    sample.mkdir(parents=True)
-    (sample / "grading.json").write_text('{{"assertions": [], "errored": false}}')
-"""
+            def test_something_else_writes_artifacts_there():
+                sample = Path(r"{iteration_root}") / "skills" / "archive" / "eval-alpha"
+                sample = sample / "ghost" / "sample-0"
+                sample.mkdir(parents=True)
+                (sample / "grading.json").write_text('{{"assertions": [], "errored": false}}')
+        """)
     )
     monkeypatch.setattr(report, "make_agent", lambda harness=None: _StubAgent())
 
