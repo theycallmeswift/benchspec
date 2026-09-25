@@ -3,9 +3,7 @@
 import json
 
 from benchspec.grading.trigger import (
-    RoutingError,
     detect_skill_fired,
-    dispatches_skill,
     streamed_activity,
 )
 
@@ -39,13 +37,6 @@ def _named_tool_line(name: str) -> str:
             },
         }
     )
-
-
-def test_retained_primitives_are_importable() -> None:
-    """Verify the kept routing primitives remain importable and callable."""
-    assert issubclass(RoutingError, RuntimeError)
-    assert callable(dispatches_skill)
-    assert callable(streamed_activity)
 
 
 def test_retained_detect_skill_fired_detects_a_minimal_fire() -> None:
@@ -140,54 +131,6 @@ def test_detect_skill_fires_after_malformed_shapes() -> None:
 def test_detect_skill_malformed_shapes_alone_do_not_crash_or_fire() -> None:
     """Verify detect skill malformed shapes alone do not crash or fire."""
     assert detect_skill_fired(_malformed_shape_lines(), "bootstrap") is False
-
-
-def test_dispatches_skill_true_for_any_skill_tool_use() -> None:
-    """Verify dispatches skill true for any skill tool use."""
-    assert dispatches_skill(_skill_line("writing-prompts")) is True
-    assert dispatches_skill(_skill_line("knowledge-base:archive")) is True
-
-
-def test_dispatches_skill_false_for_non_skill_and_junk() -> None:
-    """Verify dispatches skill false for non skill and junk."""
-    read = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "tool_use", "name": "Read", "input": {"file_path": "x"}},
-                ]
-            },
-        }
-    )
-    text = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "text", "text": "hi"},
-                ]
-            },
-        }
-    )
-    assert dispatches_skill(read) is False
-    assert dispatches_skill(text) is False
-    assert dispatches_skill("not json") is False
-    assert dispatches_skill("") is False
-
-
-def test_dispatches_skill_matches_our_skill_namespaced_fallback() -> None:
-    """Verify dispatches skill matches our skill namespaced fallback."""
-    # Mirror detect_skill_fired's fallback: a tool_use whose name IS our skill counts
-    # as a dispatch when skill_name is supplied — so the early-stop covers it too.
-    line = _named_tool_line("writing-prompts")
-    ns_line = _named_tool_line("knowledge-base:writing-prompts")
-    assert dispatches_skill(line, "writing-prompts") is True
-    assert dispatches_skill(ns_line, "writing-prompts") is True
-    # Without a skill_name, a non-Skill tool_use is not a dispatch (can't tell it's a skill).
-    assert dispatches_skill(line) is False
-    # A different skill's tool name must not match (no substring false-positives).
-    assert dispatches_skill(_named_tool_line("archive"), "writing-prompts") is False
 
 
 def test_streamed_activity_true_when_turn_began() -> None:

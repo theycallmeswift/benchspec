@@ -428,18 +428,6 @@ class OpenCodeAgent(BaseAgent):
                 f"opencode provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        dest = f"{self.guest_home}/.config/opencode/skills"
-        await sandbox.shell(
-            f"mkdir -p {dest} && "
-            f"for src in {project_mount}/skills {project_mount}/.opencode/skills "
-            f"{project_mount}/.claude/skills; do "
-            f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
-            f"done",
-            env=self.guest_env(),
-        )
-
     async def invoke(
         self,
         sandbox: LiveSandbox,
@@ -535,43 +523,6 @@ class OpenCodeAgent(BaseAgent):
             raise RuntimeError(f"opencode judge made no successful model call: {detail}")
         return json.dumps({"result": result.result_text})
 
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """Return true when a line shows any skill route."""
-        text = line.strip()
-        if not text:
-            return False
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            return False
-        if not (isinstance(event, dict) and event.get("type") == "tool_use"):
-            return False
-        part = event.get("part")
-        if not isinstance(part, dict):
-            return False
-        return _part_dispatches_any_skill(part, skill_name)
-
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Return true when the target skill fired in the OpenCode stream.
-
-        Uses the strict `_tool_dispatches_skill` matcher directly (not `detect_dispatch`,
-        which now early-stops on any skill).
-        """
-        for line in lines:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if not (isinstance(event, dict) and event.get("type") == "tool_use"):
-                continue
-            part = event.get("part")
-            if isinstance(part, dict) and _tool_dispatches_skill(part, skill_name):
-                return True
-        return False
-
     def streamed_activity(self, lines: Iterable[str]) -> bool:
         """Return true when the OpenCode stream proves the model began a turn.
 
@@ -610,16 +561,6 @@ def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
         return True
     tool = part.get("tool")
     return isinstance(tool, str) and (tool == skill_name or tool.endswith(f":{skill_name}"))
-
-
-def _part_dispatches_any_skill(part: dict, skill_name: str | None) -> bool:
-    """Return true when a part routes to any skill."""
-    tool = part.get("tool")
-    if not isinstance(tool, str):
-        return False
-    if tool == "skill":
-        return True
-    return bool(skill_name) and (tool == skill_name or tool.endswith(f":{skill_name}"))
 
 
 def _tool_call_was_rejected(part: dict) -> bool:
