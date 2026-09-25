@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0d5ef-e8a0-77c0-8cc8-68a5329e33fe"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc pwd","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc pwd","aggregated_output":"/workspace\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Hello, Alice!"}}
+{"type":"turn.completed","usage":{"input_tokens":15140,"cached_input_tokens":6656,"cache_write_input_tokens":0,"output_tokens":136,"reasoning_output_tokens":0}}

@@ -39,7 +39,7 @@ arms = [
 | CLI | Claude Code | OpenAI Codex CLI | [sst/opencode](https://github.com/sst/opencode) |
 | Model names | Aliases: `sonnet`, `opus`, `haiku` | What `codex exec -m` accepts (e.g. `gpt-5.4`) | Provider-qualified: `anthropic/claude-sonnet-4-6` |
 | How effort is passed | `--effort <value>`, unvalidated | `-c model_reasoning_effort=<value>`, unvalidated | `--variant`: `low` → `fast`, `medium` → `default`, `high` → `thorough` (anything else → `default`) |
-| Token split (input/output) | yes | yes | no; totals only |
+| Token split (input/output) | yes | yes | yes; reasoning counts as output |
 | Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
 | `provider = "openrouter"` | `OPENROUTER_API_KEY`, injected as `ANTHROPIC_AUTH_TOKEN` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and an empty `ANTHROPIC_API_KEY`; model is a vendor slug (`anthropic/claude-sonnet-4.6`) | `OPENROUTER_API_KEY`, with benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*` overrides on every invocation; model is a vendor slug (`openai/gpt-5.5`) | `OPENROUTER_API_KEY` only; model is `openrouter/<vendor>/<model>` |
 | Version pin | `BENCHSPEC_CLAUDE_VERSION` | `BENCHSPEC_CODEX_VERSION` | `BENCHSPEC_OPENCODE_VERSION`, then `[tool.benchspec] opencode_version` |

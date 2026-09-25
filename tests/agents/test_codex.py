@@ -13,7 +13,7 @@ from benchspec.agents.base import Credential
 from benchspec.agents.codex import CodexAgent, _skill_dispatch_name, parse_codex_jsonl
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
-from tests.agents.doubles import exec_call, shell_call
+from tests.agents.doubles import SLOW_EXEC_SECONDS, SlowSandbox, exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -651,13 +651,48 @@ def test_parse_codex_jsonl_populates_run_result() -> None:
 
     assert res.result_text == "Thinking...\n\nDone."
     assert res.session_id == "thread-3"
-    assert res.duration_ms == 6000
     assert res.input_tokens == 20
     assert res.cache_read_tokens == 5
     assert res.output_tokens == 9
     assert res.total_tokens == 37
     assert res.is_error is False
     assert res.fired is True
+
+
+def test_parse_codex_jsonl_reads_usage_from_a_real_exec_stream() -> None:
+    """A real `codex exec --json` run through OpenRouter reports its usage on turn.completed."""
+    res = parse_codex_jsonl(_text("codex_exec_openrouter.jsonl"), "e1", "trial", None)
+
+    assert res.result_text == "Hello, Alice!"
+    assert res.input_tokens == 15140
+    assert res.cache_read_tokens == 6656
+    assert res.output_tokens == 136
+    assert res.total_tokens > 0
+
+
+def test_invoke_times_the_harness_process_because_the_stream_has_no_timing() -> None:
+    """`codex exec --json` events carry no timestamps, so duration is the process wall time."""
+    stream = _text("codex_exec_openrouter.jsonl")
+    sandbox = SlowSandbox(exec_outputs=[FakeExecOutput(exit_code=0, stdout_text=stream)])
+
+    res = asyncio.run(
+        _agent().invoke(
+            sandbox,
+            "p",
+            eval_id="e1",
+            config="trial",
+            workdir="/workspace",
+            plugin_dir=None,
+            model="gpt-5.4",
+            effort="medium",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+    )
+
+    assert res.is_error is False
+    assert res.duration_ms >= SLOW_EXEC_SECONDS * 1000
+    assert res.output_tokens == 136
 
 
 def test_parse_codex_jsonl_carries_raw_stdout() -> None:
@@ -948,7 +983,6 @@ def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
     assert res.raw == stream
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
-    assert res.duration_ms == parsed.duration_ms
 
 
 def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:

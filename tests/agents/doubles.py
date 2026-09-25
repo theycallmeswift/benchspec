@@ -2,15 +2,19 @@
 
 `FakeSandbox.calls` records each guest call as a loosely typed tuple; the readers here
 narrow one recorded call back into a typed record so a test can assert on the script,
-the argv, or the exec environment without re-checking shapes inline.
+the argv, or the exec environment without re-checking shapes inline. `SlowSandbox` is a
+`FakeSandbox` whose guest process takes a measurable moment to run.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from benchspec.testing import FakeSandbox
+from benchspec.testing import FakeExecOutput, FakeSandbox
+
+SLOW_EXEC_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -83,3 +87,21 @@ def exec_call(sandbox: FakeSandbox, index: int = 0) -> ExecCall:
         env=_recorded_env(kwargs),
         stdin=stdin,
     )
+
+
+class SlowSandbox(FakeSandbox):
+    """A `FakeSandbox` whose every exec takes `SLOW_EXEC_SECONDS` before returning."""
+
+    async def exec(
+        self,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        stdin: bytes | None = None,
+    ) -> FakeExecOutput:
+        """Wait, then record and answer the exec like `FakeSandbox`."""
+        await asyncio.sleep(SLOW_EXEC_SECONDS)
+        return await super().exec(cmd, args, cwd=cwd, env=env, timeout=timeout, stdin=stdin)
