@@ -368,10 +368,6 @@ class CodingAgent(Protocol):
         """Install the agent CLI and credentials inside the guest."""
         ...
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        ...
-
     async def invoke(
         self,
         sandbox: LiveSandbox,
@@ -417,14 +413,6 @@ class CodingAgent(Protocol):
 
     def host_credential_error(self, environ: Mapping[str, str] | None = None) -> str | None:
         """Return a remediation message when this host-bound instance cannot authenticate."""
-        ...
-
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """Return whether one stream line shows a skill dispatch."""
-        ...
-
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Return whether stream lines show the expected skill firing."""
         ...
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:

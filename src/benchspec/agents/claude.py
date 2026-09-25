@@ -26,7 +26,7 @@ from benchspec.agents.base import (
     BaseAgent,
     Credential,
 )
-from benchspec.grading.trigger import detect_skill_fired, dispatches_skill, streamed_activity
+from benchspec.grading.trigger import streamed_activity
 from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
 from benchspec.orchestration.results import (
     RunResult,
@@ -317,18 +317,6 @@ class ClaudeCodeAgent(BaseAgent):
                 f"claude-code provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
 
-    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
-        """Copy project-local assets needed by the guest agent."""
-        # Claude auto-loads skills from the guest HOME's .claude/skills; copy (not mount)
-        # the project's local skills there for a clean per-run tree. The agent-neutral
-        # name covers other agents that stage more than just .claude/skills.
-        await sandbox.shell(
-            f"mkdir -p {self.guest_home}/.claude && "
-            f"if [ -d {project_mount}/.claude/skills ]; then "
-            f"cp -r {project_mount}/.claude/skills {self.guest_home}/.claude/skills; fi",
-            env={"HOME": self.guest_home},
-        )
-
     async def judge(
         self,
         prompt: str,
@@ -364,24 +352,6 @@ class ClaudeCodeAgent(BaseAgent):
             return {}
         token = {**os.environ, **config_env}.get(OPENROUTER_AUTH_ENV, "")
         return {**_openrouter_routing_env(), _OPENROUTER_TOKEN_ENV: token}
-
-    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
-        """True if the stream-json line shows a skill dispatch in Claude Code's event shape.
-
-        A `Skill` tool_use, or a tool_use whose name is `skill_name` (the
-        namespaced-tool fallback). Delegates to the shared `dispatches_skill` helper
-        so the event-shape match lives in one place and `trigger.py` / `sandbox.py`
-        stay agent-agnostic.
-        """
-        return dispatches_skill(line, skill_name)
-
-    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
-        """Tally whether OUR skill fired across the routing stream.
-
-        Delegates to the shared Claude-shape helper so the event-shape match lives in one
-        place.
-        """
-        return detect_skill_fired(lines, skill_name)
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:
         """True if the model began a turn (an `assistant` event), distinguishing a.
