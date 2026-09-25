@@ -83,6 +83,43 @@ Per line:
   property of the treatment arm. The Scoped assertions table already reports it per
   arm, which is where it belongs.
 
+## Follow-up: harnesses that might not load the skill
+
+The counterargument: some harness or model might never load the skill, and a stub
+would put the trigger line on equal footing across arms. The next check ran set
+`e2e-placebo-harness`: baseline, placebo, and trial arms on Codex (`openai/gpt-5.5`)
+and on OpenCode (`anthropic/claude-sonnet-4.6`), 3 samples each, 72 samples, 0 errored.
+
+| Eval · assertion | baseline-codex | placebo-codex | trial-codex | baseline-opencode | placebo-opencode | trial-opencode |
+|---|---|---|---|---|---|---|
+| Skill `hello` invoked (3 evals) | skipped | 9/9 | 9/9 | 0/9 | 9/9 | 9/9 |
+| greets-by-name · greeting feels warm (judge) | 1/3 | 3/3 | 3/3 | 3/3 | 0/3 | 3/3 |
+| Every file-content line (6 lines) | 0/18 | 0/18 | 18/18 | 0/18 | 0/18 | 18/18 |
+
+- **Both harnesses loaded both skills every time.** Nothing here fails to load, so
+  the stub and the real skill tie on the trigger line again.
+- **A harness that didn't load skills would fail the trigger line in the stub arm and
+  the trial arm alike.** Pooled against a stub, that line would add no difference in
+  either direction, so the stub can't expose the failure. What exposes it is the trial
+  arm's own trigger rate in the Scoped assertions table (`0/n` where it should be
+  `n/n`), plus the outcome lines staying at the baseline's level.
+- **Triggering happens before the body is read.** The stub shares the skill's `name`
+  and `description`, so its trigger rate can't tell "didn't load" from "didn't trigger"
+  any better than the trial arm's trigger rate already does.
+- **The stub isn't a noop, because its description carries instructions.** The
+  description says "a warm, deterministic greeting". Codex's baseline wrote "Hi Alice."
+  and passed "warm" 1/3. With the stub it wrote "Hello, Alice. It's good to see you."
+  and passed 3/3. A placebo that keeps the real description measures part of the skill.
+- **The `if:` idiom only covers one no-skill arm.** The set's baseline was
+  `baseline-codex`, so `{BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}` held for
+  `baseline-opencode`, and its trigger line was graded 0/9. That is the structural
+  penalty #139 was meant to remove. A set with more than one no-skill arm needs a
+  property clause instead: an arm `env` key such as `HELLO_SKILL = "none"` and
+  `if: {HELLO_SKILL} != "none"`.
+- The OpenCode "warm" 3/3 → 0/3 is judge variance, not a placebo effect. Both arms
+  answered "Hello, Alice!" in chat, and the judge passed it in one arm and failed it in
+  the other.
+
 ## Where a placebo arm is still useful
 
 As a third arm, with `if:` kept for the trigger line. Trial vs placebo isolates what

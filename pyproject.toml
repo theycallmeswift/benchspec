@@ -169,6 +169,22 @@ arms = [
   { name = "trial" },     # installs the skill
 ]
 
+# The placebo experiment on the other two harnesses, to check whether either fails to load
+# skills. Only one arm can be the baseline, so baseline-opencode's trigger line is graded.
+[tool.benchspec.sets.e2e-placebo-harness]
+provider = "openrouter"
+effort   = "medium"
+baseline = "baseline-codex"
+env = { GREETING_STYLE = "formal", GREETING_LOCALE = "en-US" }
+arms = [
+  { name = "baseline-codex",    harness = "codex",    model = "openai/gpt-5.5" },
+  { name = "placebo-codex",     harness = "codex",    model = "openai/gpt-5.5" },
+  { name = "trial-codex",       harness = "codex",    model = "openai/gpt-5.5" },
+  { name = "baseline-opencode", harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
+  { name = "placebo-opencode",  harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
+  { name = "trial-opencode",    harness = "opencode", model = "openrouter/anthropic/claude-sonnet-4.6" },
+]
+
 [tool.benchspec.judge]
 harness = "codex"
 model   = "gpt-5.5"
