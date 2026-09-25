@@ -125,7 +125,7 @@ def _invoke(
 
 
 @pytest.mark.parametrize("harness_name", sorted(HARNESSES))
-def test_watched_invoke_stops_on_the_deciding_dispatch(harness_name: str) -> None:
+def test_watched_invoke_stops_on_the_settling_dispatch(harness_name: str) -> None:
     """The first `hello` dispatch kills the agent; the run is graded, not errored."""
     harness = HARNESSES[harness_name]
     guest = FakeSandbox(

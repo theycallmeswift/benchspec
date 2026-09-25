@@ -543,6 +543,7 @@ class OpenCodeAgent(BaseAgent):
         """
         return _opencode_trajectory(list(iter_events(line)))
 
+
 def _skill_dispatch_name(part: dict) -> str | None:
     """Return the skill name from a `skill` dispatcher tool_use."""
     if part.get("tool") != "skill":

@@ -179,11 +179,15 @@ def test_stream_tool_calls_counts_other_tools_and_skips_non_tool_lines() -> None
     )
     text = json.dumps({"type": "text", "part": {"type": "text", "text": "hi"}})
 
-    assert agent.stream_tool_calls(bash) == [
+    bash_calls = agent.stream_tool_calls(bash)
+    text_calls = agent.stream_tool_calls(text)
+    junk_calls = agent.stream_tool_calls("not json")
+
+    assert bash_calls == [
         {"kind": "tool_call", "id": "", "name": "bash", "arguments": {"command": "ls"}}
     ]
-    assert agent.stream_tool_calls(text) == []
-    assert agent.stream_tool_calls("not json") == []
+    assert text_calls == []
+    assert junk_calls == []
 
 
 def test_parse_opencode_jsonl_populates_run_result() -> None:

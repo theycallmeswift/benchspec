@@ -168,9 +168,13 @@ def test_an_unrelated_skill_dispatch_does_not_settle() -> None:
     assert verdicts == [False, False]
 
 
-def test_a_namespaced_or_fallback_dispatch_settles() -> None:
-    """Verify both fire shapes grading recognizes also settle the run."""
+def test_a_namespaced_dispatch_settles() -> None:
+    """Verify a `Skill` call naming `plugin:hello` settles a rule over `hello`."""
     assert _settled_after({"hello"}, [_skill_line("greetings:hello")]) == [True]
+
+
+def test_a_fallback_dispatch_settles() -> None:
+    """Verify a tool call named for the skill, the second fire shape grading reads, settles."""
     assert _settled_after({"hello"}, [_named_tool_line("greetings:hello")]) == [True]
 
 

@@ -238,12 +238,12 @@ binder-degraded and `stopped_samples` counts, per-eval rows with their own
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
   `cache_creation_tokens`; zero where the harness does not report them). A run
   that [stopped early](writing-evals.md#runs-that-stop-early) adds
-  `"stopped": true`; the key is absent for a run that ended on its own. A
-  stopped run's `duration_ms` is the process wall time up to the stop, CLI
-  startup included, and its tokens are only what the harness reported before
-  it: Claude Code's per-message usage, OpenCode's finished steps, and nothing
-  from Codex, which reports usage only when a turn completes. When nothing was
-  reported the token fields are `null`, never `0`.
+  `"stopped": true` (absent for a run that ended on its own). A stopped run's
+  `duration_ms` is the process wall time up to the stop, CLI startup included,
+  and its tokens are only what the harness reported before it: Claude Code's
+  per-message usage, OpenCode's finished steps, and nothing from Codex, which
+  reports usage only when a turn completes. When nothing was reported the
+  token fields are `null`, never `0`.
 - `transcript.json`: a per-turn summary: prompt, result text, `is_error`, the
   CLI's `result_subtype`, `tool_call_count`, the final `workdir_tree`, and the
   skills dispatched (when any).

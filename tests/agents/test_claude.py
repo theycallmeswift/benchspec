@@ -644,11 +644,13 @@ def test_claude_stream_tool_calls_reads_tool_uses_and_skips_results() -> None:
         }
     )
 
-    calls = agent.stream_tool_calls(_skill_line("knowledge-base:archive"))
+    skill_calls = agent.stream_tool_calls(_skill_line("knowledge-base:archive"))
+    result_calls = agent.stream_tool_calls(result_line)
+    junk_calls = agent.stream_tool_calls("not json")
 
-    assert skills_dispatched(calls) == ["knowledge-base:archive"]
-    assert agent.stream_tool_calls(result_line) == []
-    assert agent.stream_tool_calls("not json") == []
+    assert skills_dispatched(skill_calls) == ["knowledge-base:archive"]
+    assert result_calls == []
+    assert junk_calls == []
 
 
 def test_wrong_shape_json_object_does_not_raise_uncaught() -> None:

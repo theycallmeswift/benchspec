@@ -499,4 +499,3 @@ class CodingAgent(Protocol):
     def stream_tool_calls(self, line: str) -> list[dict]:
         """Return the trajectory tool calls one raw stream line carries, in order."""
         ...
-

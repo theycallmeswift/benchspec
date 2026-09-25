@@ -404,8 +404,11 @@ def test_stream_tool_calls_counts_an_item_once_it_completes() -> None:
     started = json.dumps({"type": "item.started", "item": item})
     completed = json.dumps({"type": "item.completed", "item": item})
 
-    assert _agent().stream_tool_calls(started) == []
-    assert skills_dispatched(_agent().stream_tool_calls(completed)) == ["knowledge-base:archive"]
+    started_calls = _agent().stream_tool_calls(started)
+    completed_calls = _agent().stream_tool_calls(completed)
+
+    assert started_calls == []
+    assert skills_dispatched(completed_calls) == ["knowledge-base:archive"]
 
 
 def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
@@ -416,7 +419,11 @@ def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
         {"type": "item.completed", "item": {"id": "i2", "type": "agent_message", "text": "hi"}}
     )
 
-    assert _agent().stream_tool_calls(command) == [
+    command_calls = _agent().stream_tool_calls(command)
+    message_calls = _agent().stream_tool_calls(message)
+    junk_calls = _agent().stream_tool_calls("not json")
+
+    assert command_calls == [
         {
             "kind": "tool_call",
             "id": "i1",
@@ -424,8 +431,8 @@ def test_stream_tool_calls_counts_a_plain_command_and_skips_messages() -> None:
             "arguments": {"command": "ls"},
         }
     ]
-    assert _agent().stream_tool_calls(message) == []
-    assert _agent().stream_tool_calls("not json") == []
+    assert message_calls == []
+    assert junk_calls == []
 
 
 @pytest.mark.parametrize("skills_home", ["/home/benchspec/skills", "/root/.codex/skills"])
