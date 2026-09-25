@@ -120,6 +120,8 @@ def test_hello_evals_are_discovered_with_expected_identities() -> None:
         ("hello-file", "writes-greeting-file"),
         ("hello-outside", "allows-filesystem-traversal"),
         ("hello-transcript", "greets-from-transcript"),
+        ("hello-trigger", "fires-on-a-greeting"),
+        ("hello-trigger", "stays-quiet-on-a-listing"),
     }
     for case in cases:
         assert case.prompt
@@ -180,7 +182,7 @@ def test_hello_transcript_history_reaches_the_rendered_prompt_verbatim() -> None
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
 )
 def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
     """Verify setup.sh parses as valid bash without executing any of it."""
@@ -194,7 +196,7 @@ def test_setup_sh_has_valid_bash_syntax(group: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
 )
 def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: str) -> None:
     """Verify the baseline branch exits without running an install command."""
@@ -226,7 +228,7 @@ def test_setup_sh_baseline_arm_runs_no_install_commands(tmp_path: Path, group: s
 
 
 @pytest.mark.parametrize(
-    "group", ["hello", "hello-file", "hello-outside", "hello-transcript"]
+    "group", ["hello", "hello-file", "hello-outside", "hello-transcript", "hello-trigger"]
 )
 def test_setup_sh_trial_installs_the_real_skill_without_host_writes(
     tmp_path: Path, group: str
@@ -399,28 +401,31 @@ def test_make_e2e_runs_the_openrouter_set_with_judge_and_binder_on_openrouter() 
 
 
 TRIGGER_LINE = "Skill `hello` invoked"
+NEGATIVE_TRIGGER_LINE = "Skill `hello` not invoked"
 TRIGGER_CLAUSE = {"key": "if", "expr": "{BENCHSPEC_ARM} != {BENCHSPEC_BASELINE}"}
 EN_GB_LINE = "./Greetings/Bob.md contains the text 'an absolute pleasure'"
 EN_GB_CLAUSE = {"key": "if", "expr": '{GREETING_LOCALE} == "en-GB"'}
 
 
 def test_hello_trigger_lines_carry_the_baseline_clause() -> None:
-    """Verify every in-repo `Skill hello invoked` line is scoped off the baseline arm."""
+    """Verify every in-repo `Skill hello` trigger line is scoped off the baseline arm."""
     cases = discover_eval_cases(REPO_ROOT)
 
     trigger_clauses = {
         (case.eval_id, index): clause
         for case in cases
         for index, (assertion, clause) in enumerate(zip(case.assertions, case.clauses, strict=True))
-        if assertion == TRIGGER_LINE
+        if assertion in (TRIGGER_LINE, NEGATIVE_TRIGGER_LINE)
     }
 
     assert {eval_id for eval_id, _ in trigger_clauses} == {
         "greets-by-name",
         "allows-filesystem-traversal",
         "greets-from-transcript",
+        "fires-on-a-greeting",
+        "stays-quiet-on-a-listing",
     }
-    assert len(trigger_clauses) == 3
+    assert len(trigger_clauses) == 5
     assert trigger_clauses == dict.fromkeys(trigger_clauses, TRIGGER_CLAUSE)
 
 
@@ -466,7 +471,7 @@ def test_hello_clauses_resolve_for_every_arm(set_name: str) -> None:
         for arm in resolved.arms:
             expected = []
             for assertion in case.assertions:
-                if assertion == TRIGGER_LINE:
+                if assertion in (TRIGGER_LINE, NEGATIVE_TRIGGER_LINE):
                     expected.append(arm.name != "baseline")
                 elif assertion == EN_GB_LINE:
                     expected.append(arm.name in en_gb_arms)
