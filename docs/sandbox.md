@@ -42,7 +42,7 @@ made.
 | Backend | Host | Preflight |
 |---|---|---|
 | Docker | Any host with a running daemon; no platform gate | `docker` on `PATH` (or at `BENCHSPEC_DOCKER_PATH`, the way `MSB_PATH` overrides microsandbox's `msb`), and `docker info` succeeding |
-| microsandbox | An Apple Silicon Mac, or Linux with `/dev/kvm`, plus the extra (`pip install "benchspec[microsandbox]"`) | That platform, plus the runtime installed |
+| microsandbox | An Apple Silicon Mac, or Linux with `/dev/kvm`, plus the extra (`pip install "benchspec[microsandbox]"`) | That platform, plus the runtime installed. benchspec drives the `msb` bundled in the wheel (or `MSB_PATH`), never a standalone install under `~/.microsandbox/bin`, which may lag the SDK |
 
 Docker failures produce one of:
 
@@ -68,7 +68,7 @@ benchspec builds one **snapshot** per configuration and boots every cell from it
 Snapshots cache as `benchspec-<backend>-<harness>-<harness-version>-<fingerprint>`
 — for Docker an image tag
 (`benchspec-snapshot:benchspec-docker-<harness>-<version>-<fingerprint>`, listed
-by `docker images benchspec-snapshot`), for microsandbox an entry under
+by `docker images benchspec-snapshot`), for microsandbox a snapshot group under
 `~/.microsandbox/snapshots/`. The 8-character fingerprint hashes four
 ingredients:
 
@@ -76,6 +76,10 @@ ingredients:
 - the declared base-image reference,
 - the harness's install script,
 - the environment script's *bytes*.
+
+microsandbox adds a fifth: its installed major.minor version, because a minor
+release can change the snapshot format (0.7 cannot open 0.6 snapshots by name).
+Upgrading across a minor version rebuilds the cache once; patch upgrades keep it.
 
 Change any one and the name changes, forcing a rebuild; old snapshots coexist, so
 a multi-harness set reuses each harness's cache.

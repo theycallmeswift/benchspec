@@ -29,7 +29,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "microsandbox", marker = "extra == 'microsandbox'", specifier = ">=0.7.2" },
+    { name = "microsandbox", marker = "extra == 'microsandbox'", specifier = ">=0.7.3" },
     { name = "pytest", specifier = ">=8" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6" },
@@ -39,7 +39,7 @@ provides-extras = ["claude", "codex", "microsandbox", "opencode", "testing"]
 [package.metadata.requires-dev]
 dev = [
     { name = "houserules", specifier = ">=0.1.1,<1.0.0" },
-    { name = "microsandbox", specifier = ">=0.7.2" },
+    { name = "microsandbox", specifier = ">=0.7.3" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-repeat", specifier = ">=0.9,<1" },
     { name = "pytest-xdist", specifier = ">=3" },
