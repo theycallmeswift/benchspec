@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import time
 
 import pytest
 
@@ -48,6 +49,21 @@ def test_host_exec_treats_empty_stdin_bytes_as_closed(monkeypatch: pytest.Monkey
     assert captured["stdin"] == subprocess.DEVNULL
 
 
+def test_host_exec_measures_the_process_wall_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host times the process itself, so a harness stream without timing still has one."""
+
+    def slow_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        """Take a measurable moment, then return a canned CompletedProcess."""
+        time.sleep(0.05)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", slow_run)
+
+    result = asyncio.run(Host().exec(["codex", "exec"], env={}, timeout=5))
+
+    assert result.duration_ms >= 50
+
+
 def test_host_exec_rejects_stdin_it_cannot_feed() -> None:
     """The host never feeds a process input, so non-empty bytes are a programming error."""
     with pytest.raises(ValueError, match="cannot feed stdin"):
@@ -61,6 +77,7 @@ def test_require_success_surfaces_stdout_behind_noisy_stderr() -> None:
         exit_code=1,
         stdout='{"type":"turn.failed","error":{"message":"usage limit reached"}}',
         stderr="Reading additional input from stdin...",
+        duration_ms=1200,
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -73,7 +90,7 @@ def test_require_success_surfaces_stdout_behind_noisy_stderr() -> None:
 
 def test_require_success_reports_no_output_when_both_streams_empty() -> None:
     """A silent nonzero exit still raises, naming the command and the empty streams."""
-    result = ProcResult(command=["codex"], exit_code=2, stdout="", stderr="")
+    result = ProcResult(command=["codex"], exit_code=2, stdout="", stderr="", duration_ms=5)
 
     with pytest.raises(RuntimeError, match="`codex` exited 2: .no output."):
         result.require_success()
