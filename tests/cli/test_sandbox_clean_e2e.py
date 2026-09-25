@@ -28,7 +28,7 @@ def _write_msb_shim(shim_dir: Path) -> Path:
         printf "%s\\n" "$*" >> "$BENCHSPEC_COMMAND_LOG"
         case "$1 $2" in
           "rm -f") rm -rf "$HOME/.microsandbox/sandboxes/$3" ;;
-          "snapshot rm") rm -rf "$HOME/.microsandbox/snapshots/$4" ;;
+          "snapshot rm") rm -rf "$4" ;;
         esac
     """))
     shim.chmod(0o755)
@@ -89,7 +89,9 @@ def test_sandbox_clean_removes_leaked_sandboxes_snapshots_and_locks(tmp_path: Pa
         (sandboxes / leaked_sandbox).mkdir(parents=True)
     (sandboxes / "unrelated-sandbox").mkdir()
     (sandboxes / "eval-from-another-tool").mkdir()
-    (snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4").mkdir(parents=True)
+    group = snapshots / "benchspec-microsandbox-claude-code-latest-c30e39d4"
+    (group / "snap_abc").mkdir(parents=True)
+    (group / "group.json").write_text('{"head": "snap_abc"}', encoding="utf-8")
     (snapshots / "unrelated-snapshot").mkdir()
     repo_root = tmp_path / "repo"
     lock_file = repo_root / "tmp" / ".benchspec-snapshot-claude-code.lock"
@@ -110,7 +112,7 @@ def test_sandbox_clean_removes_leaked_sandboxes_snapshots_and_locks(tmp_path: Pa
         "rm -f benchspec-build-abc",
         "rm -f benchspec-eval-hello-trial-gw0",
         "rm -f benchspec-trigger-hello-gw1",
-        "snapshot rm --force benchspec-microsandbox-claude-code-latest-c30e39d4",
+        f"snapshot rm --force {group / 'snap_abc'}",
         "stop benchspec-build-abc",
         "stop benchspec-eval-hello-trial-gw0",
         "stop benchspec-trigger-hello-gw1",

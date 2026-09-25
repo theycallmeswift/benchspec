@@ -68,7 +68,7 @@ benchspec builds one **snapshot** per configuration and boots every cell from it
 Snapshots cache as `benchspec-<backend>-<harness>-<harness-version>-<fingerprint>`
 — for Docker an image tag
 (`benchspec-snapshot:benchspec-docker-<harness>-<version>-<fingerprint>`, listed
-by `docker images benchspec-snapshot`), for microsandbox an entry under
+by `docker images benchspec-snapshot`), for microsandbox a snapshot group under
 `~/.microsandbox/snapshots/`. The 8-character fingerprint hashes four
 ingredients:
 

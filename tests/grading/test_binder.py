@@ -24,6 +24,7 @@ import pytest
 from benchspec.grading import binder
 from benchspec.grading.binder import _BINDING_PROMPT, BinderAuthError, BinderReply, bind
 from benchspec.grading.binder_config import BinderConfig
+from benchspec.grading.checkers import run_assertion
 
 
 def _reply(text: str) -> Callable[..., BinderReply]:
@@ -175,8 +176,6 @@ def test_parses_fenced_json() -> None:
 def test_returned_spec_is_dispatchable(tmp_path: Path) -> None:
     """Verify returned spec is dispatchable."""
     # The bound spec must flow straight into the existing checker dispatch.
-    from benchspec.grading.checkers import run_assertion
-
     (tmp_path / "out.md").write_text("hi")
     spec = bind(
         "the file out.md exists",

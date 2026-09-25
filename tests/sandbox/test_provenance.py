@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from benchspec.sandbox.provenance import (
@@ -264,8 +266,6 @@ class TestDiskRoundTrip:
 
     def test_disk_dict_is_json_serializable(self) -> None:
         """Verify to_disk_dict output round-trips through actual JSON."""
-        import json
-
         record = _runtime()
 
         restored = RuntimeProvenance.from_disk_dict(json.loads(json.dumps(record.to_disk_dict())))

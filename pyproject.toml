@@ -33,7 +33,7 @@ dependencies = [
 claude = []
 codex = []
 opencode = []
-microsandbox = ["microsandbox>=0.6.16,<0.7"]
+microsandbox = ["microsandbox>=0.7.3,<0.8"]
 testing = []
 
 [dependency-groups]
@@ -43,7 +43,7 @@ dev = [
     "pytest-xdist>=3",
     "pytest-repeat>=0.9,<1",
     "ruff>=0.16",
-    "microsandbox>=0.6.16,<0.7",
+    "microsandbox>=0.7.3,<0.8",
     "ty>=0.0.79,<0.1",
 ]
 
@@ -102,6 +102,7 @@ select = [
     "PT",     # flake8-pytest-style: pytest-specific readability rules.
     "B",      # flake8-bugbear: likely bugs and surprising Python behavior.
     "A",      # flake8-builtins: avoid shadowing Python builtins.
+    "PLC0415", # Pylint: imports belong at the top of the file, even optional ones.
     "RUF100", # Ruff: remove stale noqa suppressions while houserules bans suppressions.
 ]
 

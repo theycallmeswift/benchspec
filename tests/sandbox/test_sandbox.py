@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import sys
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -1333,8 +1332,12 @@ class _BuildRecorder:
     sealed: bool = False
 
 
+class _FakeSandboxNotFoundError(RuntimeError):
+    """Stand in for microsandbox's `SandboxNotFoundError`."""
+
+
 class _StubModule(types.ModuleType):
-    """A module stand-in whose public names are fixed up front, so `from x import y` resolves."""
+    """A module stand-in whose public names are fixed up front."""
 
     def __init__(self, name: str, **members: object) -> None:
         """Create the module `name` exposing `members` as its attributes."""
@@ -1367,30 +1370,30 @@ def _patch_build_primitives(monkeypatch: pytest.MonkeyPatch, fake: FakeSandbox) 
             return fake
 
         @staticmethod
-        async def remove(name: str) -> None:
-            """Remove."""
-            return None
+        async def get(name: str) -> NoReturn:
+            """Report the build VM as already gone, the way a stopped-and-removed one is."""
+            raise _FakeSandboxNotFoundError(name)
 
     class _FakeSnapshot:
         """Provide a fake snapshot for tests."""
 
         @staticmethod
-        async def create(name: str, *, from_sandbox: str, record_integrity: bool) -> None:
+        async def create(
+            name: str, *, from_sandbox: str, group: str, record_integrity: bool
+        ) -> None:
             """Mark the snapshot sealed."""
             recorder.sealed = True
             return None
 
-    # _build_snapshot_async does `from microsandbox import Sandbox, Snapshot` and
-    # `from microsandbox.errors import MicrosandboxError` — stub the module surface.
-    monkeypatch.setitem(
-        sys.modules,
-        "microsandbox",
-        _StubModule("microsandbox", Sandbox=_FakeSandboxCls, Snapshot=_FakeSnapshot),
-    )
-    monkeypatch.setitem(
-        sys.modules,
+    errors = _StubModule(
         "microsandbox.errors",
-        _StubModule("microsandbox.errors", MicrosandboxError=RuntimeError),
+        MicrosandboxError=RuntimeError,
+        SandboxNotFoundError=_FakeSandboxNotFoundError,
+    )
+    monkeypatch.setattr(
+        microsandbox_mod,
+        "microsandbox",
+        _StubModule("microsandbox", Sandbox=_FakeSandboxCls, Snapshot=_FakeSnapshot, errors=errors),
     )
     return recorder
 
