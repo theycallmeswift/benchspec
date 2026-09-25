@@ -281,6 +281,11 @@ class _StagingAgent(_ProbeAgent):
         super().__init__()
         self.staged_into: list[str] = []
 
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
+        """Record the mount the assets were staged from."""
+        self.staged_into.append(project_mount)
+
+
 def test_run_argv_renders_resource_flags_mounts_env_then_the_idle_command() -> None:
     """Verify `run -d` carries the resource flags, every mount, every env, then `sleep infinity`."""
     argv = docker.run_argv(
@@ -474,6 +479,36 @@ def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credent
         "run -d --name benchspec-eval-hello-trial-main --cpus 2 --memory 2048m "
         f"-v {room.resolve()}:/workspace -v {stage.resolve()}:/project:ro "
         "-e ANTHROPIC_API_KEY=test-token benchspec-snapshot:snap sleep infinity",
+    ]
+
+
+def test_create_trigger_sandbox_mounts_only_the_project_and_stages_assets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify a trigger container binds only /project read-only and stages the agent's assets."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    agent = _StagingAgent()
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    created = asyncio.run(
+        backend.create_trigger_sandbox(
+            agent=agent,
+            snapshot="snap",
+            name="benchspec-trigger-main",
+            host_repo_root=stage,
+            extra_volumes=_agent_extra_volumes,
+        )
+    )
+
+    assert created.name == "benchspec-trigger-main"
+    assert agent.staged_into == ["/project"]
+    assert command_log.read_text(encoding="utf-8").splitlines() == [
+        "rm -f benchspec-trigger-main",
+        "run -d --name benchspec-trigger-main --cpus 2 --memory 2048m "
+        f"-v {stage.resolve()}:/project:ro benchspec-snapshot:snap sleep infinity",
     ]
 
 

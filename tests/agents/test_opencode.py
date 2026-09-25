@@ -124,6 +124,124 @@ def test_build_command_ignores_plugin_and_resume() -> None:
     assert "sess-X" not in cmd
 
 
+def test_detect_dispatch_matches_skill_dispatcher_with_input_name() -> None:
+    """Verify detect dispatch matches skill dispatcher with input name."""
+    # Primary OpenCode shape: `skill` tool dispatcher with `state.input.name`. This
+    # is what fires when the agent uses OpenCode's native `skill` tool to load a
+    # discovered skill from ~/.config/opencode/skills/<name>/SKILL.md.
+    agent = _opencode_agent()
+    line = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"input": {"name": "archive"}},
+            },
+        }
+    )
+    assert agent.detect_dispatch(line, "archive") is True
+    ns_line = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"input": {"name": "knowledge-base:archive"}},
+            },
+        }
+    )
+    assert agent.detect_dispatch(ns_line, "archive") is True
+
+
+def test_detect_dispatch_matches_tool_use_by_part_tool_fallback() -> None:
+    """Verify detect dispatch matches tool use by part tool fallback."""
+    # Fallback shape: tool name IS the skill name (some agents register skills
+    # directly as tools instead of going through a dispatcher).
+    agent = _opencode_agent()
+    line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
+    assert agent.detect_dispatch(line, "archive") is True
+    ns_line = json.dumps(
+        {"type": "tool_use", "part": {"type": "tool", "tool": "knowledge-base:archive"}}
+    )
+    assert agent.detect_dispatch(ns_line, "archive") is True
+
+
+def test_detect_dispatch_early_stops_on_different_skill_dispatcher() -> None:
+    """Verify detect dispatch early stops on different skill dispatcher."""
+    # A DIFFERENT skill's dispatcher is now an intended any-skill early-stop: routing
+    # is decided, so don't wait out the turn. The our-skill distinction no longer
+    # lives here — it lives in detect_fired, which stays strict (see the dedicated
+    # test_detect_dispatch_early_stops_on_any_skill test).
+    agent = _opencode_agent()
+    line = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"input": {"name": "bootstrap"}},
+            },
+        }
+    )
+    assert agent.detect_dispatch(line, "archive") is True
+
+
+def test_detect_dispatch_false_for_other_tool_names() -> None:
+    """Verify detect dispatch false for other tool names."""
+    read = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "bash"}})
+
+    assert _opencode_agent().detect_dispatch(read, "archive") is False
+
+
+def test_detect_dispatch_false_for_non_json_input() -> None:
+    """Verify detect dispatch false for non json input."""
+    agent = _opencode_agent()
+
+    assert agent.detect_dispatch("not json", "archive") is False
+    assert agent.detect_dispatch("", "archive") is False
+
+
+def test_detect_dispatch_false_when_skill_name_none() -> None:
+    """Verify detect dispatch false when skill name none."""
+    # No skill_name → nothing to match against; explicitly False (no generic Skill
+    # dispatcher in OpenCode today).
+    skill_line = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "archive"}})
+
+    assert _opencode_agent().detect_dispatch(skill_line, None) is False
+
+
+def test_detect_dispatch_early_stops_on_any_skill() -> None:
+    """Verify detect dispatch early stops on any skill."""
+    agent = OpenCodeAgent()
+    other = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"input": {"name": "bootstrap"}},
+            },
+        }
+    )
+    # early-stop fires on ANY skill dispatch...
+    assert agent.detect_dispatch(other, "archive") is True
+    # ...but the tally counts only OUR skill, so a different skill is not a fire.
+    assert agent.detect_fired([other], "archive") is False
+
+
+def test_opencode_detect_fired_true_on_our_skill() -> None:
+    """Verify opencode detect fired true on our skill."""
+    agent = OpenCodeAgent()
+    assert agent.detect_fired(_fixture_lines("opencode_route_fired.jsonl"), "archive") is True
+
+
+def test_opencode_detect_fired_false_on_different_tool() -> None:
+    """Verify opencode detect fired false on different tool."""
+    agent = OpenCodeAgent()
+    assert agent.detect_fired(_fixture_lines("opencode_route_nofire.jsonl"), "archive") is False
+
+
 def _skill_tool_line(name: str, status: str = "completed") -> str:
     """An OpenCode `skill` dispatcher tool_use line for `name` in the given state."""
     return json.dumps(
@@ -712,6 +830,25 @@ def test_provision_raises_on_failure() -> None:
     sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=1, stderr_text="boom"))
     with pytest.raises(RuntimeError, match="provision"):
         asyncio.run(_opencode_agent().provision(sandbox))
+
+
+def test_stage_project_assets_copies_skills_into_opencode_discovery_dir() -> None:
+    """Verify stage project assets copies skills into opencode discovery dir."""
+    sandbox = FakeSandbox(shell_output=FakeExecOutput(exit_code=0))
+
+    asyncio.run(_opencode_agent().stage_project_assets(sandbox, "/project"))
+
+    script = shell_call(sandbox).script
+    # Stage from all three plugin-shaped layouts (merged into one dest dir).
+    # `skills/` (no leading dot) is the canonical Claude Code plugin layout; leaving it
+    # out makes the eval skill invisible to OpenCode even when .claude/skills/ is staged.
+    assert "/project/skills" in script
+    assert "/project/.opencode/skills" in script
+    assert "/project/.claude/skills" in script
+    # Staging target MUST be OpenCode's personal-discovery path. $HOME/.opencode/skills
+    # is NOT discovered (regression guard: skills staged there silently never fire).
+    assert f"{OpenCodeAgent.guest_home}/.config/opencode/skills" in script
+    assert f"{OpenCodeAgent.guest_home}/.opencode/skills" not in script
 
 
 def test_provision_script_verifies_warmed_db() -> None:

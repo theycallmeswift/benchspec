@@ -352,6 +352,31 @@ class CodexAgent(BaseAgent):
         """
         return _codex_trajectory(list(iter_events(line)))
 
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
+        """Return whether one stream line shows a skill dispatch."""
+        text = line.strip()
+        if not text:
+            return False
+        try:
+            event = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return _item_dispatches_any_skill(_event_item(event), skill_name)
+
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
+        """Return whether stream lines show the expected skill firing."""
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if _item_dispatches_skill(_event_item(event), skill_name):
+                return True
+        return False
+
     async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
@@ -394,6 +419,19 @@ class CodexAgent(BaseAgent):
             raise RuntimeError(
                 f"codex provision failed (exit {res.exit_code}): {res.stderr_text[-2000:]}"
             )
+
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
+        """Copy project-local assets needed by the guest agent."""
+        await self._write_auth_json(sandbox)
+        dest = self.skill_load_dir
+        await sandbox.shell(
+            f"mkdir -p {dest} && "
+            f"for src in {project_mount}/skills {project_mount}/.agents/skills "
+            f"{project_mount}/.claude/skills; do "
+            f"  if [ -d $src ]; then cp -r $src/. {dest}/ 2>/dev/null || true; fi; "
+            f"done",
+            env=self.guest_env(),
+        )
 
     async def invoke(
         self,
@@ -556,6 +594,16 @@ def _item_dispatches_skill(item: dict, skill_name: str) -> bool:
     """Return whether a Codex item dispatches the expected skill."""
     name = _skill_dispatch_name(item)
     return isinstance(name, str) and _skill_name_matches(name, skill_name)
+
+
+def _item_dispatches_any_skill(item: dict, skill_name: str | None) -> bool:
+    """Return whether a Codex item dispatches any skill."""
+    name = _skill_dispatch_name(item)
+    if name is None:
+        return False
+    if item.get("type") == "tool_call" and item.get("name") != "Skill":
+        return bool(skill_name) and _skill_name_matches(name, skill_name)
+    return True
 
 
 def _debug_tail(events: list[dict]) -> str:

@@ -341,3 +341,35 @@ class MicrosandboxBackend(SharedBackendBehavior):
                 replace=True,
             )
         return MicrosandboxGuest(native)
+
+    async def create_trigger_sandbox(
+        self,
+        *,
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_repo_root: Path,
+        extra_volumes: ExtraVolumes,
+    ) -> MicrosandboxGuest:
+        """Create the sandbox used for trigger-routing probes."""
+        from microsandbox import Sandbox, Volume
+
+        volumes = {PROJECT_MOUNT: Volume.bind(host_mount_path(host_repo_root), readonly=True)}
+        volumes.update(extra_volumes(agent, Volume))
+        async with _translate_runtime_errors():
+            native = await Sandbox.create(
+                name,
+                from_snapshot=snapshot,
+                volumes=volumes,
+                secrets=microsandbox_secrets(agent),
+                cpus=VM_CPUS,
+                memory=VM_MEMORY_MIB,
+                replace=True,
+            )
+        sandbox = MicrosandboxGuest(native)
+        try:
+            await agent.stage_project_assets(sandbox, PROJECT_MOUNT)
+        except BaseException:
+            await self.stop_quietly(sandbox)
+            raise
+        return sandbox

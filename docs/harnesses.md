@@ -137,13 +137,14 @@ integration surface. An adapter declares:
   `RunResult`, surfacing agent failures as `is_error=True`, not exceptions.
   Given a `watch` (a trigger-only turn), `invoke` hands the command and its
   parser to `BaseAgent.invoke_watched`, which streams it and stops it early.
-- **Detection**: `stream_tool_calls` / `streamed_activity`, the stream probes
-  behind an early stop. `stream_tool_calls` returns the trajectory tool calls
-  one raw output line carries, exactly as the adapter's parser records them for
-  the whole stream, so the stop and the grade agree on whether a skill fired. A
-  dispatch is whatever the CLI observably does to load a skill: its native
-  skill event where it has one, otherwise a read of
-  `<skill_load_dir>/<name>/SKILL.md` (the Codex adapter works this way).
+- **Detection**: `stream_tool_calls` / `streamed_activity` behind an early
+  stop, and `detect_dispatch` / `detect_fired` for the sandbox routing path.
+  `stream_tool_calls` returns the trajectory tool calls one raw output line
+  carries, exactly as the adapter's parser records them for the whole stream,
+  so the stop and the grade agree on whether a skill fired. A dispatch is
+  whatever the CLI observably does to load a skill: its native skill event
+  where it has one, otherwise a read of `<skill_load_dir>/<name>/SKILL.md`
+  (the Codex adapter works this way).
 - **Judging**: `judge(...)`, the host-side grading entry point.
 
 The steps:

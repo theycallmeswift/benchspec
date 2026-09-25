@@ -112,7 +112,7 @@ class ExecStream(Protocol):
 
 @runtime_checkable
 class LiveSandbox(Protocol):
-    """A booted guest instance: the surface agents and sessions drive.
+    """A booted guest instance: the surface agents, sessions, and routing drive.
 
     Only the calls benchspec makes are declared here, so any runtime whose guest
     exposes this shape — a Docker container, a microsandbox guest, or a recording fake
@@ -245,6 +245,18 @@ class SandboxBackend(Protocol):
         """Create a runtime instance from a snapshot for an arm session."""
         ...
 
+    async def create_trigger_sandbox(
+        self,
+        *,
+        agent: CodingAgent,
+        snapshot: str,
+        name: str,
+        host_repo_root: Path,
+        extra_volumes: ExtraVolumes,
+    ) -> LiveSandbox:
+        """Create the sandbox used for trigger-routing probes."""
+        ...
+
     async def guest_shell(
         self, sandbox: LiveSandbox, agent: CodingAgent, script: str
     ) -> str | None:
@@ -253,6 +265,10 @@ class SandboxBackend(Protocol):
 
     async def stop_quietly(self, sandbox: LiveSandbox) -> None:
         """Best-effort VM teardown that never masks the real flow."""
+        ...
+
+    async def kill_quietly(self, handle: ExecStream) -> None:
+        """Best-effort kill of a streaming exec handle."""
         ...
 
     def prune(self) -> None:
@@ -348,7 +364,7 @@ async def run_environment_script(
 class SharedBackendBehavior:
     """The backend methods whose bodies are runtime-independent.
 
-    `guest_shell` and `stop_quietly` speak only the guest surface every
+    `guest_shell`, `stop_quietly`, and `kill_quietly` speak only the guest surface every
     backend exposes and the neutral `SandboxError` every backend raises, so both
     implementations inherit one copy instead of keeping byte-identical twins in step.
     """
@@ -367,3 +383,8 @@ class SharedBackendBehavior:
         """Best-effort guest teardown that never masks the real flow."""
         with contextlib.suppress(SandboxError, TimeoutError, OSError):
             await sandbox.stop()
+
+    async def kill_quietly(self, handle: ExecStream) -> None:
+        """Best-effort kill of a streaming exec handle (routing timeout path)."""
+        with contextlib.suppress(SandboxError, TimeoutError, OSError):
+            await handle.kill()

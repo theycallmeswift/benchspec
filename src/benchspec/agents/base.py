@@ -447,6 +447,10 @@ class CodingAgent(Protocol):
         """Install the agent CLI and credentials inside the guest."""
         ...
 
+    async def stage_project_assets(self, sandbox: LiveSandbox, project_mount: str) -> None:
+        """Copy project-local assets needed by the guest agent."""
+        ...
+
     async def invoke(
         self,
         sandbox: LiveSandbox,
@@ -501,6 +505,14 @@ class CodingAgent(Protocol):
 
     def stream_tool_calls(self, line: str) -> list[dict]:
         """Return the trajectory tool calls one raw stream line carries, in order."""
+        ...
+
+    def detect_dispatch(self, line: str, skill_name: str | None) -> bool:
+        """Return whether one stream line shows a skill dispatch."""
+        ...
+
+    def detect_fired(self, lines: Iterable[str], skill_name: str) -> bool:
+        """Return whether stream lines show the expected skill firing."""
         ...
 
     def streamed_activity(self, lines: Iterable[str]) -> bool:

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 import types
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
@@ -17,6 +18,8 @@ from benchspec.agents import CodingAgent
 from benchspec.agents.base import FIXED_SKILLS_HOME
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
+from benchspec.agents.opencode import OpenCodeAgent
+from benchspec.grading.trigger import detect_skill_fired
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox import backend as backend_mod
 from benchspec.sandbox import microsandbox as microsandbox_mod
@@ -25,12 +28,17 @@ from benchspec.sandbox.docker import DockerBackend, DockerMount, DockerVolume
 from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.specs.discovery import EnvConfig
 from benchspec.specs.schema import SchemaError
-from benchspec.testing import FakeExecOutput, FakeSandbox
+from benchspec.testing import FakeExecEvent, FakeExecOutput, FakeSandbox
 
 
 def _claude_agent(harness: str | None = None) -> ClaudeCodeAgent:
     """Build the claude agent test fixture (accepts and ignores an optional harness arg)."""
     return ClaudeCodeAgent(auth_value="test-token", version="v")
+
+
+def _stdout(*chunks: bytes) -> list[FakeExecEvent]:
+    """`stdout` events from raw byte chunks."""
+    return [FakeExecEvent("stdout", data=chunk) for chunk in chunks]
 
 
 def _shell_scripts(fake: FakeSandbox) -> list[str]:
@@ -52,12 +60,57 @@ def _first_exec_args(fake: FakeSandbox) -> list[str]:
     return args
 
 
+def _exec_stream_kwargs(fake: FakeSandbox) -> dict[str, object]:
+    """The keyword arguments of the single `exec_stream` call recorded on `fake`."""
+    (stream_call,) = [call for call in fake.calls if call[0] == "exec_stream"]
+    kwargs = stream_call[3]
+    assert isinstance(kwargs, dict)
+    return kwargs
+
+
 def _first_exec_timeout(fake: FakeSandbox) -> object:
     """The `timeout` keyword of the first `exec` call recorded on `fake`."""
     exec_call = next(call for call in fake.calls if call[0] == "exec")
     kwargs = exec_call[3]
     assert isinstance(kwargs, dict)
     return kwargs["timeout"]
+
+
+def _route_via_fake_vm(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    events: list[FakeExecEvent],
+    agent_factory: Callable[[], CodingAgent],
+    model: str,
+    capture: dict[str, object] | None = None,
+) -> list[str]:
+    """Drive `route_in_sandbox` against a fake trigger VM whose `exec_stream` yields.
+
+    `events`. If `capture` is given, it receives the `exec_stream` kwargs (so a test can
+    assert what was passed). Returns the captured `lines`.
+    """
+    trigger_vm = FakeSandbox(stream_events=events)
+    monkeypatch.setenv("BENCHSPEC_DOCKER_PATH", str(tmp_path / "missing" / "docker"))
+    monkeypatch.setattr(sandbox, "ensure_snapshot", lambda agent, **kwargs: "snap")
+    monkeypatch.setattr(sandbox, "make_agent", agent_factory)
+
+    async def fake_create_trigger(self: DockerBackend, **kwargs: object) -> FakeSandbox:
+        """Fake create trigger (class-level: takes self)."""
+        return trigger_vm
+
+    monkeypatch.setattr(DockerBackend, "create_trigger_sandbox", fake_create_trigger)
+    lines = sandbox.route_in_sandbox(
+        "query",
+        tmp_path,
+        model,
+        20,
+        effort="low",
+        skill_name="archive",
+    )
+    if capture is not None:
+        capture.update(_exec_stream_kwargs(trigger_vm))
+    return lines
 
 
 def test_snapshot_name_carries_backend_id() -> None:
@@ -541,6 +594,15 @@ def test_layer_build_config_rejects_non_table_sets(tmp_path: Path) -> None:
         sandbox._layer_build_config({}, str(config))
 
 
+def test_plugin_dir_for(tmp_path: Path) -> None:
+    """Verify plugin dir for."""
+    assert sandbox._plugin_dir_for(None) is None
+    assert sandbox._plugin_dir_for(tmp_path) is None  # no .claude-plugin/plugin.json
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text("{}")
+    assert sandbox._plugin_dir_for(tmp_path) == sandbox.PROJECT_MOUNT
+
+
 def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: Path) -> None:
     """Verify agent extra volumes mounts codex auth json."""
     auth = tmp_path / "auth.json"
@@ -711,6 +773,72 @@ def test_arm_session_propagates_create_failure(
         asyncio.run(drive())
 
 
+def test_route_in_sandbox_returns_lines_on_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify route in sandbox returns lines on dispatch."""
+    events = _stdout(
+        b'{"type":"system"}\n',
+        b'{"type":"assistant","message":{"content":'
+        b'[{"type":"tool_use","name":"Skill","input":{"skill":"archive"}}]}}\n',
+    )
+
+    lines = _route_via_fake_vm(
+        monkeypatch,
+        tmp_path,
+        events=events,
+        agent_factory=_claude_agent,
+        model="sonnet",
+    )
+
+    assert detect_skill_fired(lines, "archive") is True
+
+
+def test_route_in_sandbox_raises_on_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify route in sandbox raises for on nonzero exit."""
+    events = [
+        FakeExecEvent(
+            "stdout",
+            data=b'{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n',
+        ),
+        FakeExecEvent("exited", code=1),
+    ]
+
+    with pytest.raises(sandbox.RoutingError):
+        _route_via_fake_vm(
+            monkeypatch,
+            tmp_path,
+            events=events,
+            agent_factory=_claude_agent,
+            model="sonnet",
+        )
+
+
+def test_route_passes_empty_stdin_to_exec_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify route passes empty stdin to exec stream."""
+    events = _stdout(
+        b'{"type":"system"}\n',
+        b'{"type":"assistant","message":{"content":'
+        b'[{"type":"tool_use","name":"Skill","input":{"skill":"archive"}}]}}\n',
+    )
+    captured: dict[str, object] = {}
+
+    _route_via_fake_vm(
+        monkeypatch,
+        tmp_path,
+        events=events,
+        agent_factory=_claude_agent,
+        model="sonnet",
+        capture=captured,
+    )
+
+    assert captured.get("stdin") == b""
+
+
 class _RecordingBackend(DockerBackend):
     """A backend whose `prune` records that it ran, for `cli_clean` fan-out tests."""
 
@@ -756,6 +884,80 @@ def test_cli_clean_removes_repo_snapshot_lock_files(
     sandbox.cli_clean(tmp_path)
 
     assert not lock_file.exists()
+
+
+def _opencode_agent() -> OpenCodeAgent:
+    """Build the opencode agent test fixture."""
+    return OpenCodeAgent(auth_value="test-token", auth_env="GEMINI_API_KEY", version="v")
+
+
+def _drive_route_with_stdout_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, events: list[tuple[str, bytes]]
+) -> list[str]:
+    """Build the drive route with stdout events test fixture."""
+    return _route_via_fake_vm(
+        monkeypatch,
+        tmp_path,
+        events=[FakeExecEvent(event_type, data=data) for event_type, data in events],
+        agent_factory=_opencode_agent,
+        model="google/gemini-3.5-flash",
+    )
+
+
+def test_route_reassembles_jsonl_split_across_stream_chunks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify route reassembles jsonl split across stream chunks."""
+    # Stream chunks can split JSONL records; routing must reassemble complete lines.
+    skill_line = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"status": "completed", "input": {"name": "archive"}},
+            },
+        }
+    )
+    mid = len(skill_line) // 2
+    events = [
+        ("stdout", skill_line[:mid].encode()),  # first half — not yet parseable
+        ("stdout", skill_line[mid:].encode() + b"\n"),  # completes the line
+    ]
+
+    lines = _drive_route_with_stdout_events(monkeypatch, tmp_path, events)
+
+    # The reassembled stream tallies the fire (was False when fed raw chunks).
+    assert _opencode_agent().detect_fired(lines, "archive") is True
+
+
+def test_route_flushes_trailing_partial_line_without_newline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify route flushes trailing partial line without newline."""
+    # The final JSONL event may arrive without a trailing newline. The drain loop must
+    # flush the buffered remainder into `lines` after the stream ends, or count_fires'
+    # detect_fired(lines) misses a fire that landed in the last (newline-less) line.
+    skill_line = json.dumps(
+        {
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "skill",
+                "state": {"status": "completed", "input": {"name": "archive"}},
+            },
+        }
+    )
+    mid = len(skill_line) // 2
+    events = [
+        ("stdout", b'{"type":"step_start","part":{"type":"step-start"}}\n'),
+        ("stdout", skill_line[:mid].encode()),  # final line is itself split...
+        ("stdout", skill_line[mid:].encode()),  # ...and never terminated by a newline
+    ]
+
+    lines = _drive_route_with_stdout_events(monkeypatch, tmp_path, events)
+
+    assert _opencode_agent().detect_fired(lines, "archive") is True
 
 
 def _artifact_stream(*pairs: tuple[str, str]) -> str:
