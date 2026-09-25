@@ -251,7 +251,9 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
 
    The first run builds the sandbox snapshot (about a minute); with the snapshot
    cached, the whole suite takes about a minute on six workers. The report lands
-   in `tmp/evals/iteration_01/benchmark.md`.
+   in `tmp/evals/iteration_01/benchmark.md`. After each run,
+   [`check_sample_accounting.py`](scripts/check_sample_accounting.py) fails the
+   target if any clean sample's `timing.json` lacks its duration or token split.
 
 Then `make lint` (ruff, ty, houserules; needs `GEMINI_API_KEY`) before a pull
 request. On Claude Code on the web, the environment's setup script does steps 1

@@ -282,6 +282,37 @@ def test_make_e2e_runs_the_e2e_set() -> None:
     assert "verify_e2e_artifacts" not in output
 
 
+def test_make_e2e_checks_sample_accounting_after_each_run() -> None:
+    """Verify every `make e2e` run is followed by the time-and-token accounting check."""
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-n", "e2e"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    lines = result.stdout.splitlines()
+    run_indices = [index for index, line in enumerate(lines) if "benchspec run" in line]
+    assert len(run_indices) == 2
+    for run_index in run_indices:
+        assert lines[run_index + 1] == "uv run scripts/check_sample_accounting.py"
+
+
+def test_make_e2e_collect_only_skips_the_accounting_check() -> None:
+    """Verify a collect-only pass, which writes no iteration, never checks a stale one."""
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-n", "e2e", "EVAL_ARGS=--collect-only -q"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "benchspec run" in result.stdout
+    assert "check_sample_accounting" not in result.stdout
+
+
 def test_removed_binder_make_alias_has_no_active_references() -> None:
     """Verify maintained files reference the binder corpus through `make evals`."""
     removed_target = "evals" + ":binder"
