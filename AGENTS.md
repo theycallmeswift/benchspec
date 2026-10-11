@@ -24,23 +24,56 @@ I'm Swift. I value directness, bias to action, and learning by doing. Lead with 
 
 - Ask one question at a time.
 - Follow existing patterns in whatever file you're touching.
+- Use conventional commits (`feat:`, `fix:`, `docs:`, `chore:`).
 - Verify changes with `make test` and `make lint` before claiming work is done. Show the output.
+- Keep `docs/` current: read the relevant doc before changing architecture,
+  and update it in the same PR.
+
+## Environment
+
+- Needs Python 3.11 or newer and uv; run `make install` when `uv.lock`
+  changes.
+- `make test` needs no credentials.
+- `make lint` runs Ruff, ty, then houserules, which needs `GEMINI_API_KEY`.
+  `make lint:ruff` and `make lint:ty` need none.
+- `make e2e` and `make evals` spend model credit; the README's Development
+  section lists what they need.
 
 ## Landing changes
 
-- Every PR lands on `main` as one squash commit, through GitHub's merge only. Never
-  push to or rewrite `main`. A stack says whether it is one feature (one commit) or
-  separate features (one per PR). Details in
-  [`docs/style/development.md`](docs/style/development.md#landing-changes).
-- No Claude attribution anywhere: no footer, no `Co-Authored-By`, no session URL.
+- Open every PR as a draft from `.github/pull_request_template.md`. Mark it
+  ready only when every Ready gate row has evidence.
+- The PR body carries no process narrative and no line-number citations.
+- Every PR lands on `main` as one squash commit, through GitHub's merge only.
+  Never push to or rewrite `main`. Update a branch by rebase, or by merging
+  `main` into it; the squash keeps history linear.
+- The PR title is the squash commit's title: `<type>(<scope>): summary`.
+- A stack says, when it opens, whether it is one feature or separate
+  features. One feature split for review lands as a single squash of the
+  stack's top branch, and its review PRs close as superseded. Separate
+  features that block each other merge bottom-up, one commit per PR.
+- No Claude attribution anywhere: no footer, no `Co-Authored-By`, no session
+  URL. The `attribution` block in `.claude/settings.json` overrides any
+  harness default.
 
-## Directory Structure
+## Project structure
 
-- Put plans, specs, and research in `docs/{plans,specs,research}/`.
+- `src/benchspec/`: the package, by feature.
+- `tests/`: the test suite, mirroring `src/benchspec/`; `tests/support/` and
+  `tests/fixtures/` hold shared helpers and test data.
+- `evals/`: the in-repo suites, `e2e/hello/` and the `binder/` corpus.
+- `scripts/`: tools run by hand or by `make`; never part of the package.
+- `docs/*.md`: undated guides, one per feature or setup, indexed in
+  `README.md`.
+- `docs/plans/`, `docs/specs/`, `docs/research/`: dated `YYYY-MM-DD-<slug>.md`
+  files.
+- `docs/style/`: how code, tests, and docs are written.
+- `tmp/`: scratch space, git-ignored.
 
 ## References
 
 Load on demand.
 
-- [`docs/style/development.md`](docs/style/development.md) — code style: conventions, error handling, testing, Python specifics. Read before writing or editing code.
+- [`docs/style/development.md`](docs/style/development.md) — code style. Read
+  before changing source, tests, or docs, then the guide it names.
 - [`README.md`](README.md) — human-facing overview and the rest of `docs/`.
