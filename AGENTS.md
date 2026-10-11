@@ -42,7 +42,8 @@ I'm Swift. I value directness, bias to action, and learning by doing. Lead with 
 ## Landing changes
 
 - Open every PR as a draft from `.github/pull_request_template.md`. Mark it
-  ready only when every Ready gate row has evidence.
+  ready yourself once every Ready gate row has evidence. If CI fails after
+  that, convert it back to a draft, fix it, and mark it ready again.
 - The PR body carries no process narrative and no line-number citations.
 - Every PR lands on `main` as one squash commit, through GitHub's merge only.
   Never push to or rewrite `main`. Update a branch by rebase, or by merging
