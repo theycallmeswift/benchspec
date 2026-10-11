@@ -102,6 +102,7 @@ select = [
     "PT",     # flake8-pytest-style: pytest-specific readability rules.
     "B",      # flake8-bugbear: likely bugs and surprising Python behavior.
     "A",      # flake8-builtins: avoid shadowing Python builtins.
+    "PLC0415", # Pylint: imports belong at the top of the file, even optional ones.
     "RUF100", # Ruff: remove stale noqa suppressions while houserules bans suppressions.
 ]
 

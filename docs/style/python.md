@@ -45,6 +45,8 @@ def test_reports_bank_amounts_with_no_ledger_match(
 - **Indent multiline strings with the code around them** and strip the indent
   with `textwrap.dedent`. Start the literal with `"""\` so the first line
   isn't blank. Docstrings are exempt.
+- **No function-level imports, even optional ones.** Ruff's `PLC0415`
+  enforces it here, stricter than the shared rule.
 - **An optional dependency gets a guarded import at the top.** Import the
   module, fall back to `None`, and check `is None` where it's used, so every
   call stays type-checked. Tests stub the module attribute, not `sys.modules`.
