@@ -1,16 +1,17 @@
-# Model Arena learnings
+# Cutting matrix wall-clock and adding a live run view
 
-Research, 2026-11-12. What benchspec should take from MLH/model-arena, judged
-by one metric: total wall-clock to finish a harness × model matrix. Sources:
-model-arena at c47d2d4, benchspec at 834ef8d, E2B docs and pricing fetched
+Research, 2026-11-12. What benchspec should take from an internal prototype
+that races one prompt across many models at once and streams their answers
+live, judged by one metric: total wall-clock to finish a harness × model
+matrix. Sources: benchspec at 834ef8d, E2B docs and pricing fetched
 2026-11-12.
 
 ## Answer up front
 
-- **Model-arena is fast mostly because its task is small:** one streamed API
-  call per model, with no VM and no tool loop. What carries over is the shape
-  of the runner: fan out everything, cap every job, never let one failure stop
-  the rest.
+- **The prototype is fast mostly because its task is small:** one streamed
+  API call per model, with no VM and no tool loop. What carries over is the
+  shape of the runner: fan out everything, cap every job, never let one
+  failure stop the rest.
 - **benchspec's wall-clock is bound by its controller, not its sandbox.** Runs
   are sequential by default and capped at 6 workers in `make`. Each cell runs
   binder, then agent, then judge, one after another. A VM boots in about 1s,
@@ -38,7 +39,7 @@ model-arena at c47d2d4, benchspec at 834ef8d, E2B docs and pricing fetched
 
 ## Speed
 
-### Why model-arena is fast, and what transfers
+### Why the prototype is fast, and what transfers
 
 Built into its task, so it won't transfer:
 
@@ -112,7 +113,7 @@ Not doing: a persistent `.benchspec.cache` kept across runs.
 The arm timeout is already 600s. Make it a cap over the whole cell (bind,
 boot, agent and judge together), and when it fires, grade whatever the agent
 left in `/workspace`. Record a timeout as a result, not an infra error. In
-model-arena, a timed-out model still shows its partial answer.
+the prototype, a timed-out model still shows its partial answer.
 
 ### R7: More workers or an async runner
 
@@ -129,18 +130,19 @@ cap.
 
 ### R8: Reasoning and routing settings on each arm (S)
 
-Model-arena turns reasoning down to go fast. A benchmark can't do that
+The prototype turns reasoning down to go fast. A benchmark can't do that
 quietly, because those settings are part of what is being measured. Make
 reasoning effort and provider routing explicit fields on each arm, record them
-in provenance, and give them dated comments the way `models.mjs` does.
+in provenance, and give them dated comments the way the prototype's model
+roster does.
 
 ## Live view: one event stream, several ways to watch it
 
-Model-arena has one output channel, `send()`. The Node server and the
-Cloudflare Worker are just two places that channel can write to. benchspec
-should copy that: every run emits one event stream, and the CLI progress line,
-a JSONL artifact and an optional web view all read from it. The CLI stays the
-default, and the web view is opt-in.
+The prototype's runner takes a single `send(event)` callback. Its Node
+server and its Cloudflare Worker are just two places that channel can write
+to. benchspec should copy that: every run emits one event stream, and the CLI
+progress line, a JSONL artifact and an optional web view all read from it. The
+CLI stays the default, and the web view is opt-in.
 
 | Event | Payload | Emitted from |
 |---|---|---|
@@ -162,7 +164,7 @@ Options for the web view:
   xdist, and works on a run in progress or one that has finished.
   `run --watch` can just start it for you.
 - **SSE server inside `run`.** Lives in the controller process. Closer to
-  model-arena, but tangled up with pytest's lifecycle, and it goes away when
+  the prototype, but tangled up with pytest's lifecycle, and it goes away when
   the run ends.
 - **Terminal UI (rich live).** A live view with no browser. A good second way
   to watch, but it can't show live SVG or HTML or sort a leaderboard.
@@ -237,12 +239,13 @@ Pro month at `-n 50`. Things to verify:
   fake streams small chunks plus a cost frame, and server tests check the
   event order: `race` first, then one `done` per model, then `end`.
   benchspec's `FakeSandbox` could check the event stream the same way.
-- **Dated config comments from real measurements.** `models.mjs` records why
-  each host was pinned and when it was timed. Do the same for arm defaults.
-- **A core with no dependency on where it runs.** `core.mjs` uses only fetch,
-  streams and TextDecoder, and takes `send`, `signal` and `fetchImpl` as
-  parameters. The runner core shouldn't know whether it's writing to a
-  terminal, a JSONL file or SSE.
+- **Dated config comments from real measurements.** The prototype's roster
+  records why each host was pinned and when it was timed. Do the same for arm
+  defaults.
+- **A core with no dependency on where it runs.** Its runner uses only
+  platform primitives (fetch, streams, a text decoder) and takes `send`, a
+  cancel signal and the fetch function as parameters. The runner core
+  shouldn't know whether it's writing to a terminal, a JSONL file or SSE.
 - **Provider-reported cost.** Read `usage.cost` from the response, and show
   "not reported" rather than estimating.
 - **Roster checks as tests:** unique IDs, valid model IDs, open and closed
@@ -250,9 +253,9 @@ Pro month at `-n 50`. Things to verify:
 
 ## What not to copy
 
-- **No grading.** Model-arena only measures speed and cost. benchspec's point
+- **No grading.** The prototype only measures speed and cost. benchspec's point
   is the graded matrix.
-- **No retries.** Model-arena fixes a failing host by editing the roster.
+- **No retries.** The prototype fixes a failing host by editing the roster.
   benchspec should keep counting infra errors separately and consider
   retrying them.
 - **Starting everything at once with no limit.** That's fine for 20 API calls
@@ -278,18 +281,8 @@ Next steps:
 
 ## Sources
 
-### model-arena (MLH/model-arena at c47d2d4)
-
-- Fan-out: `app/server.mjs:119`, `worker/src/index.js:43`
-- One streamed call per model: `app/core.mjs:86-114`
-- Per-task caps: `core.mjs:93`, `models.mjs:81,89,98,127`
-- Partial output kept: `core.mjs:26-31,122`
-- Calls that never throw: `core.mjs:75-78,120-125`
-- Reasoning and routing pins: `core.mjs:90`, `models.mjs:12-28,46-54`
-- Event shapes: `core.mjs:84,112,117-123`, `server.mjs:116-123`
-- Leaderboard: `app/page/app.mjs:229-288,384-391`
-- Host-independent core: `core.mjs:1-4,79`
-- Tests: `app/test/model-arena.test.mjs:32-42,106-129,205-226`
+An internal prototype that races one prompt across many models at once. It
+is not public, so it has no citations here.
 
 ### benchspec (at 834ef8d)
 
