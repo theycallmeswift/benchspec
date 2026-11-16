@@ -191,7 +191,7 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
 
 No icon set. Status boxes, the bracket frame and mono glyphs carry meaning: `✓`
 and `✗` assertion verdicts, `›` disclosures, `‹ ›` sample navigation, `×` close,
-`▸` collapsed group, `▼` sort direction, a 7px `accent` dot for live. No emoji.
+`▸` collapsed group, a 7px `accent` dot for live. No emoji.
 
 ## Imagery
 

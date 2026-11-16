@@ -18,7 +18,6 @@ that don't run on every arm.").
 | best value | `◆` and value in `accent-ink`, plus the word `best` once in `muted` `bs-type-meta`, so colour is not the only cue; winner only |
 | ratio | losers only, against the winner by name, `muted`: `1.53× baseline` |
 | delta | only the signed figure in `success` (`+34pp`); "vs baseline" in `muted` |
-| sort | header buttons; the sorted column shows ▼ in `muted` and sets `aria-sort` |
 | errors | sub-line in `danger` (`1 boot failure`) |
 | all samples errored | `—` |
 | metric scoped off the arm | `n/a`, `muted` |
@@ -38,4 +37,4 @@ sections separated by hairlines. No nested panels.
   (`+1 errored`).
 
 Don't: colour a value `accent` (fails as text); repeat "best" as colour, word
-and badge; colour a whole delta sentence green.
+and badge; colour a whole delta sentence green; sort columns or rows.

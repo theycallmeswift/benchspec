@@ -1,7 +1,7 @@
 # Drawer
 
-The selected cell's detail, floating beside the matrix: status, eval, arm,
-sample, key numbers, assertions, phases, run path.
+The selected cell's detail, floating over the page: status, eval, arm, sample,
+key numbers, assertions, phases, run path.
 
 **Provide:** the selected sample's grading (status, assertion verdicts with
 checker and evidence), phase timings, cost, last five output lines and path,
@@ -9,7 +9,7 @@ plus previous/next sample handlers.
 
 | Part | Spec |
 | --- | --- |
-| panel, desktop | beside the matrix, `size-drawer` wide, `bg`, 1px `line` border, `radius-8`, `space-24` padding and section gap |
+| panel, desktop | a floating panel over the right of the page (`position: fixed`), not docked and not a column beside the matrix; the page sets its `top` below the Counter so the Counter stays visible. `size-drawer` wide, `bg`, 1px `line` border, `radius-8`, `shadow-popover`, `space-24` padding and section gap; scrolls inside itself |
 | panel, phone | `bs-sheet`: full-width bottom sheet, top corners `radius-8`, `shadow-sheet`, `max-height: 85vh`; same header lines (`bs-sub` in `bs-type-body-mono`) and sample nav |
 | status line | `bs-type-status`; verdict word uppercase, `danger` for FAIL and ERROR |
 | eval id | `bs-type-eval-id`: path in `fg-tertiary`, leaf in `fg` 500. Each segment is a `nowrap` span with `<wbr>` after its `/`: breaks only after `/`, never at a hyphen or mid-word |

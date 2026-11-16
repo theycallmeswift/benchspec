@@ -204,8 +204,6 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: var(--type-body
 .bs-lb .bs-sub { display: block; font: var(--type-meta); color: var(--muted); }
 .bs-lb .bs-sub.bs-err { color: var(--danger); }
 .bs-delta { color: var(--muted); } .bs-delta b { color: var(--success); font-weight: 400; }
-.bs-lb .bs-sort { appearance: none; text-align: right; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-.bs-lb .bs-sort span { color: var(--muted); }
 .bs-lbc { background: var(--surface); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); font: var(--type-body-mono); font-variant-numeric: tabular-nums; }
 .bs-lbc > * + * { border-top: var(--stroke-hair) solid var(--line); }
 .bs-lbm { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-12) var(--space-8); align-items: center; padding: var(--space-16); }
@@ -242,8 +240,9 @@ button.bs-lbh { appearance: none; padding: 0; border: 0; background: none; curso
 .bs-hc .bs-hprob { color: var(--danger); }
 .bs-hc .bs-hprob.bs-warn { color: var(--warn); }
 .bs-hc p { margin: 0; font: var(--type-help); color: var(--muted); }
-.bs-drawer { width: var(--size-drawer); max-width: 100%; box-sizing: border-box; display: grid; gap: var(--space-24); padding: var(--space-24); background: var(--bg); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); }
-.bs-drawer.bs-sheet { width: 100%; max-height: 85vh; overflow: auto; border-radius: var(--radius-8) var(--radius-8) 0 0; box-shadow: var(--shadow-sheet); }
+/* The drawer floats over the page, never docked beside the matrix; the page sets top below the Counter. */
+.bs-drawer { position: fixed; right: var(--space-32); bottom: var(--space-32); z-index: 5; width: var(--size-drawer); max-width: 100%; box-sizing: border-box; overflow: auto; display: grid; gap: var(--space-24); padding: var(--space-24); background: var(--bg); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); box-shadow: var(--shadow-popover); }
+.bs-drawer.bs-sheet { top: auto; right: 0; bottom: 0; left: 0; width: 100%; max-height: 85vh; border-radius: var(--radius-8) var(--radius-8) 0 0; box-shadow: var(--shadow-sheet); }
 .bs-dh { position: relative; display: grid; gap: var(--space-4); padding-right: var(--size-close); }
 .bs-dh .bs-st { font: var(--type-status); }
 .bs-dh .bs-st .bs-bad { color: var(--danger); }
