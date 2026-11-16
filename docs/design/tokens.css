@@ -1,0 +1,167 @@
+/* benchspec — tokens compiled from tokens.json (both themes). Fixed values once in :root; themed values per theme. */
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-500.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-600.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-700.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "DM Sans"; src: url("fonts/dm-sans-opsz.woff2") format("woff2"); font-weight: 100 1000; font-style: normal; font-display: swap; }
+:root {
+  --brand-navy: #1B1F3B;
+  --brand-orange: #E85D2F;
+  --brand-salmon: #F2A48C;
+  --brand-gray: #A5ACBE;
+  --brand-paper: #F3F4F8;
+  --brand-slate: #4A5262;
+  --term-body: #14172E;
+  --term-titlebar: #1F2440;
+  --term-text: #E8ECF1;
+  --term-muted: #8B93A7;
+  --term-prompt: #F0764B;
+  --term-green: #3FBF7F;
+  --term-yellow: #E3BF5F;
+  --term-red: #E25E59;
+  --wm-mid: #F2A48C;
+  --dot-1: var(--wm-right);
+  --dot-2: var(--wm-mid);
+  --dot-3: var(--wm-left);
+  --status-timeout: var(--warn);
+  --status-error: var(--danger);
+  --status-running: var(--accent);
+  --status-quiet: var(--warn);
+  --status-queued: var(--fg-tertiary);
+  --status-na: var(--fg-tertiary);
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --radius-2: 2px;
+  --radius-3: 3px;
+  --radius-4: 4px;
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --size-box: 14px;
+  --size-box-sm: 10px;
+  --size-dot: 5px;
+  --size-quiet-bar: 6px;
+  --size-live-dot: 7px;
+  --size-cell: 36px;
+  --size-cell-phone: 32px;
+  --size-control: 36px;
+  --size-control-phone: 44px;
+  --size-close: 32px;
+  --size-progress: 4px;
+  --size-group-bar: 2px;
+  --size-bracket-cap: 12px;
+  --size-swatch: 8px;
+  --size-drawer: 480px;
+  --size-hovercard: 280px;
+  --size-label-phone: 104px;
+  --size-arm-phone: 112px;
+  --size-shade: 8px;
+  --size-mark-ui: 22px;
+  --size-wordmark-ui: 36px;
+  --breakpoint-phone: 640px;
+  --stroke-hair: 1px;
+  --stroke-outline: 1.5px;
+  --stroke-ring: 2px;
+  --stroke-mark: 4px;
+  --text-12: 12px;
+  --text-13: 13px;
+  --text-14: 14px;
+  --text-16: 16px;
+  --text-18: 18px;
+  --text-24: 24px;
+  --text-30: 30px;
+  --text-44: 44px;
+  --dur-disclosure: 0.15s;
+  --dur-hover-delay: 150ms;
+  --dur-pulse: 1.6s;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-wordmark: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+:root, [data-theme="dark"] {
+  --bg: #14172E;
+  --surface: #1B1F3B;
+  --raised: #1F2440;
+  --hover: #262C4E;
+  --band: #181B34;
+  --lbl: #171A31;
+  --popover: var(--hover);
+  --line: #2A3053;
+  --fg: #E8ECF1;
+  --muted: #A8AEBD;
+  --fg-tertiary: #939AB0;
+  --accent: #F0764B;
+  --accent-ink: #F0764B;
+  --danger: #F07378;
+  --danger-tint: #39262D;
+  --warn: #E3BF5F;
+  --warn-tint: #34303A;
+  --success: #4FA97A;
+  --shade: #0B0D1F;
+  --wm-ink: #E8ECF1;
+  --wm-left: #6E7891;
+  --wm-right: #F0764B;
+  --status-pass: #939AB0;
+  --status-fail-1: #FA8E92;
+  --status-fail-2: #F86368;
+  --status-fail-3: #F6242C;
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-hovercard: 0 10px 28px rgba(0, 0, 0, 0.6);
+  --shadow-sheet: 0 -12px 32px rgba(0, 0, 0, 0.6);
+}
+[data-theme="light"] {
+  --bg: #F6F4EF;
+  --surface: #FDFCF9;
+  --raised: #EEEBE4;
+  --hover: #E9E5DC;
+  --band: #F2EFE9;
+  --lbl: #EBE7DF;
+  --popover: var(--surface);
+  --line: #E2DDD3;
+  --fg: #1B1F3B;
+  --muted: #4A5262;
+  --fg-tertiary: #5E657B;
+  --accent: #D8430F;
+  --accent-ink: #A93F18;
+  --danger: #B53A37;
+  --danger-tint: #FBE3E2;
+  --warn: #8A5A00;
+  --warn-tint: #FBF1D3;
+  --success: #1F6E45;
+  --shade: #C3C8D6;
+  --wm-ink: #1B1F3B;
+  --wm-left: #A5ACBE;
+  --wm-right: #E85D2F;
+  --status-pass: #6B7286;
+  --status-fail-1: #D54D4A;
+  --status-fail-2: #C1312D;
+  --status-fail-3: #9E2825;
+  --shadow-popover: 0 8px 24px rgba(27, 31, 59, 0.14);
+  --shadow-hovercard: 0 4px 12px rgba(27, 31, 59, 0.08);
+  --shadow-sheet: 0 -12px 32px rgba(27, 31, 59, 0.16);
+}
+.bs-type-wordmark { font-family: var(--font-wordmark); font-size: 30px; line-height: 64px; font-weight: 600; letter-spacing: -0.01em; }
+.bs-type-social-wordmark { font-family: var(--font-wordmark); font-size: 64px; line-height: 1; font-weight: 700; }
+.bs-type-social-tagline { font-family: var(--font-wordmark); font-size: 30px; line-height: 44px; font-weight: 400; }
+.bs-type-terminal { font-family: var(--font-wordmark); font-size: 15px; line-height: 24px; font-weight: 400; }
+.bs-type-counter { font-family: var(--font-mono); font-size: 44px; line-height: 1; font-weight: 500; letter-spacing: -0.03em; }
+.bs-type-counter-finished { font-family: var(--font-mono); font-size: 30px; line-height: 1; font-weight: 500; letter-spacing: -0.03em; }
+.bs-type-metric { font-family: var(--font-mono); font-size: 24px; line-height: 1.1; font-weight: 500; }
+.bs-type-value { font-family: var(--font-mono); font-size: 16px; line-height: 1.2; font-weight: 500; }
+.bs-type-group-name { font-family: var(--font-mono); font-size: 14px; line-height: 1.3; font-weight: 500; }
+.bs-type-eval-id { font-family: var(--font-mono); font-size: 14px; line-height: 1.4; font-weight: 400; }
+.bs-type-cell { font-family: var(--font-mono); font-size: 14px; line-height: 1.2; font-weight: 400; }
+.bs-type-body-mono { font-family: var(--font-mono); font-size: 13px; line-height: 1.55; font-weight: 400; }
+.bs-type-meta { font-family: var(--font-mono); font-size: 12px; line-height: 1.45; font-weight: 400; }
+.bs-type-section-label { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; font-weight: 500; letter-spacing: 0.04em; }
+.bs-type-heading { font-family: var(--font-sans); font-size: 30px; line-height: 1.15; font-weight: 500; letter-spacing: -0.015em; }
+.bs-type-title { font-family: var(--font-sans); font-size: 18px; line-height: 1.3; font-weight: 500; }
+.bs-type-status { font-family: var(--font-sans); font-size: 16px; line-height: 1.3; font-weight: 500; }
+.bs-type-body { font-family: var(--font-sans); font-size: 14px; line-height: 1.55; font-weight: 400; }
+.bs-type-tab { font-family: var(--font-sans); font-size: 14px; line-height: 1; font-weight: 500; }
+.bs-type-explainer { font-family: var(--font-sans); font-size: 14px; line-height: 1.5; font-weight: 400; }
+.bs-type-help { font-family: var(--font-sans); font-size: 13px; line-height: 1.5; font-weight: 400; }
