@@ -1,0 +1,1159 @@
+[
+ {
+  "model": "anthropic/claude-opus-5.5",
+  "run": 1,
+  "seconds": 93.3,
+  "cost": 0.396224,
+  "tokens": {
+   "in": 60406,
+   "out": 7730
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "DS-type·C3–C5, wordmark, social-wordmark and social-tagline rows",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The wordmark uses the platform monospace stack, so it renders as SF Mono or Menlo, while the tagline at C5 falls back to a Courier-like face; neither matches the DM Mono used in every watch frame.",
+     "why": "The brand's most visible type is the least controlled, and the Courier tagline looks like an unstyled default beside the refined UI mono.",
+     "change": "Self-host one mono face (see Q1) and use it for the wordmark at 600, 30px, letter-spacing -0.01em. Set the social wordmark at 700, 64px, letter-spacing -0.02em, and the tagline at 400, 30px, line-height 1.45. Remove the ui-monospace-first `wordmark` family.",
+     "confidence": "high"
+    },
+    {
+     "where": "B·A2 finished progress bar, B·E3 '+34 pts vs baseline', D2·A4–A5 'trial is best' lines",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Green #4FA97A fills the full-width finished bar and colors the delta lines, while orange diamonds mark the same 'best' values, so two accents claim one meaning.",
+     "why": "The references work because they keep one strong accent; here green competes with the brand orange at exactly the moment the run lands.",
+     "change": "Limit success green to the '✓ Finished' word and its check. Draw the 100% progress fill in fg-tertiary #939AB0 at 3px (light: #7C8399). Set delta and 'trial is best' text in muted #A8AEBD with only the numeral in fg, and keep orange #F0764B as the sole highlight.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·C4–E7, cell brackets around sample boxes; DS-components·B2",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "The cell brackets read as thin 1px text-glyph `[ ]` strokes with square ends, while the logo brackets are stroke-4 polylines with round caps and short horizontal arms.",
+     "why": "The bracket-matrix idea is the product's signature, but in the matrix it looks like punctuation rather than a drawn mark.",
+     "change": "Draw cell brackets as SVG polylines: stroke 1.5px, round caps, arm length 4px (about 8/48 of the 20px box-row height, matching the logo's 8/48 ratio), color fg-tertiary #939AB0 at 70%, and 3px gap to the first box.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·C5–E7 and B'·C7–E7, queued cells versus started cells",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Started cells sit on a filled raised #1F2440 ground while queued cells get a 1px outline, so the lower half of the matrix becomes a wall of outlined rectangles that is louder than the cells with results.",
+     "why": "Waiting work outranks finished work visually, and the mix of fill and outline creates a checkerboard texture.",
+     "change": "Give queued cells no border and a transparent ground so only their boxes and 'queued' label show. Keep raised #1F2440 for cells with any started sample, and drop the cell outline entirely except for focus.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·C4 and E4 group rule under '65% · 4/15'; B'·C3–E8 group summary rules",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Complete group rows show a bright, near-fg 2px rule across the full column width, which repeats down B' like a stack of white underlines.",
+     "why": "It is the brightest line on the page yet carries the least news, and it fights the orange progress bar above.",
+     "change": "Render the group bar as 2px with track line #2A3053. Fill completed groups in fg-tertiary #939AB0 at 50% opacity, and fill in-progress groups in accent #F0764B.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·A4–A6 and B'·A3–A8, group name column",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The 'N evals' count and 'trial-only' chip sometimes sit inline and sometimes wrap below, and 'claude-cloud-orchestrator/' pushes '1 evals' to its own line, so the left edge and row heights are ragged.",
+     "why": "Diagram-like structure depends on every row having the same anatomy.",
+     "change": "Always put the group name on line 1 (14px/500) and the count plus chip on line 2 (12px/400, 4px top gap). Set the chip to 11px, padding 1px 5px, radius 3px and a 1px line #2A3053 border, and fix group row height at 52px.",
+     "confidence": "high"
+    },
+    {
+     "where": "C·E3–E7, drawer section labels 'Assertions', 'Phases', 'Recent output'; B·A3 'Leaderboard'",
+     "criterion": "E2",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "Section labels are 13px DM Sans 500 in muted gray and read like generic app headings.",
+     "why": "Warp's bracketed figure captions ('[ fig. 1 — the factory ]') and Tailscale's small mono labels are exactly what would make benchspec feel like an engineering diagram, and the brackets are already ours.",
+     "change": "Set section labels as mono 11px/500, letter-spacing 0.06em, lowercase, fg-tertiary #939AB0, wrapped in brackets: '[ assertions · 3 failed · 6 passed ]', with 12px space below.",
+     "confidence": "medium"
+    },
+    {
+     "where": "C·E3 drawer title path and C·E8 footer path",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "'plan-review-judges-findings' breaks mid-word at a hyphen, and the sample path at the foot wraps arbitrarily in a pinkish tint.",
+     "why": "Ragged breaks in the drawer's most prominent line look unfinished.",
+     "change": "Insert <wbr> after each '/' and use overflow-wrap: anywhere only as a fallback. Show the path at 12px/1.45 in fg-tertiary #939AB0, not tinted, with the eval leaf in fg #E8ECF1 at 500.",
+     "confidence": "high"
+    },
+    {
+     "where": "B·A3–F5, leaderboard table grounds",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The table stacks three grounds (lbl #171A31, band #181B34, surface #1B1F3B) with banded rows, giving a striped, heavy block around very few numbers.",
+     "why": "Stripe-style precision comes from rules and alignment, not alternating fills, and the banding blurs the orange 'best' highlight.",
+     "change": "Use one surface #1B1F3B ground with 1px line #2A3053 rules between rows and no band or lbl fills. Use 20px vertical cell padding and tabular-nums. Set metric labels at 13px muted, and numbers at 18px/500 right-aligned on a shared decimal edge.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-colors dark·E8 accent vs B2 brand-orange; DS-colors light·E8–H8 accent and accent-ink",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The page uses four oranges: brand #E85D2F, dark accent #F0764B, light accent #D8430F (redder and hotter) and accent-ink #A93F18 (brown). The light theme's orange in A-light·C4 reads closer to red than the brand.",
+     "why": "The single strong accent loses identity when each theme shifts its hue.",
+     "change": "Keep hue at about 15°. Dark accent stays #F0764B. Light accent becomes the brand #E85D2F for marks and bars, and light accent-ink becomes #B84A1E for text, so hue holds and only lightness moves.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-light·C4 timeout and quiet boxes; DS-colors light·E2 warn #806100",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Light warn #806100 renders olive-brown, and light pass #5E657B fills render as heavy dark slate squares (A-light·E4), which inverts the 'quiet pass' idea.",
+     "why": "The light theme looks muddy and its loudest marks are the boring ones.",
+     "change": "Set light warn to amber #9A6700 (warn-tint #FBF0D6). Lighten light status-pass to #7C8399, keeping 3:1 on the new raised color, so passes recede as they do in dark.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-cover·E3–H4 palette blocks; A·H2 'Light theme' pill",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "On the cover, the orange block touches the card's top edge and the slab block runs past the right edge, so the cover looks cropped. Elsewhere, the theme toggle is the only fully rounded pill among 4px controls and 8px panels.",
+     "why": "Edge collisions and one-off radii make a precise system look accidental.",
+     "change": "Inset all cover blocks 24px from the card edges on an 8px gutter, and keep them at radius 8px. Set the theme toggle to radius 4px to match the Copy buttons. Codify radii as 2px (boxes), 4px (controls, cells, chips) and 8px (panels, cards, drawer).",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono has the engineering-diagram crispness of the Warp and Tailscale references, with squarer terminals and a calm, even texture at 12–14px that the matrix needs. It ships 100–700 weights, so the wordmark can finally use the same face at 600 instead of the platform stack; DM Mono stops at 500. DM Mono's curly f and light strokes are charming but thin at 12px on navy and can't carry a bold wordmark. JetBrains Mono is excellent but reads as 'IDE default' and its tall x-height makes the counter and labels feel generic."
+    },
+    "Q2": {
+     "answer": "Warp's bracketed mono figure captions on a faint diagram grid, because it extends benchspec's own brackets from the logo into the page structure.",
+     "where": "Replace the sans section labels with '[ … ]' mono captions at 11px/500, 0.06em tracking, fg-tertiary. Apply them to the drawer's Assertions, Phases and Recent output (C·E3–E7), the leaderboard heading (B·A3), and a right-aligned caption above the matrix such as '[ 13 evals × 2 arms · live ]' at A·F3. Optionally add a 1px dot grid (line #2A3053 at 50%, 16px pitch) behind the counter block only (A·A2–H2)."
+    },
+    "Q3": {
+     "answer": "Yes. Move from the cool blue-gray #F3F4F8 to warm paper tones like Tailscale's off-white, keeping navy #1B1F3B as fg so the brand ink stays.",
+     "values": "bg #F6F4EF, surface #FDFCF9, raised #EEEBE4, hover #E7E3DA, band #F3F0EA, lbl #ECE8E0, line #DCD7CC, fg #1B1F3B, muted #4A5262, fg-tertiary #6B7182, status-pass #7C8399, accent #E85D2F, accent-ink #B84A1E, warn #9A6700, warn-tint #FBF0D6, danger-tint #FBE6E1; window titlebar #ECE8E0."
+    }
+   },
+   "top_three": [
+    "Adopt IBM Plex Mono as the single mono face for wordmark (600), data and labels. Drop the platform-stack wordmark and the Courier-looking tagline so the brand type is one controlled voice.",
+    "Re-tone the light theme to warm paper (bg #F6F4EF, surface #FDFCF9, raised #EEEBE4, line #DCD7CC). Fix its accent to brand #E85D2F, warn to #9A6700 and pass to #7C8399 so it stands on its own instead of looking muddy and cool.",
+    "Enforce one accent and extend the bracket vocabulary. Take green off the finished bar and delta lines, quiet completed group rules and queued-cell outlines, and draw cell brackets as round-capped 1.5px SVG with bracketed mono section captions, so the bracket-matrix idea shows up across the whole page."
+   ]
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 1,
+  "seconds": 60.9,
+  "cost": 0.097274,
+  "tokens": {
+   "in": 31892,
+   "out": 3349
+  },
+  "output": {
+   "unparsed_raw": "```json\n{\n  \"observations\": [\n    {\n      \"where\": \"A-light·A1-H8 and DS-colors (light)·A6-H7\",\n      \"criterion\": \"E7\",\n      \"kind\": \"problem\",\n      \"severity\": \"high\",\n      \"observation\": \"The light theme uses clinical, cool blue-grays (`bg` #F3F4F8, `raised` #E9EBF2, `lbl` #E4E7EF) on a stark #FFFFFF `surface`.\",\n      \"why\": \"It feels icy and sterile rather than sharing the warm, tactile, engineering-paper confidence of Warp (REF-D) and Tailscale (REF-I), and the cool gray-blue clashes with the warm `#E85D2F` orange accent.\",\n      \"change\": \"Shift the light palette to warm stone/paper tones while keeping `#1B1F3B` navy ink: set `bg` to `#F6F5F1`, `surface` to `#FCFBF9`, `raised` to `#EFECE6`, `band` to `#F4F2ED`, `lbl` to `#EBE8E0`, `hover` to `#E6E2DA`, and `line` to `#DCD8CE`.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"DS-type (dark)·A2-F4 and DS-logo (dark)·A4-F4\",\n      \"criterion\": \"E4\",\n      \"kind\": \"problem\",\n      \"severity\": \"high\",\n      \"observation\": \"The wordmark and brand art rely on the generic `ui-monospace` platform stack (rendering as Menlo/SF Mono) while the UI data uses a self-hosted webfont.\",\n      \"why\": \"The brand mark changes character across operating systems and fails to establish a single, recognizable typographic voice across the logo, counters, and matrix.\",\n      \"change\": \"Unify `family · wordmark` and `family · mono` on `\"IBM Plex Mono\", ui-monospace, monospace` at weight 600 for `bs-type-wordmark` and 500 for display metrics, and convert the wordmark in `benchspec-wordmark-*.svg` to outlined paths in IBM Plex Mono SemiBold.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"A·C4-E6 and DS-components (dark)·A2-D2\",\n      \"criterion\": \"E1\",\n      \"kind\": \"push\",\n      \"severity\": \"high\",\n      \"observation\": \"The brackets around the sample boxes in `StatusBox` and `MatrixCell` appear to be rendered as standard font characters `[` and `]` in `fg-tertiary` rather than matching the custom geometry of the logo mark.\",\n      \"why\": \"Using thin typographic brackets makes the signature bracket-matrix motif feel like plain text punctuation instead of a crisp structural diagram echoing the logo.\",\n      \"change\": \"Render cell brackets as inline SVGs (or crisp CSS pseudo-element borders) matching the logo's proportions: `1.5px` stroke width, `4px` horizontal arm length, `1px` outer corner radius, vertically centered to span `16px` height around the `10x10px` status boxes, colored in `muted` (`#A8AEBD` dark / `#5E657B` light).\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"A·A3-E3, B (part 1)·A3-F3, and C·F3-G6\",\n      \"criterion\": \"E2\",\n      \"kind\": \"push\",\n      \"severity\": \"medium\",\n      \"observation\": \"Structural section headers (`skill/eval_id`, `Leaderboard`, `Assertions`, `Phases`, `Recent output`) are set in mixed-case `DM Sans` (`bs-type-section-label`, 13px) or plain lowercase.\",\n      \"why\": \"They blend into the body copy and miss the crisp, blueprint-like indexing seen in Warp (`[ fig. 1 — the factory ]`, REF-D·E5) and Tailscale's tracked mono nav labels (REF-I·G1).\",\n      \"change\": \"Switch `bs-type-section-label` and table column headers to the monospace family at `11px`, uppercase, `font-weight: 500`, `letter-spacing: 0.06em`, colored `muted`.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"DS-colors (light)·E1-F2 (`warn` #806100) and DS-components (light)·A2-D2\",\n      \"criterion\": \"E3\",\n      \"kind\": \"problem\",\n      \"severity\": \"medium\",\n      \"observation\": \"In the light theme, the `warn` token (`#806100`) used for `timeout` and `quiet` sample boxes is a muddy olive-brown.\",\n      \"why\": \"While chosen for contrast, `#806100` looks like a tarnished brown next to the vibrant `#D8430F` orange and `#B53A37` danger red, making the matrix cells look dingy.\",\n      \"change\": \"Shift light-theme `warn` to a richer, warmer dark amber `#B45309` (or `#A14A07` for >4.5:1 contrast on light surfaces) and `warn-tint` to `#FEF3C7`.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"B (part 2)·C4-E5 and A·C5-E6\",\n      \"criterion\": \"E6\",\n      \"kind\": \"problem\",\n      \"severity\": \"medium\",\n      \"observation\": \"In collapsed skill group rows (e.g., `not-triggers/`, `catch-me-up/`), the mini progress bars underneath the `58% · 45/45` text sit as raw `2px` white/gray lines spanning the full column width without a background track.\",\n      \"why\": \"When at 100% (which most finished groups are), they read as heavy, bright horizontal table borders rather than data bars, visually slicing the matrix into awkward strips.\",\n      \"change\": \"Give collapsed-group summary bars a `3px` height, `1.5px` border-radius, a full-width background track in `line` (`#2A3053` dark / `#DCD8CE` light), and fill 100% completed bars with `status-pass` (`#939AB0` dark / `#6E768A` light) instead of bright primary `fg`.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"B (part 1)·A3-F5 and DS-components (dark)·A5-G7\",\n      \"criterion\": \"E5\",\n      \"kind\": \"problem\",\n      \"severity\": \"medium\",\n      \"observation\": \"The Leaderboard table uses a darker fill (`lbl` `#171A31` dark / `#E4E7EF` light) on the left metric column combined with horizontal row banding (`band`) and outer rounded corners.\",\n      \"why\": \"The intersecting vertical column tint and horizontal row bands create a heavy, boxy checkerboard that feels dated compared to the airy precision of Stripe Docs (REF-G).\",\n      \"change\": \"Remove the `lbl` background fill and `band` alternating fills on the Leaderboard; use a clean `surface` background with crisp `1px solid var(--line)` horizontal row hairlines, a `2px solid var(--line)` header bottom rule, and `16px` vertical cell padding.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"C·F2-H7\",\n      \"criterion\": \"E5\",\n      \"kind\": \"problem\",\n      \"severity\": \"medium\",\n      \"observation\": \"In watch frame C, the detail drawer on the right sits as a floating rounded card inside the main canvas with a small margin on the right and bottom, rather than docking to the window frame.\",\n      \"why\": \"It creates nested parallel borders (drawer border next to window border) and cramped negative space on the right edge (`C·H3-H7`).\",\n      \"change\": \"Dock the drawer flush to the top (below the TopBar/Tabs rule), right, and bottom edges of the app container with `border-left: 1px solid var(--line)`, `border-radius: 0`, and `background: var(--bg)` or slightly elevated `#181C36`, giving it `24px` internal horizontal padding.\",\n      \"confidence\": \"medium\"\n    },\n    {\n      \"where\": \"A·A4, A·A5, A·B6 (`trial-only` badge)\",\n      \"criterion\": \"E6\",\n      \"kind\": \"problem\",\n      \"severity\": \"low\",\n      \"observation\": \"The `trial-only` badge wraps onto a second line below `delegating-to-codex/` in `A·A4`, sits inline in `A·B6`, and has a heavy `1px` border with tight padding.\",\n      \"why\": \"The inconsistent placement disrupts the left-hand hierarchy of the eval tree, and the boxed border competes with the queued sample boxes.\",\n      \"change\": \"Style `trial-only` as a quiet pill: `font-size: 11px`, `padding: 1px 6px`, `border-radius: 4px`, `background: var(--raised)`, `border: none`, `color: var(--muted)`, and keep it consistently inline with the group count (`5 evals · trial-only`) with `white-space: nowrap`.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"C·F6-G6 and DS-components (dark)·A5-C5 (`Phases` bar)\",\n      \"criterion\": \"E3\",\n      \"kind\": \"problem\",\n      \"severity\": \"low\",\n      \"observation\": \"The `Phases` proportional bar in the drawer uses four very similar slate/blue-gray shades (`bind`, `boot`, `setup`, `grade`) alongside the bright orange `agent` segment, without color keys on the text labels below.\",\n      \"why\": \"It is difficult to map the text labels (`bind 2.9s`, `boot 7.4s`, etc.) to their corresponding bar segments at a glance.\",\n      \"change\": \"Add a `6x6px` rounded square color swatch (`border-radius: 1.5px`) immediately before each phase name in the legend below the bar, matching the exact segment fill.\",\n      \"confidence\": \"high\"\n    },\n    {\n      \"where\": \"A·A2-D2 and DS-components (dark)·A6-D7 (`Counter` progress bar)\",\n      \"criterion\": \"E6\",\n      \"kind\": \"push\",\n      \"severity\": \"low\",\n      \"observation\": \"The main run progress bar (`40% 31 of 78 finished`) is a plain `3px` continuous line, while the tally immediately below breaks out `27 passed`, `4 failed`, `4 running`.\",\n      \"why\": \"A single-color orange bar misses an opportunity to reflect the multi-state richness of the run that the tally and matrix show.\",\n      \"change\": \"Make the `Counter` progress bar a segmented multi-bar (`height: 4px`, `border-radius: 2px`) showing proportional segments for `passed` (`status-pass` or `success`), `failed + errored` (`danger`), and `running` (`accent`) against the `line` track.\",\n      \"confidence\": \"medium\"\n    }\n  ],\n  \"questions\": {\n    \"Q1\": {\n      \"answer\": \"FONT-2\",\n      \"why\": \"IBM Plex Mono (FONT-2) has the crispest technical authority and most distinctive typographic character of the three—its sharp serifs on the `1`, `i`, and `l`, open `0` with a clean dot/slash, and balanced x-height give both the `40%` display counter and the dense eval IDs (`plan-review-judges-findings`) the engineered diagram feel of Warp (REF-D). DM Mono (FONT-1) is too rounded and casual, while JetBrains Mono (FONT-3) feels tall and narrow like an IDE editor block rather than an editorial data table.\"\n    },\n    \"Q2\": {\n      \"answer\": \"Warp's (REF-D·C5-G6) diagram-frame labeling and exposed structural hairlines—treating data views like numbered engineering figures with small, tracked monospace metadata headers.\",\n      \"where\": \"Apply it to the Matrix and Leaderboard containers: frame the Matrix table and Leaderboard with a crisp `1px solid var(--line)` outer border, full-width horizontal group dividers, and small uppercase monospace index labels in the header bar (e.g., `EVAL / SKILL`, `BASELINE · CLAUDE-CODE`, and `[ 13 EVALS · 2 ARMS ]` right-aligned on the tab bar).\"\n    },\n    \"Q3\": {\n      \"answer\": \"Yes. Moving from the current cool blue-gray (`#F3F4F8`) to warm architectural paper tones directly connects benchspec's light mode to Warp and Tailscale, eliminates the clinical hospital-white glare of `#FFFFFF`, and harmonizes naturally with the fixed `#E85D2F` brand orange and `#1B1F3B` navy ink.\",\n      \"values\": \"bg: #F6F5F1, surface: #FCFBF9, raised: #EFECE6, band: #F4F2ED, lbl: #EBE8E0, hover: #E6E2DA, line: #DCD8CE\"\n    }\n  },\n  \"top_three\": [\n    \"Unify all monospace typography (including the SVG wordmark, counters, and data) on IBM Plex Mono (FONT-2), and set structural section/column labels in tracked uppercase 11px mono.\",\n    \"Warm the light theme palette from cool blue-gray (#F3F4F8 / #FFFFFF) to tactile paper tones (bg #F6F5F1, surface #FCFBF9, raised #EFECE6, line #DCD8CE) and fix the muddy light-mode warn token (#806100 -> #B45309).\",\n    \"Replace the typographic `[` `]` characters in MatrixCell with custom SVG/CSS brackets that match the logo's stroke geometry, and clean up the Leaderboard and collapsed-row bars to rely on crisp hairlines rather than heavy fills.\"\n  ]\n}\n```"
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 2,
+  "seconds": 58.9,
+  "cost": 0.095444,
+  "tokens": {
+   "in": 31892,
+   "out": 3166
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A-light·A1-H7, DS-colors (light)·A6-H7",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The light theme uses stark pure white (#FFFFFF) for the main window surface and cool blue-tinted grays (#F3F4F8, #E9EBF2, #E4E7EF) for backgrounds and cells.",
+     "why": "It feels clinical and icy rather than sharing the warm, confident engineering-paper tone of Warp (REF-D) and Tailscale (REF-I).",
+     "change": "Shift the light palette to warm stone/paper tones while keeping brand-navy (#1B1F3B) for ink: set bg to #F4F2EE, surface to #FAF9F6, raised to #EFECE6, band to #F4F2EE, lbl to #EBE8E1, hover to #E5E1D9, and line to #DCD8CF.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-type (dark) part 1·A2-E4, DS-logo (dark) part 2·A4-G4",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The wordmark and brand art use the generic platform monospace stack (SFMono, Menlo, Consolas) while the product UI uses a self-hosted webfont.",
+     "why": "Letting the OS dictate the primary brand wordmark makes the logo's character shift across machines and disconnects it from the watch UI's typography.",
+     "change": "Unify family.wordmark and family.mono on 'IBM Plex Mono' (weight 600 for bs-type-wordmark, weight 500 for metrics/headers, weight 400 for data) and convert the SVG wordmark text to outlined paths in IBM Plex Mono SemiBold.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4-F6, DS-components (dark) part 1·A2-D2",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Inside MatrixCell, the brackets around the sample boxes appear to be rendered as typographic '[' and ']' glyphs in fg-tertiary (#939AB0), sitting too close to the boxes with thin strokes.",
+     "why": "The bracket-matrix is benchspec's signature motif, but in the matrix rows the brackets look like faint punctuation rather than structural framing that echoes the logo mark.",
+     "change": "Render the cell brackets as custom inline SVG polylines matching the logo mark's proportions: 1.5px stroke width, 3px horizontal arms, round caps, 3px gap to the first/last status box, colored in #8B93A7 (dark) and #6E768A (light).",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A4-B6, B (part 2)·A4-B6",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "The 'trial-only' badge next to group names is a standard rounded-rectangle pill with a 1px border.",
+     "why": "Rounded pills are generic SaaS UI tropes; using bracketed monospace metadata like Warp (REF-D·B6 '[ fig. t4 · the factory ]') would reinforce benchspec's identity.",
+     "change": "Replace the bordered pill on 'trial-only' with a borderless bracketed mono label `[trial-only]` in bs-type-meta (12px), colored fg-tertiary (#939AB0), with no background fill or border.",
+     "confidence": "high"
+    },
+    {
+     "where": "B (part 2)·C4-F5, A·C5-F5",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "When skill groups are collapsed in full-suite runs, the summary progress bars are 2px solid lines spanning the full column width directly under the text.",
+     "why": "In B (part 2)·C4-F5, six consecutive rows of bright white/gray full-width underlines create harsh horizontal striping that overpowers the group names and percentages.",
+     "change": "Match the collapsed group summary bar width to the MatrixCell width (max-width 220px) or inset it by 16px on the right, increase track height to 3px with 1.5px border-radius, and tone down the 100% completed fill from bright fg (#E8ECF1) to status-pass (#939AB0).",
+     "confidence": "high"
+    },
+    {
+     "where": "C·F2-H7, DS-components (dark) part 3·A3-D5",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The cell detail drawer sits as a floating rounded card inside the right half of the matrix area rather than docking cleanly to the layout grid.",
+     "why": "It leaves awkward dead space below it (C·F8-H8) and lacks the crisp, architectural diagram structure seen in the references.",
+     "change": "Make the drawer a full-height docked side panel spanning from the tab bar hairline (row 2) to the bottom of the viewport, separated by a 1px solid line (#2A3053) on the left, with background #171A31 (lbl) and 24px internal padding.",
+     "confidence": "medium"
+    },
+    {
+     "where": "B (part 1)·A3-F5",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "In the primary rotated Leaderboard table, the numbers in the 'baseline' column are right-aligned to column D while the table is 700px wide, leaving a ~220px empty void between the metric labels (column A) and the baseline values (column D).",
+     "why": "The eye has to jump across a wide empty chasm to connect 'Pass rate' with '65%', weakening the table's scanability and precision.",
+     "change": "Left-align the arm columns in the rotated leaderboard (matching how arms are left-aligned in the Matrix tab and in DS-components part 2·C5-F7) and set the label column width to a fixed 180px and each arm column to 200px.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-colors (light) part 2·E1-F2, DS-components (light) part 1·B2-D2",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The light theme 'warn' token (#806100) used for timeout and quiet sample boxes is a dark muddy olive-brown.",
+     "why": "While chosen for text contrast, as a tiny 10x10px geometric symbol in the matrix it reads as dull brown dirt rather than an active amber warning or timeout state.",
+     "change": "Split warn into warn-ink (#8A5A00, warmer ochre for text) and status-timeout / status-quiet (#D97706, rich amber for box fills and rings, which still achieves >3.2:1 graphical contrast on light surfaces).",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A3-H3, B (part 1)·A2-H3, DS-components (dark) part 2·A2-H2",
+     "criterion": "E4",
+     "kind": "push",
+     "severity": "low",
+     "observation": "The 'Matrix' and 'Leaderboard' tabs are set in 14px DM Sans, and section headers like 'Leaderboard' (B·A3) and 'Assertions' (C·F3) are 13px regular sans.",
+     "why": "They blend into body prose and miss the crisp technical authority that Tailscale (REF-I·A1) and Warp (REF-D·C5) get from small tracked-out monospace labels.",
+     "change": "Set bs-type-section-label ('Assertions', 'Phases', 'Recent output', 'Pass rate' on phone) in family.mono, 11px, uppercase, letter-spacing 0.06em, weight 500, color muted (#A8AEBD).",
+     "confidence": "medium"
+    },
+    {
+     "where": "C·F6-G6, DS-components (dark) part 3·A5-D5",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "In the drawer's 'Phases 90.9s' section, five phase durations ('bind 2.9s boot 7.4s setup 1.2s agent 63.8s grade 15.6s') run below a 4-color bar without visual keys linking each word to its bar segment.",
+     "why": "Because the middle three segments (bind, boot, setup) use similar muted slate/gray tones, it is hard to tell which segment corresponds to which phase.",
+     "change": "Prefix each phase label with a 6x6px square (border-radius 1.5px) filled with its exact bar segment color, and give each phase segment a distinct step in the palette (e.g., bind #4A5262, boot #6E7891, setup #A5ACBE, agent #F0764B, grade #3FBF7F).",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A7-E7, C·A6-E6",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The nine-state status legend sits directly below the last matrix row with no top divider or structural framing.",
+     "why": "It floats loosely at the bottom of the table and visually collides with the last eval row.",
+     "change": "Add a 1px top border in `line` (#2A3053 dark, #DCD8CF light) with 12px padding-top and 16px margin-top above the legend row, and prefix the row with a mono label `STATES` in 11px `fg-tertiary`.",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono (FONT-2) has crisp, squared-off mechanical terminals, a slashed zero, and an unmistakable engineering-spec personality that echoes Warp (REF-D) and harmonizes with benchspec's square bracket-matrix mark. DM Mono (FONT-1) is too soft and rounded at display sizes (like the 40% counter) and lacks a slashed/dotted zero, while JetBrains Mono (FONT-3) feels like a dense IDE code editor rather than an architectural benchmark diagram."
+    },
+    "Q2": {
+     "answer": "Warp's (REF-D) bracketed figure/diagram captions (`[ fig. 1 — the factory ]`) and Tailscale's (REF-I) crisp uppercase mono micro-labels.",
+     "where": "Replace the rounded pill badges (`trial-only`) in the Matrix group headers (A·A4, A·A5, A·B6) with plain bracketed mono tags `[trial-only]`, and style the drawer/leaderboard section headers (`ASSERTIONS`, `PHASES`, `RECENT OUTPUT`) as 11px tracked-out monospace labels."
+    },
+    "Q3": {
+     "answer": "Yes. Moving away from cool blue-grays (#F3F4F8) and stark white (#FFFFFF) to warm architectural paper tones makes the light theme feel deliberate, reduces eye strain beside a terminal, and lets the navy (#1B1F3B) and orange (#E85D2F) brand colors pop like ink on drafting paper.",
+     "values": "bg: #F4F2EE, surface: #FAF9F6, raised: #EFECE6, hover: #E5E1D9, band: #F4F2EE, lbl: #EBE8E1, line: #DCD8CF"
+    }
+   },
+   "top_three": [
+    "Switch the light theme from cool blue-gray/pure-white (#F3F4F8 / #FFFFFF) to warm engineering-paper tones (bg #F4F2EE, surface #FAF9F6, raised #EFECE6, line #DCD8CF) and warm up the muddy light-mode warning token (#806100 -> #D97706).",
+    "Adopt IBM Plex Mono (FONT-2) across the entire system—unifying the SVG wordmark, display counters, matrix cells, and uppercase micro-labels into one crisp technical voice.",
+    "Elevate the bracket-matrix motif in the UI by rendering MatrixCell brackets as crisp 1.5px SVG geometry (matching the logo mark) rather than faint text glyphs, and replacing generic rounded `trial-only` pills with `[trial-only]` mono notation."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 1,
+  "seconds": 16.0,
+  "cost": 0.0373385,
+  "tokens": {
+   "in": 19222,
+   "out": 3132
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A·B2, 40% counter headline",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The 40% headline in A dark looks thin and small next to the dense matrix, unlike Warp's bold mono headline in REF-D B2.",
+     "why": "Weight 400 at 44px makes the hero number feel tentative rather than instrument-like.",
+     "change": "Set bs-type-counter to 48px/1, weight 600, letter-spacing -0.02em, keep DM Mono family; set tally line bs-type-body-mono to 13px with tabular-nums.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C2-D2, progress track under counter",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The orange progress hairline in A sits directly on bg with no track, so it reads as an underline, not a meter.",
+     "why": "No track weakens the diagram-instrument character and makes 40% vs 100% states inconsistent.",
+     "change": "Add track token: 3px height, radius 2px, track bg #2A2F4D dark / #E8E0D1 light, fill accent #E85D2F, finished fill success #4CAF7D.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4-E4, matrix cell selected outline",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Selected cell in A dark uses a thick rounded orange outline that is heavier than the bracket strokes inside.",
+     "why": "Two competing stroke weights make selection look default rather than part of the bracket-matrix system.",
+     "change": "Change MatrixCell selected to 1.5px solid accent #E85D2F, radius 6px, plus outer 1px brackets in fg #EBEDF1; hover stays 1px band #3A4066; never add glow.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-components·B2, StatusBox fail vs error pinks",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Status fail pink and error rose in dark sit next to brand-orange running and salmon mid, creating three warm reds that vibrate.",
+     "why": "Temperature clash makes failures garish and muddies the single-strong-accent idea from REF-D.",
+     "change": "Keep accent #E85D2F only for running/selection/best; shift status-fail to #D64545 fill with #7A1F1F knock-out X, status-error to #D64545 with 2px danger ring, status-timeout to warn #C99A2B; remove salmon from status use.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-light·A3-H7, light matrix grays",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Light A uses cool gray bg and lavender-gray raised cells that look flat and chilly next to REF-I warm off-white.",
+     "why": "Cool grays contradict the paper-white references and make orange feel pasted on.",
+     "change": "Set light bg #FAF6ED, surface #FFFFFF, raised #F1EAD9, band #EFE7D3, line #E2D8C2, fg #1B1F3B; keep status fills same hue as dark but on paper.",
+     "confidence": "high"
+    },
+    {
+     "where": "B·E3-F4, leaderboard 99% best marker",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "In B dark the best diamond and +34 pts vs baseline note are tiny, orange-on-navy, and misaligned from the 99% number.",
+     "why": "Weak best-marker hierarchy forces scanning the whole table to find the winner.",
+     "change": "Set bs-type-metric to 24px/1.1 weight 700 tabular-nums; best marker to 8px solid diamond accent #E85D2F with 12px left pad; delta line to 12px mono muted #8A90A8.",
+     "confidence": "high"
+    },
+    {
+     "where": "C·F6-G6, drawer Phases 90.9s bar",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Phase bar in drawer C is a single thin gray bar with tiny labels that looks unfinished next to the crisp assertion list.",
+     "why": "Default single-bar treatment wastes the diagram-like storytelling Warp and Stripe use.",
+     "change": "Replace with segmented 4px bar radius 2px: setup #8A90A8, boot #8A90A8, agent accent #E85D2F, grade fg-tertiary #5A6080; labels 11px mono muted with 4px top pad.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·G4, hover card on trial cell",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Hover card in A dark is translucent dark with blurred text over the matrix, crowding the cell it annotates.",
+     "why": "Transparency reduces precision and breaks the Stripe-like crisp code-in-page feel.",
+     "change": "Make HoverCard solid raised #232848, 1px border line #3A4066, radius 8px, shadow 0 8px 24px rgba(0,0,0,0.35), padding 12px 14px, max-width 280px.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-cover·E3-F7, cover palette blocks",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "low",
+     "observation": "Cover's large orange/salmon/gray blocks are the most memorable brand moment but never reappear in watch.",
+     "why": "Without echo, the bracket-matrix idea stays logo-only instead of a system motif.",
+     "change": "Echo cover blocks as 8x8px square arm-keys before baseline/trial headers and as 4px left spine on drawer; use brand-orange #E85D2F for trial, brand-gray #6B7191 for baseline, brand-salmon #F2A488 for mid only.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·F1, live last event 2s ago label",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "Live dot in topbar uses a separate red-pink dot while running boxes and progress use brand orange.",
+     "why": "Extra hue breaks the one-accent discipline from REF-D and REF-I.",
+     "change": "Set live dot to 7px solid status-running #E85D2F with 2px pulse ring at 40% opacity; ended state to 7px fg-tertiary #5A6080, no pulse.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "DM Mono (FONT-1) is charming but too light, wide and single-weight: 40% and 1/3 labels look wispy and numbers wobble. JetBrains (FONT-3) reads as generic code-editor. Plex Mono has engineered ink traps, distinct 0/O and 1/I, true 500/600 weights for hierarchy, and tabular figures that keep counters, matrix labels and wordmark crisp at 12-48px while still feeling diagram-like."
+    },
+    "Q2": {
+     "answer": "Warp's engineering-diagram framing: faint dot-matrix grid + small bracketed figure labels like [ fig.1 — the factory ].",
+     "where": "Behind matrix groups in A and behind leaderboard table in B: 1px dots at 16px pitch in line color at 35% opacity, plus 11px mono muted labels e.g. [ delegating-to-codex / 5 evals ] and [ fig.2 — leaderboard ] above tables; same treatment on drawer Phases label."
+    },
+    "Q3": {
+     "answer": "Yes, move to warm paper, not cool gray; keep navy text and orange accent for continuity.",
+     "values": "bg #FAF6ED (page), surface #FFFFFF (app/drawer/popover), raised #F1EAD9 (cells/titles), hover #EFE7D3, band #EFE7D3, lbl #E8E0D1, line #E2D8C2, fg #1B1F3B, muted #5A6080, accent #C64E26 (burnt orange for light AA), accent-link #C64E26"
+    }
+   },
+   "top_three": [
+    "Warm the light theme to paper #FAF6ED / #FFFFFF with burnt-orange accent #C64E26 — makes light at least as good as dark and closest to REF-I/REF-D.",
+    "Tighten selection + brackets to one 1.5px orange system at 6px radius — turns the bracket-matrix from logo into interface language.",
+    "Switch the one mono to IBM Plex Mono with 600-weight counters and tabular numbers — gives the instrument headline and data the Warp-like precision DM Mono lacks."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 2,
+  "seconds": 15.7,
+  "cost": 0.01538075,
+  "tokens": {
+   "in": 19222,
+   "out": 2931
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A-dark·B2, 40% counter",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The 40% headline in A-dark B2 looks thin and floaty at 44px/400 next to the dense matrix.",
+     "why": "Hierarchy relies on size alone without weight, so the live headline lacks the engineering-diagram punch of REF-D.",
+     "change": "Set bs-type-counter to 44px/1, weight 600, letter-spacing -0.02em, tabular-nums on, and progress track to 4px height.",
+     "confidence": "high"
+    },
+    {
+     "where": "A-dark·C4-D4, matrix sample boxes",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Sample squares in selected and running cells look soft with ~4px radius and thin 1px strokes that blur at small size.",
+     "why": "Soft squares weaken the square-box-per-sample idea and read as default pills, not a precise instrument.",
+     "change": "Set StatusBox to 10x10px, radius 2px, stroke 1.5px; pass fill solid, fail with 1.5px X, running with 1.5px orange ring + 2px dot pulse.",
+     "confidence": "high"
+    },
+    {
+     "where": "A-dark·C4-E5, matrix cell containers",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "Matrix cells are plain rounded rectangles while the bracket-matrix logo promise is only in the logo.",
+     "why": "Without brackets in the product, character does not survive logo removal.",
+     "change": "Add 1.5px bracket endcaps to each eval-group row: 12px tall vertical ticks in line token #3A3F6B at row left edge, gap 8px to boxes.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-colors-dark·E6-F7, bg/surface/raised",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "bg #16172B, surface #1D1F39 and raised #232448 in dark are only ~2-3% apart, so matrix, drawer and hovercard melt together in C-dark F3.",
+     "why": "Low separation makes the dense tool feel flat and muddy instead of layered like Stripe Docs cards.",
+     "change": "Keep bg #16172B, move surface to #1B1F3B (brand-navy), raised to #262A4E; set line to #343A6B at 1px for all dividers.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-colors-dark·E8-F8, status fail vs error vs warn",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "status-fail pink, status-error pink-red and warn-tint yellow sit at same saturation, and quiet yellow equals running-adjacent warn in A-dark B7 legend.",
+     "why": "Warm fail/error fight with brand-orange #E85D2F for attention and quiet vs timeout are indistinguishable.",
+     "change": "Keep status-pass #9BB3A8, set status-fail to #E5484D, status-error to #B3273B with 2px danger ring, status-timeout to #C99A2B, status-quiet to desaturated #8A8578 ring only.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-dark·B2 + D2-dark·C4, progress and leaderboard bars",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Mid-run bar is brand-orange and finished bar is green, while leaderboard best values are also orange in B-dark F3.",
+     "why": "Orange means progress, running, and best at once, so accent is no longer scarce.",
+     "change": "Reserve accent #E85D2F for best-value and selected-cell only; set progress track to fg-tertiary #6B7194 4px with white 40% fill in-run and success #4CAF7D fill when 100%.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-type-dark·C4-D5, wordmark vs body",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Wordmark benchspec in DS-logo B2 uses platform monospace 600 while headings use DM Sans 500, so mono and sans compete at same sizes.",
+     "why": "Without a clear mono-for-data / sans-for-prose split like REF-G, hierarchy feels noisy.",
+     "change": "Lock wordmark + data + labels to mono only; set bs-type-heading and bs-type-body to DM Sans 500/400, all metrics/cells/meta to mono 400/500 with tabular-nums.",
+     "confidence": "high"
+    },
+    {
+     "where": "C-dark·F4-G6, drawer assertion list and phase bar",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Drawer assertions in C-dark F4 have 4px padding and 16px gaps while phase bar labels in F6 are cramped 2px from the bar.",
+     "why": "Uneven density makes the drawer feel crowded where Stripe Docs would be airy and scannable.",
+     "change": "Set drawer padding 16px, assertion card padding 12px, gap 8px, radius 6px; phase bar height 6px, radius 3px, label margin-top 8px at 12px mono.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-light·B3-C7, light matrix surfaces",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Light matrix in A-light C4 uses cool lavender-gray fills and hairline gray borders on stark #F2F3F8 white.",
+     "why": "Cool gray feels sterile and flat versus the warm plain confidence of REF-I and REF-D paper.",
+     "change": "Set light bg to #F4EFE6 warm paper, surface to #FFFEFA, raised to #FFFFFF with 1px line #E2DACA, band to #EAE2D2; keep text #1B1F3B.",
+     "confidence": "high"
+    },
+    {
+     "where": "A-dark·F1-G2, topbar live/meta row",
+     "criterion": "E2",
+     "kind": "push",
+     "severity": "low",
+     "observation": "Live dot, last-event and elapsed text in A-dark G1 are same size/weight as eval IDs, so instrument chrome blends into data.",
+     "why": "REF-I uses tiny mono labels to separate chrome from content with quiet confidence.",
+     "change": "Add bs-type-micro-label: 11px mono, uppercase, letter-spacing 0.08em, color fg-tertiary; apply to live, elapsed, skill/eval_id headers and fig captions.",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono has the most diagram-like character: narrower proportions, squared curves, and heavier 500 that holds at 12-14px labels and tabular numbers, while DM Mono (FONT-1) is too round/light and JetBrains Mono (FONT-3) reads as code-editor default. Plex pairs best with DM Sans and carries wordmark, data and labels as one voice."
+    },
+    "Q2": {
+     "answer": "Warp REF-D dot-matrix grid + fig-caption engineering-diagram framing.",
+     "where": "Behind matrix empty/queued areas in A-dark and cover DS-cover E3-G7, plus small mono captions like [ fig.1 — matrix ] above matrix and leaderboard tables in 11px uppercase mono fg-tertiary with 12px dot grid at 8% opacity."
+    },
+    "Q3": {
+     "answer": "Yes, move to warm paper, not cool gray; keep dark navy text for contrast.",
+     "values": "bg #F4EFE6 (warm paper), surface #FFFEFA, raised #FFFFFF, hover #EFE7D6, band #EAE2D2, line #E2DACA, fg #1B1F3B, muted #5A5E7A, accent #C44A22 (darkened orange for light), success #2F7E4E"
+    }
+   },
+   "top_three": [
+    "Warm the light theme to paper bg #F4EFE6 / surface #FFFEFA with line #E2DACA so it draws directly on REF-D/I.",
+    "Separate dark bg/surface/raised to #16172B / #1B1F3B / #262A4E with line #343A6B and reserve #E85D2F for best + selection only.",
+    "Adopt FONT-2 IBM Plex Mono as the single mono with micro-label style and 2px-radius 10px StatusBoxes to lock diagram precision."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 1,
+  "seconds": 93.3,
+  "cost": 0.14183744,
+  "tokens": {
+   "in": 59490,
+   "out": 8151
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A-light, whole page; DS-colors light·A6–E7 (bg #F3F4F8, surface #FFFFFF, raised #E9EBF2, line #DADDE7)",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The light theme is built on cool blue-grays, so next to REF-I's warm off-white and REF-D's paper it reads as a generic SaaS dashboard rather than a paper-toned engineering sheet.",
+     "why": "Cool gray flattens the navy/orange brand and misses the one quality all three references share, which the brief says the light theme should draw on most directly.",
+     "change": "Retoken the light UI palette to warm paper: bg #F6F4EF, surface #FDFCF8, raised #EEEAE1, band #F2EFE6, lbl #EAE5DA, line #E4DFD2, hover #EBE6DA; keep fg #1B1F3B and the muted/fg-tertiary ramp as-is so the ink stays navy.",
+     "confidence": "high"
+    },
+    {
+     "where": "C·F6, drawer phase bar",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The agent segment of the phase bar is rendered in accent orange, making a ~60%-wide orange band that is the loudest orange object on the screen — louder than the live progress bar it should defer to.",
+     "why": "The tokens reserve accent for live progress, selection and focus ('Nothing else'); spending it on a static timing breakdown breaks that discipline and fights the run-level progress bar for attention.",
+     "change": "Render the agent phase in note (#A5ACBE dark / #5C657A light) alongside the other phases in fg-tertiary; keep accent #F0764B out of the phase bar entirely.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-components dark·E4, MatrixCell selected+focus state",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The selected-and-focused cell shows two concentric orange outlines (a selected ring plus a focus ring), which reads as a doubled, vibrating stroke rather than one crisp mark.",
+     "why": "Two same-color strokes at slightly different offsets look like a rendering accident and cheapen the most important interaction state in the matrix.",
+     "change": "Use a single 2px accent ring with a 2px bg-colored gap: box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); never draw two accent strokes.",
+     "confidence": "high"
+    },
+    {
+     "where": "B·E3–F5 and D2·B4–B5, leaderboard best values",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "Each best value is signaled three times at once — orange ◆, accent-colored number, and the caption 'best' — while the non-best arm already carries the ratio ('1.53×').",
+     "why": "Triple signaling is noise; the references get their precision from saying a thing once, cleanly.",
+     "change": "Drop the 'best' caption under the winning value and keep only ◆ + accent-colored number at 24px/500; keep the '1.53×'-style ratios on the losing arm in muted.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-light·E4–F4, finished trial cells; DS-colors light part 2·A6 (status-pass #5E657B)",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "In the light theme the pass squares are filled with dark slate #5E657B, making runs of passing cells the heaviest, darkest objects on the page — heavier than the fail boxes they should quietly sit behind.",
+     "why": "Pass is meant to be 'deliberately quiet', but on paper a near-black fill inverts the emphasis and makes a wall of 100% cells shout.",
+     "change": "Lighten light-theme status-pass to #7C8598 (keep dark-theme #939AB0); fail/danger fills stay #B53A37 so failures remain the darkest saturated marks.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·A3–B3 and DS-type part 2·A3, bs-type-meta 12px (e.g. 'claude-code · sonnet')",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "DM Mono at 12–13px/400 on navy goes faint and wispy — the meta lines and legend labels lose their edges against #14172E.",
+     "why": "The lightest text tier is where a data tool lives; a mono that thins out at small sizes forces the eye to work and reads as low-contrast rather than airy.",
+     "change": "Adopt IBM Plex Mono (see Q1), whose 12px text weight holds up on dark grounds; if DM Mono is kept, raise bs-type-meta and bs-type-help to weight 500 and letter-spacing 0.01em.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-components dark·B4 vs G1, Controls (Copy buttons vs theme toggle)",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "Corner radii mix across controls: Copy/select/segmented controls use ~6px radii while the theme toggle is a full pill, with no system reason for the difference.",
+     "why": "Inconsistent radii in one control row is exactly the kind of default-looking detail the references never let slip.",
+     "change": "Set every control (buttons, selects, segmented, toggle) to radius 6px; reserve pill geometry for nothing, or document the toggle as the single pill exception.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-colors light part 2·E1 (warn #806100) and the timeout/quiet boxes in A-light·C4",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The light-theme warn is a muddy olive-brown that sits dead next to the clean danger red and the brand orange.",
+     "why": "On a warm paper ground a murky mustard reads as a printing error rather than a warning tone.",
+     "change": "Move light warn to #8F6D00 (same hue family, higher chroma) and warn-tint to #F7EFD8; keep dark-theme warn #E3BF5F unchanged.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·F3–H7 (empty ground right of the matrix), DS-components PageState cards·B7–E8, DS-cover",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "Large areas of the watch page and the empty states are flat, untextured navy, while the brand's own idea — a matrix of dots in brackets — appears only in the logo and cell brackets.",
+     "why": "Warp's faint dot-matrix ground (REF-D·B5–G8) is what makes it read as an engineering diagram; the same texture would make benchspec recognizable without its logo.",
+     "change": "Add a dot-grid background layer: 1.5px dots, 20px pitch, fg at 5% opacity (dark) / 7% (light), behind the matrix region, the PageState cards and the cover; keep it out of tables and the drawer.",
+     "confidence": "medium"
+    },
+    {
+     "where": "C·F4 ('Assertions'), F6 ('Phases'), F7 ('Recent output'), drawer section labels",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "low",
+     "observation": "The drawer's section labels are plain 13px sans, stylistically interchangeable with any admin template.",
+     "why": "Warp's bracketed figure captions ('[ fig. 1 — the factory ]') show how a tiny mono convention can carry a whole identity; benchspec already owns brackets and barely uses them.",
+     "change": "Set section labels as bracketed mono captions: '[ assertions ]', '[ phases ]', '[ recent output ]' in 11px mono, muted, letter-spacing 0.04em, weight 400.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·A2–F2, run progress bar",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "low",
+     "observation": "The progress track is a plain rounded rectangle — the one horizontal element every dashboard has, drawn the way every dashboard draws it.",
+     "why": "Capping the track with the mark's own brackets would tie the most-seen element on the page to the logo's geometry at zero layout cost.",
+     "change": "Add 2px-tall bracket end-caps to the track: left cap polyline (0,0)→(-3,0)→(-3,h)→(0,h) and its mirror, stroke 1.5px in line color, track height 3px, fill radius 1.5px.",
+     "confidence": "low"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono has the most point of view of the three: its slightly condensed, engineered letterforms and distinctive numerals read like diagram lettering, which is exactly the register of the bracket-matrix mark and the Warp reference. DM Mono is charming but thins out at the 12–13px meta sizes on navy (A·A3), and JetBrains Mono — while excellent — is the default IDE face, so it makes the page look like every dev tool rather than like benchspec. Plex Mono's narrower advance width also buys a few more characters of eval id per column, and it pairs with DM Sans without the matchy same-family feel."
+    },
+    "Q2": {
+     "answer": "Warp's faint dot-matrix grid used as a ground texture — the quality that makes REF-D read as an engineering diagram rather than a web page.",
+     "where": "As a background layer on the watch page behind and beside the matrix (A·F3–H7), inside the PageState empty-state cards (DS-components·B7–E8), and on the DS-cover: 1.5px dots at 20px pitch, fg at 5% opacity dark / 7% light. It echoes the bracket-matrix logo's dot field and costs no layout."
+    },
+    "Q3": {
+     "answer": "Yes — the current cool blue-grays are the main thing keeping the light theme below the dark theme, and all three references are paper-toned.",
+     "values": "bg #F6F4EF, surface #FDFCF8, raised #EEEAE1, band #F2EFE6, lbl #EAE5DA, line #E4DFD2, hover #EBE6DA; keep fg #1B1F3B, muted and fg-tertiary in the existing navy ramp, and lighten status-pass to #7C8598 so passing cells stay quiet on paper."
+    }
+   },
+   "top_three": [
+    "Retoken the light theme to warm paper (bg #F6F4EF, surface #FDFCF8, raised #EEEAE1, line #E4DFD2) and lighten light status-pass to #7C8598 — this lifts E7 from 'acceptable inversion' to the references' territory.",
+    "Adopt IBM Plex Mono (FONT-2) as the single monospace face for wordmark, data and labels — more character than JetBrains, sturdier than DM Mono at the small sizes where watch lives.",
+    "Restore accent discipline: take #F0764B out of the drawer phase bar (agent segment → note #A5ACBE) and drop the redundant 'best' captions in the leaderboard, so orange means live/selected/best and nothing else."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 2,
+  "seconds": 115.5,
+  "cost": 0.121612,
+  "tokens": {
+   "in": 59490,
+   "out": 3139
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A-light·B2–H7, whole page ground",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The light theme sits on a cool blue-gray (#F3F4F8 bg, #FFFFFF surface, #E9EBF2 raised), so it reads as a generic SaaS dashboard rather than the warm paper of REF-D/G/I.",
+     "why": "All three references are paper-toned; the cool gray makes the light theme feel like a default inversion of dark instead of a designed second theme.",
+     "change": "Shift the light ramp warm: bg #F7F5F0, surface #FFFFFF, raised #F0EDE6, band #F3F0E9, line #E3DFD5, hover #EDEAE2. Keep fg #1B1F3B.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4 vs A·C6, pass boxes vs queued boxes",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "status-pass (#939AB0 filled) and status-queued (#939AB0 1.5px outline) share the same gray, so at a glance a finished 100% cell and an untouched queued cell are the same color family distinguished only by fill.",
+     "why": "Pass is the single most important 'done' signal in the matrix and it has no positive temperature at all — the matrix reads as gray with occasional red.",
+     "change": "Keep pass quiet but warm it slightly: status-pass #9AA3B8 → #A8B0C2 in dark, and in light use #6B7286; alternatively give pass a subtle 1px inner highlight at 12% white so filled squares read as solid, not just gray.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·B1–H1, top bar and page background",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "The bracket-matrix idea appears in the logo and the cell brackets, but the page chrome (top bar, tab row, drawer header) is plain rectangles; nothing at the page level echoes the mark.",
+     "why": "Character is the stated goal: the bracket motif should show up once at page scale so the tool is recognizable without the logo.",
+     "change": "Frame the matrix column header row (skill/eval_id · baseline · trial, A·B3) with faint bracket caps at its left and right ends in `line` #2A3053, 1.5px stroke, matching the cell bracket geometry; or add a 4px bracket pair flanking the 'Matrix / Leaderboard' tab row.",
+     "confidence": "medium"
+    },
+    {
+     "where": "B·E3–F5, leaderboard 'best' treatment",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Best values get an orange diamond, orange value text, and the word 'best' — three orange marks per winning cell, so the leaderboard's right column is a wall of orange (99%, 37/38, plus deltas).",
+     "why": "The accent token's own rule is 'a mark, never text'; using accent for value, glyph and label simultaneously dilutes it and fights the orange progress bar and live dot.",
+     "change": "Keep the ◆ diamond + value in accent #F0764B, but set the word 'best' in muted #8B93A7 and drop the orange from '1.53× best' ratio lines to fg-tertiary #939AB0.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·B2, 40% counter and progress bar",
+     "criterion": "E5",
+     "kind": "push",
+     "severity": "low",
+     "observation": "The 44px counter, the '31 of 78 finished' beside it, and the full-width 3px progress bar are strong, but the bar's orange fill ends abruptly mid-track with no tick or marker at the finish position.",
+     "why": "Warp's diagram quality comes from small precise marks; the bar is the one hero element and it currently reads as a plain CSS progress element.",
+     "change": "Add a 1px tick in fg #E8ECF1 at the leading edge of the fill (full bar height + 2px), and set the track to line #2A3053 at 2px with the fill at 3px so the fill visibly overhangs the track.",
+     "confidence": "low"
+    },
+    {
+     "where": "C·F6, drawer phase bar",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The phase bar stacks bind/boot/setup/agent/grade as adjacent color blocks (gray, orange, gray) with no gaps and no per-segment labels on the bar itself; the orange agent segment dominates and reads as 'progress' rather than 'time spent'.",
+     "why": "It visually collides with the run progress bar above it — two orange horizontal bars meaning different things on one screen.",
+     "change": "Separate segments with 1px bg-colored gaps, reduce bar height to 4px, and reserve accent orange only for the agent segment while bind/boot/setup use fg-tertiary #939AB0 at 60/40/25% opacity and grade uses note #A5ACBE.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·G4, hover card",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The hover card floats on bg with a 1px line border and no shadow, so over the matrix its edges are hard to parse against the raised cells beneath it.",
+     "why": "On a dark theme, elevation without shadow reads flat; the card's sample rows visually merge with the matrix rows behind.",
+     "change": "Give popovers/drawers a shadow: 0 8px 24px rgba(11,13,31,0.5) plus the existing 1px line border, and raise the card ground from bg #14172E to raised #1F2440.",
+     "confidence": "high"
+    },
+    {
+     "where": "D2·A4–B5, phone leaderboard bars",
+     "criterion": "E5",
+     "kind": "push",
+     "severity": "low",
+     "observation": "The per-arm pass-rate bars (baseline gray, trial orange) are good, but the gray baseline bar uses the same fill as the track behind it, so its 65% length is only legible via the endpoint.",
+     "why": "On the small screen the bars are the whole story; the losing arm's bar nearly disappears.",
+     "change": "Set the non-best arm's bar fill to #6E7891 (wm-left) against a track of raised #1F2440, and round only the trailing cap (radius 2px) so length reads crisply.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A·A7, legend row",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The nine-state legend sits at the bottom edge in 12px muted text with glyphs at the same size as labels, and it crowds the matrix's last row (send-findings-back at A6 nearly touches it).",
+     "why": "The legend is the key to the whole shape language; treating it as footer noise undersells the system's most distinctive element.",
+     "change": "Give the legend its own band: 8px vertical padding, 1px line #2A3053 top border, glyphs at 14px with 6px glyph-to-label gap and 18px between items.",
+     "confidence": "medium"
+    },
+    {
+     "where": "DS-type·B3 vs A·B1, wordmark vs UI mono",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The wordmark uses the platform monospace stack while all UI data uses DM Mono, so the logo in the top bar (A·B1) is set in a visibly different face from the iteration_12 text beside it.",
+     "why": "Two monos in one 14px line reads as a rendering bug, not a system; the references all use one mono voice.",
+     "change": "Set the wordmark in the chosen UI mono (see Q1) at weight 500 with -0.01em tracking, and reserve the platform stack only as fallback.",
+     "confidence": "high"
+    },
+    {
+     "where": "A-light·C4, selected cell ring",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The selected cell's 2px accent ring (#D8430F in light) plus the orange progress bar and orange live dot put three saturated oranges in the top half of the light page, where orange is louder than on navy.",
+     "why": "On paper tones the accent needs more restraint; the light theme currently inherits dark-theme accent density.",
+     "change": "In light theme only, render the selected ring as 2px brand-navy #1B1F3B with a 1px accent inner offset, keeping orange for the live dot and progress fill.",
+     "confidence": "medium"
+    },
+    {
+     "where": "B'·C3–E7, full-suite matrix rows",
+     "criterion": "E5",
+     "kind": "push",
+     "severity": "low",
+     "observation": "At 232-cell scale the matrix holds up, but every row is the same height whether it carries live state (running, fails) or is a plain queued row, so the eye gets no rhythm of importance down the page.",
+     "why": "Stripe's docs get their calm from varied vertical rhythm; uniform 34px rows at this density feel like a spreadsheet dump.",
+     "change": "Compress queued/n-a rows to 28px and keep rows containing running/failed/error samples at 36px, with group summary rows at 40px and 500 weight — density stays, hierarchy appears.",
+     "confidence": "low"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono has the most character of the three without getting quirky: the slightly condensed proportions and the distinctive lowercase (the curved-tail l, the open g) give data a designed voice that DM Mono's neutral roundness and JetBrains Mono's wide, IDE-familiar texture both lack. It also pairs best with DM Sans — both have a engineered-but-warm tone that matches the navy/orange brand and the Tailscale-style small mono labels in the references. Numerals in the 40%/99% counters stay crisp at 400/500, and its brackets and slashes (heavy in eval ids like delegating-to-codex/plan-review-judges-findings) are the cleanest of the three. Adopt it for wordmark, data and labels so the top bar stops mixing two monos."
+    },
+    "Q2": {
+     "answer": "Warp's diagram framing: the small bracketed figure caption ('[ fig. 1 — the factory ]') and the dot-matrix texture that make the page read like an engineering drawing.",
+     "where": "Two places. (1) A bracketed mono caption above the matrix in A·B3, e.g. '[ matrix — 232 cells · 2 arms ]' in 12px muted #8B93A7, which also reinforces the bracket motif at page scale. (2) A faint 16px dot grid (dots at 4% fg opacity) behind the empty right region of the leaderboard (B·G3–H5) and behind PageState empty states, so large empty areas feel intentional rather than unfinished."
+    },
+    "Q3": {
+     "answer": "Yes — the current cool blue-gray ramp (#F3F4F8 / #FFFFFF / #E9EBF2) reads as a default light mode; the references' warmth is the single biggest gap between the light theme and the stated taste targets.",
+     "values": "bg #F7F5F0, surface #FFFFFF, raised #F0EDE6, band #F3F0E9, hover #EDEAE2, line #E3DFD5, lbl #EAE6DC; keep fg #1B1F3B, muted #5A6070 (warmed from #4A5262), accent #D8430F, accent-ink #A93F18. brand-paper for social cards becomes #F7F5F0 to match."
+    }
+   },
+   "top_three": [
+    "Warm the light theme to paper tones (bg #F7F5F0, raised #F0EDE6, line #E3DFD5) so it stands with the references instead of reading as an inverted dark theme.",
+    "Adopt IBM Plex Mono as the single mono for wordmark, data and labels, ending the platform-stack/DM-Mono split visible in the top bar.",
+    "Pull the bracket-matrix motif up to page level — bracketed mono caption over the matrix and bracket caps on the column-header row — while thinning the leaderboard's triple-orange 'best' treatment to diamond + value only."
+   ]
+  }
+ },
+ {
+  "model": "openai/gpt-6-astra",
+  "run": 1,
+  "seconds": 68.7,
+  "cost": 0.83193,
+  "tokens": {
+   "in": 54823,
+   "out": 2933
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "FONT-1·A2 and G4, progress and hover-card percentages; FONT-2·A2 and G4; DS-type part 1·B2–D4, wordmark family",
+     "criterion": "E4",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "DM Mono’s slashed zeros make the large percentages unusually busy, while the wordmark uses a separate platform-monospace voice.",
+     "why": "The identity would feel more authored if its wordmark, counters and small technical labels shared one deliberate face.",
+     "change": "Set family-mono and family-wordmark to self-hosted IBM Plex Mono; use 400 for data, 500 for group labels and metrics, and 600 for the wordmark, retaining DM Sans for prose and navigation. Keep the 44px live counter and 30px finished counter, with tabular lining numerals and 0 letter-spacing. Regenerate wordmark assets with the chosen face embedded or outlined and update the platform-font usage rule.",
+     "confidence": "medium"
+    },
+    {
+     "where": "A-light·A2–F6, page and matrix surfaces; DS-colors light part 1·A6–F7, neutral surface tokens",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The white canvas, lavender-gray cells and cool hover card make the light theme feel like an inversion of dark rather than a paper-toned companion.",
+     "why": "The cool neutral stack distances the theme from the references’ warmth and makes the orange feel more abrupt.",
+     "change": "Set light bg to #F6F4EF, surface to #FFFDFA, raised to #EFEEE8, hover to #E7E5DD, band to #F4F2EC, lbl to #ECEAE3 and line to #D8D6CE. Use surface for floating cards, retain navy #1B1F3B as primary ink, and leave the fixed brand orange #E85D2F unchanged.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4–F7, matrix cells; DS-components dark part 1·A3–H4, MatrixCell specimens",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "high",
+     "observation": "The bracketed sample groups sit inside repeated rounded rectangles, so the generic cell containers compete with the product’s distinctive small-scale geometry.",
+     "why": "The matrix reads more like a stack of UI cards than the precise benchmark diagram suggested by the logo.",
+     "change": "Make idle queued-cell backgrounds and outer borders transparent while retaining every outlined sample square; keep completed-cell fills, hover fills and the existing focus treatment. Standardize cell radius at 4px, sample boxes at 14px with 2px radii, sample gaps at 4px, and bracket-to-label spacing at 8px. Draw brackets as consistent 1px strokes, 20px tall with 4px arms, retaining all distinct state shapes.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4, failed and running samples; DS-colors dark part 2·A1–D2 and A6–H7, danger and status tokens",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The pink failure marks introduce a noticeably cooler, candy-like accent beside the orange running marks and ochre warnings.",
+     "why": "That temperature jump makes a busy mixed-state row feel more multicolored than the restrained brand palette suggests.",
+     "change": "Warm dark danger from #F27089 to #EE7D79 and danger-tint from #3A2236 to #39262D; keep status-fail and status-error aliased to danger. Retain the neutral pass color, ochre warning color and orange running color, without adding further hues or changing state shapes.",
+     "confidence": "medium"
+    },
+    {
+     "where": "B dark part 1·D3–F5, winning leaderboard values; D2·A4–C7, best-value annotations",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Winning results receive an orange diamond, orange value and repeated orange “best” label, with green explanatory lines adding another layer of emphasis.",
+     "why": "The repeated decoration competes with the numbers instead of letting the comparison carry the hierarchy.",
+     "change": "Keep winning values in accent-ink at weight 500, but render the “best” annotation in muted at 12px/16px and reduce the diamond to a fixed 6px mark with a 6px gap. On phone, make the explanatory sentence muted and color only the signed delta in success; preserve all result information.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A2–F3, tally-to-tabs spacing and matrix column header; D2·A3–C3, tally-to-tabs spacing",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Large vertical pauses above the tabs and inside the matrix header contrast with the tightly packed evaluation rows below.",
+     "why": "The upper page feels loosely assembled rather than sharing the matrix’s deliberate data-tool rhythm.",
+     "change": "Use 24px from the tally line to the tab strip, a 40px tab-strip height, and a 64px matrix column-header height with 12px bottom padding. Preserve the current evaluation-row density and 32px desktop outer gutter; use the same 24px section gap with the existing 16px phone gutter.",
+     "confidence": "high"
+    },
+    {
+     "where": "B dark part 2·C4–F6, completed skill-group progress rules",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "At full-suite scale, the completed groups create a ladder of bright horizontal rules beneath relatively quiet labels.",
+     "why": "The accumulated line weight becomes a competing visual structure rather than a supporting measurement cue.",
+     "change": "Give group-summary tracks and fills a dedicated 1px height; use #2A3053 for dark tracks and #626B83 for completed neutral fills, reserving the existing orange for active progress. Keep the main run progress bar at 4px so the two scales have an intentional hierarchy.",
+     "confidence": "high"
+    },
+    {
+     "where": "C·F3–H7, assertion list, phase section and recent output",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The assertion rows are closely packed, but the transitions into Phases, Recent output and the final path have much larger gaps.",
+     "why": "The drawer alternates between dense and loose spacing without a clear section rhythm.",
+     "change": "Retain 24px drawer padding, then use a consistent 24px between sections and 8px between each section label and its content. Set collapsed assertion rows to 36px minimum height, expanded evidence padding to 12px, and evidence/output text to 13px/20px; give the final path a 24px top margin.",
+     "confidence": "high"
+    },
+    {
+     "where": "A-light·G4–H5, hover-card edge and shadow; DS-components light part 3·A1–C2, HoverCard specimen",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The light hover card casts a broad, dark shadow that gives it substantially more visual weight than the fine-lined matrix.",
+     "why": "The floating panel feels like a generic elevated card rather than an annotation attached to an engineering diagram.",
+     "change": "Use a 6px radius, a 1px #D8D6CE border and box-shadow: 0 4px 12px rgba(27,31,59,0.08) in light. Use the same radius with a 1px #2A3053 border and 0 4px 12px rgba(0,0,0,0.16) in dark; keep static drawers shadow-free.",
+     "confidence": "high"
+    },
+    {
+     "where": "DS-components dark part 2·A4–E4, controls; A·H2 and D2·B2, theme toggle",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "low",
+     "observation": "The fully pill-shaped theme toggle introduces a softer geometry than the rectangular copy buttons, segmented controls and bracketed data.",
+     "why": "This isolated radius choice makes the controls feel collected from different component families.",
+     "change": "Set button, select, segmented-control and theme-toggle radii to 4px, keeping their existing dimensions and focus treatments. Standardize their borders at 1px and horizontal padding at 12px; reserve 6px radii for floating panels.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono gives benchspec the strongest balance of instrument-like precision and human character. In FONT-2·A2, the dotted zero makes 40% calmer than DM Mono’s slash beside the percent sign; in C4–F5, labels remain lighter and less insistently code-editor-like than JetBrains Mono. Its 600 weight can also give the wordmark a deliberate voice without introducing another face. Keep DM Sans for prose so the page remains friendly rather than uniformly terminal-like."
+    },
+    "Q2": {
+     "answer": "Warp’s diagram-like economy: let measured marks and alignment establish character instead of adding more containers or decoration.",
+     "where": "Apply it first to A·C4–F7 and the MatrixCell specimens: remove idle queued-cell outer rectangles, standardize the 14px sample geometry and 1px brackets, and retain fills only where they establish state or interaction. Extend the same restraint to the 1px group-summary rules in B dark part 2·C4–F6. Do not add a decorative dot-grid behind live data."
+    },
+    "Q3": {
+     "answer": "Yes—move toward restrained warm paper, closer to Tailscale’s plain confidence, without making the interface cream-colored or nostalgic.",
+     "values": "Background #F6F4EF; primary surface and floating panels #FFFDFA; raised cells #EFEEE8; hover #E7E5DD; alternating band #F4F2EC; table-label surface #ECEAE3; borders #D8D6CE. Retain primary navy ink #1B1F3B and fixed brand orange #E85D2F."
+    }
+   },
+   "top_three": [
+    "Make the bracketed samples the matrix’s primary visual structure: quieter cell containers, consistent 14px squares and precise 1px brackets.",
+    "Unify wordmark, data and labels in IBM Plex Mono, with deliberate 400/500/600 weights and DM Sans retained for prose.",
+    "Give light mode its own warm-paper surface system: #F6F4EF background, #FFFDFA surfaces and restrained, warm-neutral elevation."
+   ]
+  }
+ },
+ {
+  "model": "x-ai/grok-4.7",
+  "run": 2,
+  "seconds": 312.9,
+  "cost": 0.204674,
+  "tokens": {
+   "in": 48400,
+   "out": 18267
+  },
+  "output": {
+   "observations": [
+    {
+     "where": "A-light·A1 page ground; DS-colors light·B3 brand-paper",
+     "criterion": "E7",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "The light theme sits on cool blue-gray #F3F4F8, with white cards and blue-gray lines (#DADDE7, #E4E7EF), so the page reads as a generic dashboard rather than paper.",
+     "why": "Warp, Stripe and Tailscale are warm or plain paper; a cool ground makes the orange accent look electric and leaves the light theme with no character of its own.",
+     "change": "Retint the light ground to paper: --bg and --brand-paper #F7F4EF, --surface #FCFAF7, --raised #FFFFFF, --hover #F0EBE4, --band #EBE6DE, --line #E4DDD4, --muted #6B655C, --fg-tertiary #8A8478. Keep --fg #1B1F3B and light accent #D8430F.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·B2 “4 failed”; A·C4 fail marks; DS-colors dark·A2 danger",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "high",
+     "observation": "Fail is a cool magenta #F27089, while the brand is warm orange and the light theme’s danger is already a brick #B53A37.",
+     "why": "The most repeated mark on the matrix pulls the temperature off the navy-and-orange palette and makes dark and light feel like two products.",
+     "change": "Set dark --danger and --status-fail to the existing term-red #E25E59; keep light danger #B53A37 as the ink of that same hue. Recolor the X glyph and the “4 failed” tally with that token only.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4 selected cell, A·B2 progress, A·G2 live dot, B·E3 best value",
+     "criterion": "E3",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Orange is the progress bar, the live dot, the running ring, a 2px selection outline, and the leaderboard winner, all at full strength on one screen.",
+     "why": "The references use one accent once; here accent, selection and status collapse into the same shout and the bracket matrix stops being the point of view.",
+     "change": "Keep #F0764B for the progress fill, the 6px live dot and the 1.5px running ring only. Selection becomes a 1px #A5ACBE stroke, radius 6px, no orange. Winners get a 5×5px #E85D2F square, not an orange number.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·C4–E6 matrix brackets; Suite matrix·C3 expanded rows",
+     "criterion": "E1",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The cell brackets are a near-invisible hairline, while the same mark in the top bar is crisp, so the matrix reads as rounded status chips.",
+     "why": "The bracket is the only shape that makes this benchspec rather than a template grid, and at cell size it currently disappears.",
+     "change": "Draw cell brackets at 1px #A5ACBE, 80% opacity, square caps, matching the logo’s stroke proportion; do not fill them. Leave the box interiors as they are.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·E4 100% pass squares; DS-colors dark·B6 status-pass",
+     "criterion": "E1",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "Passing squares are a flat cool gray #939AB0, a different gray from the logo’s left column #A5ACBE, so a perfect cell looks disabled rather than like the mark.",
+     "why": "Muting 100% is right, but a second anonymous gray throws away the chance for every cell to be a small bracket-matrix.",
+     "change": "Set --status-pass to brand-gray #A5ACBE. Add a 1px top inset #C5CAD6 at 40% so the square has the same slight face as the logo squares, still quieter than a fail.",
+     "confidence": "high"
+    },
+    {
+     "where": "B·E3 99% and B·D4 25.5s",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Each best value carries an orange diamond, an orange figure, a green “best” and sometimes a green delta.",
+     "why": "The diamond is a generic award glyph, and three decorations on one number make the leaderboard look decorated rather than measured.",
+     "change": "Remove the ◆ and the green “best” label. Mark the winner with a 5×5px square, radius 1px, fill #E85D2F, 6px before the figure. Figure stays --fg; only the delta (“+34 pts”) uses --success #4FA97A at 12px/400.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·G4 hover card; A·C4 cell corners",
+     "criterion": "E6",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Cells, the selection ring and the hover card use different radii, and the card floats on a heavy shadow with no edge, like a default tooltip.",
+     "why": "Mixed radii and an unbordered shadow are the main “unfinished UI kit” tells next to an otherwise strict matrix.",
+     "change": "One radius scale: cells 6px, cards and drawer 8px, ring 6px. Hover card: 16px padding, 1px solid #2A3053, shadow 0 12px 32px #0B0D1F80, ground --surface #1B1F3B. Path at 12px/500; the 100% drops to 28px/500 with the meta on the next line at 12px #8B93A7.",
+     "confidence": "medium"
+    },
+    {
+     "where": "D2·A6–A8 samples and median block",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "On the phone leaderboard a darker inset starts abruptly at Samples and the pass-rate bars above do not share its edges.",
+     "why": "The nested slab breaks the one-card column, so the phone frame looks cropped out of the desktop card rather than set.",
+     "change": "One card, ground #1B1F3B, radius 8px, 16px padding. Separate metrics with 1px #2A3053 only; delete the inner slab. Bars stay 6px tall, track #2A3053, trial fill #F0764B, baseline fill #6E7891.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A4 group name vs eval ids; A·C3 column titles",
+     "criterion": "E4",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "Group names, eval ids, column titles and meta are the same small mono weight and nearly the same color, so the matrix has no hierarchy except hue.",
+     "why": "Stripe and Tailscale get structure from size, weight and tracking; here everything whispers at once and the eye falls on the red X’s only.",
+     "change": "Group name 13px/600 #E8ECF1. Eval id 13px/400 #8B93A7. Column title 11px/500 #A5ACBE, tracking 0.06em, not uppercase. Meta (“claude-code · sonnet”) 11px/400 #6E7891, 2px under the title.",
+     "confidence": "high"
+    },
+    {
+     "where": "A·A2 “40%”; B·E3 “99%”; DS-type·B6 counter",
+     "criterion": "E4",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "The counter is the one display moment, but the percent sign is the same size and color as the digits, and the face is light and wide.",
+     "why": "Numbers are the product; a full-size unit sign makes 40% and 99% look like labels instead of readings.",
+     "change": "Digits 44px/500, tracking -0.03em, --fg. “%” at 0.55em, weight 400, #8B93A7, baseline-aligned. Same split for leaderboard units (s, $) at 0.65em. “31 of 78 finished” aligns to the counter baseline, 14px/400, 12px gap.",
+     "confidence": "medium"
+    },
+    {
+     "where": "Suite matrix·C3 group rules; A·C3 arm columns",
+     "criterion": "E2",
+     "kind": "push",
+     "severity": "medium",
+     "observation": "The thin rule under a group rate is the most diagram-like mark on the page, but the arm columns themselves are only a gap.",
+     "why": "Warp reads as an engineering diagram because hairlines, not color, hold the grid; adopting that would calm the matrix without a new layout.",
+     "change": "A 1px #2A3053 rule on the left edge of each arm column, from the header baseline to the last row. Group summary rules use the same --line token and 1px, inset to the column, not a brighter white.",
+     "confidence": "high"
+    },
+    {
+     "where": "C·F6 phase bar",
+     "criterion": "E5",
+     "kind": "problem",
+     "severity": "medium",
+     "observation": "The phase bar is a  thick orange run with “bind 2.9s boot 7.4s setup 1.2s agent 63.8s grade 15.6s” colliding on one line beneath it.",
+     "why": "The drawer’s most structural graphic becomes a smear of accent and unreadable captions, which undercuts the otherwise spare assertion list.",
+     "change": "Bar height 4px, 2px gaps, radius 1px. Segments: setup #6E7891, boot #E3BF5F, agent #F0764B, grade #4FA97A. One 11px/400 #8B93A7 label per segment, 4px below, left-aligned to that segment; drop the single crowded line.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "FONT-2",
+     "why": "IBM Plex Mono is the one face that can be the wordmark, the cell labels and the 40% counter without looking like a default mono (DM Mono) or an IDE skin (JetBrains Mono). It is slightly narrower and squarer, so “benchspec” locks up tighter beside the bracket mark, and its figures stay even at 12–13px in the matrix. It also shares DM Sans’s humanist stress, so the sans explanations and the mono data feel like one instrument. JetBrains is clearer as code but its tall, quirky drawing would make the wordmark look like every other agent tool; DM Mono is even and wide and gives the lockup no point of view."
+    },
+    "Q2": {
+     "answer": "Warp’s diagrammatic restraint: structure from hairlines, color used once.",
+     "where": "The matrix arm columns and the leaderboard. Add the 1px #2A3053 column rules, quiet the selection ring and the pass squares, and let #F0764B appear only as the progress fill, the live dot, the running ring and the 5px best square."
+    },
+    "Q3": {
+     "answer": "Yes. Move the light theme off cool gray onto a warm off-white, still plain, not cream.",
+     "values": "--bg #F7F4EF; --brand-paper #F7F4EF; --surface #FCFAF7; --raised #FFFFFF; --hover #F0EBE4; --band #EBE6DE; --line #E4DDD4; --fg #1B1F3B; --muted #6B655C; --fg-tertiary #8A8478. Light accent stays #D8430F; light danger stays #B53A37."
+    }
+   },
+   "top_three": [
+    "Warm the light theme to paper (#F7F4EF / #FCFAF7 / #E4DDD4) so it stands with the references instead of as a cool-gray invert.",
+    "Put fail on the warm red #E25E59 and spend orange only four times (progress, live dot, running ring, 5px best square); selection becomes a 1px gray stroke.",
+    "Make the matrix the logo: 1px #A5ACBE brackets, pass squares in brand-gray #A5ACBE, hairline column rules, and IBM Plex Mono with unit signs smaller than the digits."
+   ]
+  }
+ }
+]

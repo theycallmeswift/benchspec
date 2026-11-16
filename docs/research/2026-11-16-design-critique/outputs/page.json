@@ -1,0 +1,1951 @@
+[
+ {
+  "model": "anthropic/claude-opus-5.5",
+  "run": 1,
+  "seconds": 135.9,
+  "cost": 0.621808,
+  "tokens": {
+   "in": 90282,
+   "out": 13034
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "A2",
+     "element": "counter tally, '27 passed'",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The visible passes are 3 on trial codex-logged-out and 12 in trial not-triggers/, which is 15, yet the tally reads 27 passed; the 12 baseline n/a samples are being counted as passes.",
+     "why": "Job 1: the headline tally inflates the pass count and breaks the rule that n/a never reads as PASS, so you misjudge how the run is going.",
+     "fix": "Bucket n/a samples as 'none' per the MatrixCell tally table: exclude them from passed, waiting and the counter's M. Add a separate tertiary tally item '24 n/a' after 'waiting', so passed + failed + errored + running + waiting equals M.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A2",
+     "element": "phone counter tally, '27/31 passed · 4 running' (also D2 '62/77 passed · 1 errored', D3 '15/69 passed')",
+     "criterion": "C2",
+     "severity": "high",
+     "problem": "The phone tally drops the failed count entirely (4 in D, 15 in D2), and its denominators (31, 77, 69) don't match the counter beside it (31 of 78, 78 of 78, 70 of 117).",
+     "why": "Job 1 on phone: the fastest signal that something is wrong, 'N failed' in danger, is missing, and the mismatched fractions invite a wrong reading.",
+     "fix": "On phone, render the same tally items as desktop in a wrapping flex row: '27 passed · 4 failed · 4 running', with failed and errored above zero in danger. Drop the 'N/M passed' fraction and keep only the counter's 'N of M finished'. Omit 'waiting' and the worker count on phone if space is short.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "baseline × plan-implement-task, quiet box",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "A sample that has been quiet for 52s shows only as one small amber-ringed box beside a red fail, and the label reads '1/3 · agent 1m 21s'; nothing outside the cell says an agent is stuck.",
+     "why": "Job 1: spotting a stuck agent means scanning every running cell for one 14px ring.",
+     "fix": "Add a 'quiet' item to the counter tally in warn when it is above zero ('1 quiet' after '4 running'). Make it a button that scrolls to and focuses the quietest cell. Count quiet samples in it, not in running.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "E3",
+     "element": "full-suite inset, trial × bootstrap/new-python-repo, '100%' beside an error box",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "A cell containing an errored sample shows a muted '100%', the 'all clear' styling, because the rate excludes the errored sample.",
+     "why": "Job 1 and job 3: the only error in the group hides behind the quietest label on the row.",
+     "fix": "Apply the muted bs-q class only when every sample is pass. If any sample is error or timeout, render the rate in fg, even at 100%.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "E7",
+     "element": "codex × review-submission-diff, three error boxes with '—'",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "An all-errored cell is three thin red outlines on a faint tint, which reads like queued outlines and is quieter than the solid fail squares around it.",
+     "why": "Job 1 and job 2: crashed cells are the most urgent problem, yet they look less alarming than a mild fail.",
+     "fix": "Raise the error box's danger-tint ground so it reaches 3:1 against the raised cell ground. Add a centred 6×2px knockout bar rotated 45°, drawn with the existing mask technique, so the error box has a distinct filled shape. Keep the 2px danger ring.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "E6",
+     "element": "triggers/ group summary, trial '— · 0/12' (also B Leaderboard 'Skill triggered' baseline '— ⓘ')",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "'—' is defined as 'every sample errored', but here it also means 'nothing finished yet' (triggers/) and 'not run' (Skill triggered), while D2 writes 'not run' for the same leaderboard value.",
+     "why": "Job 2: a reader can't tell a fully crashed arm from one that simply hasn't started or doesn't apply.",
+     "fix": "Reserve '—' for all-errored. Group summaries with nothing finished read 'queued · 0/12' in muted. Leaderboard cells for checks that don't run on an arm read 'not run' in muted on desktop and phone.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card, '94% 17 of 18 checks passed' over rows '× 9/10' and '✓ 10/10'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The sample rows add up to 19 of 20 checks, but the headline says 17 of 18, because the headline pools only shared lines and the rows count every line.",
+     "why": "Job 3: the numbers inside one card disagree, so you doubt the pooled rate you are trying to diagnose.",
+     "fix": "Show the sample rows over the same pooled lines as the headline (8/9, 9/9). Add one muted help line: '1 check per sample runs only on some arms.' The drawer keeps the full per-line list.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "A4",
+     "element": "group meta '5 evals · [trial-only]' (also E '[skips bare]' on groups where bare has results)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The scope note says the whole group is trial-only, yet baseline shows real results in that group (52%, 1/3 running); in E, '[skips bare]' sits over bare cells at 33–56%.",
+     "why": "Job 2: it suggests an arm wasn't evaluated, which undermines the arm comparison.",
+     "fix": "Show the scope note only when every check in the group skips an arm. When only some checks are scoped, write '[1 check trial-only]', from the backend's per-group count of scoped lines.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "counter, '31 of 78 finished'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "78 is samples (13 evals × 2 arms × 3), but the Counter spec says cells and the label names no unit.",
+     "why": "Job 1: progress is ambiguous when a cell is 1/3 done; developers will read it as 78 cells.",
+     "fix": "Label the unit: '31 of 78 samples finished', with the progressbar aria-valuetext set to 'samples'. Update the Counter spec to say samples.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "E3",
+     "element": "full-suite inset trial labels '3/3 pass' and group summary 'routed 12/12 · 12/12' (also A E5, C E5–E7)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Trigger evals use '3/3 pass' and '2/3 pass' instead of the pooled-rate label that every other finished cell uses, and the group summary adds the jargon 'routed' plus a duplicated '12/12'.",
+     "why": "Job 1: two label formats in one column slow scanning, and '2/3 pass' reads as a near-pass rather than a failure.",
+     "fix": "Finished trigger cells show the pooled rate like any cell ('67%', or '100%' muted). Group summaries read '100% · 12/12'. Remove 'routed'; put the trigger-check explanation in the hover card note.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "B5",
+     "element": "scrolled inset, red marks left of pinned eval ids ('built-…-since', 'event-winners')",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Unlabelled red bars appear in the pinned id column, are not in the legend, and act as markers, which the system forbids; slivers of scrolled cells ('%', 'ie') also show under the pinned edge.",
+     "why": "Job 1 on phone: an unexplained red mark invites guessing about which arm failed.",
+     "fix": "Remove the bars. Give the pinned column an opaque surface ground up to its 1px line edge with z-index above the cells, and show the size-shade gradient only on .bs-scrolled.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "G4",
+     "element": "hover card for baseline × codex-logged-out",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The card for the hovered baseline cell (pointer at D4) opens to the right of the selected trial cell, so it visually attaches to the wrong cell.",
+     "why": "Job 3: you read baseline's three fails as trial's.",
+     "fix": "Anchor the card to the hovered cell's own bounding box: below it with an 8px gap, or above if there isn't room. Never position it next to a different cell; flip vertically rather than shift horizontally across columns.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D",
+     "grid": "D3",
+     "element": "bottom sheet header, 'baseline · sample 2 of 3'",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The phone sheet drops the ‹ › sample buttons that the desktop drawer has, so another sample can only be reached by closing and reopening.",
+     "why": "Job 3: comparing a cell's three samples on phone takes extra steps.",
+     "fix": "Add the Previous sample and Next sample bs-iconbtn buttons after 'sample 2 of 3' at size-control-phone (44px) square. Keep their aria-labels.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A5",
+     "element": "phone eval ids 'plan-…t-task', 'pytho…issing', 'deleg…codex/'",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Middle truncation in the 104px id column leaves most eval ids unrecognisable, while each 112px arm column holds only about 90px of content.",
+     "why": "Job 3 on phone: you can't tell which eval you are about to open.",
+     "fix": "When samples ≤ 3, set the phone arm column to 96px (boxes + 4-char rate + space-8 padding) and give the freed width to the id column. Truncate from the start ('…implement-task') so the distinctive end shows; the full id is in the sheet.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "E4",
+     "element": "leaderboard sub-lines '1.53× best', '2.24× best'",
+     "criterion": "C8",
+     "severity": "medium",
+     "problem": "'1.53× best' sits under the losing value and repeats the word 'best', which reads as a best marker.",
+     "why": "Job 2: it muddies which arm won each metric.",
+     "fix": "Write '1.53× slower than best' for times and '2.24× the best cost' for cost, in muted. Show the word 'best' only under the winning value.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "With 2–4 arms, columns keep each metric on one row, so you compare values across a single row. Arms appear in the same order as the matrix columns, and the frame fits the width. B-alt packs ratio and value into every cell ('1.00× 99%'), puts the best marker in five places, and already clips the cost column at two arms."
+    }
+   },
+   "top_three": [
+    "Fix the tally buckets: n/a never counts as passed, and phone shows the same failed and errored counts and the same denominator as the desktop counter.",
+    "Give every symbol and label one meaning: '—' only for all-errored, pooled rates for every finished cell, scope notes only when true, and hover-card rows counted over the same lines as the headline.",
+    "Make problems louder outside the boxes: a 'N quiet' tally item, no muted 100% when a sample errored or timed out, and an error box with a distinct filled shape."
+   ]
+  }
+ },
+ {
+  "model": "anthropic/claude-opus-5.5",
+  "run": 2,
+  "seconds": 144.1,
+  "cost": 0.632988,
+  "tokens": {
+   "in": 90282,
+   "out": 13593
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "E6",
+     "element": "group summary, triggers/ × trial, '— · 0/12' (also B·D3 'Skill triggered' baseline '—' vs D2·B5 'not run', and B part 2·C6 to-spec/ '— · 9/39')",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The dash, which the system reserves for 'every sample errored', also stands for 'nothing finished yet' and 'not run on this arm', and the same leaderboard fact reads '—' on desktop but 'not run' on phone.",
+     "why": "Jobs 1 and 2: a group that hasn't started looks the same as a group where every sample crashed, and the same leaderboard fact reads differently on desktop and phone.",
+     "fix": "Show '—' only when the backend reports denominator 0 because every sample errored. When no sample has finished, render the summary as 'queued · 0/12' or 'running · 0/12' in muted. When the metric is scoped off the arm, render 'not run' in muted. Apply this one mapping to group summaries, cells, the leaderboard table and the phone card.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "D6",
+     "element": "matrix cell, continue-plan-codex-task × trial, '2/3 pass' next to a red fail box (also '3/3 pass' cells in C·D5 and B part 2·E3)",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Trigger-only cells use a '2/3 pass' label instead of the pooled rate, so a cell with a failed sample carries the word 'pass'.",
+     "why": "Job 1: the word contradicts the red box and makes a failing cell read as passing, and it is inconsistent with the '%' labels in every other cell.",
+     "fix": "Always render the finished-cell label as the pooled rate from the backend (e.g. '67%'), muted only at 100%. Remove the 'N/M pass' label variant. Keep 'N/M' only in the running label format '{done}/{total} · {phase} {elapsed}'.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A2",
+     "element": "phone counter tally, '27/31 passed · 4 running' (also D3·A3 '15/69 passed · 1 timed out…' and D2·A3 '62/77 passed · 1 errored')",
+     "criterion": "C2",
+     "severity": "high",
+     "problem": "The phone tally drops the failed count; in D3 that hides 54 failures behind '15/69 passed'.",
+     "why": "Job 1: on a phone the tally is the one place to learn that something is wrong without scrolling, and failures are the most common problem.",
+     "fix": "On phone, render the tally as '{passed} passed · {failed} failed · {errored} errored · {running} running'. Drop any zero bucket except failed. Show failed and errored in danger when above zero, and wrap with flex-wrap. Count timeouts under failed, as the MatrixCell tally buckets specify.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card, gemini-hack-days × opencode, '17 of 18 checks passed' vs rows '✗ 9/10' and '✓ 10/10'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The headline counts 17 of 18 checks while the sample rows add up to 19 of 20, because the rows include the skill-trigger line that rates exclude.",
+     "why": "Job 3: numbers that don't add up within one card make the user distrust the rate they are trying to explain.",
+     "fix": "Compute the sample-row figures from the same check set as the pooled rate, so the rows sum to the headline. Show excluded checks only in the drawer as '–' rows with the caption '[ … · 1 not run ]'.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "G4",
+     "element": "hover card for codex-logged-out × baseline, placed beside the selected trial cell",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The pointer is on the baseline cell (C4), but the card floats right of the orange-ringed trial cell, so it appears to describe trial (100%) while it reports baseline (52%).",
+     "why": "Job 3: the user can read baseline's failures as trial's.",
+     "fix": "Anchor the hover card to the hovered cell's bounding box: open below it, left-aligned to the cell, with an 8px gap. Flip above only when the space below is shorter than the card. Never anchor to the selected cell.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "E3",
+     "element": "matrix cell (part 2, full suite), new-python-repo × trial, '100%' muted with an error box (also C·D4 plan-review-judges-findings × trial)",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "A cell with an errored sample shows a muted '100%' because the error is left out of the denominator, so the cell looks like a quiet pass.",
+     "why": "Job 1: crashed samples are exactly what users need to spot, and the muted rate tells them to skip this cell.",
+     "fix": "Apply the bs-q muted style only when every sample is pass. If any sample is error or timeout, render the rate in fg, even at 100%.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "group summary bars, delegating-to-codex/ '57% · 4/15' and '100% · 3/15'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The progress fill is a stub of about 2% of the track, while 4/15 should fill about 27%.",
+     "why": "Job 1: group bars are meant to show how far along each group is, and here they understate progress.",
+     "fix": "Set the fill width to done/total × 100% of the track (style=\"width: 26.7%\"), computed from the same done and total figures printed in the label.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "F4",
+     "element": "leaderboard sub-line under trial Median time, '1.53× best'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "'1.53× best' reads as 'best' when it means 1.53 times the best value, so the losing arm's cell contains the word best.",
+     "why": "Job 2: the user can misread which arm won on time and cost.",
+     "fix": "Render it as '1.53× slower than baseline' for time metrics and '2.24× baseline' for cost. Reserve the word 'best' for the winning value's sub-line.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "E5",
+     "element": "group summary, not-triggers/ (collapsed), baseline 'n/a · 12/12' and trial 'routed 12/12 · 12/12'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "'routed' is internal jargon. 'n/a · 12/12' counts n/a samples as finished, although the tally buckets exclude n/a from counts.",
+     "why": "Jobs 1 and 2: the user can't tell whether the group passed or how many samples ran.",
+     "fix": "Use the standard summary format: trial '100% · 12/12', baseline 'n/a' with no count and no bar. Remove the word 'routed' from all summaries.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "D5",
+     "element": "four-arm cell, event-winners × claude-code '89%' (three fail-1 boxes) vs bare '33%'",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "At size-box-sm, the 1.34:1 gap between fail steps is too small to see, so an 89% cell looks as red as a 33% cell.",
+     "why": "Job 1: in a red-heavy matrix the user can't separate near-misses from real failures without reading every rate.",
+     "fix": "Widen the step contrast to at least 1.6:1 between neighbours. Lighten dark status-fail-1 toward #FDB3B5 and keep status-fail-3 at #F6242C, rechecking that every step stays ≥3.2:1 on raised and hover. Regenerate contrast.md.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "A4",
+     "element": "full-suite matrix (part 2), collapsed group catch-me-up/ '58% · 45/45'",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "Groups with many failing evals start collapsed, and nothing on the summary row says how many evals failed.",
+     "why": "Job 1: across 232 cells the user must expand each group to find failing cells.",
+     "fix": "Add the failing-eval count to the group meta line, in danger when above zero: '15 evals · 9 failing · [trial-only]'. Pull the count from the backend. Keep groups collapsed by default.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "H2",
+     "element": "counter row 'elapsed 6m 41s · ~10m le…', matrix caption missing its closing ']', theme toggle (same in B·H2, C·H2, E·H2)",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The app content overflows the window's right edge, so the ETA, the caption bracket, the progress bar's right cap and the toggle are cut off.",
+     "why": "Job 1: the ETA is part of 'how far along', and it is the clipped text.",
+     "fix": "Give .bs-app box-sizing: border-box and max-width: 100%, so the space-32 padding sits inside the window. Lay the counter row out with flex and min-width: 0 so the elapsed text stays inside.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "D3",
+     "element": "phone bottom sheet header, 'baseline · sample 2 of 3'",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The sheet has no ‹ › sample navigation, unlike the desktop drawer, and the sub-lines switch from mono to DM Sans.",
+     "why": "Job 3: comparing a cell's failing samples on a phone means closing the sheet and reopening it each time.",
+     "fix": "Add the two bs-iconbtn buttons '‹' and '›' (aria-label 'Previous sample' and 'Next sample') after 'sample 2 of 3' at size-control-phone (44px). Set the .bs-sub lines in bs-type-body-mono, as on desktop.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A5",
+     "element": "phone eval-id column, 'pytho…issing', 'plan-…ndings', 'codex…ed-out'",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Eval ids are cut in the middle to about 6 visible characters, even though the two arm columns leave unused width.",
+     "why": "Job 1 on phone: the user can't tell which eval a red cell belongs to.",
+     "fix": "For two arms, shrink the arm columns to the box frame plus a 4-character rate (about 96px) and give the rest to the id column. Let ids wrap to two lines, breaking only after '-' or '/' (overflow-wrap: anywhere off, <wbr> after each hyphen). Grow the row height to fit.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "D7",
+     "element": "B-alt header 'pass rate ▼ ⓘ' in orange; 'ⓘ' glyphs in B·B3; '!' in E·G5; '×' instead of '✗' in A·G4",
+     "criterion": "C6",
+     "severity": "low",
+     "problem": "Accent is used as text, which the system forbids, and the screens use glyphs outside the iconography list.",
+     "why": "Consistency: glyph and colour meanings drift between views, which weakens the status vocabulary.",
+     "fix": "Render sorted headers in fg with '▼' in muted. Replace 'ⓘ' with a text button 'How counted' in muted. Use '✗' for fails and the word 'ERROR' for errors in hover cards, with the sample label in fg and only the verdict in danger.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "With 2–4 arms, arms as columns keep the matrix's column order, so each metric row compares arms side by side and the best value lines up under its arm. B-alt already clips the cost column with only two arms, and it doubles every value with a ratio ('1.00× 99%') that slows the read. B should borrow one thing from B-alt: a rank or a 'trial is best · +37 pts' line above the table."
+    }
+   },
+   "top_three": [
+    "Give each unfinished or no-data state exactly one word everywhere: '—' only when every sample errored, 'not run', 'queued' or 'running'. Apply it to cells, group summaries, the leaderboard and the phone card.",
+    "Show the failed count, in danger, in the phone tally, and count timeouts as failed on every screen.",
+    "Make cell rates honest: always the pooled % (no 'N/M pass'), muted only when every sample passed, and hover-card rows that sum to the headline."
+   ]
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 1,
+  "seconds": 64.9,
+  "cost": 0.16985,
+  "tokens": {
+   "in": 69375,
+   "out": 3110
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "E4",
+     "element": "matrix cell, trial × codex-logged-out",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The trial × codex-logged-out cell has a 1.5px orange selected ring even though no drawer is open and the pointer is hovering over the baseline cell.",
+     "why": "Job 1 & 3: The orange ring means 'selected (drawer open)' or 'keyboard focus', so showing it on an unselected cell with no open drawer confuses system status and steals focus from actual problems.",
+     "fix": "Remove `.bs-sel` from `trial × codex-logged-out` in Frame A (and A-light); only apply `.bs-sel` when the cell's drawer is actively open as in Frame C.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 2)",
+     "grid": "E2",
+     "element": "matrix cells, trial × new-python-repo (E3) and group summary (E2)",
+     "criterion": "C2",
+     "severity": "high",
+     "problem": "When a group collapses, the `1 error` text in the group header disappears (as seen in `delegating-to-codex/` at E4 vs Frame C), and inside open groups, cells with an errored sample alongside passing samples (`[pass, pass, error] 100%` at E3) style `100%` in muted text just like a clean 3/3 pass.",
+     "why": "Job 1 & 3: A developer scanning for why the run exited 1 cannot spot the errored cell at a glance because the muted `100%` label masks the single red hollow error box.",
+     "fix": "Never apply `.bs-q` (muted text) to a cell's rate label if any sample in that cell has `error` or `timeout`, and keep the `N error` danger badge visible in group summary rows even when the group is collapsed.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C3",
+     "element": "group summary bars, delegating-to-codex/ (C3, E3) and to-spec/ in B (part 2) (C6, E6)",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "In-progress group summary bars (`bs-gbar bs-live`) are drawn at a tiny ~4px stub width instead of scaling to the group's completion or pass rate (`4/15` or `57%`).",
+     "why": "Job 1: The bar looks like 2% progress when the group is actually 27% complete (4/15 samples) with a 57% pass rate, violating honest data encoding.",
+     "fix": "Set the width of `.bs-gbar.bs-live i` to the percentage of finished samples in that group (`done / total * 100%`, e.g., `26.7%` for `4/15`), and set finished group bars to `100%` width.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "counter headline and tally (B2) vs group summaries (C3, E3)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The counter mixes units without labels: `31 of 78 finished` and the tally (`27 passed 4 failed...`) count samples (`13 evals × 2 arms × 3 samples = 78`), whereas the Counter spec states it counts cells, and `4 running` conflicts with the 3 running/booting/quiet sample boxes visible in the matrix (`plan-implement-task` has 2 on baseline, 2 booting on trial).",
+     "why": "Job 1: Mixing cell and sample counts without naming the unit makes it hard to reconcile the top-level progress with the matrix rows.",
+     "fix": "Explicitly name the unit in the counter (`31 of 78 samples finished` or `cells finished`) and ensure the tally's `running` and `waiting` counts strictly equal the sum of sample states in the matrix.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "F3",
+     "element": "drawer sample navigation `<` `>` buttons",
+     "criterion": "C5",
+     "severity": "medium",
+     "problem": "The `<` and `>` sample navigation buttons in the drawer header (`baseline · sample 1 of 3 < >`) are rendered as tiny inline glyphs (~12px wide) rather than 32×32px `.bs-iconbtn` buttons, and lack a disabled state on `<` when viewing sample 1.",
+     "why": "Job 3: Navigating between samples to compare why sample 1 failed vs sample 2 passed is slow and error-prone with a tiny click target, and fails WCAG 2.5.8 target size.",
+     "fix": "Render both buttons using `.bs-iconbtn` (`32px × 32px`), add `disabled` to the previous button on sample 1, and space them by `space-4`.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "E3",
+     "element": "phone bottom sheet header, sample navigation",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "On the phone bottom sheet (`D·E3`), the `<` and `>` sample navigation buttons are completely missing from the `baseline · sample 2 of 3` line.",
+     "why": "Job 3: On mobile, where there is no hover card, a user cannot switch between samples 1, 2, and 3 of an opened cell at all.",
+     "fix": "Include the previous/next `.bs-iconbtn` buttons (sized to `size-control-phone` or at least 32×32px) on the `sample N of M` row in the mobile bottom sheet.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "D4",
+     "element": "scrolled phone matrix pinned column (`D4`–`D5`)",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "In the scrolled 4-arm phone inset (`D3·D4`), the pinned `skill/eval_id` column does not have an opaque `surface` background and `shade` drop-shadow, so the scrolled-under `bare` column's red boxes bleed through on the left edge and its `%` signs poke out on the right.",
+     "why": "Job 1: Overlapping cell fragments make the pinned eval names and adjacent arm cells visual clutter and hard to read on a 390px screen.",
+     "fix": "Give `.bs-mx .bs-mrow > :first-child` an opaque `background: var(--surface)`, `overflow: hidden`, and the `.bs-mx.bs-scrolled::before` `size-shade` gradient mask over the scroll seam so scrolled cells are cleanly clipped.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card on opencode × gemini-hack-days",
+     "criterion": "C6",
+     "severity": "medium",
+     "problem": "The hover card places the error detail line (`opencode exited 1: provider returned 429`) in muted gray below Sample 2 instead of in a top `.bs-hprob` danger summary line above the sample rows, and omits the bottom help note (`Open the cell for assertions and output.`).",
+     "why": "Job 1 & 3: Inconsistent hover card layout across cells slows down rapid scanning of errors when hovering across the matrix.",
+     "fix": "Follow the HoverCard spec: render `.bs-hprob` (`error · sample 2 exited 1: provider returned 429`) in `danger` immediately under the headline rate, keep sample rows in a contiguous 3-column grid, and include the muted footer note.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "A4",
+     "element": "phone leaderboard layout (`A4`–`B8`)",
+     "criterion": "C6",
+     "severity": "medium",
+     "problem": "The phone leaderboard in D2 uses horizontal progress bars per metric and repeats every arm under 6 stacked metric sections instead of using the `.bs-lbc` ranked arm-card component specified in the design system.",
+     "why": "Job 2: With 3–4 arms, repeating all arms 6 times with full-width orange bars for the winner creates a wall of orange and requires scrolling to see a single arm's profile.",
+     "fix": "Use the `.bs-lbc` component from `Leaderboard/README.md`, or limit horizontal bars strictly to the top `Pass rate` section and use a compact tabular grid for secondary metrics.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B (part 2)",
+     "grid": "E6",
+     "element": "matrix cell, trial × not-triggers/handoff-doc",
+     "criterion": "C6",
+     "severity": "medium",
+     "problem": "The cell label reads `running · agent 9s` instead of the standard `{done}/{total} · {phase} {elapsed}` format (`0/3 · agent 9s`) used in every other running cell (`2/3 · agent 14s` right beside it at C6).",
+     "why": "Job 1: Dropping the `0/3` fraction breaks tabular alignment and makes it harder to compare progress across arms in the same row.",
+     "fix": "Always format running and booting cell labels as `{done}/{total} · {phase} {elapsed}` (i.e. `0/3 · agent 9s`).",
+     "confidence": "high"
+    },
+    {
+     "frame": "A-light",
+     "grid": "H2",
+     "element": "theme toggle button (`Light theme`)",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "In the light-theme frame (`A-light·H2`), the theme toggle button still reads `Light theme` instead of naming the theme it switches to (`Dark theme`), and is clipped on the right edge across frames A, A-light, B, and C.",
+     "why": "violates the TopBar spec ('label names the theme it switches to') and looks broken at the viewport edge.",
+     "fix": "Change the button label to `Dark theme` when `data-theme=\"light\"` is active, and ensure `.bs-top` has proper right padding within the container so the button border is never clipped.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 1)",
+     "grid": "H2",
+     "element": "counter elapsed time (`took 19m 42s`) and live ETA (`A·H2`, `B-part-2·H1`, `E·H2`)",
+     "criterion": "C4",
+     "severity": "low",
+     "problem": "The right-aligned elapsed/ETA text (`.bs-el`) is clipped by the right edge of the viewport in every desktop frame (`~10m le`, `took 19m 4:`, `~1h 18m le`, `took 1h 32m 10`).",
+     "why": "Job 1: Truncating the ETA and total run duration hides key status information.",
+     "fix": "Ensure `.bs-counter` respects the `space-32` `.bs-app` right padding and `box-sizing: border-box` so `.bs-el` wraps or sits cleanly inside the right margin.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, Frame B (arms as columns) keeps the exact same horizontal arm order and spatial mental model as the Matrix tab (`baseline` on the left, `trial` on the right), avoids repeating `1.00×` ratio noise on every metric cell, and lets the eye scan down one column to read an arm's full profile or across a row to compare a single metric."
+    }
+   },
+   "top_three": [
+    "Fix group summary progress bars (`bs-gbar bs-live`) so their fill width accurately reflects `done / total` samples rather than rendering as a tiny ~4px stub.",
+    "Keep errored samples salient when all other samples pass: never mute a `100%` cell rate label when the cell contains an `error` box, and keep the red `N error` count visible on collapsed group headers.",
+    "Remove the false selected ring on `trial × codex-logged-out` in Frame A and restore 32×32px `< >` sample navigation buttons to both desktop and phone drawers."
+   ]
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 2,
+  "seconds": 59.1,
+  "cost": 0.17813,
+  "tokens": {
+   "in": 69375,
+   "out": 3938
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "E4",
+     "element": "matrix cell, trial × codex-logged-out",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The cell trial × codex-logged-out has the 1.5px orange selected ring (.bs-sel), even though no drawer is open and the pointer is hovering over baseline × codex-logged-out (C4).",
+     "why": "Job 1 & 3: In the benchspec system, orange (`accent`) means live progress, focus, or the selected cell with an open drawer; putting it on a finished 100% cell when no drawer is open creates a false focal point and misleads the user about what is selected or running.",
+     "fix": "Remove `.bs-sel` from `trial × codex-logged-out` in Frame A and A-light so that only cells with an open drawer (like Frame C·C4) display the inset accent ring.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "group summary bars under delegating-to-codex/ (C4, E4)",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The in-progress group summary bars under `57% · 4/15` (C4) and `100% · 3/15` (E4) are rendered as tiny ~4px orange ticks instead of being scaled to either the pass rate (57%, 100%) or completion ratio (4/15, 3/15).",
+     "why": "Job 1: Users rely on group bars to see group-level progress or pass rates at a glance; a 3% width bar for '100% · 3/15' contradicts both numbers and makes the group appear barely started or failing.",
+     "fix": "Set the `<div class=\"bs-gbar bs-live\"><i style=\"width: ...\">` width to the true percentage (either completion `26.7%` and `20%`, or pass rate `57%` and `100%` per MatrixGroup spec) so the visual bar matches the text above it.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 2)",
+     "grid": "E3",
+     "element": "matrix cell, trial × new-python-repo, and C·E4 trial × plan-review-judges-findings",
+     "criterion": "C2",
+     "severity": "high",
+     "problem": "Cells with 2 passing samples and 1 errored sample (`[pass, pass, error]`) render their text label as `100%` in muted gray (`.bs-q`), identical to a flawless 3/3 pass cell.",
+     "why": "Job 1 & 3: Because the `100%` label is muted and says 100%, a cell where 1/3 of samples crashed before grading blends in with healthy 100% cells, hiding a critical harness/boot failure unless the user spots the single hollow red square.",
+     "fix": "Do not apply `.bs-q` (muted text) to cells containing any `error` or `timeout` sample, or append the valid sample count when `n < total` (e.g. `100% (2/3)` in primary `fg` color) so partial-crash cells never masquerade as clean 100% passes.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "A2",
+     "element": "Run progress counter section (missing above Tabs)",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "Opening the cell drawer on the Matrix tab completely removes the Counter section (`✓ Finished · 100% · 78 of 78`, progress bar, and tally) from the top of the page.",
+     "why": "Job 1 & 3: Removing the top-level run counter when inspecting a cell causes a jarring vertical layout shift in the matrix and strips away overall run context while drilling into failures.",
+     "fix": "Keep `<section class=\"bs-counter\">` visible above `.bs-tabs` when the drawer is open, matching Frames A, B, and E.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 2)",
+     "grid": "E6",
+     "element": "matrix cell, trial × not-triggers/handoff-doc",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The cell label reads `running · agent 9s` instead of `{done}/{total} · {phase} {elapsed}` (`0/3 · agent 9s`), omitting the completed sample count.",
+     "why": "Job 1: It breaks consistency with every other active cell in the matrix (such as `2/3 · agent 14s` right beside it at C6 and `0/3 · setup 1s` in A·E4), forcing the user to count boxes to know how many samples have finished.",
+     "fix": "Format all active cell labels strictly as `{done}/{total} · {phase} {elapsed}` (here, `0/3 · agent 9s`) per the MatrixCell specification.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "H1",
+     "element": "TopBar status and counter elapsed time (H1, H2, H3) across Frames A, A-light, B, C, E",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Right-aligned elements in the desktop frames (`Light theme` button at H1, `~10m left` at H2, `[ 13 evals × 2 arms · live ]` at H3) are clipped by the right edge of the application container.",
+     "why": "Job 1: Clipping the ETA (`~10m le`), total duration (`took 19m 4`), and theme toggle hides system status and looks like a broken layout.",
+     "fix": "Ensure `.bs-app` uses `box-sizing: border-box; width: 100%; padding: var(--space-32)` and that child flex/grid rows wrap or constrain width within the viewport rather than overflowing horizontally.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "HoverCard on opencode × gemini-hack-days",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "The hover card places the error detail `opencode exited 1: provider returned 429` in muted gray below Sample 2 and uses lowercase `! error`, instead of putting a top-level `danger`-colored `.bs-hprob` problem line above the sample list and uppercase `ERROR` in the sample row.",
+     "why": "Job 3: Muting the crash reason in gray inside the sample list makes the most important diagnostic message in the hover card look like secondary metadata.",
+     "fix": "Follow the HoverCard spec: render `<div class=\"bs-hprob\">error · sample 2 exited 1 (provider returned 429)</div>` in `danger` directly below the `94%` headline, and display `ERROR` in `danger` in the Sample 2 row.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "G2",
+     "element": "Drawer sample navigation buttons ‹ and ›",
+     "criterion": "C5",
+     "severity": "medium",
+     "problem": "The previous/next sample chevrons (`‹ ›`) next to `baseline · sample 1 of 3` are rendered as tiny bare characters without button affordance, adequate spacing, or disabled state on `‹` when at sample 1.",
+     "why": "Job 3: When drilling into a multi-sample cell to compare why sample 1 failed and sample 2 passed, tiny unstyled chevrons are hard to spot and click, and `‹` looks active when on the first sample.",
+     "fix": "Render `‹` and `›` as `32px × 32px` `.bs-iconbtn` buttons with `disabled` (`fg-tertiary`) on `‹` when viewing sample 1 of 3.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "D2",
+     "element": "Bottom sheet drawer header on phone (missing sample ‹ › buttons)",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "The phone bottom sheet header shows `baseline · sample 2 of 3` as plain text with no `‹` or `›` sample navigation buttons at all.",
+     "why": "Job 3: On a phone, tapping a cell opens the sheet for one sample, but without sample navigation buttons the user has no way to inspect the other 2 samples in that cell.",
+     "fix": "Include the Previous sample (`‹`) and Next sample (`›`) icon buttons in the phone bottom sheet header with `size-control-phone` (`44px`) or at least `32px` tap targets.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "D5",
+     "element": "Scrolled phone matrix sticky eval_id column",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "In the scrolled phone inset (D4–D5), the `bare` arm's red status boxes and `%` characters bleed visibly to the left and right of the pinned `skill/eval_id` column instead of being cleanly masked behind it.",
+     "why": "Job 1: Visual bleed of red fail boxes along the left edge of the pinned eval names creates false red status signals next to the wrong column and makes the sticky header look broken.",
+     "fix": "Give the sticky first column (`> :first-child`) an opaque `background: var(--surface)`, `left: 0`, full coverage to the container's left edge, and `overflow: hidden` on `.bs-mx-scroll` so scrolled cells never peek out to the left of the pinned label column.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "A4",
+     "element": "Phone leaderboard layout (bars and multi-section list)",
+     "criterion": "C6",
+     "severity": "medium",
+     "problem": "Frame D2 invents a custom bar-chart-plus-key-value layout (`accent` orange bar for trial, `trial is best · +37 pts`, `not run` for Skill triggered) that contradicts the Leaderboard `.bs-lbc` phone specification and misuses `accent` for a static finished metric bar.",
+     "why": "Job 2: Using `accent` orange for a finished pass-rate bar violates the design system rule that `accent` is only for live progress, selection, or focus (finished bars use `fg-tertiary` or `success`), and changing `n/a` to `not run` on baseline `Skill triggered` conflates two distinct states.",
+     "fix": "Either use the spec's `.bs-lbc` ranked arm card list, or if keeping the metric-grouped phone card, color finished metric bars in `fg-tertiary` (reserving `accent-ink` for `◆ 99%`) and change baseline's `Skill triggered` value from `not run` to `n/a` to match desktop Frame B.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A2",
+     "element": "Counter tally line on phone (D·A2, D2·A3, D3·A3)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The phone counter tally changes format to a fraction (`27/31 passed · 4 running` in D, and `15/69 passed · 1 timed out · 1 errored` in D3 where 15+1+1 = 17, not 69 or 70) and drops the `4 failed` count that is highlighted in red on desktop Frame A.",
+     "why": "Job 1: Dropping `4 failed` from the mid-run tally on phone hides the primary problem indicator in the counter header, and `15/69 passed` in D3 leaves 52 finished cells completely unaccounted for.",
+     "fix": "Use the same unambiguous tally items on phone as on desktop (`27 passed · 4 failed · 4 running · 43 waiting`, wrapping via `flex-wrap: wrap`) with `failed` and `errored` > 0 in `danger`.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A-light",
+     "grid": "H1",
+     "element": "Theme toggle button label ('Light theme' in light mode)",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "In `A-light` (which is already displaying the light theme), the theme toggle button in the top bar still reads `Light theme` instead of `Dark theme`.",
+     "why": "Per the TopBar and Controls spec, the theme toggle label must name the theme it switches to (or reflect `aria-pressed` state clearly), so showing `Light theme` while already in light mode confuses what clicking the button will do.",
+     "fix": "Update the toggle button text to `Dark theme` (with `aria-pressed=\"true\"`) whenever `data-theme=\"light\"` is active.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B7",
+     "element": "Legend fail swatch and tooltip (A·B7, C·B7, D·A7, E·B7)",
+     "criterion": "C4",
+     "severity": "low",
+     "problem": "The `fail` entry in the bottom legend shows a 2-band square instead of the 3-step swatch (`bs-b-failsteps`: `status-fail-1`, `-2`, `-3`) and has no visual cue that hovering/focusing it explains the shading (`Darker = fewer checks passed.`).",
+     "why": "Job 1 & 3: Because pass and fail differ by color only and fail uses three redness steps, users who don't know why some red squares are pink and others are deep red cannot discover the 3-step grading rule from a static 2-band icon.",
+     "fix": "Render the legend fail box with the 3-band `.bs-b-failsteps` gradient and change the legend text to `fail (3 steps)` or add a subtle dotted underline under `fail` so users know it has a help tooltip.",
+     "confidence": "medium"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, Frame B (arms as columns) keeps the exact same horizontal left-to-right arm positions as the Matrix tab (`baseline` then `trial`), so switching tabs requires zero mental transposition. It also puts each metric's primary value on top and secondary context (`+37 pts vs baseline`, `1.53× best`, `+1 errored`) cleanly stacked on a second line, whereas Frame B-alt crams ratios and raw values onto a single line (`1.53× 39.0s`, `1.00× $0.087`) that is harder to scan and already clips at the right edge with just 2 arms."
+    }
+   },
+   "top_three": [
+    "Fix false visual signals in the matrix: remove the stray orange `.bs-sel` ring from `trial × codex-logged-out` in Frame A/A-light, and fix the group summary bars in Frame A (`delegating-to-codex/`) so their fill widths match the actual percentages instead of rendering as tiny 4px ticks.",
+    "Never display a muted `100%` label on cells that contain an errored or timed-out sample (such as `trial × new-python-repo` in Frame B part 2 and `trial × plan-review-judges-findings` in Frame C); keep the rate unmuted or show the valid sample fraction (`100% · 2/3`) so partial crashes don't blend into clean passes.",
+    "Preserve full navigation and context when drilling into a cell: keep the Counter section visible above the tabs when the desktop Drawer is open (Frame C), and include properly sized `‹ ›` sample navigation buttons in both the desktop Drawer and the phone bottom sheet (Frame D)."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 1,
+  "seconds": 22.8,
+  "cost": 0.089284,
+  "tokens": {
+   "in": 54944,
+   "out": 4848
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "counter line, 31 of 78 finished",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Counter says 78 cells for 13 evals x 2 arms, which is the sample count, not the cell count.",
+     "why": "Job 1 and 2: progress % and finished counts cannot be trusted across counter, matrix and leaderboard.",
+     "fix": "Use run.start.cell_count for M and count finished cells, or relabel to samples and keep cells for the matrix caption.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card, 94% 17 of 18 checks",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Headline 17 of 18 does not match rows 9/18 plus error plus 10/18.",
+     "why": "Job 3: drill-in starts from a number that cannot be reconciled, so failure scope is misread.",
+     "fix": "Pool the headline from the same backend numerator and denominator as the rows, and show error as excluded with n noted.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "D3",
+     "element": "leaderboard table, arm headers",
+     "criterion": "C1",
+     "severity": "high",
+     "problem": "Arm names and harness lines are rotated vertical, forcing sideways reading to compare arms.",
+     "why": "Job 2: which arm won and by how much cannot be read in three seconds.",
+     "fix": "Keep headers horizontal in matrix order baseline first, wrap harness line to two lines, allow horizontal scroll if needed.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "B2",
+     "element": "phone counter tally, 27/31 passed",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Phone tally shows passed and running only and hides 4 failed when failed is above zero.",
+     "why": "Job 1: a failing run looks healthy at a glance on the device kept beside the terminal.",
+     "fix": "Always show failed and errored when above zero on phone, e.g. 27 passed 4 failed 4 running.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "C3",
+     "element": "matrix group rows, n/a cells with boxes",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Cells labelled n/a show queued outline boxes instead of n/a slashed boxes.",
+     "why": "Job 1: waiting work is confused with out-of-scope work, so progress and routing are misread.",
+     "fix": "Render every all-scoped-off sample with bs-b-na and label n/a, never queued outlines.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card sample rows, x and ! text",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Rows use x and ! instead of spec verdicts ✓ 9/9, ✗ 5/9, ERROR, TIMEOUT, quiet 52s.",
+     "why": "Job 3: inconsistent words force recall and break the drawer preview contract.",
+     "fix": "Use HoverCard row spec verbatim and color only fail and ERROR in danger, timeout and quiet in warn.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "C4",
+     "element": "phone leaderboard pass-rate bars",
+     "criterion": "C6",
+     "severity": "medium",
+     "problem": "Leaderboard uses orange accent bars for values, though accent is reserved for live, selected and focus.",
+     "why": "Job 2: finished results look live and the page loses its one focal point.",
+     "fix": "Remove bars on phone, show values in bs-type-value with ◆ and best word per Leaderboard spec, no accent fills.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "B2",
+     "element": "tally line, 1 timed out",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Tally lists timed out separately while buckets require timeout graded at cap to count as failed.",
+     "why": "Job 1 and 2: failed totals disagree between counter, matrix rates and leaderboard.",
+     "fix": "Fold timeout into failed in the tally and keep a hover tooltip for the timeout breakdown if needed.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "C4",
+     "element": "phone matrix arm headers, bare / claude-code cod",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Four-arm headers truncate to bare and claude-code cod so arms cannot be told apart.",
+     "why": "Job 1: recognition over recall fails, the wrong arm gets opened.",
+     "fix": "Show two-line headers with arm name on line one and harness clipped with ellipsis, full name in aria-label and tooltip.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "G4",
+     "element": "hover card problem rows, all red x",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "All three sample rows render in fail red though only two samples failed.",
+     "why": "Job 1: passing samples look alarming and the worst problem does not stand out.",
+     "fix": "Render pass rows in fg with ✓, fail rows in danger with ✗, and add the single worst-problem line on top.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D2",
+     "grid": "C6",
+     "element": "phone leaderboard Samples row, 38 of 39 +1 errored",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Samples row mixes denominator 39 with an error note that changes the rate basis without explanation.",
+     "why": "Job 2: n is ambiguous, so pass-rate deltas cannot be trusted.",
+     "fix": "Show n 38 of 39 with sub-line 1 boot failure in danger per spec, and exclude errored from rate with a How numbers are counted note.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "C",
+     "grid": "F4",
+     "element": "drawer phase legend, bind boot setup agent grade",
+     "criterion": "C5",
+     "severity": "medium",
+     "problem": "Phase swatches rely on color alone with 8px squares and muted labels.",
+     "why": "Job 3: color-blind users cannot map bar segments to timings.",
+     "fix": "Keep the text labels next to each swatch as the signal and ensure swatches meet 3:1, never color alone.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D",
+     "grid": "C3",
+     "element": "phone matrix eval ids, deleg.codex/ plan-.t-task",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Eval ids truncate mid-word in the 104px pinned column with no wrap point.",
+     "why": "Job 3: the target cell cannot be identified one-handed before tapping.",
+     "fix": "Allow two-line wrapping breaking only after slash, keep pinned column at size-label-phone with sticky headers.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "B2",
+     "element": "snapshot banner, This page is a snapshot",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "Banner copy buries the next step after a dash and repeats Copy twice.",
+     "why": "Job 2: after a run users hesitate on how to reopen live data.",
+     "fix": "Shorten to two sentences with one Copy report path button and one reopen command, ending with a period.",
+     "confidence": "medium"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B-alt",
+     "why": "Arms as rows keeps arm names horizontal, lets metrics align in sortable columns, and scales to 4 arms without rotation or sideways reading."
+    }
+   },
+   "top_three": [
+    "Fix counter to count cells, not samples, so progress % matches the matrix caption.",
+    "Fix phone tally to always show failed and errored when above zero.",
+    "Keep leaderboard headers horizontal with arms as rows for 2-4 arms."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 2,
+  "seconds": 20.7,
+  "cost": 0.086751,
+  "tokens": {
+   "in": 54944,
+   "out": 4252
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "C",
+     "grid": "C3",
+     "element": "group summary rate, delegating-to-codex/ baseline",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Finished run still shows rate plus count as 56% · 15/15, implying 15 of 15 means 100%.",
+     "why": "Job 2: after a run the group rate is the verdict, and pairing it with a full count invites reading the cell as complete-pass.",
+     "fix": "When the run is finished show rate only in bs-gs, e.g. 56%, and drop the · done/total suffix; keep suffix only while live.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "C4",
+     "element": "group summary rate, core-data-model/ bare 43% · 15/15",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Same finished-run suffix error across all four arms: 43% · 15/15, 94% · 15/15, 72% · 15/15, 98% · 15/15.",
+     "why": "Job 2: on the wide 4-arm matrix the wrong suffix repeats on every group and normalizes the misreading.",
+     "fix": "Apply the same finished vs live rule as frame C: finished groups render rate only, live groups render rate · done/total.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card sample rows for core-data-model/mini-hack-days on opencode",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Rows use x 9/18, ! error, check 10/10 glyphs and headline 94% 17 of 18 checks passed that do not add up.",
+     "why": "Job 3: the hover card is where problems are named in words, and inconsistent verdicts block trusting what failed.",
+     "fix": "Render exactly per HoverCard: pass as ✓ 9/9 in fg, fail as ✗ 5/9 in danger matching its box step, error as ERROR, timeout as TIMEOUT, quiet as quiet 52s, with headline pooled checks from backend.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "C4",
+     "element": "phone leaderboard Pass rate rows with bars and 62% / 99% values",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "Phone leaderboard replaces the specified card with per-arm bars whose lengths are not to scale and orange 99% text.",
+     "why": "Job 2: which arm won and by how much must read from aligned values and a +34 pts delta, not bar length.",
+     "fix": "Replace bars with the bs-lbc card: one row per arm, value in bs-type-value right-aligned, best as ◆ value in accent-ink plus one muted best word, delta as +34 pts in success with vs baseline in muted.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "C4",
+     "element": "phone matrix arm headers, bare / claude-code / cod",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Four arm headers are cut to bare, claude-code, cod with no ellipsis or full name on tap.",
+     "why": "Job 1: on a 390px phone you cannot tell which arm a failing box belongs to when headers are unreadable.",
+     "fix": "Keep size-arm-phone columns, truncate headers with ellipsis to one line, and show full arm name plus harness · model in the drawer title and in a sticky header tooltip on tap.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "G4",
+     "element": "drawer assertion list rows",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Assertion texts are middle-truncated with … and no visible disclosure chevron for evidence.",
+     "why": "Job 3: drill-in requires reading the failed assertion and opening its checker evidence, which has no affordance.",
+     "fix": "Show full assertion text wrapped to two lines, failures first, each with a › disclosure that expands judge · evidence; keep ✗ in danger and ✓ in muted.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "D3",
+     "element": "leaderboard table headers, baseline and trial columns",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Arm headers are set vertical/rotated so baseline and trial read sideways.",
+     "why": "Job 2: comparing arms requires instant column identity, and rotated headers force slow decoding.",
+     "fix": "Set headers horizontal with arm name in fg 500 on one line and harness · model in muted below, arms as columns in matrix order baseline first.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B-alt",
+     "grid": "D6",
+     "element": "leaderboard alternative table, pass rate and median time values",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Values are left-mixed with n and p90 sub-lines instead of right-aligned on one edge with headers.",
+     "why": "Job 2: without one right edge for values the eye cannot scan which arm leads across metrics.",
+     "fix": "Use the specified bs-lb layout: metric labels left in muted, all values and arm headers right-aligned, best marked once with ◆ and best.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "counter row, elapsed 4m 41s · ~10m left",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "Percent, N of M, tally and elapsed/ETA share one visual weight so no single focal point leads.",
+     "why": "Job 1: during a run progress % and whether anything is wrong must win in three seconds over elapsed detail.",
+     "fix": "Keep 40% at text-44 fg as the sole large element, drop N of M to 16px muted on the same baseline, and keep tally on its own line with failed/errored in danger only when above zero.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D",
+     "grid": "B2",
+     "element": "phone counter elapsed label, 6m 41s",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "Phone shows bare 6m 41s with no elapsed word after ETA is dropped.",
+     "why": "Job 1: a bare duration next to 31 of 78 finished reads as ETA or runtime interchangeably.",
+     "fix": "On phone render elapsed 6m 41s in muted mono, and omit the ~10m left part per Counter.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "B4",
+     "element": "phone matrix eval ids, deleg.codex/ and codex..ad..out",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Eval ids are middle-mangled to deleg.codex/ and codex..ad..out instead of truncated with ellipsis.",
+     "why": "Job 3: tapping the right problem cell one-handed requires recognizable eval names.",
+     "fix": "Truncate eval ids with trailing ellipsis in the pinned size-label-phone column, full id in the cell aria-label and drawer header with break only after /.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "B2",
+     "element": "finished counter bar and Report path line",
+     "criterion": "C6",
+     "severity": "low",
+     "problem": "Finished bar and snapshot notice use a thin green fill plus small muted copy that blends into the matrix caption.",
+     "why": "Job 2: after a run the Finished state and snapshot caveat must be unmissable before trusting leaderboard numbers.",
+     "fix": "Render ✓ Finished in success title type with 100% counter-finished, full-width success bar, and report path on its own muted line with Copy affordance.",
+     "confidence": "medium"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "Arms as columns keeps one row per metric with values right-aligned on one edge in matrix order baseline first, so 2-4 arms scan down to see who leads; arms as rows repeats metric labels per arm and forces sideways comparison."
+    }
+   },
+   "top_three": [
+    "Show rate only on finished group summaries, keep rate · done/total only while live.",
+    "Fix the phone leaderboard to the specified card with right-aligned values, ◆ best plus one best word, and +pts delta instead of bars.",
+    "Fix the hover card sample rows to spec verdicts and pooled checks so fail text matches box steps."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 1,
+  "seconds": 167.0,
+  "cost": 0.314160832,
+  "tokens": {
+   "in": 71841,
+   "out": 18773
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "B",
+     "grid": "D3",
+     "element": "leaderboard, Skill triggered row, baseline value \"— ⓘ\"",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "A check that never runs on an arm is shown as \"—\" here, as \"not run\" in D2 (B5), and as \"n/a\" in the matrix, while the same \"—\" means \"every sample errored\" in E (E7, review-submission-diff) and \"no rate yet\" in B part 2 (C6, to-spec \"— · 9/39\").",
+     "why": "Jobs 1 and 2: \"—\" reads as \"all errored\", so a healthy arm looks like it crashed everywhere, and n/a, not-run and errored become indistinguishable — exactly the confusion C3 forbids.",
+     "fix": "Reserve \"—\" for all-samples-errored cells only. Show \"n/a\" wherever lines are scoped off an arm (B's Skill triggered baseline, D2's baseline row, group summaries with no graded samples), and \"not run\" only for cells outside the run.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "E4",
+     "element": "matrix cell, trial × codex-logged-out, orange selected ring (both A themes)",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The accent ring sits on the passing trial cell (100%) while the pointer and the hover card are on the failing baseline cell (52%), and no drawer is open.",
+     "why": "Job 1: the one orange mark on the page — reserved for live, selected or best — points at the healthy cell, pulling the eye away from the failure the hover card is explaining.",
+     "fix": "Remove the ring when no drawer is open (hover changes only the ground), or if a cell is selected, open its drawer and keep the ring on that cell only.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 2)",
+     "grid": "C6",
+     "element": "matrix cell, not-triggers/handoff-doc × baseline, label \"2/3 · agent 14s\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The cell shows two n/a boxes and one running box, but the label counts the n/a samples as done: \"2/3\".",
+     "why": "Job 1: n/a is excluded from rates and counts per the tally rules, so the progress fraction overstates how far along the cell is.",
+     "fix": "Exclude n/a samples from done/total: label it \"0/1 · agent 14s\" (one graded sample, still running).",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "A7",
+     "element": "legend, fail entry (single red box)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The legend shows fail as one red square, but cells use three graded red steps, and the required three-step swatch with the \"Darker = fewer checks passed.\" tooltip is missing.",
+     "why": "Job 1: nothing on the page explains that deeper red means fewer checks passed, so the graded fail boxes are undecodable without guessing.",
+     "fix": "Render the fail legend entry as the bs-b-failsteps three-step swatch inside a button with the tooltip \"Darker = fewer checks passed.\" (hover, focus, Esc), per StatusBox.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card, gemini-hack-days × opencode headline \"94% · 17 of 18 checks passed\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The headline says 17 of 18 checks passed, but the sample rows (9/10, error, 10/10) add up to 19 of 20 graded checks.",
+     "why": "Job 3: the drill-in preview contradicts itself, so the user can't trust either figure when diagnosing the cell.",
+     "fix": "Compute the headline from the same pooled sample data as the rows (here \"95% · 19 of 20 checks passed\"), or correct the rows; never hand-set the two independently.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "F4",
+     "element": "leaderboard, Median time trial sub-line \"1.53× best\" (also \"1.44× best\", \"2.24× best\")",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The word \"best\" appears on the losing value's sub-line, so both rows in a metric carry the word.",
+     "why": "Job 2: scanning the Median time column, trial's \"1.53× best\" can be misread as trial being best at time, when baseline won it.",
+     "fix": "Keep ◆ and the word \"best\" only on the winning value; write the loser's sub-line as \"1.53× slower\" or \"vs best 25.5s\".",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C5",
+     "element": "group summaries, not-triggers/ baseline \"n/a · 12/12\" vs triggers/ baseline \"n/a · 0/12\" (C6)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Two groups that are fully n/a on baseline show contradictory fractions: one \"12/12\", the other \"0/12\".",
+     "why": "Job 1: the same state reads as fully done in one group and not started in another, inviting a wrong progress reading.",
+     "fix": "For an arm where every line in the group is scoped off, show \"n/a\" with no fraction; n/a is excluded from counts.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "C",
+     "grid": "E5",
+     "element": "matrix cells, trial column of not-triggers/ and triggers/ rows, labels \"3/3 pass\" and \"2/3 pass\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Finished cells here are labeled with a sample fraction (\"3/3 pass\") while finished cells elsewhere show the pooled rate (\"100%\", \"67%\").",
+     "why": "Job 2: two label formats for the same finished state make columns hard to compare — \"3/3 pass\" reads as a count, not a rate, next to percentage cells.",
+     "fix": "Label every finished cell with its pooled rate per MatrixCell (\"100%\" muted, \"67%\"); the trigger-check detail belongs in the hover card and drawer.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "H2",
+     "element": "top bar and counter row, right edge (also B·H1 \"took 19m 42…\", E·G3 matrix caption \"[ 10 evals × 4 arms · finished\")",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "Desktop frames clip content at the window's right edge: the theme toggle, the elapsed/ETA text and the matrix caption are all cut off.",
+     "why": "Job 1: elapsed time and the run caption are primary status information, and they are unreadable without resizing.",
+     "fix": "Keep the app's space-32 padding on both sides and let the top bar and counter row wrap (they already wrap per spec), so the toggle, elapsed time and caption never overflow the window.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card, sample 2 row \"! error 34s\" and the line \"opencode exited 1: provider returned 429\" between rows",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The error sample uses a \"!\" glyph that isn't in the iconography set, and the error explanation is inserted between sample rows instead of the single problem line under the headline.",
+     "why": "Job 3: an unfamiliar glyph and a mid-list explanation break the one-row-per-sample scan pattern the hover card specifies.",
+     "fix": "Write \"ERROR\" in the sample row per HoverCard, and move \"error · opencode exited 1: provider returned 429\" to the problem line directly under the headline in danger; drop the \"!\" glyph.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "F3",
+     "element": "drawer sample nav \"‹ ›\" and close \"×\" (H2)",
+     "criterion": "C5",
+     "severity": "medium",
+     "problem": "The previous/next sample buttons and the close button render at text size (~16px), not as the 32px bs-iconbtn, so they fall under the 24px WCAG 2.2 target minimum.",
+     "why": "Job 3: the main drill-in navigation is a small target, and it fails the AA target-size rule on a primary action.",
+     "fix": "Render ‹, › and × as bs-iconbtn at size-close (32×32px) with their aria-labels (\"Previous sample\", \"Next sample\", \"Close\").",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D2",
+     "grid": "B4",
+     "element": "phone leaderboard, Pass rate bars for baseline and trial",
+     "criterion": "C3",
+     "severity": "low",
+     "problem": "The rate bars have no track and no visible 0–100% scale, so bar length can only be read relative to the other arm, not as an absolute rate.",
+     "why": "Job 2: without a track, a 62% bar that fills roughly a third of the card understates the absolute value and the visual gap depends on card width.",
+     "fix": "Draw each bar on a full-width line track at a fixed 0–100% scale, so 62% fills 62% of the track and 99% fills 99%.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "C",
+     "grid": "G4",
+     "element": "drawer assertions, caption \"[ assertions · 3 failed · 6 passed · 1 skipped ]\" and the \"– Skill `delegating-to-codex` invoked\" row",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "The not-run assertion introduces a new state word (\"skipped\") and a new \"–\" marker that isn't in the glyph set, while the frame's own note calls the line \"not run\".",
+     "why": "Job 3: a third vocabulary for the same thing (skipped / not run / n/a) makes the user guess whether \"skipped\" differs from \"not run\".",
+     "fix": "Write the caption as \"[ assertions · 3 failed · 6 passed · 1 not run ]\" and mark the row with the words \"not run\" in muted instead of the \"–\" glyph.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "E5",
+     "element": "group summary, not-triggers/ trial \"routed 12/12 · 12/12\"",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "\"routed\" is internal jargon, the fraction is duplicated, and the leaderboard calls the same metric \"Skill triggered\".",
+     "why": "Job 2: the user has to map \"routed\" onto \"Skill triggered\" mentally, and the repeated \"12/12\" is noise.",
+     "fix": "Write \"triggered 12/12\" once, matching the leaderboard's \"Skill triggered\" label.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D3",
+     "grid": "B3",
+     "element": "phone summary line \"15/69 passed · 1 timed out · 1 errored\" (also E·B3)",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "The tally says \"timed out\" while the design system's state word is \"timeout\".",
+     "why": "Job 1: two words for one state (legend \"timeout\", tally \"timed out\") is a small consistency break in a glanceable summary.",
+     "fix": "Use the state word in tallies: \"1 timeout\".",
+     "confidence": "medium"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, arms-as-columns keeps the table narrow and matches the matrix's column order (baseline first), so spatial memory from the Matrix tab transfers, and the verdict reads directly: \"◆ 99% · best · +37 pts vs baseline\". B-alt needs one column per metric, which already overflows the desktop width (the cost column is clipped at H7), and its ratio-to-best encoding (\"0.63× 62%\", \"1.00×\") is harder to parse than a percentage-point delta — ratios also compress real gaps in pass rate (62% vs 99% reads as 0.63×, a less honest-feeling gap than +37 pts)."
+    }
+   },
+   "top_three": [
+    "Unify the empty-state encoding: reserve \"—\" for all-samples-errored, use \"n/a\" for lines scoped off an arm (B's Skill triggered row, D2, group summaries) and \"not run\" only for cells outside the run — today the same dash means three different things across frames.",
+    "Frame A: remove the orange selected ring from the passing trial cell when no drawer is open, so the failing baseline cell that the hover card describes is the single focal point.",
+    "Fix the legend's fail entry to the three-step swatch with the \"Darker = fewer checks passed.\" tooltip, so the graded red boxes in every matrix are decodable on their own."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 2,
+  "seconds": 98.1,
+  "cost": 0.135610794,
+  "tokens": {
+   "in": 71841,
+   "out": 7920
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "D2",
+     "grid": "B3",
+     "element": "phone summary line, \"62/77 passed · 1 errored\"",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "The finished run has 15 failed samples, but the phone summary shows only passed and errored counts, so the run's main problem is invisible without scrolling to the leaderboard.",
+     "why": "Job 2 on phone: a viewer glancing at the finished run sees \"62/77 passed\" and no signal that 15 samples failed, understating how bad the losing arm was.",
+     "fix": "Always include the failed count when above zero: \"62/77 passed · 15 failed · 1 errored\", with failed in danger, matching the desktop tally.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "H2",
+     "element": "counter elapsed/ETA line, \"elapsed 6m 41s · ~10m le…\"",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The elapsed/ETA text runs to the window's right edge and is clipped, and the matrix caption \"[ 13 evals × 2 arms · live ]\" at H3 is clipped the same way.",
+     "why": "Job 1: the ETA is part of \"how far along is it\", and the caption's live state is cut mid-word at exactly the glance path.",
+     "fix": "Right-align these lines with the app's space-32 padding as the boundary (margin-right: var(--space-32)) and let the ETA wrap under the counter before it clips; verify at 1280px and 1024px.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "H7",
+     "element": "B-alt leaderboard table, rightmost columns (\"cost / sample\" header)",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The arms-as-rows table overflows the window and its last metric column is cut off at the viewport edge with no horizontal-scroll affordance.",
+     "why": "Job 2: cost per sample is one of the comparison metrics, and in this layout it is unreadable at a common desktop width.",
+     "fix": "Cap the table at the app width and wrap it in an overflow-x:auto container with a right-edge fade, or drop the ratio column before dropping a metric.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "B3",
+     "element": "counter tally, \"1 timed out\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The tally adds a sixth \"timed out\" bucket, but the design system buckets timeouts (graded at the cap) into failed, and the Counter spec defines only passed/failed/errored/running/waiting.",
+     "why": "Job 1: the same timeout is counted as failed in the matrix cells but as a separate category in the tally, so the numbers (85 failed + 1 timed out) don't reconcile with the cells the viewer sees.",
+     "fix": "Fold timeouts into failed (86 failed) per the tally-bucket table; if a timeout breakdown is wanted, put it in the hover card of the affected cell, not the headline tally. Same fix in D3 (B3).",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "E4",
+     "element": "finished scoped cells, labels \"3/3 pass\" and \"2/3 pass\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Finished cells in the scoped groups are labelled with a sample-pass fraction (\"3/3 pass\", \"2/3 pass\") while every other finished cell in the same column is labelled with the pooled check rate (\"100%\", \"96%\").",
+     "why": "Job 2: two different units in one column invite wrong comparisons — \"2/3 pass\" reads as 67% but sits next to rates that count checks, not samples.",
+     "fix": "Label every finished cell with its pooled rate per the MatrixCell label table (e.g. \"100%\"); if the scoped n matters, show it in the hover card (\"3 of 3 samples passed\").",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card for gemini-hack-days × opencode, headline \"94% · 17 of 18 checks passed\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The headline says 17 of 18 checks passed, but the sample rows show ✗ 9/10 and ✓ 10/10, which sum to 19 of 20.",
+     "why": "Job 3: when the headline and the per-sample rows disagree, the viewer can't trust either number while diagnosing the cell.",
+     "fix": "Compute the headline as the sum of graded checks across non-errored samples (here 19/20, 95%) and add a fixture test that headline equals the sum of the rows.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "B",
+     "grid": "D4",
+     "element": "leaderboard \"Skill triggered\" row, baseline value \"—\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Baseline's not-applicable skill check is shown as \"—\" here, as \"not run\" in the phone leaderboard (D2·B5), and \"—\" is also the all-samples-errored marker in frame E.",
+     "why": "Job 2: one glyph carrying three meanings (n/a, not run, all errored) makes the winner's margin on the trigger check easy to misread.",
+     "fix": "Use \"n/a\" for checks scoped off an arm everywhere (desktop and phone), reserve \"—\" for the all-errored denominator-0 case, and never use \"not run\" for a scoped-off line.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "F4",
+     "element": "leaderboard sub-line \"1.53× best\" under trial's 39.0s",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "\"1.53× best\" reads as if trial is the best; it means trial takes 1.53× the best arm's time.",
+     "why": "Job 2: the losing arm's row contains the word \"best\" in accent-adjacent position, which momentarily flips who won on time and cost.",
+     "fix": "Reword to \"1.53× the best (25.5s)\" or drop the ratio and show \"+13.5s vs best\"; keep the word \"best\" only on the winning value.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "B4",
+     "element": "group meta \"5 evals · [trial-only]\" on delegating-to-codex/",
+     "criterion": "C3",
+     "severity": "low",
+     "problem": "The group is tagged [trial-only] yet the baseline column shows a full summary (57% · 4/15) and failed baseline cells.",
+     "why": "Job 1: the scope note contradicts the data beside it, so the viewer can't tell whether baseline actually ran this group.",
+     "fix": "If only the skill-trigger check is trial-scoped, drop the [trial-only] tag from the group and mark the single n/a line instead; reserve the group tag for groups where the other arm shows n/a cells.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "B7",
+     "element": "legend fail entry, single red box",
+     "criterion": "C6",
+     "severity": "low",
+     "problem": "The legend's fail entry is one solid red box, but the StatusBox spec requires the three-step fail swatch in a button with the \"Darker = fewer checks passed.\" tooltip.",
+     "why": "Job 1: the graded fail scale is the one encoding that needs a legend entry, and a single box doesn't explain it.",
+     "fix": "Swap the single fail box for the bs-b-failsteps swatch inside a bs-lgbtn with the tooltip wired per the StatusBox README (hover, focus, Esc).",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "H2",
+     "element": "finished counter, \"took 19m 42…\"",
+     "criterion": "C1",
+     "severity": "low",
+     "problem": "The run duration at the right end of the finished counter row is clipped by the window edge.",
+     "why": "Job 2: minor, but the duration is part of the finished summary and it's cut mid-token.",
+     "fix": "Same fix as the live counter: bound the right-aligned element to the app padding, not the viewport edge.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "Arms as columns wins for 2–4 arms: it keeps the matrix's mental model (baseline first, one column per arm), puts all values for a metric on one right-aligned edge so the eye compares down a single row, and needs no sort control or ratio encoding. B-alt's \"ratio to the best arm\" adds a second unit to learn (0.63×, 1.53×), repeats \"best\" on losing rows, and its table already overflows the window at desktop width — a problem B's narrow metric-rows layout doesn't have."
+    }
+   },
+   "top_three": [
+    "Show the failed count in the phone summary line whenever it's above zero (D and D2), so a finished or mid-run phone view can't hide the run's main problem.",
+    "Stop right-edge content from clipping at the viewport: the counter ETA/duration and the matrix caption in A and B must be bounded to the app padding.",
+    "Make the numbers reconcile everywhere: fold timeouts into the failed tally bucket, label finished cells with the pooled rate instead of \"3/3 pass\", and fix the hover-card headline to equal the sum of its sample rows."
+   ]
+  }
+ },
+ {
+  "model": "openai/gpt-6-astra",
+  "run": 1,
+  "seconds": 93.1,
+  "cost": 1.05608,
+  "tokens": {
+   "in": 69783,
+   "out": 3676
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "D",
+     "grid": "D3",
+     "element": "phone drawer, “baseline · sample 2 of 3”",
+     "criterion": "C4",
+     "severity": "high",
+     "problem": "The phone drawer identifies sample 2 but provides no visible controls for opening samples 1 and 3.",
+     "why": "Job 3: users cannot inspect the other failed samples from the cell detail.",
+     "fix": "Add Previous sample and Next sample buttons beside the sample count, with 32px square targets; update assertions, output and timings together, and disable the corresponding button at either end.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A2",
+     "element": "run tally, “27/31 passed · 4 running”",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "The phone summary hides four failures inside a passed fraction rather than stating the failure count.",
+     "why": "Job 1: spotting trouble requires subtraction, especially when failing cells are outside the viewport.",
+     "fix": "Use explicit sample tallies: “27 passed · 4 failed · 4 running”; wrap onto a second line as needed and retain nonzero timeout and error counts.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "E3",
+     "element": "matrix arm headers, “baseline” and “trial”",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The live view provides group rates but no overall comparison showing which arm is currently ahead.",
+     "why": "Job 1: users must compare multiple group summaries or leave the matrix to establish the current leader.",
+     "fix": "Add each arm’s overall pooled shared-check rate and graded sample count beneath its header, labelled “so far”; show the leading arm’s percentage-point difference beside its rate.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 1)",
+     "grid": "F3",
+     "element": "leaderboard, “◆ 99%” and the other best-value markers",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The winning pass rate competes with similarly accented winners for triggering, time, first output and cost.",
+     "why": "Job 2: the primary outcome and winning margin do not form one clear focal point.",
+     "fix": "Add a headline above the table reading “trial leads by 37pp” with the two pass rates beneath it; retain secondary best markers but render their values at the standard 16px value size.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "H2",
+     "element": "right edge of the top bar and progress summary",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The theme control, remaining-time text and right progress bracket extend beyond the visible app boundary.",
+     "why": "Job 1: part of the run status is unavailable at the depicted desktop width.",
+     "fix": "Constrain the app content to its container with border-box sizing and min-width: 0; let the top bar wrap and move elapsed time and ETA onto a second line when necessary, keeping both progress brackets inside the padding.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "progress counter, “31 of 78 finished”",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The total of 78 represents samples, while the matrix contains 13 × 2 cells and the counter does not name its unit.",
+     "why": "Job 1: users can mistake sample completion for cell completion and misjudge how many eval–arm combinations remain.",
+     "fix": "Label the counter “31 of 78 samples finished” and identify the tally as sample counts; use the same unit in group completion labels, progress accessibility text and the finished state.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "delegating-to-codex group bars beneath “57% · 4/15” and “100% · 3/15”",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Both completion bars appear as tiny orange stubs rather than representing 4/15 and 3/15 of their tracks.",
+     "why": "Job 1: the visual progress encoding contradicts the adjacent counts.",
+     "fix": "Set each fill width to finishedSamples / totalSamples × 100%, yielding 26.7% and 20% here, and label the counts as samples finished so the bars cannot be mistaken for pass-rate bars.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C6",
+     "element": "baseline cells under “triggers/”, shown as queued",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The baseline group summary says “n/a” while its child cells show queued samples.",
+     "why": "Job 1: users cannot distinguish work that will run later from checks that do not apply to this arm.",
+     "fix": "Resolve applicability before rendering sample state; when every check is scoped off baseline, show slashed n/a boxes immediately and exclude those samples from waiting and applicable completion totals.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "H5",
+     "element": "gemini-hack-days hover card, headline and sample check counts",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The headline reports 17 of 18 checks passed, but the visible graded sample rows total 19 of 20 without explaining the different scope.",
+     "why": "Job 3: users cannot reconcile the cell rate with its sample evidence.",
+     "fix": "Label the headline “Shared checks: 17/18”; show shared-check counts of 8/9 and 9/9 in the corresponding sample rows, and list excluded arm-scoped checks separately.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "D2",
+     "grid": "A5",
+     "element": "Skill triggered, baseline “not run”",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The baseline trigger check is labelled “not run” even though it is scoped to trial and therefore not applicable.",
+     "why": "Job 2: the label suggests missing execution rather than an intentional exclusion from comparison.",
+     "fix": "Replace “not run” with “n/a” and provide the explanation “This check applies only to trial.” when the metric label is tapped; use the same terminology on desktop.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "D4",
+     "element": "scrolled matrix inset, pinned eval-id column",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Fragments of scrolled arm headers, rates and red boxes remain visible around the pinned eval labels.",
+     "why": "Job 1: overlapping content makes it harder to associate a problem box with the correct eval and arm.",
+     "fix": "Give every pinned label and header cell an opaque surface background and a higher stacking level than all arm cells; paint the full pinned-column width including its padding, with the edge gradient outside that width.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A-light",
+     "grid": "H2",
+     "element": "theme toggle, “Light theme”",
+     "criterion": "C4",
+     "severity": "low",
+     "problem": "The light-theme frame offers “Light theme” rather than naming the theme the control will switch to.",
+     "why": "The control’s label makes its action ambiguous.",
+     "fix": "Render “Dark theme” while the light theme is active and “Light theme” while the dark theme is active, deriving both the label and pressed state from the same theme value.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 1)",
+     "grid": "F3",
+     "element": "pass-rate delta, “+37 pts vs baseline”",
+     "criterion": "C8",
+     "severity": "low",
+     "problem": "“pts” does not explicitly identify a percentage-point difference and differs from the specified comparison terminology.",
+     "why": "Job 2: users may confuse the absolute rate difference with a relative percentage improvement.",
+     "fix": "Use “+37pp vs baseline” consistently in desktop and phone leaderboards, with accessible text reading “37 percentage points above baseline.”",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, B avoids B-alt’s wide spread of metric columns, clipped cost values and ratio-first reading. Keeping arms in matrix order also avoids remapping their positions, while each metric’s values remain together on one row."
+    }
+   },
+   "top_three": [
+    "Make progress trustworthy: name samples explicitly, scale group bars to their completion counts, and distinguish queued work from n/a checks.",
+    "Expose failures and the current arm comparison in the live summary without requiring subtraction or scanning multiple groups.",
+    "Complete phone drill-in with sample navigation and eliminate scrolled content bleeding through the pinned eval column."
+   ]
+  }
+ },
+ {
+  "model": "openai/gpt-6-astra",
+  "run": 2,
+  "seconds": 81.8,
+  "cost": 0.24421,
+  "tokens": {
+   "in": 69783,
+   "out": 3488
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "A",
+     "grid": "E3",
+     "element": "baseline and trial column headers",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The live view has no run-wide arm comparison, so determining which arm leads requires comparing individual group summaries.",
+     "why": "Job 1: users cannot identify the leading arm within a quick glance, especially across a tall suite.",
+     "fix": "Add each arm's provisional pooled pass rate and graded sample count beneath its header, using the same shared-check calculation as the leaderboard and labeling the figures 'so far'.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "A2",
+     "element": "phone summary, '27/31 passed · 4 running'",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "The summary hides four failures inside a fraction and does not identify the quiet agent among the running samples.",
+     "why": "Job 1: developers must calculate failures and search small sample boxes to discover that attention is needed.",
+     "fix": "Show explicit nonzero problem counts beneath progress: '4 failed · 1 quiet', followed by the existing passing and running counts; count quiet samples within running rather than adding them twice.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B2",
+     "element": "progress counter, '31 of 78 finished'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The counter uses sample totals even though the specified progress unit is cells: 13 evals × 2 arms produces 26 cells, not 78.",
+     "why": "Job 1: progress, matrix size and sample tallies appear to describe the same unit but do not.",
+     "fix": "Calculate headline progress from eval × arm cells, marking a cell finished when all scheduled samples reach terminal states; label the adjacent tally 'samples' and apply this distinction to every frame.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "opencode × gemini-hack-days hover card, '94% 17 of 18 checks passed'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The headline contradicts the displayed graded samples, whose 9/10 and 10/10 results total 19/20, or 95%.",
+     "why": "Jobs 2 and 3: users cannot trust the arm comparison or reconcile the cell result with its evidence.",
+     "fix": "Generate the matrix rate and hover headline from the same sample-check data; for the displayed rows, show '95% · 19 of 20 checks passed' and exclude the ungraded error from the check denominator.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "delegating-to-codex group bars beneath '57% · 4/15' and '100% · 3/15'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "Both live group bars are tiny slivers rather than proportional representations of their displayed completion counts.",
+     "why": "Job 1: the bars suggest almost no progress despite several completed samples.",
+     "fix": "Define group bars as completion bars and set their widths to done / total × 100: 26.7% for baseline and 20% for trial here; apply the same calculation to the full-suite inset.",
+     "confidence": "high"
+    },
+    {
+     "frame": "C",
+     "grid": "G6",
+     "element": "drawer phase bar, '[ phases · 90.9s ]'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The orange agent segment occupies only a small portion of the bar despite accounting for 63.8 of 90.9 seconds.",
+     "why": "Job 3: the visualization falsely attributes most elapsed time to grading rather than the agent.",
+     "fix": "Render bind, boot, setup, agent and grade with flex-grow values of 2.9, 7.4, 1.2, 63.8 and 15.6 respectively, using fixed gaps outside the proportional segment widths.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "A5",
+     "element": "Skill triggered, baseline 'not run'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The scoped-off baseline check is labeled 'not run', conflating an inapplicable check with work omitted from the run.",
+     "why": "Job 2: users may interpret an intentional scope exclusion as incomplete benchmark coverage.",
+     "fix": "Show 'n/a' for this metric on both desktop and phone, with an accessible explanation that the skill check applies only to trial; reserve 'not run' for cells outside the run.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "B4",
+     "element": "group metadata, '5 evals · [trial-only]'",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The group-level 'trial-only' label appears to scope all five evals to trial even though baseline has graded results.",
+     "why": "Jobs 1 and 2: the label makes valid baseline results look contradictory and obscures which checks are comparable.",
+     "fix": "Replace the scope text with '[skill check: trial only]' and use equivalent check-specific wording for '[skips bare]' in frame E.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B (part 1)",
+     "grid": "A3",
+     "element": "leaderboard 'Pass rate' row and information icon",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "The primary comparison does not visibly explain that its percentages pool shared checks rather than fully passing samples.",
+     "why": "Job 2: users can mistake the headline rate for the sample pass fraction shown in the run summary.",
+     "fix": "Add a persistent line above the leaderboard: 'Pass rate counts shared checks passed; ungraded errors are excluded.' Show checks passed / checks graded beneath each arm's percentage and retain the separate sample-count row.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "C5",
+     "element": "scrolled inset, pinned eval-name column",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Fragments of underlying sample boxes and labels remain visible around the pinned eval column in the scrolled state.",
+     "why": "Job 1: stray red marks and clipped values can be attributed to the wrong eval or arm.",
+     "fix": "Give every pinned label and its header an opaque surface background, place them above all scrolling cells, and clip scrolling content to the matrix viewport; keep the edge gradient outside the pinned column.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "D3",
+     "element": "bottom-sheet header, 'baseline · sample 2 of 3'",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The phone drawer identifies the selected sample but omits the previous and next sample controls shown on desktop.",
+     "why": "Job 3: users cannot inspect the other failures without leaving the detail view.",
+     "fix": "Add Previous sample and Next sample buttons beside the sample counter, each with a 44px touch target; disable the appropriate button at the first and last samples.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "D8",
+     "element": "bottom sheet, '[ recent output · last 5 lines ]'",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "Output lines are truncated on a touch-only view without a visible way to reveal their full contents.",
+     "why": "Job 3: the command or error detail needed to diagnose the failure may be hidden beyond the ellipsis.",
+     "fix": "Wrap recent output on phones using white-space: pre-wrap and overflow-wrap: anywhere, preserving timestamps and allowing the sheet to scroll vertically.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A",
+     "grid": "H2",
+     "element": "right edge of theme control and elapsed-time/ETA text",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "The desktop layout clips the theme control and elapsed-time information at the window's right edge.",
+     "why": "Job 1: run timing is partially unavailable at the demonstrated window width.",
+     "fix": "Constrain the app to its container with border-box sizing, allow header groups to wrap, and move elapsed time and ETA onto a second line when they cannot fit without clipping.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B-alt",
+     "grid": "D7",
+     "element": "pass-rate values, '1.00× 99%' and '0.63× 62%'",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "Ratios receive more emphasis than the actual pass rates, adding a translation step to the primary comparison.",
+     "why": "Job 2: users must look past normalized values to find which arm won and its percentage-point advantage.",
+     "fix": "Make 99% and 62% the primary values, show '+37pp vs baseline' beneath trial, and move optional ratios to secondary text for time and cost only.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A-light",
+     "grid": "H2",
+     "element": "theme toggle, 'Light theme'",
+     "criterion": "C4",
+     "severity": "low",
+     "problem": "The light-theme frame labels its toggle 'Light theme' even though the control should name the destination theme.",
+     "why": "This makes the toggle's next action ambiguous.",
+     "fix": "Bind the visible label to the active theme: show 'Dark theme' in light mode and 'Light theme' in dark mode.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, columns keep each metric on one comparison row and preserve the matrix's arm order. B-alt spreads metrics across a wider table, clips the cost column in the supplied frame, and makes users decode ratios before comparing actual pass rates."
+    }
+   },
+   "top_three": [
+    "Unify progress units, pooled rates and proportional bars across the matrix, hover cards, drawer and leaderboard.",
+    "Expose explicit live problem counts and provisional arm-wide rates so failures, quiet agents and the current leader are visible without searching.",
+    "Complete phone diagnosis: fix pinned-column bleed, restore sample navigation and make recent output fully readable."
+   ]
+  }
+ },
+ {
+  "model": "x-ai/grok-4.7",
+  "run": 1,
+  "seconds": 954.3,
+  "cost": 0.163556,
+  "tokens": {
+   "in": 70984,
+   "out": 21326
+  },
+  "output": {
+   "unparsed_raw": "I have the frames and the design system; next I’ll confirm the specific misreads in the matrix, drawer, leaderboard, and phone layouts before writing the critique."
+  }
+ },
+ {
+  "model": "x-ai/grok-4.7",
+  "run": 2,
+  "seconds": 515.5,
+  "cost": 0.33818,
+  "tokens": {
+   "in": 70984,
+   "out": 32990
+  },
+  "output": {
+   "issues": [
+    {
+     "frame": "D",
+     "grid": "D3",
+     "element": "phone sheet status line \"FAIL · 5/9 assertions\"",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "\"FAIL · 5/9 assertions\" is the passed count — the caption under it says \"4 failed · 5 passed\" — so the headline reads as five failures.",
+     "why": "Job 3: the number you open a cell to read is the wrong failure count; frame C's drawer does the same (\"FAIL · 6/9 assertions\" beside \"3 failed · 6 passed\").",
+     "fix": "Render status as \"FAIL · 4 of 9 assertions failed\", using the failed count, the word \"failed\", and the total, from the same source as the \"[ assertions · 4 failed · 5 passed ]\" caption. Never put a pass fraction after FAIL.",
+     "confidence": "high"
+    },
+    {
+     "frame": "E",
+     "grid": "G5",
+     "element": "hover card on opencode × gemini-hack-days, \"94%\" and the three sample rows",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The card says \"94% · 17 of 18 checks passed\" but the rows are × 9/10, error, and ✓ 10/10, which is 19 of 20 graded checks, not 17 of 18.",
+     "why": "Job 3: the hover card is where a problem cell is explained, and the headline disagrees with its own rows, so neither number can be trusted.",
+     "fix": "Compute the percent and \"N of M checks passed\" only from the graded rows shown in the card, excluding the errored sample, and write each fail row as \"✗ 9/10 passed\" so the mark is not read as 9 failures.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "B3",
+     "element": "phone run summary \"27/31 passed · 4 running\"",
+     "criterion": "C2",
+     "severity": "high",
+     "problem": "The summary says 27/31 passed and 4 running, and drops the 4 failed cells the desktop tally shows for this same run.",
+     "why": "Job 1: the line you read first on the phone makes a run with failures look healthy, so failing cells are not visible at a glance.",
+     "fix": "Use the desktop tally buckets and omit only zeros: \"27 passed · 4 failed · 4 running · 31 of 78 finished\". Do not show a passed/finished fraction.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C4",
+     "element": "delegating-to-codex group bars under \"57% · 4/15\" and \"100% · 3/15\"",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "The baseline bar is a short sliver under a 57% label, and the trial bar is far short of full under a 100% label, so neither matches its rate or its finished fraction.",
+     "why": "Job 1: those bars are how you compare arms while the run is live, and here they read as barely started versus partly done.",
+     "fix": "Set each live group bar's width to the same pass rate printed above it (57% and 100% of the track) and paint it accent. If the arm is n/a or not run, leave the track empty.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "B3",
+     "element": "phone summary \"15/69 passed · 1 timed out · 1 errored · 4 running\" under \"60% 70 of 117 finished\"",
+     "criterion": "C3",
+     "severity": "high",
+     "problem": "\"15/69 passed\" cannot be reconciled with \"70 of 117 finished\" or with 60%, so the two progress readouts describe different totals.",
+     "why": "Job 1: on a 117-cell phone run you cannot tell how far along it is or how many cells have actually failed.",
+     "fix": "Use one formula: percent = finished cells / total cells, and list non-zero buckets that sum to that total (\"N passed · N failed · 1 timed out · 1 errored · 4 running · N waiting\"). Remove the 15/69 fraction.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D3",
+     "grid": "B4",
+     "element": "four-arm phone matrix headers \"bare\", \"claude-code\", \"codex\" and the core-data-model rate row",
+     "criterion": "C7",
+     "severity": "high",
+     "problem": "All four arm columns are squeezed into the 390px card, so headers, sample boxes and rates overlap and cannot be read.",
+     "why": "Job 1: a four-arm run is a normal case, and on the phone you cannot see which arm is failing.",
+     "fix": "Pin the eval-id column at 104px and lock each arm column at 112px inside a matrix-only horizontal scroller, two arms visible, with a persistent \"arms 1–2 of 4\" label and a right-edge fade. Never shrink columns to fit four arms.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "E4",
+     "element": "accent ring on the trial codex-logged-out cell labeled \"100%\"",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The only accent ring is on the passing trial cell, while the pointer, hover ground and hover card all belong to the failing baseline cell.",
+     "why": "Job 1 and job 3: orange is the page's focal color, so the eye lands on the healthy cell instead of the failure being inspected.",
+     "fix": "Draw the accent ring only on the selected or focused cell, and only when that cell is the one the card or drawer describes. Hover changes the cell ground only and must not add a ring.",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "E4",
+     "element": "leaderboard median-time trial cell \"39.0s\" / \"1.53× best\"",
+     "criterion": "C1",
+     "severity": "medium",
+     "problem": "The word \"best\" sits on the slower arm as \"1.53× best\", and the same pattern is on first output and cost.",
+     "why": "Job 2: this tab exists to show which arm won, and \"best\" on the losing value credits the wrong arm.",
+     "fix": "Keep \"◆\" and the word \"best\" only on the winning value. On the other arm show the absolute value plus \"1.53× baseline\", with no \"best\".",
+     "confidence": "high"
+    },
+    {
+     "frame": "D2",
+     "grid": "B3",
+     "element": "finished-run header \"62/77 passed · 1 errored\"",
+     "criterion": "C2",
+     "severity": "medium",
+     "problem": "The phone header says 62/77 passed and mentions one error, omitting the 15 failed cells the desktop tally shows for the same run.",
+     "why": "Job 2: before the per-arm bars, the finished run looks clean, so the size of the loss is hidden.",
+     "fix": "Match the desktop finished tally exactly: \"62 passed · 15 failed · 1 errored\". Leave per-arm pass rates to the card below.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "C5",
+     "element": "not-triggers baseline summary \"n/a · 12/12\" with a full bar, and trial \"routed 12/12 · 12/12\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "An n/a arm draws a full summary bar, and the other arm is labeled \"routed\", which is not a pass rate, n/a, or not-run.",
+     "why": "Job 1: a skipped arm looks finished and successful, and \"routed\" is not in the legend, so a scoping skip can be read as a win.",
+     "fix": "If an arm has no scored checks, label it \"n/a\" or \"not run\", show only slashed or empty boxes, and leave the summary track empty. Remove the word \"routed\".",
+     "confidence": "high"
+    },
+    {
+     "frame": "B",
+     "grid": "D7",
+     "element": "alternative leaderboard, trial row \"◆ 1.00× 99% best\" and \"1.53× 39.0s\"",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "\"1.00×\" means the winner for both a higher-is-better rate and a lower-is-better time, and the cost column is clipped off the right edge.",
+     "why": "Job 2: a ratio above 1 looks like a win on time and cost, and the clipped column hides a metric you need to compare.",
+     "fix": "Do not ship ratio-to-best rows for 2–4 arms. If a row layout is kept for more than four arms, label each metric \"higher is better\" or \"lower is better\", show absolute values, and scroll the table instead of clipping it.",
+     "confidence": "high"
+    },
+    {
+     "frame": "A",
+     "grid": "E6",
+     "element": "triggers trial summary \"- · 0/12\", and the leaderboard skill-triggered \"—\" on frame B",
+     "criterion": "C3",
+     "severity": "medium",
+     "problem": "An em dash means not started here, skill not run on the leaderboard, and every sample errored in frame E and in the spec.",
+     "why": "Job 1 and job 2: a dash on a live group can be read as a crash, and a dash on the leaderboard can be read as a scored zero.",
+     "fix": "Use words: \"0/12\" while nothing has finished, \"not run\" when the arm skipped the metric (as D2 already does), and reserve \"—\" for denominator 0 after errors, with the error boxes beside it.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "B5",
+     "element": "phone eval-id labels \"plan-...ndings\", \"plan-...t-task\", \"codex...ed-out\"",
+     "criterion": "C7",
+     "severity": "medium",
+     "problem": "Ids are truncated from the end, so several rows collapse to the same \"plan-...\" prefix and cannot be told apart.",
+     "why": "Job 1 and job 3: on the phone the eval name is what you tap, and these labels no longer identify the failing row.",
+     "fix": "In the 104px pinned column, keep the leaf id and ellipsize the front (\"…judges-findings\", \"…logged-out\"), one line, no mid-word cut.",
+     "confidence": "high"
+    },
+    {
+     "frame": "D",
+     "grid": "B5",
+     "element": "phone sample boxes on the plan-implement-task row",
+     "criterion": "C5",
+     "severity": "medium",
+     "problem": "At 10px the running dot and the quiet bar are both a warm-colored ring, so a stuck agent is not distinct from a working one.",
+     "why": "Job 1: quiet is the stuck state to spot during a run, and the phone hides the duration label that would name it, leaving color as the only signal.",
+     "fix": "On phone, fill the quiet box with the warn color and keep running as an accent ring with a dot, so they differ by fill versus stroke. Put \"quiet\" in the cell's accessible name.",
+     "confidence": "medium"
+    },
+    {
+     "frame": "A-light",
+     "grid": "G2",
+     "element": "theme toggle labeled \"Light theme\"",
+     "criterion": "C4",
+     "severity": "medium",
+     "problem": "On the light-theme page the toggle still says \"Light theme\", which is the theme already showing, not the one it switches to.",
+     "why": "The control no longer says what it will do, so returning to the default dark theme is a guess.",
+     "fix": "Label the button with the destination theme: \"Dark theme\" when the page is light, \"Light theme\" when it is dark, and keep aria-pressed in sync.",
+     "confidence": "high"
+    }
+   ],
+   "comparisons": {
+    "Q1": {
+     "choice": "B",
+     "why": "For 2–4 arms, arms as columns keep one metric per row so you compare two to four aligned numbers in matrix order. The row alternative encodes every value as a ratio whose direction flips by metric (1.00× wins on both pass rate and time), repeats \"best\" on losing cells, and clips the cost column."
+    }
+   },
+   "top_three": [
+    "Make FAIL lines, hover headlines and phone summaries use one failed/passed count, in words (\"FAIL · 4 of 9 assertions failed\", \"27 passed · 4 failed\"), never a pass fraction after FAIL.",
+    "Drive group bars and phone tallies from the same buckets as the counter, to scale, and stop drawing a full bar or the word \"routed\" for n/a.",
+    "On phone, scroll four arms at a fixed 112px column with the leaf eval id pinned; on desktop, put the accent ring only on the cell the card or drawer describes."
+   ]
+  }
+ }
+]

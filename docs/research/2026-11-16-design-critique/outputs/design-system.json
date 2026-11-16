@@ -1,0 +1,1880 @@
+[
+ {
+  "model": "anthropic/claude-opus-5.5",
+  "run": 1,
+  "seconds": 131.8,
+  "cost": 0.546308,
+  "tokens": {
+   "in": 71607,
+   "out": 12994
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/StatusBox/README.md: state table (pass, fail, timeout); contrast.md: status-pass / status-fail / status-timeout rows; Components·B2",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout are all the same filled 14px square and differ only by hue, and their luminance is almost identical (on bg: pass 5.86, fail 5.87 dark; pass 5.19, fail 5.17, timeout 5.17 light), so the README's claim that each state differs in shape is false for the three most common states.",
+     "why": "A red–green colour-blind user, or anyone in greyscale, cannot tell pass from fail in a box group, and on phone the markers are hidden, so timeout and quiet lose their only non-colour signal too.",
+     "fix": "Give each filled state its own shape. pass: solid fill. fail: solid fill with a 2px knocked-out ✗ (CSS mask of two 2px diagonals at 45° and 135°). timeout: bottom-half fill (`background: linear-gradient(to top, var(--status-timeout) 50%, transparent 50%)` plus a 1.5px ring). quiet: ring plus centre dot plus a 3px notch cut from the top-right corner. Then add this rule to StatusBox: 'Every state must be identifiable in greyscale at size-box-phone; the phone layout keeps a 1-character marker (! for error, ⧗ for timeout, … for quiet) even when it hides the marker text.' Correct the Color › Status colors paragraph to match.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell, .bs-b; README.md › Layout: Focus",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The focus rule exists only in prose (there is no :focus-visible style anywhere in bundle.css), the cell is a clickable <div> with no role or tabindex, and the sample boxes are empty <i> elements with no accessible name.",
+     "why": "An agent copying the bundle ships a matrix that keyboard users cannot reach, that shows no focus, and that screen readers announce as nothing.",
+     "fix": "Add to bundle.css: `.bs-cell:focus-visible, .bs-tab:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }`. Add to MatrixCell README: 'Render the cell as <button type=\"button\" class=\"bs-cell\" aria-haspopup=\"dialog\" aria-label=\"{eval} × {arm}: {label}; {n} pass, {n} fail, {n} running…\">. Boxes get aria-hidden=\"true\". The matrix is a role=\"grid\" with arrow-key navigation; Enter opens the drawer and Esc closes it and returns focus to the cell.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell:hover / .bs-hov / .bs-sel; Components·D4 vs Components·B5",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Hover (1px accent ring), selected (2px accent ring), focus (2px accent outline) and running boxes (2px accent ring) all use the same orange ring, and the hovered and selected cells in the screenshots are nearly indistinguishable.",
+     "why": "An agent cannot show a selected cell that is also focused or hovered without the states merging, and 'accent for the single live thing' stops meaning anything.",
+     "fix": "Define the states as follows. hover: `background: var(--hover)` with no ring. selected: `box-shadow: inset 0 0 0 2px var(--fg)` plus a 3px `--accent` bar on the left edge (`inset 3px 0 0 var(--accent)`). focus: the outline above, offset 2px, drawn outside the cell so it stacks with selected. Add a combined-state table to MatrixCell (hover+selected, focus+selected, focus+hover).",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md › Components; tokens.json usages for drawer, hover card, popover, tabs, leaderboard, phase bar, theme toggle, select, segmented control, copy button, stale tile",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The tokens refer to at least ten surfaces (cell drawer, hover card, sample popover, tabs, leaderboard, phase bar, top bar, theme toggle, segmented control, select, copy button), but only three components are specified, and no empty, loading, disconnected or run-errored page state is defined.",
+     "why": "An agent will invent most of watch (the drawer layout, the leaderboard table, what to show before the first event arrives or when the stream drops), so the result will drift from the mockups.",
+     "fix": "Add component docs, each with a states table (default/hover/focus/selected/disabled), sizes, spacing tokens and a do/don't list, for: TopBar (mark 22px, live dot, theme toggle), Tabs (underline 2px accent, gap space-28), CellDrawer (bg, radius-8, padding space-24, shadow; desktop right panel 480px, phone bottom sheet), HoverCard, Leaderboard (band rows, lbl column, sticky column with shade), PhaseBar, ThemeToggle. Add page states with exact copy: empty 'No cells yet. Waiting for run.start.', connecting 'connecting…' with skeleton cells in an outline of `--faint` at 1.5px dashed, disconnected 'Lost connection · retrying in 5s' in a yellow-tint banner, disabled as `opacity: .5; cursor: not-allowed` plus aria-disabled.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: size-cell, counter, counter-finished, heading, status usage strings; README.md › Layout",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Phone values (36px counter, 24px finished counter, 32px cell, 15px status, 16px padding, a 640px breakpoint) appear only in free-text usage strings, there is no breakpoint token, and the phone matrix layout (sticky column, scrolling, which arms show) is never specified.",
+     "why": "An agent parsing tokens gets only desktop values and has to guess both the breakpoint and the phone layout.",
+     "fix": "Add `breakpoint-phone: 640px` and phone overrides as tokens (`size-cell-phone: 32px`, `counter-phone: 36px`, `counter-finished-phone: 24px`, `heading-phone: 24px`, `status-phone: 15px`, `space-app-x-phone: 16px`), and emit them in tokens.css under `@media (max-width: 639px)`. Add a 'Phone matrix' section: first column sticky at 40% width with an 8px `shade` gradient, cells at `size-box-phone` with no brackets, horizontal scroll with scroll-snap per arm, short labels (`2/3`, `56%`), and the drawer as a bottom sheet with `shadow-sheet`.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: line 1 @import fonts.googleapis.com; README.md › Type ('default-src self')",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The component stylesheet loads DM Mono and DM Sans from Google Fonts, but the README says the watch page sets `default-src 'self'`, so that request is blocked.",
+     "why": "An agent copying bundle.css ships a page that logs CSP errors and silently falls back to Menlo or Consolas, so the type differs by machine and the metric-tuned sizes (13.5px, -0.03em) render wrong.",
+     "fix": "Remove the @import. Ship `fonts/` with woff2 subsets and add `@font-face { font-family: \"DM Mono\"; src: url(\"/static/fonts/dm-mono-400.woff2\") format(\"woff2\"); font-weight: 400; font-display: swap; }` (plus 500, and DM Sans variable opsz 9–40, wght 400–500). Add the rule: 'Never load fonts from a third-party origin; watch is offline-capable.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html: .bs-lg title attributes; components/MatrixCell/README.md ('Per-sample detail is on hover')",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "Legend definitions live in `title` tooltips, and per-sample detail is only on hover, with no rule for keyboard, touch, dismissal or hover persistence (WCAG 1.4.13).",
+     "why": "An agent will build hover-only hover cards that touch and keyboard users never see and that vanish as the pointer moves onto them.",
+     "fix": "Replace `title` with a tooltip component triggered on hover and on focus, `role=\"tooltip\"` and `aria-describedby`, dismissible with Esc, persistent while hovered, delay 300ms. Add the rule: 'Anything shown in a hover card is also reachable in the cell drawer; on touch, tap opens the drawer directly.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css: .cell, .counter, .status, .value, .title, .body; README.md › Components ('mockups use the same rules unprefixed (.cell, .counter)')",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The compiled type styles are global unprefixed classes that share names with the unprefixed mockup component classes (`.cell`, `.counter`) and with common words (`.status`, `.title`, `.body`, `.value`).",
+     "why": "An agent that follows the mockups and writes `class=\"cell\"` gets the type style's font rules mixed into the component, so the output depends on which stylesheet loads last.",
+     "fix": "Emit the type styles as custom properties plus prefixed classes: `--type-cell: 400 13.5px/1.2 var(--font-mono);` and `.bs-type-cell { font: var(--type-cell); }`. Add a rule: 'All benchspec classes start with bs-; mockup class names are not to be used in production.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-bx (gap 4px, padding 3px 6px, 1.5px, opacity .7), .bs-counter .bs-n (44px, 16px, 20px), .bs-legend (12px, gap 8px 14px), .bs-mk (3px 6px)",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The component CSS hard-codes many spacing, size, stroke and font values instead of reading tokens, and some values (3px padding, the 1.5px ring and bracket stroke, 0.7 opacity, 20px Finished word) have no token at all.",
+     "why": "An agent extending components cannot tell which numbers are system values and which are one-offs, so it copies the literals and the system drifts.",
+     "fix": "Add `stroke-hair: 1px`, `stroke-outline: 1.5px`, `stroke-ring: 2px`, `space-3: 3px` (or round marker padding to `space-4 space-6`) and `type-finished: 500 20px/1 var(--font-sans)`. Replace every literal in bundle.css with `var(--…)`, and add a lint rule to the README: 'bundle.css contains no raw px values except 0.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100; README.md › Pass-rate ramp; Colors(dark)·A6–H6",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "An undecided alternative (the 'frame A′' ramp) ships as live tokens, its red-to-green hue contradicts the 'pass is never green' rule, and adjacent dark stops are indistinguishable (rate-0 #D34742, rate-10 #D34F3B, rate-20 #D45733).",
+     "why": "An agent will find and use the ramp, so it produces a red-to-green heatmap that conflicts with the status boxes and implies 10pp distinctions nobody can see.",
+     "fix": "Move the rate-* tokens to `tokens.experimental.json`, out of tokens.css, until a decision is made. If they are kept, cut the ramp to 5 stops (0, 25, 50, 75, 100) on a single-hue navy-to-orange luminance ramp that avoids green, with at least 1.3:1 luminance difference between neighbours, and add 'Never combine rate fills and status fills on one screen.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: wm-bracket = wm-text; dot-1/dot-2/dot-3 = wm-right/wm-mid/brand-gray; accent-ink (dark) = accent; band (light) = raised #E9EBF2; accent-tint 'not yet used'; term-* emitted inside [data-theme] blocks",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Several tokens duplicate one another, one is unused, the light theme collapses band into raised, and the fixed term-* and brand-* values are redeclared in both theme blocks as if they were themable.",
+     "why": "An agent has no way to choose between twin tokens, and banded rows placed on raised in light theme become invisible.",
+     "fix": "Merge wm-text into wm-bracket and dot-* into the wm-* tokens. Delete accent-tint or give it a job (for example, the selected drawer row ground). Set light `band: #EEF0F5` so it differs from raised. Emit brand-* and term-* once in `:root` only, outside the theme blocks.",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: spacing (4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 36, 40) and type scale (16 sizes incl. 13.5 and 11.5)",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "The spacing scale has 12 near-adjacent steps ('not a strict grid'), and the type scale has 16 roles at 11 sizes including fractional pixels, so many roles share a size and only differ by name.",
+     "why": "An agent picking a gap or size for a new element has three plausible tokens within 2px of each other and will choose inconsistently.",
+     "fix": "Snap spacing to a 4px scale: 4, 8, 12, 16, 24, 32, 40 (map 6→8, 10→12, 14→12 or 16, 20→24, 28→24 or 32, 36→32 or 40). Reduce type to 7 sizes: 11, 12, 13, 14, 16, 24, 44, and make roles aliases of those (cell→13, marker→11, status→16, metric→24).",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md › Type: Wordmark; assets/Logos/README.md; Cover·B5–D6 vs Type·C4 vs Logo·B1",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "The wordmark is live SVG text in the platform monospace stack, so the same logo renders differently on each platform, and on the cover it rendered as a proportional sans (Cover·B5–D6).",
+     "why": "An agent embedding the wordmark cannot guarantee its shape, and the logo's clear-space and baseline geometry assume glyph widths that vary by machine.",
+     "fix": "Outline the wordmark text to paths in the chosen brand font (see Q1) in all three SVGs and in `render_assets.py`. Add a one-colour version (`benchspec-mark-mono.svg` using `currentColor`) and a 16px favicon variant (squares only, brackets dropped), and add 'Never typeset the wordmark as live text.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/Cover/preview.html: .ink / .gray; Cover·F3–H4; tokens.json section-label (uppercase, 0.08em)",
+     "criterion": "D5",
+     "severity": "medium",
+     "problem": "In dark theme the cover's 'ink' slab binds to wm-bracket and turns into a large near-white block, the gray block uses brand-gray instead of wm-left, `stroke-width` reads `--space-4`, and every section head is all-caps tracked mono, which is the stock AI-dashboard look.",
+     "why": "An agent copying the cover or the label style produces glaring blocks on dark grounds and generic uppercase headers throughout watch.",
+     "fix": "Bind the cover slab to `--brand-navy` on light and `--raised` on dark, use `--wm-left` for the gray block, and add `stroke-mark: 4px` instead of reusing space-4. Change section-label to sentence case, 13px DM Sans 500 in `muted`, prefixed by a bracket glyph (`[ Assertions ]` in faint brackets) so the mark's motif replaces the caps.",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md › Voice and content: State words; StatusBox legend ('pass', 'fail', 'error'); MatrixCell markers ('error', 'timeout')",
+     "criterion": "D8",
+     "severity": "low",
+     "problem": "The voice rule says state words are uppercase (PASS, FAIL, TIMEOUT, ERROR), but the legend and markers use lowercase, and there is no copy guidance for empty states, errors, buttons or confirmations.",
+     "why": "An agent will mix PASS and pass across the page and invent error and empty-state copy in a generic tone.",
+     "fix": "Rewrite the rule: 'Uppercase state words only in the drawer status line and CLI output; legend entries and cell markers are lowercase.' Add a copy table: buttons are a verb in lowercase (`copy`, `close`); errors give what happened plus what to run (`Lost connection to benchspec run. Retrying in 5s.`); empty states name the next command (`No evals found. Add one to benchmark.md and run benchspec run.`).",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt JetBrains Mono (Google Fonts, OFL), set the wordmark in JetBrains Mono 700 and outline it to paths in every SVG and raster render.",
+     "why": "The platform stack makes the logo vary by OS and, as Cover·B5 shows, it can fall back to a sans. JetBrains Mono has weights 100–800, so it covers the wordmark's 600–700 that DM Mono lacks. Its squared, upright letterforms match the mark's 10×10 squares and 4-unit strokes, and it reads as a developer tool without being mannered. Using the same family as the UI mono (see Q2) ties the wordmark to every number on the page."
+    },
+    "Q2": {
+     "answer": "Keep DM Sans and replace DM Mono with JetBrains Mono (400/500 in UI, 700 for the wordmark only).",
+     "why": "DM Mono's swashed, ƒ-like 'f' is conspicuous in the word this tool shows most ('4 ƒailed' at Components·B7, 'ƒamily' at Type·A1), and its weights stop at 500, so it can never match a bolder wordmark. JetBrains Mono has a taller x-height that holds up at the 11.5–13.5px sizes watch depends on, clearly separates 0/O and 1/l/I in eval ids, and has tabular figures by default. DM Sans stays as the prose face: neutral, geometric and well matched to JetBrains Mono's proportions."
+    }
+   },
+   "top_three": [
+    "Make every sample state distinguishable without colour: give fail a knocked-out ✗, timeout a half fill and quiet a notch, and keep a one-character marker on phone, because pass, fail and timeout currently share both shape and luminance.",
+    "Specify interaction and accessibility in code, not prose: button cells with aria-labels, a :focus-visible outline, distinct non-accent hover and selected treatments, and keyboard- and touch-reachable hover cards and tooltips.",
+    "Fill the build gaps that force invention: add the drawer, hover card, tabs, leaderboard, top bar and toggle components; empty, loading and disconnected states; phone tokens with a 640px breakpoint; and self-hosted fonts that comply with the page's CSP."
+   ]
+  }
+ },
+ {
+  "model": "anthropic/claude-opus-5.5",
+  "run": 2,
+  "seconds": 147.7,
+  "cost": 0.579108,
+  "tokens": {
+   "in": 71607,
+   "out": 14634
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "tokens.json: status-pass / status-fail / status-timeout; components/bundle.css: .bs-b-pass, .bs-b-fail, .bs-b-to; Components (light)·B2",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout are all plain filled squares. The contrast table puts their luminance level with each other: dark pass 5.86 vs fail 5.87 on bg; light pass 5.19, fail 5.17, timeout 5.17. That leaves hue as the only signal, which contradicts the README claim that 'each state differs in shape'.",
+     "why": "An agent building watch to spec gives red-green colourblind users a matrix where every finished sample looks the same, and in light theme pass, fail and timeout are indistinguishable without hue.",
+     "fix": "Give fail and timeout their own shapes. Fail: `.bs-b-fail { background: linear-gradient(45deg, transparent 42%, var(--surface) 42% 58%, transparent 58%), linear-gradient(-45deg, transparent 42%, var(--surface) 42% 58%, transparent 58%), var(--status-fail); }` (a knocked-out ✗). Timeout: `.bs-b-to { box-shadow: inset 0 0 0 1.5px var(--status-timeout); background: linear-gradient(to top, var(--status-timeout) 50%, transparent 50%); }` (half-filled, 'ran out'). Add to StatusBox/README: 'No two states may share both shape and luminance; pass is the only plain filled square.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-run vs .bs-b-stale; components/MatrixCell/README.md: 'Phone hides markers'",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Running and quiet use the same shape (a 2px ring with a centre dot) and differ only by hue. The pulse that also separates them stops under reduced motion, and phone hides the text markers for error, timeout and quiet.",
+     "why": "On phone, or with reduced motion on, an agent following the spec ships error, timeout and quiet as colour-only signals, which fails WCAG 1.4.1.",
+     "fix": "Change quiet to a ring plus a flat line: `.bs-b-stale { box-shadow: inset 0 0 0 2px var(--status-quiet); background: linear-gradient(var(--status-quiet), var(--status-quiet)) center / 6px 2px no-repeat; }`. Replace 'Phone hides markers' with: 'Phone shortens markers to `err`, `t/o` and `quiet` but never hides them; if no marker fits, append the word to the label (`2/3 · quiet`).'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell (no :focus-visible); README.md Layout: Focus; Components·B5",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Cells are `div`s with `cursor: pointer`, and there is no focus rule or keyboard model anywhere in bundle.css. The documented focus style (a 2px accent outline) also looks almost the same as the selected style (a 2px inset accent ring).",
+     "why": "An agent ships a matrix you can only use with a mouse, and even if focus is added it can't be told apart from the cell whose drawer is open.",
+     "fix": "Add to MatrixCell/README: 'Each cell is a `<button>` inside `role=grid`, with roving tabindex; arrow keys move between cells, Enter opens the drawer, Esc closes it and returns focus to the cell.' Add `.bs-cell:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }`. Change the Focus rule to: 'Focus is a 2px `fg` outline offset 2px, outside the element. Selected is a 2px inset `accent` ring. Never use one style for both.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html: <i class=\"bs-b ...\">, .bs-lg title=; StatusBox/README.md",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Sample boxes are empty `<i>` elements with no accessible name, and the legend definitions live only in `title` attributes, which keyboard and touch users can't reach.",
+     "why": "An agent copying the markup builds a matrix that screen readers announce as nothing, with definitions that never appear on touch devices.",
+     "fix": "Add to StatusBox/README: 'The `.bs-bx` group has `role=\"img\"` and an `aria-label` that lists its samples in order, for example `aria-label=\"3 samples: fail, running, quiet 52s\"`; individual boxes have `aria-hidden=\"true\"`. Legend definitions are visible text in `help` style, or a `<button aria-describedby>` disclosure, never `title`.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: accent (dark #F0764B) vs red (dark #E6726D); Components·B5",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "In dark theme, accent and red are nearly the same hue and luminance (6.21 vs 5.87 on bg). The orange selected ring around the 67% cell at Components·B5 reads as an error ring, and the running ring reads like the error ring.",
+     "why": "An agent will draw selection, hover and running in a colour users take to mean failure.",
+     "fix": "Move dark `red` toward crimson so it separates from orange by hue: `red` dark `#F27089` (about 4.75:1 on hover and 5.0:1 on red-tint by my calculation; re-run the full contrast table to confirm). Add to Color: 'accent and red must differ by at least 30° of hue in both themes.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md: Components; tokens.json usage notes (drawer, hover card, tabs, leaderboard, segmented control, theme toggle, phase bar, stale tile, bottom sheet)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The tokens mention about ten surfaces that have no component spec: cell drawer, hover card, tabs, leaderboard, sample navigation, phone bottom sheet, phase bar, theme toggle, select and segmented control. There is also no empty, loading, disconnected or disabled state, and no defined phone breakpoint.",
+     "why": "Most of watch's screen area would be invented by the agent and would not match the mockups.",
+     "fix": "Add a component doc and preview for each of: CellDrawer, HoverCard, Tabs, Leaderboard, SampleNav, PhoneSheet and PhaseBar. Each doc gets a state table covering default, hover, focus, selected, disabled and empty. Add a `bp-phone: 640px` token. Add three state specs. Empty: 'No run yet. Start one with `benchspec run`.' in `help`, `muted`, centred in the matrix area. Loading: queued boxes with the label `connecting`. Disconnected: a banner on `yellow-tint` reading 'Lost connection to benchspec run · retrying'. Disabled: `muted` text, a 1px `line` border, `cursor: not-allowed`, no opacity change.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: @import fonts.googleapis.com; tokens.json: type.fonts []",
+     "criterion": "D6",
+     "severity": "high",
+     "problem": "bundle.css loads the fonts from Google, but the README says the watch page sets `default-src 'self'`, which blocks that request. tokens.json lists no font files at all.",
+     "why": "An agent copying bundle.css ships watch in Menlo or Segoe fallbacks, so the UI's type silently differs on every machine.",
+     "fix": "Delete the @import. Ship `@font-face { font-family: 'DM Mono'; src: url('/static/fonts/dm-mono-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }` and matching faces for 500 and for DM Sans 400 and 500 (opsz 9–40). Fill `type.fonts` with `{family, weight, file, license: 'OFL-1.1'}` entries.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json / tokens.css: --red, --yellow, --ok, --faint, --wm-left, --dot-2",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "Core UI tokens are named by appearance rather than role. `yellow` is olive #826200 in light theme, and `faint` does three jobs: tertiary text, the pass fill and the queued outline.",
+     "why": "An agent will reach for `--red` for any red-looking thing and can't tell which `faint` uses are safe to change.",
+     "fix": "Rename by role and keep the old names as deprecated aliases: `red`→`danger`, `red-tint`→`danger-tint`, `yellow`→`warn`, `yellow-tint`→`warn-tint`, `ok`→`success`, `faint`→`fg-tertiary`. Point `status-pass` directly at its own value (not through `fg-tertiary`) so pass can be tuned without moving text.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell, .bs-mk, .bs-counter .bs-n, .bs-legend; tokens.json usage notes ('36px on phone', '24px on phone', 'tooltips use 0 8px 20px')",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "Components hard-code px values instead of reading the space and type tokens (`gap: 10px`, `padding: 3px 6px`, `font: 500 11.5px`, `border-radius: 2px`). Phone and tooltip variants exist only as prose inside usage strings.",
+     "why": "An agent theming or resizing from the tokens will miss these values, and phone sizes have no machine-readable form.",
+     "fix": "Replace the literals with `var(--space-*)` and the type classes. Add tokens `size-cell-phone: 32px`, `type.counter.phone: 36px`, `type.counter-finished.phone: 24px`, `type.heading.phone: 24px`, `radius-box-phone: 2px`, `shadow-tooltip: 0 8px 20px …` and `border-ring: 2px`, `border-outline: 1.5px`. Add a lint rule: 'No px literal in bundle.css except 0 and 1px hairlines.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100 ('not yet chosen'); README.md: Pass-rate ramp",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "Eleven ramp tokens ship as live tokens, but their status is 'not yet chosen'. A red-to-green ramp also contradicts the 'pass is not green' rule.",
+     "why": "An agent can't tell whether to fill boxes with the ramp or with status colours, and may mix the two.",
+     "fix": "Move `rate-*` to `tokens.experimental.json` and add this rule: 'watch fills sample boxes with status-* only. Do not use rate-* until frame A′ is adopted. If adopted, it replaces status colour for finished cells only and never coexists with it in one view.'",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: UI palette ('accent for the single live thing'); tokens.json: accent usage",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Accent is described as 'the single live thing on screen', yet it is assigned to seven jobs: live dot, progress, running, booting, hover, selected, focus and tab underline.",
+     "why": "An agent ends up with a screen full of orange where nothing reads as the live element, and the rule contradicts itself.",
+     "fix": "Make hover a 1px `muted` ring: `.bs-cell:hover { box-shadow: inset 0 0 0 1px var(--muted); }`. Move focus to `fg` (see the focus issue). Rewrite the rule: 'accent marks live progress (live dot, progress fill, running and booting boxes) and the one selected cell. Nothing else.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.css [data-theme=light]: --raised #E9EBF2 = --band #E9EBF2; shadow-* tokens",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In light theme, `raised` and `band` are the same hex, so two tokens do one job. The shadows are a single unthemed rgba(0,0,0,.35), which is harsh on a light ground, so the light theme reads as inverted rather than designed.",
+     "why": "Banded rows and raised cells will merge in light theme, and floating panels get heavy black halos.",
+     "fix": "Set light `band: #EEF0F5`, so it sits between surface #FFFFFF and raised #E9EBF2. Theme the shadows: light `shadow-popover: 0 8px 24px rgba(27,31,59,0.14)`, `shadow-hovercard: 0 10px 28px rgba(27,31,59,0.16)`, `shadow-sheet: 0 -12px 32px rgba(27,31,59,0.16)`.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: spacing (12 steps, 'not a strict grid'); type scale (16 styles incl. 13.5px, 11.5px; heading and counter-finished both 30px)",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "The spacing and type scales are traced from the mockups instead of designed. Near-duplicate steps (10/12/14, 28/36/40, 13/13.5/14) give the agent no principle for choosing a value.",
+     "why": "An agent adding a new element will pick an arbitrary step or invent a new one, and spacing will drift.",
+     "fix": "Make spacing 4/8/12/16/24/32/40, with 6→8, 10→8, 14→12, 20→24, 28→32 and 36→32 (desktop side padding). Make the type scale 11/12/13/14/16/18/24/30/44, with 11.5→11, 13.5→13 and 15→14. Add rule text: 'Use only scale steps; no half-pixel sizes.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "components/Cover/preview.html: .name, .art; Cover·B5–D6, Cover·F5–G7",
+     "criterion": "D5",
+     "severity": "medium",
+     "problem": "The cover sets 'benchspec' as 76px live text with -0.02em tracking, which renders in a proportional sans at Cover·B5–D6 and breaks the logo's 'don't' rules. It also scatters orange and salmon boxes through a pass matrix, which in watch would read as failed or running samples.",
+     "why": "Agents treat the cover as the brand reference, so they will reproduce a wordmark in the wrong font and status boxes coloured with no status meaning.",
+     "fix": "Replace `.name` with the inline wordmark SVG bound to `wm-*` tokens, with no letter-spacing. In the art matrix, use `status-pass` boxes plus real status states only (for example two `bs-b-fail` and one `bs-b-run`). Add to Imagery: 'Status boxes in brand art follow StatusBox semantics; wm-* colours appear only in the mark.'",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Voice and content",
+     "criterion": "D8",
+     "severity": "low",
+     "problem": "The voice rules cover the tagline and product nouns but give no rules for interface copy: button and tab case, empty states, errors, tooltips or confirmations.",
+     "why": "An agent will write generic copy such as 'Oops! Something went wrong' for watch's non-matrix states.",
+     "fix": "Add these rules. 'UI labels use sentence case (`Cell drawer`, `Copy output`). Tooltips are one sentence ending in a period, under 80 characters. Errors say what happened and the next command: `Lost connection to benchspec run · retrying in 5s`. Empty states name the command: `No run yet. Start one with benchspec run.` Never say sorry, oops or please.'",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt JetBrains Mono (OFL, Google Fonts) at 600 for the wordmark and brand art only, and ship the wordmark as outlined paths instead of live text.",
+     "why": "The platform monospace stack makes the logo change shape on every OS, and the cover already falls back to a proportional sans (Cover·B5). JetBrains Mono SemiBold is close to the Menlo and SF Mono forms the current art was drawn with, so the mark barely changes while becoming fixed. It also has a real 600 weight, which DM Mono lacks. Outlining the paths removes any font dependency in SVGs, and a pinned file lets render_assets.py produce the same PNGs on every machine."
+    },
+    "Q2": {
+     "answer": "Keep DM Sans for prose. Replace DM Mono with JetBrains Mono at 400 and 500, so one monospace face covers the wordmark, the terminal art and the UI data.",
+     "why": "DM Mono's curly florin-like 'f' (see 'ƒailed' and 'ƒinished' at Components·B7) is a quirk in dense 12–13.5px data. It stops at weight 500, and it deliberately differs from the wordmark, which is why the system needs a 'never set the wordmark in DM Mono' rule. JetBrains Mono has a tall x-height, clear 0/O and 1/l/I, and the weights the UI needs. Sharing it with the wordmark makes watch read as the same product as the logo. DM Sans pairs fine with it, since both are low-contrast geometric grotesques."
+    }
+   },
+   "top_three": [
+    "Make every status distinguishable without hue. Give fail a knocked-out ✗ and timeout a half fill, give quiet a flat line instead of a centre dot, and never hide markers on phone. Today pass, fail and timeout have equal luminance in light theme.",
+    "Specify keyboard and screen-reader behaviour. Cells become buttons in a role=grid with roving focus; focus is a 2px fg outline distinct from the accent selected ring; status groups get aria-labels; legend definitions move out of title attributes.",
+    "Spec the rest of watch before an agent builds it: cell drawer, hover card, tabs, leaderboard, phone sheet, empty, loading, disconnected and disabled states, plus a bp-phone token. Self-host the fonts so the page's CSP doesn't silently replace the type."
+   ]
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 1,
+  "seconds": 74.4,
+  "cost": 0.138838,
+  "tokens": {
+   "in": 46774,
+   "out": 4529
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/bundle.css: @import and README.md: Type",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "`components/bundle.css` loads DM Mono and DM Sans from `https://fonts.googleapis.com` via `@import`, while `README.md` states that `benchspec watch` sets Content-Security-Policy `default-src 'self'`.",
+     "why": "When an agent includes `bundle.css` in `benchspec watch`, the browser will block the Google Fonts stylesheet under `default-src 'self'`, triggering console CSP errors and falling back to system fonts.",
+     "fix": "Remove the external `@import url(\"https://fonts.googleapis.com/...\");` from `components/bundle.css`, vendor the WOFF2 files locally under `assets/fonts/`, and declare local `@font-face` rules (`src: url(\"/assets/fonts/DMMono-Regular.woff2\") format(\"woff2\")`) for DM Mono (400, 500) and DM Sans (400, 500).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/ and tokens.json",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Only 3 leaf components (`StatusBox`, `MatrixCell`, `Counter`) are specified, while tokens and docs reference major `benchspec watch` surfaces and controls that have no component specs, dimensions, or CSS rules: Top bar, Tabs, Matrix table & collapsible group rows, Leaderboard table, Cell drawer / Phone bottom sheet, Hover card, Sample popover, Theme toggle, and Empty/Loading states.",
+     "why": "An agent building `benchspec watch` with no human designer in the loop will have to invent layout dimensions, HTML structure, borders, and interactive states for over 70% of the application UI.",
+     "fix": "Add component specs and `.bs-*` CSS rules for: (1) `.bs-topbar` (height `48px`, `size-mark-ui` 22px mark + wordmark, live 7px `accent` dot, pill theme toggle `radius-pill`), (2) `.bs-tabs` (`space-28` gap, `tab` font, 2px `accent` active underline), (3) `.bs-matrix` & `.bs-leaderboard` (sticky `lbl` column with 8px `shade` scroll gradient, `band` even rows, group summary row with `2px solid var(--line)` top border and `▸`/`▼` disclosure), (4) `.bs-drawer` / `.bs-sheet` (desktop width `480px` on `bg`, `radius-8`, `space-24` padding; phone bottom sheet `shadow-sheet`, `max-height: 85vh`), and (5) `.bs-hovercard` / `.bs-popover` (`bg` ground, `1px solid var(--line)`, `radius-8` / `radius-6`, `shadow-hovercard` / `shadow-popover`).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md and components/StatusBox/README.md",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Responsive rules for phone and 4-arm layouts are referenced in prose (\"on phone, where the brackets are dropped\", \"Phone hides markers and shortens the label\", \"32px on phone\", \"36px on phone\" counter) without a defined CSS media query breakpoint, bracket-hiding CSS rule, or string-shortening format.",
+     "why": "An agent cannot implement responsive behavior deterministically without knowing the exact viewport breakpoint, the CSS selector that hides `.bs-bx` brackets, or how to shorten labels like `2/3 · running · agent 1m 21s`.",
+     "fix": "Define a breakpoint token (`640px`, matching `tokens.json` heading usage) and add explicit `@media (max-width: 640px)` rules to `components/bundle.css`: `.bs-bx::before, .bs-bx::after { display: none; } .bs-bx { padding: 0; gap: var(--space-6); } .bs-cell { height: 32px; border-radius: var(--radius-4); } .bs-cell .bs-mk { display: none; } .bs-counter .bs-n { font-size: 36px; } .bs-counter .bs-n.bs-fin { font-size: 24px; }`. In `MatrixCell/README.md`, specify the exact shortened phone label pattern: `<done>/<total> · <phase>` (dropping elapsed time, e.g. `2/3 · agent`, `booting`).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css and components/StatusBox/preview.html",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Interactive elements lacks keyboard focus styling and semantics: `bundle.css` omits the focus ring rule promised in `README.md`, `MatrixCell/preview.html` uses non-focusable `<div class=\"bs-cell\">` elements, and `StatusBox/preview.html` relies on native `title` attributes on non-focusable `<span>` tags for legend definitions.",
+     "why": "An agent copying the component templates and CSS will ship a matrix and legend that cannot be navigated, focused, or inspected via keyboard or screen reader, failing WCAG 2.2 AA (2.1.1, 2.4.7).",
+     "fix": "Add `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` to `components/bundle.css`; require `<button type=\"button\" class=\"bs-cell\">` (or `role=\"button\" tabindex=\"0\"`) for interactive cells in `MatrixCell/README.md`; and specify accessible custom tooltips triggered on both `:hover` and `:focus-visible` (`role=\"tooltip\"`) for legend items.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0..rate-100 and README.md: Pass-rate ramp",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The 11-step pass-rate ramp (`rate-0` through `rate-100`) is included in `tokens.json` and `tokens.css` with usage text stating \"(frame A′ ramp, not yet chosen over status colour)\".",
+     "why": "An agent reading the design system faces an unresolved product decision and may color sample boxes using `rate-*` instead of `status-*` or mix both encodings.",
+     "fix": "Settle the rule in `README.md` and `tokens.json`: state explicitly that sample boxes in `MatrixCell` always use `status-*` tokens, and either remove `rate-0`…`rate-100` from the token file or restrict their usage to a specific component (such as group-summary row heatmap cells).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md and components/MatrixCell/preview.html",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "`MatrixCell/README.md` specifies the running label format as `2/3 · running · agent 1m 21s`, whereas `MatrixCell/preview.html` (and `components (dark)·B4`) renders `1/3 · agent` alongside a `quiet 52s` marker without documenting when `running` and the duration are omitted.",
+     "why": "An agent formatting cell labels from live run state has to guess when to include the word `running` and the phase timer versus truncating to `<done>/<total> · <phase>`.",
+     "fix": "Document the exact conditional label formatting rules in `MatrixCell/README.md`: when a cell has no `.bs-mk` marker on desktop, render `<done>/<total> · running · <phase> <elapsed>` (`2/3 · running · agent 1m 21s`); when a `.bs-mk` marker (`quiet Ns`, `timeout`, or `error`) is present inside the cell or on phone viewports, omit `running` and `<elapsed>` to leave `<done>/<total> · <phase>` (`1/3 · agent`).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css: :root, .wordmark..help and components/bundle.css",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Typography styles in `tokens.css` use unprefixed utility classes (`.cell`, `.status`, `.title`, `.body`, `.tab`, `.meta`) without `tabular-nums`, while `components/bundle.css` uses `bs-`-prefixed classes (`.bs-cell`, `.bs-mk`, `.bs-counter`) that hardcode font sizes, weights, and spacing instead of consuming the token classes or CSS variables.",
+     "why": "An agent will encounter namespace collisions on generic class names like `.cell` or `.status` and has two disconnected sources of truth for typography and spacing.",
+     "fix": "Prefix all generated typography utility classes in `tokens.css` with `bs-type-` (e.g., `.bs-type-cell`, `.bs-type-counter`), add `font-variant-numeric: tabular-nums` to all Display and Data group classes in `tokens.css`, and refactor `components/bundle.css` to reference `--space-*` and `--radius-*` tokens instead of hardcoded pixel literals (`4px`, `6px`, `10px`, `12px`, `14px`, `20px`).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: red, yellow, ok, note, faint, accent, accent-ink",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Color tokens mix visual hue names (`red`, `yellow`) with semantic role names (`ok`, `note`) and luminance names (`muted`, `faint`), and `accent` vs `accent-ink` share the exact same hex (`#F0764B`) in dark mode while diverging in light mode (`#DF4A19` vs `#A93F18`).",
+     "why": "Hue-named tokens violate role-based naming (D1) and tempt agents to use `--red` or `--yellow` outside their intended roles, or to use `--accent` on text when building in dark mode (where it looks identical to `--accent-ink`), which then fails 4.5:1 text contrast in light mode (3.25:1 on `hover`).",
+     "fix": "Alias or rename the semantic text/mark tokens by role (`--danger: var(--red)`, `--danger-tint: var(--red-tint)`, `--warn: var(--yellow)`, `--warn-tint: var(--yellow-tint)`) and rename `--accent` to `--accent-mark` (keeping `--accent-ink` for text) so the token name itself prevents agents from applying `--accent` to `color` properties.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: shadow-popover, shadow-hovercard, shadow-sheet",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "The shadow tokens (`shadow-popover`, `shadow-hovercard`, `shadow-sheet`) use a fixed single-theme `rgba(0, 0, 0, 0.35)` without light-theme counterparts or border pairing rules.",
+     "why": "On light theme (`bg: #F3F4F8`, `surface: #FFFFFF`), a raw 35% black drop shadow looks heavy and muddy, while in dark mode (`bg: #14172E`) a floating popover on `bg` without a border blends into the background.",
+     "fix": "Make shadow tokens theme-aware in `tokens.json` and `tokens.css`: in dark mode use `0 8px 24px rgba(5, 7, 18, 0.65)` paired with a mandatory `1px solid var(--line)` border on floating surfaces; in light mode use a crisp multi-layer shadow `0 1px 3px rgba(27, 31, 59, 0.08), 0 8px 24px rgba(27, 31, 59, 0.12)`.",
+     "confidence": "medium"
+    },
+    {
+     "where": "assets/Logos/README.md and assets/Logos/benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "There is no standalone dark-ground mark asset (`benchspec-mark-dark.svg`); `assets/Logos/README.md` only provides `benchspec-mark.svg` with hardcoded light-ground navy `#1B1F3B` brackets, while the dark-first UI top bar shows the standalone mark at `22px` (`size-mark-ui`).",
+     "why": "A maintainer or agent referencing an `<img>` for the standalone mark on dark surfaces (which are default across `benchspec`) has no SVG file to load, and `README.md` does not provide the copy-pasteable inline SVG snippet bound to `--wm-*` variables.",
+     "fix": "Add `assets/Logos/benchspec-mark-dark.svg` (64×64 viewBox with `#E8ECF1` brackets, `#6E7891` left squares, and `#F0764B` / `#F2A48C` right squares) and include the exact theme-reactive inline `<svg>` snippet using `var(--wm-bracket)`, `var(--wm-left)`, `var(--wm-right)`, and `var(--wm-mid)` in `README.md`.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/benchspec-wordmark-light.svg and assets/Logos/benchspec-wordmark-dark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "Both SVG wordmark files use live `<text>` elements in the system monospace fallback stack (`ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace`) at `font-weight=\"600\"` inside a fixed `width=\"250\"` viewBox.",
+     "why": "Because Menlo and Liberation Mono lack an native 600 semibold weight (browsers synthesize or snap to 700 bold) and differ in glyph advance widths from SF Mono and Consolas, the wordmark's visual weight, letterforms, and right-hand clear space change unpredictably across macOS, Windows, and Linux.",
+     "fix": "Adopt a single named open-source monospace font for the wordmark, convert the `<text>` element in `benchspec-wordmark-light.svg` and `benchspec-wordmark-dark.svg` to outlined `<path>` geometry, and lock the viewBox width to exact clear-space geometry.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/Cover/preview.html and cover (dark)·B6",
+     "criterion": "D8",
+     "severity": "low",
+     "problem": "`components/Cover/preview.html` renders the tagline in normal weight (`400`) `14px` muted sans-serif (`color: var(--muted)`), contradicting `README.md` (\"Primary tagline: ... Use it verbatim: one sentence, bold under the wordmark\") and `tokens.json` (`social-tagline` in `wordmark` mono).",
+     "why": "Maintainers or agents generating brand cover art from `Cover/preview.html` will style the primary tagline inconsistently with the brand book's voice rules.",
+     "fix": "Update `.tag` in `components/Cover/preview.html` (or clarify `README.md: Voice and content`) so the cover card sets the tagline in `font-family: var(--font-mono); font-weight: 500; color: var(--fg);` (or explicitly exempt `.cover .tag` in `README.md`).",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes — benchspec should adopt **JetBrains Mono** (available free on Google Fonts and OFL-licensed) as its named brand font at weight `600` (SemiBold), and convert the SVG wordmark text to outlined paths from it.",
+     "why": "Relying on the platform monospace stack (`SFMono-Regular`, `Menlo`, `Consolas`, `Liberation Mono`) means `benchspec` renders with different glyph shapes, x-heights, and advance widths on every OS — and neither Menlo nor Consolas ships a true `600` weight, causing synthetic bolding or weight snapping. JetBrains Mono has a true `600` SemiBold weight, squarish superelliptical bowls (`b`, `p`, `e`, `c`) that visually lock with the `10×10` (`rx=2.5`) rounded squares and `stroke-width: 4` brackets of the mark, and crisp technical character appropriate for a coding-agent benchmark."
+    },
+    "Q2": {
+     "answer": "No — replace **DM Mono + DM Sans** with **JetBrains Mono + IBM Plex Sans** (or **Inter**).",
+     "why": "DM Mono is a stylized, wide, low-density face with quirky calligraphic terminals (such as its flared `r`, `f`, and `1`) and only three weights (300, 400, 500), which wastes horizontal space in dense benchmark matrix cells (`2/3 · running · agent 1m 21s`) and clashes with the geometric bracket-matrix mark and system-mono wordmark. Pairing **JetBrains Mono** (for data, cells, counters, and the wordmark) with **IBM Plex Sans** (for prose, tabs, drawers, and tooltips) unifies the brand mark and product UI into one family, improves character density and symbol legibility (`✓`, `✗`, `▸`, `◆`) in `benchspec watch`, and gives the tool an authentic, engineered developer-tool aesthetic."
+    }
+   },
+   "top_three": [
+    "Specify the missing `benchspec watch` components and responsive rules in `components/bundle.css` and `components/*/README.md` (Top bar, Tabs, Matrix & collapsible group rows, Leaderboard table, Cell drawer / bottom sheet, Hover card / Popover, and `@media (max-width: 640px)` rules) so an agent never has to invent layout or state values.",
+    "Fix the Content-Security-Policy conflict and keyboard accessibility gaps in `components/bundle.css`: self-host the web fonts instead of using `@import url(\"https://fonts.googleapis.com/...\")` (which breaks under `default-src 'self'`), add the `:focus-visible` `2px solid var(--accent)` outline rule, and use `<button>` semantics for `MatrixCell` and keyboard-accessible tooltips for `StatusBox`.",
+    "Unify typography and logo assets by adopting **JetBrains Mono** for both the outlined SVG wordmarks (plus a standalone `benchspec-mark-dark.svg`) and the UI `--font-mono` token (paired with **IBM Plex Sans**), while resolving the unchosen `rate-0`…`rate-100` ramp in `tokens.json`."
+   ]
+  }
+ },
+ {
+  "model": "google/gemini-4-argon",
+  "run": 2,
+  "seconds": 70.4,
+  "cost": 0.138118,
+  "tokens": {
+   "in": 46774,
+   "out": 4457
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/bundle.css: @import and README.md: Type",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "components/bundle.css loads DM Mono and DM Sans via a remote Google Fonts @import, directly violating README.md's rule that benchspec watch sets Content-Security-Policy default-src 'self'.",
+     "why": "An agent bundling or importing bundle.css into benchspec watch will trigger CSP violations in the browser and silently drop the UI fonts.",
+     "fix": "Remove `@import url(\"https://fonts.googleapis.com/...\");` from `components/bundle.css` and replace it with local `@font-face` declarations pointing to self-hosted `/fonts/DMMono-Regular.woff2`, `/fonts/DMMono-Medium.woff2`, and `/fonts/DMSans-Variable.woff2` (or document that the watch server serves a separate `fonts.css` under `'self'`).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Only three leaf components (StatusBox, MatrixCell, Counter) are specified, while tokens.json and README.md reference major watch surfaces and controls—top bar, Matrix/Leaderboard tabs, matrix table (group summary rows, sticky phone column), leaderboard table, cell drawer/phone bottom sheet, hover card, sample popover, segmented control, select, and theme toggle—with no component specs or CSS.",
+     "why": "An agent building benchspec watch without a human designer will have to invent the markup, layout, dimensions, and states for over half the application.",
+     "fix": "Add component specs and `.bs-*` rules in `components/bundle.css` for: 1) AppShell & TopBar (`height: 52px`, mark `22px`, live `7px` `--accent` dot, pill theme toggle `radius-pill`), 2) Tabs (`.bs-tab`, `14px` sans 500, `28px` gap, `2px solid var(--accent)` active bottom border), 3) MatrixTable (`16px` column gap, `1px solid var(--line)` row rule, group summary row `2px solid var(--line)` top rule, phone sticky label column with `8px` `linear-gradient(to right, var(--shade), transparent)`), 4) LeaderboardTable (`--lbl` header/first column, `--band` even rows, `--accent-ink` best value with `◆`), and 5) CellDrawer / HoverCard / Popover (`--bg` ground, `1px solid var(--line)` border, `--radius-8` / `--radius-6`, and corresponding `--shadow-*` tokens).",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md and components/StatusBox/README.md",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The responsive phone rules described in prose ('Phone hides markers and shortens the label', 'where the brackets are dropped', '32px on phone') have no corresponding media queries, modifier classes, or label-truncation rules in bundle.css or the docs.",
+     "why": "An agent cannot deterministically implement the phone matrix because 'shortens the label' is ambiguous and `.bs-sm` in bundle.css neither hides brackets nor changes cell height or markers.",
+     "fix": "Specify exact phone label templates in `components/MatrixCell/README.md` (e.g., `2/3 · running · agent 1m 21s` becomes `2/3 · 1m 21s`; `booting · setup 1s` becomes `booting`), and add responsive rules to `components/bundle.css`: `.bs-sm.bs-bx { padding: 0; } .bs-sm.bs-bx::before, .bs-sm.bs-bx::after { display: none; } @media (max-width: 640px) { .bs-cell { height: 32px; border-radius: var(--radius-4); } .bs-cell .bs-mk { display: none; } .bs-counter .bs-n { font-size: 36px; } .bs-counter .bs-n.bs-fin { font-size: 24px; } }`.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html and components/bundle.css",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Status boxes are rendered as empty `<i class=\"bs-b bs-b-*\"></i>` elements with no ARIA attributes or screen-reader text, and legend definitions rely on native `title` attributes rather than keyboard-accessible tooltips or visible text.",
+     "why": "Screen-reader users and keyboard-only users navigating the matrix or legend cannot perceive individual sample states or legend definitions.",
+     "fix": "In `components/StatusBox/README.md`, require `role=\"img\"` and `aria-label=\"{k} of {n} samples: {state list}\"` on `.bs-bx` (or `aria-hidden=\"true\"` when the adjacent `.bs-t` and drawer button expose the full state), and add `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` to `components/bundle.css` alongside an accessible `.bs-tooltip` spec triggered on both `:hover` and `:focus-visible`.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "MatrixCell's documentation does not define the marker prioritization rule when a cell has multiple problem states simultaneously (e.g. one `err` sample and one `stale` sample) or how unfinished cell labels format when states mix.",
+     "why": "An agent rendering a multi-sample cell with both an error and a timeout or quiet sample will either stack multiple `.bs-mk` badges and overflow the 36px cell or guess which marker wins.",
+     "fix": "Add an explicit priority rule to `components/MatrixCell/README.md`: 'Show at most one `.bs-mk` per cell, prioritized in order: `error` (`bs-bad`) > `timeout` (`bs-warn`) > `quiet Ns` (`bs-warn`). For unfinished cell labels (`{done}/{total} · {phase} · {subphase} {elapsed}`), report the furthest active sample's phase (`running` > `booting` > `queued`).'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100 and README.md: Pass-rate ramp",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The 11-step pass-rate ramp (`--rate-0` to `--rate-100`) is documented as 'an alternative to status colour from the mockups (frame A′), not yet chosen'.",
+     "why": "Leaving an unresolved design fork in the token source of truth forces an agent to guess whether to color sample boxes by status or by pooled pass-rate.",
+     "fix": "Make a binding rule in `README.md` and `tokens.json`: state that sample boxes in `MatrixCell` always use `--status-*` tokens, and either remove `--rate-0` … `--rate-100` from `tokens.json` or explicitly scope them to a named opt-in view (e.g., Leaderboard rate bars or heatmap mode).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: value vs README.md: UI palette",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "In `tokens.json`, the `value` type style usage states 'the best per row takes accent', directly contradicting `README.md` and the `accent-ink` token usage ('Accent-coloured TEXT: best leaderboard value... Never use accent for text').",
+     "why": "An agent following the type token description will set best leaderboard text in `--accent` (`#DF4A19`), which fails WCAG 4.5:1 text contrast on all light-theme grounds (3.25:1–4.09:1).",
+     "fix": "Update `tokens.json` under `type.groups[1].styles[3]` (`value`) so `usage` reads: `\"Leaderboard cell value; the best per row takes accent-ink.\"`",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css and components/bundle.css",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "`tokens.css` defines unprefixed global utility classes (`.cell`, `.status`, `.title`, `.body`, `.tab`) while `components/bundle.css` uses `.bs-*` prefixes and hardcodes magic numbers (`13.5px`, `4px`, `6px`, `10px`, `12px`, `14px`, `20px`) instead of referencing the `--space-*` and type tokens.",
+     "why": "Using `.cell` for both typography in `tokens.css` and layout in unprefixed mockup styles causes CSS collisions, and hardcoded values in `bundle.css` bypass the token system.",
+     "fix": "Prefix all typography utility classes in `tokens.css` with `.bs-type-` (e.g., `.bs-type-cell`, `.bs-type-status`) and replace hardcoded pixel values in `components/bundle.css` with their corresponding CSS variables (`var(--space-4)`, `var(--space-10)`, `var(--space-12)`, `var(--space-14)`, `var(--space-20)`).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: shadow and colors (light)·E5–H6",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In light theme, `--raised` and `--band` have the exact same hex (`#E9EBF2`), and floating surfaces (`--shadow-popover`, `--shadow-hovercard`, `--shadow-sheet`) sit on `--bg` (`#F3F4F8`) over `--surface` (`#FFFFFF`) with heavy `0.35` black shadows designed for dark mode.",
+     "why": "In light theme, matrix cells and banded rows cannot be distinguished on the same surface, and popovers/drawers look dingy (gray `#F3F4F8` floating over white `#FFFFFF` with a muddy 35% black shadow).",
+     "fix": "In light theme, differentiate `--band` (`#F5F6FA`) from `--raised` (`#E9EBF2`), set floating popover/drawer surfaces to `--surface` (`#FFFFFF`) with a `1px solid var(--line)` border, and make shadow tokens theme-aware (`rgba(27, 31, 59, 0.12)` in light theme vs `rgba(0, 0, 0, 0.35)` in dark theme).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: yellow, status-timeout and components (light)·A2–D5",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In light theme, `--yellow` is set to `#826200` (a dark olive-brown tuned to pass 4.5:1 as small text) and reused directly as the fill for `--status-timeout` and ring for `--status-quiet`, making timeout boxes look brown rather than amber (`components (light)·B2`, `C3`).",
+     "why": "Reusing a text-darkened yellow token for graphical status marks makes light-theme timeout and quiet states look muddy and hard to recognize as amber/yellow.",
+     "fix": "Split `--yellow` into `--yellow` (for marks/rings, needing 3:1) and `--yellow-ink` (for text, needing 4.5:1), just like `--accent` and `--accent-ink`: set light `--yellow: #B88600` (3.15:1 on `--hover`, warm amber) for `--status-timeout` and `--status-quiet`, and keep `--yellow-ink: #826200` for `.bs-mk.bs-warn` text.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css: .counter, .metric, .value, .cell, .body-mono",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "README.md states 'Turn on tabular numerals (`font-variant-numeric: tabular-nums`) wherever numbers stack', but none of the numeric or mono type classes in `tokens.css` include `font-variant-numeric: tabular-nums` (only `.bs-app` and `.bs-counter` in `bundle.css` do).",
+     "why": "An agent applying `.value`, `.metric`, or `.cell` from `tokens.css` outside `.bs-app` will get default numeral spacing if fallback fonts are active.",
+     "fix": "Add `font-variant-numeric: tabular-nums;` to `.counter`, `.counter-finished`, `.metric`, `.value`, `.cell`, and `.body-mono` in `tokens.css`.",
+     "confidence": "medium"
+    },
+    {
+     "where": "assets/Logos/README.md and logo (dark)·E3–H3",
+     "criterion": "D7",
+     "severity": "low",
+     "problem": "There is no standalone dark-ground mark asset (`benchspec-mark-dark.svg`), only `benchspec-mark.svg` with hardcoded light-ground navy `#1B1F3B` brackets.",
+     "why": "Maintainers or agents referencing a standalone mark file on dark backgrounds (or in `<picture>` tags, favicons, or dark README badges) have no SVG file to link and risk rendering invisible navy brackets on dark grounds.",
+     "fix": "Add `assets/Logos/benchspec-mark-dark.svg` using the dark mark palette (`#E8ECF1` brackets, `#6E7891` left squares, `#F0764B` and `#F2A48C` right squares) to match `benchspec-wordmark-dark.svg`.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Type vs tokens.json: social-wordmark and cover (dark)·B6",
+     "criterion": "D7",
+     "severity": "low",
+     "problem": "README.md states 'Use two weights only: 400 and 500 (600 is the wordmark's alone)', but `tokens.json` specifies `fontWeight: 700` for `social-wordmark` and `components/Cover/preview.html` renders the wordmark at `76px` with `-0.02em` tracking without the bracket mark.",
+     "why": "Maintainers and agents get conflicting rules on whether the wordmark is weight 600 or 700, tracked or untracked, and whether it can appear at display scale without its bracket mark.",
+     "fix": "Standardize the wordmark weight to `600` (`letter-spacing: 0`) across `social-wordmark` in `tokens.json` and `scripts/render_assets.py`, or explicitly document `700` as the raster-only fallback for Menlo/DejaVu Sans Mono which lack a 600 weight.",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes — adopt a named open-source monospace font for the wordmark, specifically **JetBrains Mono** (weight 600 SemiBold) or **IBM Plex Mono** (weight 600 SemiBold) from Google Fonts, and convert the `<text>` in `benchspec-wordmark-light.svg` and `benchspec-wordmark-dark.svg` to outlined `<path>` elements.",
+     "why": "Using live `<text>` with a platform stack (`ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono`) causes the logo's glyph shapes, x-height, weight (Menlo and DejaVu Sans Mono lack a true 600 weight and jump to 700 Bold), and total advance width inside the fixed `250×64` viewBox to shift across macOS, Windows, and Linux; setting the wordmark in JetBrains Mono 600 (whose crisp, squared-off terminals echo the `10×10` `rx=2.5` matrix squares) and outlining the SVG paths guarantees the logo looks identical everywhere with zero runtime font dependency."
+    },
+    "Q2": {
+     "answer": "Replace **DM Mono** and **DM Sans** with **JetBrains Mono** (or **IBM Plex Mono**) for data/UI and **IBM Plex Sans** (or **Inter**) for prose, unifying the brand and UI monospace family.",
+     "why": "DM Mono is a stylized, wide-set geometric monospace with rounded, quirky terminals (especially on `r`, `f`, `j`, `1`, and `%`) and only three weights, which feels soft at `11.5px–13.5px` inside dense `36px` matrix cells and clashes with the crisp technical wordmark; JetBrains Mono (paired with IBM Plex Sans or Inter) has a taller x-height, tighter horizontal metrics for long eval IDs (`delegating-to-codex/plan-review-judges-findings`), unmistakable `0`/`O` and `1`/`l`/`I` distinction, and native weights from 400 to 700 so the wordmark (600) and UI data (400/500) share one coherent typographic voice."
+    }
+   },
+   "top_three": [
+    "Specify the missing `benchspec watch` structural components in `components/` and `bundle.css`—AppShell/TopBar, Tabs, MatrixTable (including group summary rows and phone sticky column), LeaderboardTable, CellDrawer/BottomSheet, and HoverCard/Popover—plus explicit `.bs-sm` / `@media (max-width: 640px)` rules so an agent never has to invent layouts or responsive behavior.",
+    "Remove the remote Google Fonts `@import` from `components/bundle.css` so it does not break under watch's `default-src 'self'` CSP, and unify the typography around a single self-hosted monospace/sans pairing (such as JetBrains Mono + IBM Plex Sans) with outlined SVG paths for the wordmark.",
+    "Fix the light-theme and accessibility gaps: resolve the `value` token doc contradiction (`accent-ink`, not `accent`), split light-theme `--yellow` into a warm amber mark token (`#B88600`) and a dark text token (`#826200`), distinctify light `--band` from `--raised`, and add `aria-label` / `:focus-visible` rules to `StatusBox` and `MatrixCell`."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 1,
+  "seconds": 114.3,
+  "cost": 0.108306,
+  "tokens": {
+   "in": 59421,
+   "out": 8007
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/MatrixCell/README.md: States + components/bundle.css: .bs-cell",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "PASS, FAIL and TIMEOUT boxes are all solid fills differing only by hue (faint vs red vs yellow).",
+     "why": "An agent building watch will encode pass vs fail only in color, so red-green and achromatic users cannot tell 56% from 100% without reading the label.",
+     "fix": "Add shape difference to fills: keep pass as solid faint square, add 2px darker inner slash or 1.5px inset outline to fail, and add diagonal stripe or keep warn marker mandatory for timeout; update StatusBox table and .bs-b-fail/.bs-b-to rules and never allow a finished cell without label+shape.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: status-running / status-quiet",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Running and quiet are the same shape: 2px ring plus centre dot, differing only accent vs yellow.",
+     "why": "An agent will render stalled vs live agents identically for color-blind users, and hover text alone does not fix the box mark.",
+     "fix": "Change one shape: e.g. running = 2px solid accent ring + pulsing centre dot, quiet = 2px dashed yellow ring + static square centre 4x4px; update tokens.json usage, StatusBox README table, and .bs-b-run/.bs-b-stale CSS.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: missing :focus-visible",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "README specifies 2px solid accent outline offset 2px, but bundle.css defines only .bs-hov and .bs-sel with no :focus-visible rule.",
+     "why": "An agent copying bundle.css will ship keyboard-invisible cells/tabs/counter controls.",
+     "fix": "Add to bundle.css: .bs-cell:focus-visible, .bs-bx:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-5); } and document that hover ring never replaces focus.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Components + components/MatrixCell/README.md + components/Counter/README.md",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Only StatusBox, MatrixCell and Counter are specified; tabs, leaderboard, drawer, hover-card, tooltip, empty, loading, disabled and selected+hover states have no sizes, tokens or markup.",
+     "why": "An agent building watch must invent the rest of the page, so layout, type and color will drift from the mockups.",
+     "fix": "Add specs for: tabs (height, active underline 2px accent, inactive muted), leaderboard row (height, band/lbl use, best-value accent-ink + ◆), drawer (padding space-24, radius-8, status line style), hover-card (max-width, radius-8, shadow-hovercard), tooltip (help style, shadow-popover), empty (help in muted centered), disabled (opacity 0.5 + not-allowed, muted text) for both themes and phone/desktop.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: type.groups + README.md: Layout, shape and depth",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Phone behavior is prose only with no breakpoint token: counter 44px to 36px, heading 30px to 24px, box 14px to 10px, hide markers, drop brackets, keep elapsed drop ETA.",
+     "why": "An agent has no media query value or exact phone label strings, so phone matrix and counter will differ per build.",
+     "fix": "Add tokens: breakpoint-phone: 640px; rule text: @media (max-width:640px) use counter 36px, heading 24px, status 15px, .bs-sm boxes 10px without .bs-bx brackets, cell label shortened to e.g. '1/3 · running' and markers hidden but exposed via aria-label='quiet 52s'; add to tokens.json and bundle.css.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100 + README.md: Color",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Pass-rate ramp is listed as alternative not yet chosen over status colour with no rule for when to use which.",
+     "why": "An agent must choose between two fill systems for the same boxes, guaranteeing forked watch UIs.",
+     "fix": "Decide and write: Default is status colour; use rate ramp only when cell attribute data-mode='rate' and always print pooled rate in fg beside it; remove ramp tokens if rejected, or promote to status-rate-* aliases with same shape rules if accepted.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: @import + tokens.json: type.fonts: []",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "tokens.json fonts array is empty and bundle.css loads DM Mono/Sans via Google Fonts @import, which README says watch CSP blocks with default-src 'self'.",
+     "why": "An agent following tokens will either hotlink fonts that fail to load or fall back silently to a different metric stack.",
+     "fix": "Fill type.fonts with files, weights and self-host paths, add font-display: swap rule, and add fallback rule text: If webfonts fail, use ui-monospace stack for mono and system-ui stack for sans with tabular-nums on; remove @import from bundle.css and vendor fonts locally.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/README.md: Boxes + components/bundle.css: .bs-sm .bs-b",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "Spec says add bs-sm on phone where brackets are dropped, but CSS only shrinks boxes and never hides .bs-bx::before/::after.",
+     "why": "An agent cannot satisfy both text and code without guessing, so phone cells will show brackets in one build and not in another.",
+     "fix": "Add explicit rule: .bs-sm.bs-bx::before, .bs-sm.bs-bx::after { display:none; } .bs-sm.bs-bx { padding:0; gap: var(--space-6); } and correct README to: wrap phone boxes in <span class='bs-bx bs-sm'>.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: raised #E9EBF2 / band #E9EBF2 (light)",
+     "criterion": "D4",
+     "severity": "high",
+     "problem": "In light theme raised and band are the same hex, collapsing two surface steps into one.",
+     "why": "An agent building banded leaderboard/table in light theme will render invisible banding and lose depth hierarchy.",
+     "fix": "Give band a distinct value that still passes text 4.5:1 and mark 3:1, e.g. light band #E0E3EC vs raised #E9EBF2, update tokens.json, tokens.css and contrast.md rows for band, or merge into one token if banding is dropped.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/README.md + assets/Logos/benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "high",
+     "problem": "There is no standalone dark-ground mark file; dark use requires hand-recolouring with wm-* tokens.",
+     "why": "An agent or maintainer picking a file for dark ground will use the light file and navy brackets will vanish on navy/term-body.",
+     "fix": "Ship benchspec-mark-dark.svg with dark fills (#E8ECF1 brackets, #6E7891 left, #F0764B right 1/3, #F2A48C mid) and change rule to: use -mark.svg on light, -mark-dark.svg on dark; keep inline wm-* binding only for UI chrome.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: spacing space-4 … space-40 + radius radius-2 … radius-10",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Spacing is 12 ad-hoc values from mockups not a scale, radii are 7 single-use values, and accent-tint and wm-text duplicate jobs.",
+     "why": "An agent must guess gaps and corners for any new element and will drift from the 4/8 rhythm.",
+     "fix": "Lock one 4px base scale (4,8,12,16,24,32,40) remap usages, collapse radii to 3 values (e.g. radius-sm 3px boxes/markers, radius-md 5px cells/popovers, radius-lg 8px drawers/frames + pill), delete or use accent-tint, merge wm-bracket/wm-text into wm-ink.",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md: Type + tokens.json: type.groups Wordmark/Display",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "Rule says two weights only 400 and 500 (600 wordmark alone), but social-wordmark is 700 and terminal headers are bold.",
+     "why": "An agent choosing weights for headings/metrics will pick 700/bold in one place and 500 in another.",
+     "fix": "Amend rule to: UI text 400/500 only; brand art may use 600 wordmark live text and 700 social-wordmark 64px Menlo Bold; terminal body 400 with 600 for headers; add font-weight to each type token and forbid other weights.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: cell 13.5px / marker 11.5px + tokens.css: .cell/.marker",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "Data sizes use fractional 13.5px/11.5px with line-height 1 and no tabular-nums in type classes; marker at 11.5px is near legibility floor.",
+     "why": "An agent will render cramped truncated markers and misaligned stacked numbers in matrix and leaderboard.",
+     "fix": "Round to integer scale (cell 13px or 14px, marker 12px), set line-height marker 1.4, add font-variant-numeric: tabular-nums to counter/metric/value/cell/body-mono/meta/marker classes, and set min-height for marker pill.",
+     "confidence": "medium"
+    },
+    {
+     "where": "components/Counter/README.md: Finished + README.md: Voice State words",
+     "criterion": "D8",
+     "severity": "medium",
+     "problem": "State words require uppercase PASS/FAIL/TIMEOUT/ERROR and lowercase queued/running, but Counter finished spec is ✓ Finished capitalized sans with check glyph.",
+     "why": "An agent writing copy will mix Finished, FINISHED and finished and misuse ✓/✗ vs text markers.",
+     "fix": "Add copy rule: Matrix/tally states use exact tokens PASS/FAIL/TIMEOUT/ERROR and lowercase running/booting/quiet 52s/queued/n/a/not run; Counter finished line alone may use '✓ Finished · 100%' with status style in ok; never use emoji, never paraphrase tagline.",
+     "confidence": "medium"
+    },
+    {
+     "where": "Cover·E5-G7 + components/Cover/preview.html",
+     "criterion": "D5",
+     "severity": "medium",
+     "problem": "Cover mixes four block motifs and a 6x5 boxed matrix that does not match the 3x2 logo grid or five-row social graphic.",
+     "why": "An agent extending brand art will copy the wrong matrix density and slab shapes, diluting the bracket-matrix idea into generic blocks.",
+     "fix": "Lock cover rule: art must be the mark's own layout at scale — two columns (gray + orange/salmon/orange), brackets in wm-bracket, boxes size-box pitch space-6, no extra slabs; deprecate five-row social graphic or define it as cover-only with exact geometry.",
+     "confidence": "low"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes, adopt one free mono as the brand font for wordmark and raster art, e.g. IBM Plex Mono SemiBold (600).",
+     "why": "Live platform-monospace text renders with different metrics per OS (Menlo vs DejaVu noted as same advance but different shapes) so logo geometry, 250x64 viewBox and social card lockup drift; a fixed OFL font locks the 30px/64px wordmark, keeps developer-tool voice, and lets UI keep DM pairing without forcing wordmark into DM Mono."
+    },
+    "Q2": {
+     "answer": "Keep DM Sans for prose/tabs, replace DM Mono for data with a more legible tabular mono such as IBM Plex Mono or JetBrains Mono.",
+     "why": "DM Sans humanist geometric tone fits navy/orange developer-tool brand and pairs with mono wordmark, but DM Mono at 11.5-13.5px is narrow/light with weak 0/O and tabular alignment, so small markers, tallies and leaderboard numbers lose legibility where Plex/JetBrains keep distinct glyphs and true tabular figures at the same sizes."
+    }
+   },
+   "top_three": [
+    "Specify the missing watch UI (tabs, leaderboard, drawer, hover-card, tooltip, empty/disabled/focus/phone breakpoint) with exact tokens and markup so agents stop inventing.",
+    "Fix status encoding to never rely on color alone: give FAIL vs PASS and RUNNING vs QUIET distinct shapes plus mandatory text markers.",
+    "Ship a real dark-ground mark file, lock a brand mono (IBM Plex Mono 600), and self-host fonts to satisfy CSP and stop logo/metric drift."
+   ]
+  }
+ },
+ {
+  "model": "meta/muse-spark-1.3",
+  "run": 2,
+  "seconds": 79.1,
+  "cost": 0.0478278,
+  "tokens": {
+   "in": 59421,
+   "out": 9145
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/bundle.css: missing :focus-visible",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "No focus style is implemented in code despite README requiring a 2px accent outline.",
+     "why": "An agent building watch from bundle.css will ship mouse-only hover/selected cells with no visible keyboard focus.",
+     "fix": "Add: .bs-cell:focus-visible, .bs-bx:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } and document tab order: matrix cells are tabbable, Enter/Space opens drawer.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md: keyboard interaction",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Cells are described as cursor:pointer divs with no role, tabindex, or key handling.",
+     "why": "An agent will build div-onClick cells that screen-reader and keyboard users cannot operate.",
+     "fix": "Add rule: cell is <button type=\"button\" class=\"bs-cell\"> or div role=\"button\" tabindex=\"0\" aria-expanded=\"false\" aria-label=\"eval-id, arm, label\"; Enter/Space toggles drawer; Esc closes.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html: <i class=\"bs-b\">",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Sample boxes are empty <i> elements with meaning only in title tooltips on the legend.",
+     "why": "An agent copying the preview will ship status with no accessible name, so AT users get nothing.",
+     "fix": "Add rule: each box gets role=\"img\" aria-label=\"pass|fail|timeout|error|running|booting|quiet|queued|n/a\"; legend is a <ul> with real text, not title-only; markers .bs-mk remain visible text.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: @import Google Fonts",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "bundle.css @imports fonts.googleapis.com while README Type requires data-theme page with default-src 'self' to self-host.",
+     "why": "An agent following bundle.css will ship a watch page where DM Mono/Sans are blocked by CSP and fall back silently.",
+     "fix": "Delete the @import line. Add @font-face for DM Mono 400/500 and DM Sans 400/500 from /fonts/*.woff2 and keep stacks: var(--font-mono), var(--font-sans) unchanged.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md: States",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "No spec for focus, disabled, empty matrix, or loading skeleton; only hover, selected, queued, out, na.",
+     "why": "An agent building watch must invent disabled/empty/loading, so runs will differ from mockups.",
+     "fix": "Add rows: focus = 2px accent outline offset 2px; disabled = opacity 0.5 cursor:not-allowed no drawer; empty = help text 'No samples yet' in muted; loading = raised skeleton bars with aria-busy=\"true\".",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "11-step rate ramp is documented as alternative not yet chosen over status colour, plus accent-tint defined but not yet used.",
+     "why": "An agent must guess whether to fill boxes with status-pass/fail or rate-0…100 and what accent-tint is for.",
+     "fix": "Decide: keep status colour as normative; move rate-0…100 and accent-tint to deprecated: usage=\"DO NOT USE in watch; retained for experiments only\" or delete them from tokens.json/css.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md: label —",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Arm whose every sample errored is labelled with bare em-dash — with no words or marker rule.",
+     "why": "An agent will render — which carries no meaning and contradicts plain-words labels and uppercase ERROR words.",
+     "fix": "Replace rule with: label text `error` in red plus .bs-mk.bs-bad `error` marker; never use — alone; aria-label includes count e.g. 3 errored.",
+     "confidence": "medium"
+    },
+    {
+     "where": "assets/Logos/README.md: no dark mark file",
+     "criterion": "D7",
+     "severity": "high",
+     "problem": "Only benchspec-mark.svg in light-ground colours ships; dark use requires manual recolour via wm-* tokens.",
+     "why": "An agent will place the light mark on navy/term-body where navy brackets vanish, producing off-brand header.",
+     "fix": "Add benchspec-mark-dark.svg with fills #E8ECF1 brackets, #6E7891 left, #F0764B right 1/3, #F2A48C mid; rule: use light file on paper/white/light, dark file on navy/term-body/dark bg.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: faint on hover 4.50 dark / marker line-height 1",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "Marker style is 11.5px/1 with tight padding, and faint text sits at exactly 4.50 on hover dark.",
+     "why": "An agent using marker as specified will clip descenders like quiet 52s q and ship borderline-legible small text.",
+     "fix": "Change marker to 12px/1.45 font-weight 500 padding 3px 6px radius-4; bump dark faint to #939AB0 to keep >=4.6:1 on hover.",
+     "confidence": "medium"
+    },
+    {
+     "where": "components/bundle.css: prefers-reduced-motion",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "Only .bs-b-run pulse is stopped; 0.15s disclosure turn from README has no code and no reduced-motion guard.",
+     "why": "An agent will add a disclosure rotation that still animates for reduced-motion users.",
+     "fix": "Add disclosure class with transition:transform 0.15s; add @media (prefers-reduced-motion:reduce){ .bs-b-run{animation:none} *{transition:none !important} }.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: band #E9EBF2 == raised #E9EBF2 light",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In light theme band and raised share #E9EBF2, so two tokens do the same job.",
+     "why": "An agent cannot produce banded vs raised distinction in light and will guess or collapse them.",
+     "fix": "Set light band to #EDEFF5 or delete band token and rule: banded rows use raised; update contrast table for new value >=4.5:1 text, >=3:1 marks.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Layout, spacing steps",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Spacing is explicitly not a strict grid with 12 ad-hoc space-4…space-40 values.",
+     "why": "An agent must memorize 12 one-off usages instead of composing from a scale, causing drift.",
+     "fix": "Define 4px base scale: 4,8,12,16,24,32,40; remap space-6->8, space-10->8/12, space-14->16, space-20->24, space-28->32, space-36->32/40 and update usages.",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md: Type section-label uppercase",
+     "criterion": "D5",
+     "severity": "medium",
+     "problem": "Section labels are mandated uppercase 12px 0.08em tracked muted.",
+     "why": "An agent following this will produce the all-caps-labels-everywhere AI look the rubric forbids.",
+     "fix": "Change section-label to sentence case 13px/1.3 weight 500 muted, no letter-spacing; reserve uppercase for ASSERTIONS-style code keywords only.",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: type.families wordmark live text",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "Wordmark is live SVG <text> in platform monospace stack, shape changes slightly by platform.",
+     "why": "An agent re-rendering the wordmark gets different widths/weights on Mac vs Linux, breaking clear-space and lockups.",
+     "fix": "Outline wordmark paths in shipped SVGs; add rule: do not typeset wordmark in code, always use benchspec-wordmark-light/dark.svg via <picture>.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: type cell 13.5px",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "Cell 13.5px and marker 11.5px fractional sizes with no tabular-nums scope beyond .bs-app.",
+     "why": "An agent placing .bs-cell outside .bs-app loses tabular lining and gets blurry half-pixel text.",
+     "fix": "Round cell to 13px or 14px, marker to 12px; add font-variant-numeric:tabular-nums to .bs-cell, .bs-tally, .value, .metric, .counter in bundle.css.",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes, adopt one named brand font for wordmark/logo/social only: IBM Plex Mono SemiBold 600.",
+     "why": "Free OFL on Google Fonts, technical squared forms echo the bracket-matrix, stable cross-platform metrics let you outline the SVG and fix clear-space/min-size, and it stays distinct from UI DM Mono which the system already forbids for the wordmark."
+    },
+    "Q2": {
+     "answer": "Yes, keep DM Mono for data + DM Sans for prose.",
+     "why": "Mono for numbers/ids/cells/tables preserves terminal heritage and bracket-box logic while sans for body/tabs/tooltips prevents mono fatigue; shared DM skeleton pairs cleanly and both are OFL with 400/500, just self-host them and fix fractional sizes."
+    }
+   },
+   "top_three": [
+    "Implement focus, keyboard roles, and accessible names for cells and status boxes in bundle.css + docs so watch is operable.",
+    "Decide status-colour vs rate-ramp and delete or deprecate rate-0…100 and accent-tint so agents stop guessing fill encoding.",
+    "Self-host DM Mono/Sans, remove Google Fonts @import that violates default-src 'self', and ship outlined wordmark plus dark-ground mark file."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 1,
+  "seconds": 73.4,
+  "cost": 0.254043,
+  "tokens": {
+   "in": 60431,
+   "out": 4850
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/ (only StatusBox, MatrixCell, Counter exist)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The tokens and README reference UI that has no component spec: tabs, the cell drawer, the hover card, the leaderboard table, the segmented control, select inputs, the theme toggle, tooltips and the phone bottom sheet.",
+     "why": "An agent building watch must invent the structure, states and spacing of most of the page, so each build will diverge from the mockups and from each other.",
+     "fix": "Add a README + preview per missing component with the same rigor as MatrixCell: e.g. Tab (14px sans 500, active = fg with 2px accent underline, inactive = muted, hover = fg), Drawer (bg ground, radius-8, space-24 padding, status line in `status` style, sections space-28 apart, close `×` top-right), Leaderboard (head row on `lbl`, even rows on `band`, label column on `lbl`, best value in accent-ink with ◆), and rules for the toggle, select and tooltip.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell / README.md Layout (Focus)",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The focus ring is described in prose (2px accent, offset 2px) but no component CSS implements it, and interactive cells are specified as clickable divs with no keyboard, focus-visible or ARIA rule.",
+     "why": "An agent will ship a matrix that is mouse-only: no :focus-visible style exists to invoke, and nothing says cells must be <button> or carry aria-label, so keyboard and screen-reader users get nothing.",
+     "fix": "Add to bundle.css: `.bs-cell:focus-visible, .bs-tab:focus-visible, .bs-tgl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` and to MatrixCell/README: 'Cells are <button type=\"button\"> (or role=button with tabindex=0 and Enter/Space handlers); each carries aria-label=\"{eval} on {arm}: {label text}\"; the drawer traps focus and Esc closes it.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100 (and Colors·A6–D8)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The 11-step pass-rate ramp is shipped as a first-class token set but every stop's usage says 'not yet chosen over status colour', leaving two competing encodings for sample boxes.",
+     "why": "One agent build fills boxes with the ramp, another uses status fills, and the two look like different products; the undecided decision is pushed onto the consumer.",
+     "fix": "Decide now. Recommended: keep status colour for state and use the ramp only where rate is the value (leaderboard cells, group summary tiles). Write that as the rule: 'Sample boxes always use status-* fills/rings. rate-* fills appear only on rate tiles and leaderboard cells, always with the pooled rate printed beside in fg.' Delete 'not yet chosen' from all 11 usage strings.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md Layout / tokens.json (no breakpoint token, no empty/loading spec)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Phone adaptations are scattered through usage strings ('36px on phone', 'phone hides markers') with no named breakpoint, and there is no spec for the empty run (0 cells), the loading state before first data, or a failed watch connection.",
+     "why": "Agents guess the breakpoint (640px appears once, in `heading` usage) and invent empty/loading UI, which is exactly where generic-AI skeleton screens creep in.",
+     "fix": "Add `\"breakpoint\": {\"phone\": \"640px\"}` to tokens.json and a Layout line: 'Phone rules apply below 640px.' Add an Empty/loading section: empty run = `help`-style text 'No cells yet — the matrix appears when the first sample starts' on surface, no skeleton shimmer; disconnected = `bs-mk bs-bad` marker reading 'disconnected' in the top bar with the last data left in place.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-stale, .bs-b-to, .bs-b-wait, .bs-k-out",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "CSS class names don't match the system's own state vocabulary: quiet is `stale`, timeout is `to`, queued is `wait`, not-run is `out`.",
+     "why": "An agent reading the voice rules writes `quiet`/`timeout`/`queued`/`not run` and must guess the mapping to `stale`/`to`/`wait`/`out`; some will invent parallel classes and drift.",
+     "fix": "Rename classes to match the state words: `bs-b-quiet`, `bs-b-timeout`, `bs-b-queued`, `bs-k-notrun` (keep the old names as deprecated aliases for one release), and update the StatusBox state table so token, class and word are three columns of one row.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: band, raised, hover (light theme)",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In the light theme `band` and `raised` are the identical hex #E9EBF2, and `hover` #E2E5EF is only ~2% darker, so two tokens do one job and the hover step is nearly invisible.",
+     "why": "Banded rows and cells become indistinguishable in light mode, and a hovered cell reads as unchanged despite the 1px accent ring doing all the work.",
+     "fix": "Differentiate: light `raised` #FFFFFF-adjacent is wrong direction — instead set light `band` to #EDEFF5 (between bg #F3F4F8 and raised #E9EBF2) and deepen light `hover` to #D9DDE9; re-run the contrast table (all text tokens still clear 4.5:1 at these lightness levels) and update tokens.css.",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: type.fonts / components/bundle.css line 1",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "`fonts` is an empty array, bundle.css @imports Google Fonts over the network, and the README notes watch runs under default-src 'self' — three contradictory answers to where the fonts come from.",
+     "why": "An agent building the self-contained watch page either ships a CSP violation or silently falls back to system fonts, losing the DM Mono/DM Sans look entirely.",
+     "fix": "Specify self-hosting: add to tokens.json `fonts: [{\"family\":\"DM Mono\",\"weights\":[400,500],\"src\":\"assets/fonts/dm-mono-{wght}.woff2\"},{\"family\":\"DM Sans\",\"weights\":[400,500],\"src\":\"assets/fonts/dm-sans-{wght}.woff2\"}]`, replace the @import in bundle.css with @font-face rules pointing at those relative paths, and state the fallback order is only for when the files are missing.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/README.md: benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "There is no standalone dark-ground mark file; the docs say to recolour inline with wm-* tokens, but Markdown contexts (README, docs) can't recolour an <img>.",
+     "why": "A maintainer adding the mark alone (not the wordmark) to a dark README section or docs page has no asset to reference and will either recolour by hand or use the light mark on navy, which the Don'ts forbid.",
+     "fix": "Generate `benchspec-mark-dark.svg` (brackets #E8ECF1, left squares #6E7891, right squares #F0764B/#F2A48C/#F0764B) in scripts/render_assets.py, ship it in assets/Logos/, and add it to the <picture> guidance.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/benchspec-wordmark-*.svg: <text> element",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "The wordmark is live SVG text in the platform monospace stack, so its glyphs, advance widths and rendered width differ by OS, and the social card uses a different weight (700 Menlo) than the SVG (600).",
+     "why": "The single most-reproduced brand asset renders inconsistently across viewers, and an agent embedding it at a fixed 250×64 box can get clipped or off-center text on platforms whose mono is wider than Menlo.",
+     "fix": "Either outline the text to paths per platform target (render via render_assets.py so it stays reproducible), or adopt a named brand mono (see Q1) and pin it. At minimum, add the rule: 'Never crop the wordmark viewBox; always render the full 250×64 and scale the box, not the text.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: accent-tint",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "`accent-tint` is defined in both themes with the usage 'Defined in the mockups, not yet used by a component' — a token with no job.",
+     "why": "Agents hunting for a selected-row or active-tab background will grab accent-tint inconsistently, or ignore it, and the token set teaches that unused values are acceptable.",
+     "fix": "Either assign it ('selected segment in the segmented control and the active tab ground: accent-tint fill, fg text') with a contrast row proving fg on accent-tint ≥4.5:1 in both themes, or delete it from tokens.json and tokens.css.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html: .bs-lg title attributes",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "The legend's state definitions exist only as `title` attributes, which are invisible to keyboard and touch users and unreliable for screen readers.",
+     "why": "On the phone matrix — where the legend matters most — the definitions are unreachable, so the nine shapes carry meaning nobody can look up.",
+     "fix": "Specify a real disclosure: each legend entry is a <button> with aria-label including the definition, opening the standard tooltip on focus and tap (tooltip: bg ground, radius-6, shadow-popover, `help` style, 8px gap). Add this to the StatusBox README rules.",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: size-box-phone usage",
+     "criterion": "D1",
+     "severity": "low",
+     "problem": "`size-box-phone` is named for phone but its usage also covers four-arm cells on desktop, so the name lies about when to use it.",
+     "why": "An agent keys the 10px box to a phone media query and leaves 14px boxes overflowing in dense four-arm desktop cells.",
+     "fix": "Rename to `size-box-sm` with usage '10px box: phone matrices and any cell with four or more arms; radius 2px; brackets dropped', and update the StatusBox table and bundle.css comment.",
+     "confidence": "high"
+    },
+    {
+     "where": "contrast.md: accent on line (light) = 3.02",
+     "criterion": "D3",
+     "severity": "low",
+     "problem": "The light-theme accent clears the 3:1 floor against the progress track by 0.02, so any future nudge to either colour fails silently.",
+     "why": "A maintainer tuning `line` or `accent` light values has no margin, and the table gives no warning threshold.",
+     "fix": "Deepen light `accent` to #D8430F (≈3.4:1 on line, still ≥3:1 on all six grounds — re-verify hover) or add a rule to contrast.md: 'No passing pair may sit below 3.2:1 (marks) or 4.75:1 (text); regenerate the table after any token change.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md Voice and content",
+     "criterion": "D8",
+     "severity": "low",
+     "problem": "Voice rules cover marketing copy and state words but give no pattern for UI sentences an agent must write: empty states, errors, confirmations, tooltips.",
+     "why": "The tagline stays on-brand while the watch UI's incidental copy ('Something went wrong!') drifts generic.",
+     "fix": "Add a UI-copy subsection with three examples: error = 'watch lost the run connection. Reconnecting…' (lowercase, states the thing, no apology); empty = 'No cells yet.'; confirmation-free = 'actions take effect immediately; there are no confirm dialogs.' Rule: 'UI copy names the object and the state in under eight words; no exclamation marks, no \"please\".'",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes — adopt JetBrains Mono (Google Fonts, OFL) as the named brand font for the wordmark and raster brand art.",
+     "why": "Today the wordmark is live SVG text in the platform mono stack, so the brand's most-repeated asset literally looks different on macOS, Windows and Linux, and the social card already diverges (Menlo 700 vs SVG 600). JetBrains Mono is free, has true 600/700 weights, a distinctive but sober developer-tool character, and — critically — can be pinned in render_assets.py and self-hosted, so the wordmark becomes reproducible everywhere. Its slightly increased x-height also survives the 22–36px UI sizes better than Menlo at 600."
+    },
+    "Q2": {
+     "answer": "Mostly right, with one swap: keep DM Sans for prose, but replace DM Mono with JetBrains Mono for data.",
+     "why": "DM Sans is a good fit — quiet, geometric, doesn't fight the mono. DM Mono is the weak link: it has no tabular-figures feature to toggle (the spec's `font-variant-numeric: tabular-nums` is a no-op on it), its light color at 12–13.5px on navy is spindly, and it caps at weight 500, which the scale already strains. If the brand adopts JetBrains Mono for the wordmark (Q1), using it for UI data too unifies wordmark, terminal renders and watch into one voice, gains real tabular figures and a fuller weight range, and removes the odd rule 'never set the wordmark in the UI mono' — the current setup where brand mono and data mono are deliberately different fonts is a distinction no viewer will ever perceive as intentional."
+    }
+   },
+   "top_three": [
+    "Spec the missing watch components (tabs, drawer, hover card, leaderboard, toggle, tooltip) with states, sizes and do/don't rules — three components cannot produce a coherent page.",
+    "Make interactivity accessible by construction: add :focus-visible CSS, button/ARIA rules for cells, keyboard behavior for the drawer, and replace title-only legend definitions with real tooltips.",
+    "Resolve the open decisions an agent would otherwise guess: choose where the rate ramp is used vs status colour, name the 640px breakpoint, define empty/loading/disconnected states, and pin self-hosted font files."
+   ]
+  }
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "run": 2,
+  "seconds": 39.7,
+  "cost": 0.077425152,
+  "tokens": {
+   "in": 60428,
+   "out": 4219
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/bundle.css: @import url(googleapis.com)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The component stylesheet loads DM Mono and DM Sans from Google Fonts, but the README states the watch page runs under default-src 'self' and must serve fonts itself.",
+     "why": "An agent copying bundle.css into watch gets a CSP-blocked font load and the whole UI silently falls back to system fonts, losing the designed type system.",
+     "fix": "Remove the @import from bundle.css; add a 'Fonts' section to tokens.json (the 'fonts' array is currently empty) listing the four woff2 files (dm-mono-400, dm-mono-500, dm-sans-400, dm-sans-500), their @font-face rules with font-display: swap, and the rule: 'watch serves these from /fonts; never load from a CDN.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/ (only StatusBox, MatrixCell, Counter exist)",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Token usages and the README reference UI that has no component spec: tabs, the cell drawer, the hover card, the leaderboard, the segmented control, select inputs, the theme toggle, tooltips and the phone bottom sheet.",
+     "why": "An agent building watch must invent the structure, states and spacing of most of the page, so those parts will drift from the mockups and from each other.",
+     "fix": "Add a spec per missing component with the same rigor as MatrixCell: for each, the ground token (drawers/popovers on bg per the bg usage note), radius (radius-8 drawer, radius-6 popover), padding (space-24 drawer, space-12 popover), shadow (shadow-sheet/hovercard/popover), states (active tab = accent underline, selected segment on raised) and a preview.html.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md (Focus) vs components/bundle.css",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Focus is specified only as prose ('2px solid accent outline, offset 2px'); no :focus-visible rule exists in bundle.css and MatrixCell is a clickable div with no keyboard or focus spec.",
+     "why": "An agent building from the CSS will ship cells that are unreachable and invisible to keyboard focus, failing WCAG 2.2 2.1.1 and 2.4.7.",
+     "fix": "Add to bundle.css: '.bs-cell:focus-visible, .bs-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }' and to MatrixCell/README: 'Cells are <button type=\"button\"> (or tabindex=0 with role=button); Enter/Space opens the drawer; focus ring per .bs-cell:focus-visible, never outline: none.'",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0 … rate-100",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The 11-stop pass-rate ramp is shipped as a first-class token set but every usage note says 'not yet chosen over status colour'.",
+     "why": "An agent has two sanctioned, mutually exclusive ways to fill sample boxes and no rule for which to use, so different builds of watch will look like different products.",
+     "fix": "Decide and encode it: either delete the ramp tokens, or add a top-level rule in README Color — 'Finished sample boxes use status colour (frame A); the rate-* ramp is reserved for [named surface]. Never mix the two on one screen.'",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox: bs-b-run vs bs-b-stale",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Running and quiet boxes are identical in shape (2px ring with a centre dot) and differ only in hue (accent vs yellow); the distinguishing text marker lives in MatrixCell, not in the StatusBox legend or standalone use.",
+     "why": "A red–green or low-vision user, or anyone glancing at the legend, cannot tell a healthy running sample from a stalled one, which is exactly the signal watch exists to surface.",
+     "fix": "Change quiet's shape in bundle.css and the StatusBox table: '.bs-b-stale { box-shadow: inset 0 0 0 2px var(--status-quiet); border-radius: 50%; }' (ring becomes a circle) or give it a double ring 'inset 0 0 0 2px var(--status-quiet), inset 0 0 0 4px var(--surface), inset 0 0 0 5px var(--status-quiet)'; update the legend swatch and the 'shape carries state' rule.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md (states)",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "No disabled, empty-matrix, loading or error-page states are specified anywhere; 'not run' covers a cell outside the run but nothing covers a run with zero cells, a disconnected live feed, or a failed load.",
+     "why": "The first screen a new user sees (no runs yet) and every failure path will be improvised by the agent.",
+     "fix": "Add an 'Empty and error states' section: empty matrix = 14px explainer in muted on surface with the short-explainer copy; disconnected = counter row plus a bs-warn marker 'disconnected · retrying'; load failure = status style 'ERROR' in red with the plain-cause line, both themes, with preview.html examples.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/*.svg (wordmark text) + assets/Logos/README.md",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "The wordmark is a live SVG <text> in the platform monospace stack, so the shipped logo renders with different glyphs and widths on macOS, Windows and Linux, and the docs acknowledge the drift.",
+     "why": "Maintainers exporting the logo from different machines produce visibly different wordmarks, and an agent regenerating assets cannot reproduce the canonical lockup.",
+     "fix": "Outline the text to paths in both wordmark SVGs (keeping the live-text source in scripts/render_assets.py), or pin the font: adopt one named mono (see Q1), subset 'benchspec' to woff2, and ship it in assets/Logos with the @font-face the SVG references.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: accent-tint",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "accent-tint is defined in both themes with the usage 'Defined in the mockups, not yet used by a component' — a token with no job.",
+     "why": "An agent looking for a tinted accent ground will use it inconsistently (or invent a second one), and the contrast table never checks text on it.",
+     "fix": "Either assign it a job — 'ground of the selected tab and the live-run banner; accent-ink text on accent-tint passes 4.5:1' with the ratios added to contrast.md — or delete it from tokens.json and tokens.css.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css [data-theme=\"light\"]: --band and --raised",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "In the light theme band (#E9EBF2) and raised (#E9EBF2) are the same hex, so banded rows are indistinguishable from the cells and tiles that sit on them.",
+     "why": "The leaderboard's even-row banding vanishes in light mode and an agent may 'fix' it by inventing a new grey, breaking the one-scale rule.",
+     "fix": "Darken light band one step: --band: #E2E5EF (the current hover value) and move hover to #DBDEE9, then re-run the six-ground contrast rows for the changed grounds and update contrast.md.",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md (Motion) vs components/bundle.css",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "The 0.15s disclosure turn is specified in prose but absent from the CSS, and the reduced-motion media query only disables the running pulse, not the disclosure turn or any future transition.",
+     "why": "An agent adding the drawer/disclosure animation will pick its own duration and is likely to forget reduced-motion, failing WCAG 2.2 2.3.3/2.2.2 expectations for the page.",
+     "fix": "Add tokens --dur-disclosure: 0.15s and --dur-pulse: 1.6s to tokens.json, use them in bundle.css, and replace the media query with a blanket rule: '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }'.",
+     "confidence": "medium"
+    },
+    {
+     "where": "components/Cover/preview.html (.gray class)",
+     "criterion": "D5",
+     "severity": "medium",
+     "problem": "The cover art binds its grey block to --brand-gray while the logo rules say UI chrome must use the wm-* tokens (wm-left), so the cover's grey does not switch correctly with the theme.",
+     "why": "An agent copying the cover pattern learns to bind logo-adjacent art to brand-* instead of wm-*, reproducing the exact 'light mark on navy' failure the Don't list warns about.",
+     "fix": "Change '.gray { fill:var(--brand-gray); }' to '.gray { fill:var(--wm-left); }' and add a line to the cover's spec comment: 'cover art binds to wm-* tokens so it themes with the page.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: spacing.tokens",
+     "criterion": "D4",
+     "severity": "low",
+     "problem": "The spacing scale is 12 named steps 'not a strict grid', with space-14 used exactly once and no rule for choosing between adjacent steps (10 vs 12, 28 vs 36).",
+     "why": "An agent spacing a new component has no principle to follow and will pick arbitrarily, eroding the rhythm.",
+     "fix": "State the rule in README Layout: 'Steps are multiples of 4 except space-6 (box gutters) and space-14 (counter gap); prefer the nearest multiple of 8 for new gaps; do not add new steps without a second use.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "tokens.json: type (marker 11.5px, cell 13.5px)",
+     "criterion": "D6",
+     "severity": "low",
+     "problem": "Half-pixel sizes (11.5px marker, 13.5px cell) render as 12/14 on some rasterizers and blur on 1x displays, and DM Mono has no italic while the voice rules imply emphasis via code style only — this is undocumented.",
+     "why": "An agent on a non-retina screen gets fuzzy small text, or reaches for italic for emphasis and synthesizes it.",
+     "fix": "Round to marker 12px and cell 14px (updating the contrast rows is unnecessary — sizes, not colours), and add to Type: 'DM Mono has no italic; never synthesize it. Emphasis is weight 500 or code style.'",
+     "confidence": "medium"
+    },
+    {
+     "where": "README.md (Voice and content)",
+     "criterion": "D8",
+     "severity": "low",
+     "problem": "Voice rules cover tagline, separators and state words but give no patterns for buttons, empty states or error messages — the copy an agent actually writes.",
+     "why": "UI copy outside the documented cases will drift into generic SaaS tone ('Oops, something went wrong').",
+     "fix": "Add three copy patterns with examples: buttons are imperative verbs ('Run again', 'Copy eval id'); empty states state the fact and the next command ('No runs yet. Run benchspec run -- --count 3.'); errors lead with the cause in plain words ('The worker exited before grading.'), never apology or exclamation.",
+     "confidence": "medium"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes — adopt IBM Plex Mono (SemiBold 600) as the named brand font for the wordmark and raster brand art only, and outline the wordmark SVG text to paths.",
+     "why": "The current platform-monospace wordmark renders differently on every OS, so the most reproduced brand asset is also the least stable — the logo page already shows the drift. IBM Plex Mono is free (OFL, on Google Fonts), has a true 600 weight, a technical-but-warm character that suits a benchmarking tool, and is visually distinct from DM Mono so the existing 'never set the wordmark in DM Mono' rule becomes enforceable by inspection. Subsetting the nine glyphs of 'benchspec' keeps the asset tiny and lets scripts/render_assets.py produce identical output on every machine."
+    },
+    "Q2": {
+     "answer": "Yes, keep DM Mono and DM Sans — they are the right pairing for this brand.",
+     "why": "DM Mono's light, wide, slightly typewriter texture reads as 'lab instrument' rather than 'IDE', which separates benchspec from the JetBrains-Mono-everywhere look of most dev tools, and its 400/500 range matches the two-weight rule. DM Sans is a quiet geometric sans that stays out of the data's way for the prose roles it is assigned. The real risks are operational, not aesthetic: DM Mono's lack of italic must be documented, and the fonts must be self-hosted under the watch CSP (currently broken by the Google Fonts @import). If a replacement were ever forced, JetBrains Mono + Inter would be the safe fallback, but it would cost the brand its slight eccentricity for no functional gain."
+    }
+   },
+   "top_three": [
+    "Self-host the fonts: remove the Google Fonts @import from bundle.css, ship the four woff2 files with @font-face rules, and fill the empty fonts array in tokens.json — otherwise the entire type system silently falls back under the watch CSP.",
+    "Spec the missing components (tabs, drawer, hover card, leaderboard, toggle, tooltips, bottom sheet) plus focus, disabled, empty, loading and error states, and add the :focus-visible rules to bundle.css — today an agent must invent most of the page and all of its keyboard behaviour.",
+    "Resolve the undecided decisions encoded as tokens: choose status colour vs the rate-* ramp (or scope the ramp to a named surface), give accent-tint a job or delete it, and differentiate quiet from running by shape (e.g. circular ring), not hue alone."
+   ]
+  }
+ },
+ {
+  "model": "openai/gpt-6-astra",
+  "run": 1,
+  "seconds": 104.0,
+  "cost": 0.280363,
+  "tokens": {
+   "in": 57636,
+   "out": 4454
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/StatusBox/README.md: state table; components/bundle.css: .bs-b-pass, .bs-b-fail, .bs-b-to; components/MatrixCell/README.md: Markers",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout share the same filled-square shape, while running and quiet share a ring-and-dot shape whose distinguishing marker is hidden on phones.",
+     "why": "An agent following these rules would make individual sample states depend on color, and the empty sample elements expose no equivalent state information to assistive technology.",
+     "fix": "Keep one square per sample, but add contrasting internal symbols: a check for pass, a cross for fail and a horizontal bar for timeout, drawn in the enclosing surface token against the existing fills; give quiet two center dots rather than running's one. Preserve these distinctions at 10px. Provide an accessible ordered summary such as 'Sample 1: FAIL; sample 2: running; sample 3: quiet, 52 seconds without output', and mark the corresponding visual boxes aria-hidden. Do not remove the only non-color status cue on phones.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/preview.html: .bs-cell div elements; components/bundle.css: MatrixCell; README.md: Focus",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Clickable cells are demonstrated as non-focusable divs, and the documented focus treatment has no implementation in the component stylesheet.",
+     "why": "An agent copying the examples would produce cells that keyboard users cannot open or identify as focused.",
+     "fix": "Render actionable cells as button elements with type='button', an accessible name containing eval and arm, aria-expanded and aria-controls for the detail panel; render 'not run' as non-interactive text. Add '.bs-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }'. Specify Enter and Space to open details, Escape to close, and focus restoration to the originating cell; keep focus outlines unobscured by scrolling containers.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-run and @keyframes bs-pulse; contrast.md: meaningful-mark claims",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The pulse fades the entire running indicator to 0.45 opacity, taking its meaningful ring below the promised 3:1 contrast.",
+     "why": "An agent would ship an indicator that periodically becomes insufficiently visible despite using approved tokens.",
+     "fix": "Remove opacity animation from .bs-b-run and keep its 2px ring fully opaque. Put the center dot in a pseudo-element and animate only transform: scale(0.8) to scale(1), with opacity fixed at 1; disable that animation under prefers-reduced-motion. Test the rendered indicator at both animation endpoints on all six grounds in both themes.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: type.groups.Display.styles[value].usage; README.md: Color / UI palette",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The value type token instructs agents to use accent for the best leaderboard value, contradicting the requirement to use accent-ink for text.",
+     "why": "Following the machine-readable type guidance would produce 16px leaderboard text below 4.5:1 in the light theme.",
+     "fix": "Replace the value usage text with 'Leaderboard cell value; the best per row uses accent-ink, never accent.' Add '.bs-value-best { color: var(--accent-ink); }' and an automated check that text styles never reference accent as their foreground color.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Color / Pass-rate ramp; tokens.json: rate-0 through rate-100",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The production token source contains a competing sample-color system explicitly described as not yet chosen.",
+     "why": "An agent must make a product decision about whether sample boxes encode lifecycle state or pass rate.",
+     "fix": "Add the normative rule 'watch sample boxes always use StatusBox state encoding; rate-* tokens are experimental and must not be used in production watch.' Move the ramp into an experimental token namespace excluded from the production CSS build, and remove the instruction to fill sample boxes with it.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Components; tokens.json: drawer, hover-card, tabs, leaderboard and select usage references",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "The system references essential watch surfaces and controls but provides buildable specifications only for StatusBox, MatrixCell and Counter.",
+     "why": "Agents must invent the matrix structure, leaderboard, navigation, detail panel and supporting controls independently.",
+     "fix": "Add normative component specs and reference markup for Matrix, Leaderboard, Tabs, DetailPanel, Tooltip, Button, Select and ThemeToggle. Define matrix and leaderboard row/column headers using native tables; use 36px-minimum desktop rows, 16px column gaps and existing surface tokens. Define a modal detail panel at min(480px, 100vw), with bg, 24px padding, 28px section gaps, a labelled heading, focus containment, Escape dismissal and focus restoration. Specify tab arrow-key behavior, sort-button aria-sort updates, disabled-control behavior, and tooltip opening on focus as well as hover, Escape dismissal and touch access.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Components; components/Counter/README.md: Provide and Finished",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "There are no application-level specifications for initial loading, an empty run, no matching results or a disconnected watch stream.",
+     "why": "An agent must invent these layouts and may present missing or stale data as a valid zero or completed run.",
+     "fix": "Add an application-state table: loading shows 'Loading run…' with no numeric result; zero cells shows 'No cells in this run.' with no percentage; an empty filter shows 'No evals match these filters.' and a 'Clear filters' button; disconnection retains the last data and shows 'Connection lost. Showing the last update from {time}.' with 'Reconnect'. Use body text in fg on surface, 24px padding and 12px content gaps; connection warnings use yellow on yellow-tint. Never convert loading, missing data or disconnection into PASS, 0% or Finished.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/README.md: phone rule; components/MatrixCell/README.md: phone rules; components/Counter/README.md: phone rules; components/bundle.css",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "Phone adaptations exist only as scattered prose, lack responsive CSS, and explicitly drop the brackets despite the required bracket-framed sample treatment.",
+     "why": "Agents will choose different breakpoints and overflow behavior, and some will remove the product's defining matrix frame.",
+     "fix": "Define phone as viewport width below 640px and compile responsive rules: app padding 16px; counter 36px, finished counter 24px; cell min-height 32px; boxes 10px with radius-2; elapsed retained and ETA hidden. Retain brackets at every width. Put wide matrices in their own horizontally scrollable region with a sticky eval-label column and the specified 8px shade gradient; allow the surrounding page to reflow at 320px. Specify compact labels as '{finished}/{total} · {state}' and retain accessible full labels and non-color status cues.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md: Label; components/Counter/README.md: Provide; components/MatrixCell/preview.html: error example",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "Pooled rates, cell completion and tally categories lack a deterministic aggregation contract, especially for mixed errors, timeouts and n/a samples.",
+     "why": "Agents can calculate different benchmark results and completion totals from the same run.",
+     "fix": "Add a backend-to-UI data contract containing rate numerator, rate denominator, applicable-check scope, sample state, cell terminal flag and run terminal reason. Require the UI to use the backend's canonical eligibility policy rather than infer a rate from box colors or sample counts. Specify rate = 100 × numerator / denominator, denominator zero displays '—', in-flight rates remain provisional, and all-error cells retain the error marker. Specify N as terminal included cells, M as run.start.cell_count, and tally buckets as mutually exclusive with an explicit mapping for timeout, quiet, booting and n/a. Add fixtures for mixed outcomes and interrupted runs.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell:not(.bs-k-out):hover and .bs-cell.bs-sel",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "The hover selector has greater specificity than the selected selector, so hovering a selected cell replaces its 2px selection ring with the 1px hover ring.",
+     "why": "The visible selected state changes merely because the pointer enters it, contradicting the documented state model.",
+     "fix": "Exclude selected cells from the ordinary hover rule, then add '.bs-cell.bs-sel, .bs-cell.bs-sel:hover { box-shadow: inset 0 0 0 2px var(--accent); }' and '.bs-cell.bs-sel:hover { background: var(--hover); }'. Document that selection persists through hover and keyboard focus, with the external focus outline remaining independently visible.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/Counter/preview.html: .bs-prog; components/Counter/README.md",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "The progress component has no accessible progress semantics or rule for announcing live updates.",
+     "why": "An agent may expose an unnamed decorative bar or announce every elapsed-time tick instead of useful run changes.",
+     "fix": "Give the bar role='progressbar', aria-label='Run completion', aria-valuemin='0', aria-valuemax=M, aria-valuenow=N and aria-valuetext='{N} of {M} cells finished'. For unknown totals, omit aria-valuenow; for M=0, use the empty-run state instead. Add a separate polite, atomic status region announcing completion-count changes at most once every 10 seconds and the terminal run state immediately; do not place elapsed time or streaming logs in that region.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: hardcoded spacing and type values; tokens.json: spacing and type",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Component rules copy tokenized values as literals and introduce unregistered values such as 3px padding and the 20px Finished label.",
+     "why": "Changing the token source will leave component geometry and typography behind, creating two competing systems.",
+     "fix": "Replace component spacing literals with the existing space-* variables and expose type styles as generated custom-property groups consumed by components. Add space-3 = 3px and a finished-label style using DM Sans, 20px, line-height 1 and weight 500. Make tokens.json the only source for these values and add a build check rejecting unregistered spacing, radius and typography literals in production component CSS.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: Google Fonts @import; tokens.json: type.fonts; README.md: Type",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "The supplied stylesheet fetches fonts externally even though watch's documented content security policy blocks them and the font manifest is empty.",
+     "why": "An agent copying the bundle will render system fallbacks instead of the specified UI typography, particularly offline.",
+     "fix": "Remove the Google Fonts import. Populate type.fonts with local WOFF2 paths and license metadata for DM Mono 400/500 and DM Sans 400/500 with the specified optical-size range. Generate same-origin @font-face declarations with font-display: swap, ship those files with watch, and verify the component previews under default-src 'self' with network access disabled.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Logo / Wordmark and Type; assets/Logos/benchspec-wordmark-light.svg; assets/Logos/benchspec-wordmark-dark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "The wordmark uses platform-dependent live text while raster assets use different platform fonts and weights.",
+     "why": "Maintainers and agents cannot reproduce a single wordmark shape across operating systems, README assets and watch.",
+     "fix": "Adopt DM Mono Medium 500 as the named wordmark face, replace the prohibition against DM Mono, and update wordmark and social-wordmark tokens to weight 500. Generate outlined text paths for both distributed wordmark SVGs from the same pinned font file, retaining the accessible benchspec name. Use that same font source for raster artwork and document the approved outlined assets as authoritative.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/README.md: benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "There is no standalone dark-ground mark asset, so a routine dark-background placement requires manual recoloring.",
+     "why": "An agent or maintainer may reuse the light-ground file on navy or generate a slightly different dark variant.",
+     "fix": "Ship benchspec-mark-dark.svg with the existing geometry, brackets #E8ECF1, left squares #6E7891, right squares 1 and 3 #F0764B, and middle-right square #F2A48C. Identify the existing file explicitly as the light-ground variant and document file selection for external images versus wm-* bindings for inline UI SVG.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt DM Mono Medium 500, a free Google Fonts family, as the named wordmark face and distribute outlined SVG wordmarks.",
+     "why": "A pinned face removes platform-dependent letterforms and synthetic weight differences without introducing another font family. Its restrained monospace character connects the identity to benchmark data; the bracket-matrix mark remains the primary distinctive element."
+    },
+    "Q2": {
+     "answer": "Keep DM Mono and DM Sans; do not replace the UI pairing. Self-host both and make their role assignments executable through generated styles.",
+     "why": "Replacing the families would not address the demonstrated failures: blocked font loading, contradictory usage guidance and incomplete component behavior. Retain DM Mono for identifiers, code and aligned data, and DM Sans for prose and navigation, with tabular numerals wherever values align."
+    }
+   },
+   "top_three": [
+    "Make the supplied components accessible by default: non-color sample distinctions, semantic keyboard-operable cells, implemented focus styles and a running indicator that retains contrast throughout its animation.",
+    "Publish a complete watch contract covering missing surfaces, aggregation semantics, loading and connection states, and responsive behavior while retaining the bracketed sample motif.",
+    "Make production output deterministic: choose status encoding over the experimental ramp, generate component values from tokens, self-host UI fonts and ship reproducible light/dark logo assets."
+   ]
+  }
+ },
+ {
+  "model": "openai/gpt-6-astra",
+  "run": 2,
+  "seconds": 101.9,
+  "cost": 0.9344425,
+  "tokens": {
+   "in": 57636,
+   "out": 4280
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/StatusBox/README.md: state table; components/bundle.css: .bs-b-pass, .bs-b-fail, .bs-b-to; components/MatrixCell/README.md: Markers",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout use the same filled-square shape, while phone rules remove text markers that distinguish additional states.",
+     "why": "An agent following these rules would produce sample results that depend on color, despite the explicit claim that shape carries state.",
+     "fix": "Keep pass as a solid neutral square; add a 2px knockout X inside fail and a 2px knockout horizontal bar inside timeout, using the actual surrounding ground color for the knockout. Give quiet a square center rather than running's round dot. Retain exception text on phones, allowing it to wrap below the boxes. Give every sample an accessible description such as 'Sample 2: FAIL' and update the legend with the same shapes.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/preview.html: .bs-cell divs; components/bundle.css: MatrixCell rules",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The executable examples implement interactive cells as unfocusable divs and omit the documented focus treatment.",
+     "why": "An agent copying the examples would make sample details inaccessible from the keyboard.",
+     "fix": "Render actionable cells as button elements with type='button', aria-haspopup='dialog', aria-controls pointing to the drawer, and aria-expanded reflecting its state. Include eval, arm and summary in the accessible name. Render 'not run' as noninteractive text. Add '.bs-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }', reset native button borders and alignment, and ensure containers do not clip the outline. Enter and Space open details; closing restores focus to the triggering cell.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-run and @keyframes bs-pulse; contrast.md: meaningful-mark coverage",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The running animation reduces the entire status mark to 45% opacity, invalidating the opaque-color contrast guarantee.",
+     "why": "An agent would ship a running ring that falls below 3:1 during its pulse even though the contrast table reports a pass.",
+     "fix": "Keep the running ring and dot at opacity 1 throughout. Move the dot into a 5px circular pseudo-element and animate only its scale from 1 to 0.7 and back over 1.6s; keep the 2px ring static. Under prefers-reduced-motion, disable the transform animation. Extend contrast checks to rendered component states rather than opaque token pairs alone.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Color / Pass-rate ramp; tokens.json: rate-0 through rate-100",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The production token set exposes an unchosen rate-color alternative that conflicts with the specified status encoding.",
+     "why": "An agent must decide whether sample boxes represent categorical outcomes or pass-rate bands, producing incompatible interfaces.",
+     "fix": "Add the normative rule: 'watch sample boxes always use StatusBox categorical states; rate-* tokens must not be used in production watch.' Move the ramp to an experimental token file excluded from the default build, and remove instructions to fill sample boxes with it from the production documentation.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css: typography classes; components/bundle.css: .bs-cell, .bs-counter, .bs-mk",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "Component typography and spacing are copied literals rather than references to the declared source of truth, and some type properties are omitted.",
+     "why": "An agent updating tokens would leave components unchanged or inherit unintended values, such as the cell's 1.55 line height instead of 1.2.",
+     "fix": "Generate size, line-height, weight and tracking custom properties for every type role from tokens.json. For cells emit --type-cell-size: 13.5px, --type-cell-leading: 1.2 and --type-cell-weight: 400, then consume all three in .bs-cell. Replace existing component spacing literals with their space-* references. Add explicit tokens for currently prose-only variants, including counter-phone: 36px, counter-finished-phone: 24px and finished-label: 20px/1 at weight 500. Generate published and review CSS through the same compiler.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/README.md: phone sizing; components/MatrixCell/README.md: phone rules; components/Counter/README.md: phone rules",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "Phone behavior is scattered through prose without a shared breakpoint or implementation, and dropping brackets contradicts the required sample framing.",
+     "why": "An agent must invent responsive layout rules and may remove the brand's bracket-matrix motif on phones.",
+     "fix": "Define phone as viewport width below 640px and implement it in the shared stylesheet: 16px app padding, 10px sample boxes with 2px radii, cells with min-height 32px and auto height for wrapping, counter sizes 36px live and 24px finished, and no ETA. Preserve brackets at both sizes. Put only the matrix in a horizontally scrollable region, use a 120px sticky eval-label column and arm columns with min-width 160px, and keep the rest of the page reflowing at 320px. Specify compact labels as 'N/M · running', 'booting', 'queued', 'n/a' or 'not run', with exception text retained.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Components; tokens.json: bg, raised, shade and type.tab usage",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "The system references drawers, hover cards, tabs, sortable leaderboards and controls without supplying their component contracts.",
+     "why": "An agent must invent the main watch navigation and detail surfaces despite having tokens that imply they are already designed.",
+     "fix": "Add normative specs and executable examples for MatrixTable, Leaderboard, Tabs, SampleDrawer, HoverCard and shared controls. Define table header associations, group disclosure and sorting behavior. Specify the drawer as a modal dialog on bg, 480px wide on desktop and a full-width bottom sheet below 640px, with 24px padding, radius-8, Escape-to-close, contained focus and focus restoration. Specify hover cards as bg with 12px padding and shadow-hovercard. Use native buttons/selects, 36px desktop and 44px phone control heights, the shared focus outline, and disabled states with disabled semantics and no hover response.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/Counter/README.md: Provide and Finished; README.md: Components",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "Initial loading, empty runs, disconnected streams and interrupted runs have no specified presentation.",
+     "why": "An agent must improvise lifecycle states and could show stale data as live or label an interrupted run 'Finished'.",
+     "fix": "Add a lifecycle state table: loading shows 'Loading run…' with aria-busy='true' and no fabricated percentage; zero cells shows 'No samples in this run.' and no progress bar; connection loss preserves results and shows 'Connection lost. Reconnecting…' with the live indicator removed; interruption shows 'Run stopped · N of M finished' and preserves actual progress. Show 'Finished' only after a completed-run event. Use body/help typography, fg/muted text and existing surfaces for these states, with a polite status region announcing transitions.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/MatrixCell/README.md: Label and Markers; components/Counter/README.md: counts and tally",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "The docs do not define aggregation, mixed-state precedence or how timeout and n/a affect completion and tally counts.",
+     "why": "An agent could calculate different rates and completion totals from the same run or hide one exception behind another.",
+     "fix": "Add a data contract naming backend-authoritative pooled rate, finished-cell count, total-cell count and state counts; explicitly prohibit deriving pooled rate from the number of pass-colored boxes. Define all terminal sample states, including timeout, error and n/a, for completion purposes, and exclude 'not run' cells from run totals. Set progress width to 100 × finished/total, round displayed progress to the nearest integer and handle total=0 separately. For mixed cells show completed/total plus active phase, list every present exception with counts in error, timeout, quiet order, and use the longest silence duration for quiet.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html: .bs-lg title attributes; components/MatrixCell/README.md: per-sample detail",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "Legend explanations rely on native title tooltips, and hover detail has no keyboard or touch behavior.",
+     "why": "An agent would leave definitions unavailable to touch users and inconsistently exposed to keyboard users.",
+     "fix": "Replace title-only definitions with a 'Status definitions' disclosure containing the nine visible name-and-definition pairs. If custom tooltips remain, specify appearance on hover and focus, aria-describedby linkage, Escape dismissal, pointer access to the tooltip and persistence until hover/focus leaves. State that every hover-card detail is also available through the keyboard- and touch-operable cell drawer.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell:not(.bs-k-out):hover and .bs-cell.bs-sel",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "The hover selector has greater specificity than the selected selector and replaces the selected cell's 2px ring with a 1px ring.",
+     "why": "An agent using the supplied CSS would make selection appear weaker or disappear when the pointer enters the selected cell.",
+     "fix": "Add '.bs-cell.bs-sel, .bs-cell.bs-sel:hover { box-shadow: inset 0 0 0 2px var(--accent); }' after the hover rules. Document state composition: hover changes the ground, selection retains its 2px inset ring, and keyboard focus adds the separate 2px offset outline.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: Google Fonts @import; tokens.json: type.fonts; README.md: Type",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "The only supplied font-loading implementation uses Google Fonts despite watch's self-only content security policy, and the font manifest is empty.",
+     "why": "An agent copying the stylesheet would silently render fallback fonts in the actual product rather than the documented UI pairing.",
+     "fix": "Remove the remote @import and populate type.fonts with local assets and licenses. Ship DM Mono 400/500 and DM Sans 400/500 as WOFF2 under /assets/fonts/, with self-hosted @font-face declarations and font-display: swap. Specify font-style: normal and the exact supported weights; retain system stacks only as loading or failure fallbacks. Add an offline, CSP-enabled rendering test.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/benchspec-wordmark-light.svg: text; assets/Logos/benchspec-wordmark-dark.svg: text; README.md: Type",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "The wordmark is live system-font text while raster assets use separate platform-dependent fonts, so the identity changes across machines.",
+     "why": "Agents and maintainers cannot reproduce one consistent wordmark across README, social artwork and watch.",
+     "fix": "Adopt DM Mono Medium 500 as the named wordmark face, replace the prohibition on DM Mono, and outline the wordmark text in both distributed SVGs. Keep an editable source using 30px DM Mono 500 at x=72, baseline y=43 in the existing 250×64 viewBox. Pin the same font files in the asset renderer, use DM Mono 500 for the social wordmark and 400 for its tagline, and update the weight rules to match.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/README.md: benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "There is no standalone dark-ground mark asset, so consumers must modify the light-ground SVG themselves.",
+     "why": "Maintainers using image embeds or external asset tools cannot apply CSS tokens and may ship invisible navy brackets or inconsistent recoloring.",
+     "fix": "Generate benchspec-mark-dark.svg using brackets #E8ECF1, left squares #6E7891, right squares 1 and 3 #F0764B, and middle-right square #F2A48C. Preserve the existing geometry and accessible label. Document the existing mark as the light-ground variant and provide a picture-element example selecting between the two files.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt DM Mono Medium 500, a free Google Fonts family, as the named wordmark face and distribute outlined SVG wordmarks.",
+     "why": "The problem is reproducibility, not a need for a more decorative font. Reusing DM Mono removes platform-dependent letterforms, connects the identity to watch's data typography and avoids adding a third family."
+    },
+    "Q2": {
+     "answer": "Yes—retain DM Mono and DM Sans. Specify DM Mono for identifiers, code, numeric results and compact data labels; DM Sans for navigation, prose, explanations and action labels.",
+     "why": "A replacement would not resolve the observed implementation gaps. The priority is reliable self-hosting, complete type-role bindings and tabular numerals wherever values align, rather than introducing another visual direction."
+    }
+   },
+   "top_three": [
+    "Make the supplied components accessible in practice: non-color sample encodings, semantic keyboard-operable cells, visible focus and a contrast-safe running animation.",
+    "Complete the watch contract with responsive layouts, detail surfaces, lifecycle states and authoritative aggregation rules so agents do not invent product behavior.",
+    "Create one deterministic production source: exclude the experimental ramp, generate component styles from tokens, self-host UI fonts and freeze the wordmark artwork."
+   ]
+  }
+ },
+ {
+  "model": "x-ai/grok-4.7",
+  "run": 1,
+  "seconds": 715.9,
+  "cost": 0.397988,
+  "tokens": {
+   "in": 56065,
+   "out": 47931
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "components/StatusBox/README.md · components (dark)·B2",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout are the same filled square and differ only by hue, and fail has no text marker, so a mixed cell conveys which sample failed by color alone.",
+     "why": "An agent shipping the StatusBox CSS will leave a color-blind user unable to tell a failed sample from a passed one when the cell label is only a pooled rate such as 67%.",
+     "fix": "Keep pass a solid status-pass square. Draw fail as a status-fail fill plus a 1.5px bg X (two diagonals covering 42–58% of the 14px box). Draw timeout as a status-timeout fill plus a 2px bg bar at 50% height, and keep the timeout marker. Give every box role=\"img\" and an aria-label (pass, fail, timeout, error, running, booting, quiet, queued, n/a). Do not recolor pass to green.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Matrix cells are clickable but bundle.css has no :focus-visible rule, the box is an empty <i>, and MatrixCell puts per-sample detail on hover only.",
+     "why": "An agent copying the stylesheet will build a pointer-only matrix, so keyboard and screen-reader users cannot open a cell or hear which sample failed.",
+     "fix": "Make .bs-cell a <button type=\"button\">. Add .bs-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } and keep selection as box-shadow: inset 0 0 0 2px var(--accent) so the two stack. Open the hover card on focus as well as hover. Enter moves focus into the drawer; Esc closes it and returns focus to the cell.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: value",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The value style says the best leaderboard cell takes accent, but light accent #DF4A19 is only 3.25–4.09:1 on UI grounds, under the 4.5:1 text floor.",
+     "why": "An agent following the type token will color the best rate with accent, which matches accent-ink in dark and fails WCAG on every light ground.",
+     "fix": "Change the value usage to: the best per row is accent-ink (#A93F18 light, #F0764B dark), never accent. Add .bs-value-best { color: var(--accent-ink); } and the word best beside the mark so the diamond is not the only signal.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-run",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The running pulse fades the whole box to opacity 0.45, so the 2px accent ring, the only non-text running signal, drops below 3:1 on raised for half of the 1.6s cycle.",
+     "why": "In a mixed cell the label does not name the running sample, so that box will look empty, like queued, twice a second.",
+     "fix": "Keep the ring at full opacity. Pulse only the centre dot: .bs-b-run::after { width: 5px; height: 5px; background: var(--status-running); animation: bs-pulse 1.6s ease-in-out infinite; } and under prefers-reduced-motion set animation: none; opacity: 1. Remove the opacity animation from .bs-b-run itself.",
+     "confidence": "medium"
+    },
+    {
+     "where": "components/MatrixCell/README.md",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Drawer, hover card, leaderboard, tabs, phase bar, assertions, theme toggle, empty, disabled and loading are named by tokens and have no component spec.",
+     "why": "An agent will invent those surfaces, so the main watch flows will not match the product or the tokens that already assume them.",
+     "fix": "Add three specs. Drawer: 420px desktop, full-width phone sheet, padding space-24, radius-8, shadow-sheet on phone, eval-id header, sans status line such as FAIL · 6/9 assertions, assertion rows with ✓ in ok and ✗ in red plus the words pass and fail, Esc closes. Hover card: radius-8, padding space-12, shadow-hovercard, 1px line border (the black 0.35 shadow is invisible on #14172E), opens on hover and focus. Leaderboard: odd rows surface, even rows band, sticky lbl column, best cell accent-ink plus the word best. Empty copy: No run yet. Disabled: faint text, no opacity, cursor not-allowed. Loading: booting boxes and the label booting, no spinner.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: size-cell",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "The 640px phone breakpoint and every phone size live only in usage prose, and there is no column, sticky-matrix or sheet token.",
+     "why": "An agent parsing tokens.json will ship 44px counters and 36px cells on a phone, or invent a breakpoint and a stacking layout the docs never define.",
+     "fix": "Add breakpoint-phone: 640px. Set structured sizes: counter 44/36, counter-finished 30/24, heading 30/24, status 16/15, size-cell 36/32, page padding 28px 36px desktop and 16px phone. Under 640px drop brackets, hide markers, drop the ETA, scroll the matrix horizontally, and pin the label column with an 8px shade-to-transparent gradient. Four-arm cells use size-box-phone (10px) and drop brackets on desktop too.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Color",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The pass-rate ramp is described as not yet chosen and, in the same paragraph, as the fill for sample boxes, which contradicts StatusBox.",
+     "why": "An agent will either recolor boxes with rate-0–rate-100 or ignore eleven tokens, and the two builds will not look like one product.",
+     "fix": "Delete rate-0 through rate-100 from tokens.json and tokens.css. Replace that Color paragraph with: Sample boxes use StatusBox states only. Do not encode pass rate as a fill. Print the pooled rate beside the boxes in fg.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: type.fonts",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The font source of truth is fonts: [], while bundle.css imports Google Fonts, which the watch CSP default-src 'self' blocks.",
+     "why": "An agent will hotlink Google Fonts and get a silent fallback, or guess file names, so watch will not actually render in DM Mono and DM Sans.",
+     "fix": "Self-host the woff2 files and set fonts to DM Mono 400 and 500 plus DM Sans 400 and 500, opsz 9–40, with those paths. Replace the @import with @font-face rules that use local urls only. Keep the current family stacks as the fallback.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Voice and content",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "Voice requires uppercase PASS, FAIL, TIMEOUT and ERROR, but StatusBox, MatrixCell and the tally use lowercase pass, fail, timeout, error and 4 failed.",
+     "why": "An agent will uppercase cell labels and the legend, breaking the MatrixCell plain-words rule and disagreeing with the terminal.",
+     "fix": "Replace the voice bullet with: Watch UI uses lowercase state words: pass, fail, timeout, error, queued, running, booting, quiet 52s, n/a, not run. Uppercase PASS, FAIL, TIMEOUT and ERROR are only for the terminal report and the drawer status line (FAIL · 6/9 assertions). Tallies use 4 failed and 0 errored.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-bx",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "Bracket frames use opacity 0.7, 3px 6px padding, a 1.5px stroke and a 2.5px dot, none of which are tokens or written in the StatusBox spec.",
+     "why": "An agent following the README will draw full-strength faint brackets, while an agent copying the CSS will fade them, so the logo echo will not match across builds.",
+     "fix": "Add --size-bracket-stroke: 1.5px, --space-bracket-y: 3px, --space-bracket-x: 6px and --size-dot: 5px. Document them in StatusBox. Set bracket opacity to 1 so the frame stays at faint's measured 5.35:1 on dark surface, and delete the 0.7.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: social-wordmark · type (dark)·C4",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "The type scale is not closed: social-wordmark is weight 700, the Finished word is 20px, cell is 13.5px and marker is 11.5px, against a rule of weights 400 and 500 plus wordmark 600.",
+     "why": "An agent will load a bold the UI families do not include, or invent a 20px step, and the README lockup will not match the SVG wordmark.",
+     "fix": "Set social-wordmark fontWeight to 600. Change the Finished word from 20px to the title size, 18px sans 500. Snap cell to 14px and marker to 12px. Set help line-height to 1.4 and delete the 1.5 versus 1.4 split. Add font-variant-numeric: tabular-nums to counter, metric, value, cell and body-mono.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: band · colors (light)·A6",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Light band and light raised are both #E9EBF2, status-pass is an alias of the text token faint, and accent-tint is used by no component.",
+     "why": "An agent will put a raised tile on a banded row and it will vanish in the light theme, or invent a one-off use for accent-tint.",
+     "fix": "Add this rule: light band equals light raised on purpose; leaderboard rows alternate surface #FFFFFF and band #E9EBF2 and must not contain raised tiles. Keep status-pass at the current hex but stop calling it a text color so the fill can move later. Delete accent-tint.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Iconography",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "Chrome icons are required as DM Mono glyphs (✓ ✗ › ‹ › ▸ ▼ ◆), and that face does not contain those codepoints, while the wordmark uses a different mono.",
+     "why": "An agent will get fallback glyphs that break the monospace grid, or substitute emoji, which the voice rules forbid.",
+     "fix": "Replace those glyphs with 12px currentColor SVGs named check, x, chevron-left, chevron-right, caret-right, caret-down, diamond and close, and specify the paths in Iconography. Do not set them in DM Mono. Keep the wordmark on the wordmark stack only until it is outlined.",
+     "confidence": "medium"
+    },
+    {
+     "where": "assets/Logos/benchspec-mark.svg",
+     "criterion": "D7",
+     "severity": "low",
+     "problem": "There is no dark-ground mark file, and both wordmarks are live SVG text, so Menlo, Consolas and Liberation Mono draw different widths in the 250×64 viewBox.",
+     "why": "An agent embedding benchspec-mark.svg on navy will lose the brackets, and the top-bar wordmark will shift or overflow by OS.",
+     "fix": "Add benchspec-mark-dark.svg with brackets #E8ECF1, left squares #6E7891, right squares #F0764B and #F2A48C. Outline both wordmarks as paths in IBM Plex Mono 600 so the 250×64 box no longer depends on installed fonts. Keep the existing don't list.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt IBM Plex Mono (Google Fonts, OFL) at weight 600 and outline it into the wordmark SVGs.",
+     "why": "The wordmark has no font of its own, so Menlo, Consolas and Liberation Mono draw different logos from the same SVG. IBM Plex Mono has a real 600, tabular figures and a technical tone close to that system stack, and it can be embedded. A system stack cannot, so outlining is required even after the family is chosen."
+    },
+    "Q2": {
+     "answer": "No. Replace DM Sans and DM Mono with IBM Plex Sans and IBM Plex Mono, self-hosted at 400 and 500.",
+     "why": "DM Sans and DM Mono pair with each other but not with the wordmark, and DM Sans is a default AI-dashboard grotesque this system is trying not to look like. DM Mono also lacks the check, cross and triangle glyphs the icon spec sets in the mono face, and it has no 600. One Plex family lets prose, data and the logo be the same product."
+    }
+   },
+   "top_three": [
+    "Make every sample state readable without color: a distinct shape per box, a text name, and a running ring that never fades below 3:1.",
+    "Specify the missing watch surfaces and the 640px phone breakpoint as tokens and component rules, including focus, keyboard and the drawer.",
+    "Remove the contradictions an agent will follow: accent-ink for text, StatusBox colors only, self-hosted fonts, one state-word case, and one outlined wordmark."
+   ]
+  }
+ },
+ {
+  "model": "x-ai/grok-4.7",
+  "run": 2,
+  "seconds": 618.5,
+  "cost": 0.363746,
+  "tokens": {
+   "in": 56065,
+   "out": 42224
+  },
+  "output": {
+   "issues": [
+    {
+     "where": "README.md: Components",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Watch is specified as three components, but the drawer, hover card, leaderboard, tabs, theme toggle, empty, disabled and page-loading states are only names in tokens.",
+     "why": "An agent has to invent layout, copy, keyboard behavior and hit targets for the surfaces watch actually runs on, so two builds will not be the same product.",
+     "fix": "Add component specs that only use existing tokens plus these values. Drawer: desktop in-flow panel, width 400px, background surface, radius-8, padding space-24, section gap space-28; phone bottom sheet on overlay, top radius-8, shadow-sheet, max-height 85vh, status line 15px. Header is eval-id, a 32×32 × (U+00D7) close, and ‹ › (U+2039/U+203A) sample nav. Esc closes and returns focus; focus is trapped. Assertion rows: radius-6, ✓ (U+2713) in ok or ✗ (U+2717) in red, statement in body-mono. Empty uses help: \"This sample has no assertions.\" Hover card: pointer only, open after 150ms, max-width 280px, padding space-12, radius-8, background overlay, 1px faint border, shadow-hovercard, 8px below the cell (flip if clipped); content is metric, meta, and the marker definition in help. Not on touch; tap opens the drawer. Leaderboard: sticky eval-id column on lbl, one column per arm, row height size-cell, even rows band, best value in accent-ink with a ◆ (U+25C6) prefix, header click sorts with ▼ (U+25BC) in muted. Tabs: height 36px, gap space-28, inactive muted, active fg plus a 2px accent underline. Theme toggle: 36×20px, radius-pill, track raised, 16px surface thumb, accessible name \"Dark theme\" or \"Light theme\". Disabled: no opacity fade, text faint, ground raised, aria-disabled, not in tab order. Loading before the first snapshot: percent —, bar at 0 on line, tally \"waiting\" in muted, no shimmer. Matrix: roving tabindex on cells that are not \"not run\"; Enter opens the drawer.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: size-cell",
+     "criterion": "D2",
+     "severity": "high",
+     "problem": "Phone sizes and the only breakpoint live in usage prose, while every token value is the desktop number.",
+     "why": "An agent compiling tokens.css ships 44px counters, 36px cells and 36px side padding on a phone, or invents a second set of sizes.",
+     "fix": "Add --breakpoint: 640px; --size-cell-phone: 32px; --font-size-counter-phone: 36px; --font-size-counter-finished-phone: 24px; --font-size-heading-phone: 24px; --font-size-status-phone: 15px; --space-page-top: 28px; --space-page-x: 36px; --space-page-x-phone: 16px. Rule text: at max-width 640px use only those tokens; drop the ETA, cell markers and status-box brackets; use size-box-phone. Do not add another breakpoint. Four-arm desktop cells use size-box-phone but keep the brackets.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/README.md",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "Pass, fail and timeout are the same filled square, and fail has no marker, so a failed sample is red and nothing else.",
+     "why": "An agent will ship sample boxes whose pass/fail difference disappears without color, including under the legend, so a color-blind user cannot see which sample failed.",
+     "fix": "Change the fail row to: filled status-fail square with a 1.5px diagonal slash in the cell ground (raised, or bg if the cell has no fill), so it is not the same shape as pass or timeout. If any sample failed, the cell must also show a bs-mk bs-bad marker reading \"fail\". Keep timeout as a solid yellow fill plus its warn marker. Add the same slash rule to .bs-b-fail in bundle.css: background linear-gradient(135deg, var(--status-fail) 42%, var(--raised) 42% 58%, var(--status-fail) 58%).",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: value",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The value style says the best leaderboard figure \"takes accent\", while the color rules say accent text is always accent-ink and never accent.",
+     "why": "An agent following the type token will set light-theme best-arm rates in #DF4A19, which the contrast table already measures at 3.72:1 on bg, under the 4.5:1 text floor.",
+     "fix": "Change the value usage to \"the best per row takes accent-ink, never accent\". In bundle.css add .bs-best { color: var(--accent-ink); } and use it for the best rate, its ◆ and stars. Keep dark accent-ink #F0764B and light accent-ink #A93F18. Delete any example that colors those strings with accent.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css",
+     "criterion": "D1",
+     "severity": "high",
+     "problem": "bundle.css imports DM Mono and DM Sans from fonts.googleapis.com, but watch sets default-src 'self', and tokens.json type.fonts is [].",
+     "why": "An agent who links the component CSS gets no brand fonts under the product CSP and falls back to the system stack, so watch type will not match the spec.",
+     "fix": "Delete the Google @import. Self-host fonts/DMMono-Regular.woff2, fonts/DMMono-Medium.woff2, fonts/DMSans-Regular.woff2 and fonts/DMSans-Medium.woff2, with @font-face, font-display: swap, and Latin unicode-range. Set type.fonts to those four files at weights 400 and 500 only. If the UI family changes, self-host that family the same way; do not point CSS at a third-party host.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-cell:hover",
+     "criterion": "D3",
+     "severity": "high",
+     "problem": "The stylesheet has no :focus-visible rule, and .bs-cell:hover (specificity 0,2,1) overrides .bs-sel so the selected ring shrinks from 2px to 1px.",
+     "why": "An agent copying bundle.css ships cells whose keyboard focus is the browser default and whose open-drawer state disappears on hover.",
+     "fix": "Add .bs-cell:focus-visible, .bs-tab:focus-visible, .bs-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }. Change the hover rule so it sets only background: var(--hover), not box-shadow. Keep .bs-cell.bs-sel, .bs-cell.bs-sel:hover { box-shadow: inset 0 0 0 2px var(--accent); }. Not-run cells are not focusable. Do not set outline: none anywhere else.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: bg",
+     "criterion": "D4",
+     "severity": "high",
+     "problem": "Popovers, hover cards and drawers are told to sit on bg, which is the page color and only about 1.1:1 against surface, and the shadow is rgba(0,0,0,0.35).",
+     "why": "An agent building the default dark theme gets a hover card and phone sheet that blend into #14172E, so the floating layer does not exist.",
+     "fix": "Add --overlay: #262C4E in dark and #FFFFFF in light, and use it for popovers, hover cards and the phone sheet. Replace the three shadows with dark 0 12px 32px rgba(0,0,0,0.6) and light 0 8px 24px rgba(20,23,46,0.16). Add a 1px solid var(--faint) border on every floating panel so the edge does not depend on the shadow.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/bundle.css: .bs-b-run",
+     "criterion": "D3",
+     "severity": "medium",
+     "problem": "The running pulse fades the whole box to opacity 0.45, which blends the accent ring to about 2.9:1 on dark raised, under the 3:1 mark floor.",
+     "why": "For half of every 1.6s cycle the running sample's ring fails the contrast the table claims, and reduced-motion is the only path that keeps it visible.",
+     "fix": "Keep the 2px inset ring at opacity 1. Draw the centre dot on .bs-b-run::after (5px circle, status-running) and run bs-pulse on that pseudo-element only. Leave .bs-b-boot and .bs-b-stale unanimated. Keep the reduced-motion rule on the dot.",
+     "confidence": "high"
+    },
+    {
+     "where": "components/StatusBox/preview.html",
+     "criterion": "D1",
+     "severity": "medium",
+     "problem": "The one-sentence definition of each sample state exists only as a title attribute on the preview, not in the spec table.",
+     "why": "An agent treating the README as the spec will omit the legend copy or ship title tooltips, which keyboard and touch users never see.",
+     "fix": "Add a Definition column to the StatusBox table: pass \"Every check in the sample passed.\"; fail \"At least one check failed.\"; timeout \"The agent hit the time cap; its checks were still graded.\"; error \"The sample crashed before it could be graded.\"; running \"The agent is working.\"; booting \"The sandbox is starting or setup.sh is running.\"; quiet \"No output from a running agent for 30s or more.\"; queued \"Waiting for a free worker.\"; n/a \"Every check in this sample runs only on another arm.\" Render each legend item as a button with a focusable tooltip in the help style. Do not use title.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.json: rate-0",
+     "criterion": "D2",
+     "severity": "medium",
+     "problem": "rate-0 through rate-100 are documented as not yet chosen over status colour, while StatusBox already forbids recolouring pass and specifies the status aliases.",
+     "why": "An agent that trusts the token file will paint sample boxes on the red-to-green ramp and ship a different watch from one that follows StatusBox.",
+     "fix": "Replace \"not yet chosen over status colour\" on every rate-* usage string with \"Unused. Do not paint sample boxes from rate-*. Watch uses StatusBox status aliases only.\" Add that sentence under README Color, Pass-rate ramp. Leave the hex values, but do not reference them from component CSS.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/benchspec-wordmark-light.svg",
+     "criterion": "D6",
+     "severity": "medium",
+     "problem": "The wordmark is live SVG text in a platform monospace stack, and social-wordmark asks for weight 700 while the type rules allow only 400, 500 and wordmark 600.",
+     "why": "The logo changes shape between Menlo, Consolas and Liberation Mono, and an agent may synthesize a 700 the face does not have, so README, social card and watch chrome will not match.",
+     "fix": "Convert the <text> in both wordmark SVGs to outlined paths of IBM Plex Mono at weight 600, baseline y=43, size 30px, starting at x=72. Set social-wordmark fontWeight to 600 and render the social PNG from those paths. Delete the rule that the wordmark must stay live platform text. Keep weight 600 out of the UI; UI stays 400 and 500.",
+     "confidence": "high"
+    },
+    {
+     "where": "tokens.css: --band",
+     "criterion": "D4",
+     "severity": "medium",
+     "problem": "Light band is #E9EBF2, the same hex as light raised, so the light theme has no band step.",
+     "why": "An agent building the leaderboard gets banded rows in dark and a flat table in light, then invents a third gray to fix it.",
+     "fix": "Set light --band to #DDE1EB. Keep dark band #181B34, light raised #E9EBF2, light hover #E2E5EF and light lbl #E4E7EF. Recheck text on the new band; fg #1B1F3B and faint #5F667D stay above 4.5:1 because the ground is darker than the old band.",
+     "confidence": "high"
+    },
+    {
+     "where": "assets/Logos/README.md",
+     "criterion": "D7",
+     "severity": "medium",
+     "problem": "There is no dark-ground mark file, and on light grounds the left squares (#A5ACBE, 2.07:1) and middle square (#F2A48C, 1.83:1) nearly vanish, while size-mark-ui 22px draws the stroke at 1.4px.",
+     "why": "An agent placing the only mark file on navy loses the brackets, and the light top-bar and social mark read as two orange dots rather than a matrix.",
+     "fix": "Add benchspec-mark-dark.svg with brackets #E8ECF1, left squares #6E7891, right squares #F0764B and #F2A48C. Theme the light mark: wm-left #6E7891 (about 4.0:1 on brand-paper) and wm-mid #C46A52 (about 3.5:1 on brand-paper); keep dark wm-mid #F2A48C. Raise size-mark-ui and the minimum from 22px to 32px so the 4-unit stroke is 2px. Below 32px, use the word benchspec alone.",
+     "confidence": "high"
+    },
+    {
+     "where": "README.md: Voice and content",
+     "criterion": "D8",
+     "severity": "medium",
+     "problem": "Voice rules require uppercase PASS, FAIL, TIMEOUT and ERROR, but the legend, markers and cell labels are all lowercase.",
+     "why": "An agent will uppercase the legend or lowercase the drawer status line, so the two surfaces will not sound like one product.",
+     "fix": "Replace the state-words bullet with: uppercase PASS, FAIL, TIMEOUT, ERROR only in the drawer status line and assertion verdicts (FAIL · 6/9 assertions). Legend labels, cell markers and unfinished labels stay lowercase: pass, fail, timeout, error, queued, running, booting, quiet 12s, n/a, not run. The number in quiet 12s is the live duration, never a hardcoded 52s.",
+     "confidence": "high"
+    }
+   ],
+   "questions": {
+    "Q1": {
+     "answer": "Yes. Adopt IBM Plex Mono (Google Fonts, OFL) at weight 600 and outline it in the wordmark SVGs.",
+     "why": "The platform stack is not a brand font: Menlo, Consolas and Liberation Mono draw benchspec differently, and live SVG text will not hold the 250×64 viewBox on every OS. Plex Mono has the 600 the wordmark already specifies; DM Mono does not (400 and 500 only). Its squared technical forms match the bracket mark, and outlined paths keep README, social card and watch chrome identical."
+    },
+    "Q2": {
+     "answer": "No. Replace the pair with IBM Plex Sans for prose and IBM Plex Mono for data, and use that same mono for the wordmark.",
+     "why": "Watch is a matrix of long eval ids, and DM Mono is wide, so ids truncate early. DM Sans never appears in the wordmark and is a default of generic AI UI, which this system is meant to avoid. Plex Sans and Plex Mono are one free family, with 400/500 for UI and 600 for the mark, and tabular figures. Keep the role split: Plex Mono for counters, cells, ids and tables; Plex Sans for prose, tabs, tooltips and the drawer status line. Self-host both; do not load them from Google at runtime."
+    }
+   },
+   "top_three": [
+    "Write the missing watch specs (drawer, hover card, leaderboard, tabs, theme toggle, empty, disabled, loading) and put the 640px phone sizes in tokens so an agent does not invent the product.",
+    "Make status and focus hold without color or hover accidents: a slashed fail box plus a fail marker, accent-ink for every accent word, a focus-visible outline that does not collapse the selected ring, and an overlay token so floating panels separate on dark.",
+    "Self-host IBM Plex Sans and IBM Plex Mono, and outline the wordmark in Plex Mono 600, so the CSP, the logo and the UI type are one product on every machine."
+   ]
+  }
+ }
+]
