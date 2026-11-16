@@ -78,3 +78,6 @@ Load on demand.
 - [`docs/style/development.md`](docs/style/development.md) — code style. Read
   before changing source, tests, or docs, then the guide it names.
 - [`README.md`](README.md) — human-facing overview and the rest of `docs/`.
+- [`docs/design/README.md`](docs/design/README.md) — the design system: tokens,
+  components, brand and voice. Read before changing any UI, terminal output
+  styling or brand asset; it is the source of truth for visuals.
