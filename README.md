@@ -197,7 +197,7 @@ has the long version: unit of evaluation, isolation, and statistics per tool.
 | [`docs/sandbox.md`](docs/sandbox.md) | Snapshots, mounts, credentials, host requirements. |
 | [`docs/results.md`](docs/results.md) | Reading `benchmark.md` and the machine-readable artifacts. |
 | [`docs/harnesses.md`](docs/harnesses.md) | `claude-code`, `codex`, `opencode`, and adding your own. |
-| [`docs/design/`](docs/design/README.md) | The visual design system: tokens, components, contrast, logo. |
+| [`docs/design/`](docs/design/README.md) | The visual design system: brand book, foundations (tokens, contrast), components, logos. |
 
 ## Development
 

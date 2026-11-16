@@ -43,8 +43,7 @@ cell (no `error`, `timeout`, `quiet 52s`, `err`, `t/o`).
 ### States
 
 Default ground `raised`; hover, selected and focus follow [README › Interaction
-states](../../README.md#interaction-states) (selected = drawer open).
-Exceptions:
+states](../README.md#interaction-states) (selected = drawer open). Exceptions:
 
 | Cell | Ground | Ring |
 | --- | --- | --- |

@@ -34,13 +34,14 @@ exception). The cell rate label, hover card (`✗ 5/9`) and accessible name
 | `bs-f3` | under 34%; always for a failed single-check eval |
 
 Darker = fewer checks passed. Same danger hue, lightness only (ratios:
-[`contrast.md`](../../contrast.md)); the lightest never reads as pass or warn.
+[`contrast.md`](../foundations/contrast.md)); the lightest never reads as pass
+or warn.
 
 ### Rules
 
 - Every other state has its own shape; never weaken one. Knockouts use a CSS
   `mask`, so the real ground shows through.
-- Brackets: the [README's bracket](../../README.md#layout-shape-and-depth)
+- Brackets: the [README's bracket](../README.md#layout-shape-and-depth)
   (`stroke-outline`, `space-4` arms), never faded or removed; a mask
   (`--bs-bracket`) on the frame's `::before` and `::after`.
 - Sizes: `size-box` in a cell and the legend; `size-box-sm` (add `bs-sm`) on

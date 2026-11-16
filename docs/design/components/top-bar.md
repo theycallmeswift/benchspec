@@ -7,7 +7,7 @@ since the last event, or `ended · exit N`) and current theme.
 
 | Part | Spec |
 | --- | --- |
-| mark | inline SVG at `size-mark-ui`, `bs-wm-*` classes ([README › Logo](../../README.md#logo)); `aria-hidden` |
+| mark | inline SVG at `size-mark-ui`, `bs-wm-*` classes ([README › Logo](../README.md#logo)); `aria-hidden` |
 | run id | `<b>`, `fg`, weight 500 |
 | suite | `muted` |
 | live | `bs-live`: a `size-live-dot` `accent` dot, then `live · last event 2s ago` |

@@ -1,8 +1,8 @@
 # Contrast
 
 WCAG 2.2 ratios for every text and meaningful-mark pair; rules in [README ›
-Contrast](README.md#contrast). Cells read dark/light. Every pair passes. Opaque
-pairs hold at every animation frame (the running dot pulses by scale).
+Contrast](../README.md#contrast). Cells read dark/light. Every pair passes.
+Opaque pairs hold at every animation frame (the running dot pulses by scale).
 
 ## Text on grounds (target ≥4.6:1)
 

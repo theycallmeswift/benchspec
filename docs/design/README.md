@@ -12,9 +12,9 @@ focus and best; JetBrains Mono for data; the mark's bracket on every sample
 group and caption. `benchspec watch` is dark-first; light (`data-theme="light"`)
 is its own design, not inverted dark.
 
-Rules live once: brand-wide here; per component in
-`components/<Name>/README.md`; per token in its `usage`
-([`tokens.json`](tokens.json)); ratios in [`contrast.md`](contrast.md).
+Rules live once: brand-wide here; per component in `components/<name>.md`; per
+token in its `usage` ([`tokens.json`](foundations/tokens.json)); ratios in
+[`contrast.md`](foundations/contrast.md).
 
 ## Voice and content
 
@@ -53,9 +53,9 @@ Rules live once: brand-wide here; per component in
 
 ## Logo
 
-Files: [`assets/Logos/`](assets/Logos/). Source: the repo's `docs/assets/`;
-`scripts/render_assets.py` should also generate the dark mark and outlined
-wordmarks.
+Files: [`docs/assets/`](../assets/), listed in [Logos](brand/logos.md).
+`scripts/render_assets.py` generates them; the dark mark and outlined wordmarks
+arrive with [#184](https://github.com/theycallmeswift/benchspec/issues/184).
 
 ### Construction
 
@@ -90,7 +90,7 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
 - UI chrome: draw the mark inline, bound to `wm-ink`, `wm-left`, `wm-right`,
   `wm-mid` (classes `bs-wm-*`), which follow the theme.
 - Markdown: switch files with `<picture>` and `prefers-color-scheme` (snippet in
-  the [Logos README](assets/Logos/README.md)).
+  [Logos](brand/logos.md)).
 - Clear space on every side: at least the wordmark's bracket-to-text gap (12
   grid units, about 19% of the mark's height).
 - Minimum size: 22px (`size-mark-ui`). Smaller, write `benchspec` alone.
@@ -120,7 +120,7 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
   (box fills, rings, bars, focus) 3.2:1, on all seven grounds (`bg`, `surface`,
   `raised`, `hover`, `band`, `lbl`, `popover`) in both themes; banner text also
   on its tint. (WCAG floors: 4.5:1, 3:1.) Regenerate
-  [`contrast.md`](contrast.md) after any token change.
+  [`contrast.md`](foundations/contrast.md) after any token change.
 - Never fade text or marks with opacity; check animation endpoints too.
 - `line` is decorative: never the only boundary or mark that carries meaning.
 - Logo colours (`brand-gray`, `brand-salmon`, `wm-left`, `wm-mid`) are exempt as
@@ -195,7 +195,7 @@ and `✗` assertion verdicts, `›` disclosures, `‹ ›` sample navigation, `�
 
 ## Imagery
 
-- Use only the generated art ([Marketing](assets/Marketing/README.md)).
+- Use only the generated art ([Marketing](brand/marketing.md)).
 - Screenshots of output: real runs, or shaped on real runs; never invented
   numbers.
 - Show the terminal on `term-body` with its three-dot title bar.
@@ -206,15 +206,11 @@ and `✗` assertion verdicts, `›` disclosures, `‹ ›` sample navigation, `�
 
 ## Components
 
-[StatusBox](components/StatusBox/README.md),
-[MatrixCell](components/MatrixCell/README.md),
-[MatrixGroup](components/MatrixGroup/README.md),
-[Counter](components/Counter/README.md), [TopBar](components/TopBar/README.md),
-[Tabs](components/Tabs/README.md),
-[Leaderboard](components/Leaderboard/README.md),
-[HoverCard](components/HoverCard/README.md),
-[Drawer](components/Drawer/README.md),
-[Controls](components/Controls/README.md),
-[PageState](components/PageState/README.md). Every class is in
+[StatusBox](components/status-box.md), [MatrixCell](components/matrix-cell.md),
+[MatrixGroup](components/matrix-group.md), [Counter](components/counter.md),
+[TopBar](components/top-bar.md), [Tabs](components/tabs.md),
+[Leaderboard](components/leaderboard.md), [HoverCard](components/hover-card.md),
+[Drawer](components/drawer.md), [Controls](components/controls.md),
+[PageState](components/page-state.md). Every class is in
 [`components/bundle.css`](components/bundle.css) (prefix `bs-`), which reads
 tokens only: no px literal except 0, 1px hairlines and the one breakpoint.
