@@ -7,9 +7,10 @@ never stored: that cell binds it live, as it would without a table.
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 from benchspec.config.arms import Arm
 from benchspec.orchestration import results
@@ -23,6 +24,13 @@ Binder = Callable[[str], dict | None]
 BoundSpecs = dict[str, dict | None]
 
 WORKERINPUT_KEY = "benchspec_bound_specs"
+
+
+def workerinput(config: pytest.Config) -> MutableMapping[str, object] | None:
+    """The xdist-attached `workerinput` on a worker's config; None on the controller."""
+    attached = getattr(config, "workerinput", None)
+
+    return attached if isinstance(attached, MutableMapping) else None
 
 
 def unique_active_texts(
@@ -64,29 +72,6 @@ def bind_unique(
         outcomes = list(pool.map(attempt, ordered))
 
     return {text: spec for text, bound, spec in outcomes if bound}
-
-
-def summary_line(texts: list[str], table: Mapping[str, dict | None], seconds: float) -> str:
-    """The one-line report of a pre-bind pass."""
-    failed = len(texts) - len(table)
-
-    return f"benchspec: bound {len(texts)} unique assertions in {seconds:.1f} s ({failed} failed)"
-
-
-def prebind(
-    pairs: list[tuple[EvalCase, Arm]],
-    bind: Binder,
-    *,
-    baseline: str | None,
-    eval_set: str,
-    today: str,
-) -> tuple[BoundSpecs, str]:
-    """Bind every unique active text; return the table and its summary line."""
-    texts = unique_active_texts(pairs, baseline=baseline, eval_set=eval_set, today=today)
-    started = time.perf_counter()
-    table = bind_unique(texts, bind)
-
-    return table, summary_line(texts, table, time.perf_counter() - started)
 
 
 def table_or_live(table: Mapping[str, dict | None], live: Binder) -> Binder:

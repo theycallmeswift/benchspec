@@ -17,6 +17,7 @@ from __future__ import annotations
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -304,9 +305,9 @@ def baseline_arm(request: pytest.FixtureRequest) -> str | None:
 @pytest.fixture
 def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
     """The specs the controller bound before any cell started; empty when none were."""
-    workerinput = getattr(request.config, "workerinput", None)
-    if isinstance(workerinput, dict):
-        return workerinput.get(prebind.WORKERINPUT_KEY, {})
+    from_controller = prebind.workerinput(request.config)
+    if from_controller is not None:
+        return cast(prebind.BoundSpecs, from_controller.get(prebind.WORKERINPUT_KEY, {}))
 
     return request.config.stash.get(BOUND_SPECS, {})
 

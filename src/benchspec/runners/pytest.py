@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import time
 from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Protocol
@@ -41,6 +42,7 @@ _STARTED_AT = pytest.StashKey[str]()
 # Set once any eval cell reports, so session end knows the iteration is this run's.
 _RAN_CELLS = pytest.StashKey[bool]()
 _SUMMARY_LINES = pytest.StashKey[list[str]]()
+_BIND_SUMMARY = pytest.StashKey[str]()
 
 
 def _help(*parts: str) -> str:
@@ -285,7 +287,7 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.args_source != pytest.Config.ArgsSource.ARGS:
         config.args = [str(_CASES)]
 
-    workerinput = _workerinput(config)
+    workerinput = prebind.workerinput(config)
     if workerinput is not None:
         # xdist worker: adopt the iteration name the controller chose.
         workspace.set_current_iteration(str(workerinput["benchspec_iteration"]))
@@ -299,15 +301,22 @@ def pytest_configure(config: pytest.Config) -> None:
         _prebind_assertions(config)
 
 
+def _targets_cases(config: pytest.Config) -> bool:
+    """Whether this run's targets include the eval cases module, the only home of `test_eval`."""
+    return any(Path(arg.split("::")[0]).resolve() == _CASES for arg in config.args)
+
+
 def _prebind_assertions(config: pytest.Config) -> None:
     """Bind each unique active assertion once, on the controller, before any cell starts.
 
-    Skipped when nothing paid follows: `--collect-only`, no eval cases, or no set.
+    Skipped when no `test_eval` cell follows: `--collect-only`, a run that targets something
+    other than the cases module (the binder corpus), no eval cases, or no set.
 
     Raises:
-        pytest.UsageError: the grading environment (a missing or empty binder key) is unusable.
+        pytest.UsageError: the grading environment (a missing or empty binder key) is
+            unusable, or the binder rejected its key.
     """
-    if config.option.collectonly:
+    if config.option.collectonly or not _targets_cases(config):
         return
 
     pairs, _ = cases.eval_arm_params(config)
@@ -318,15 +327,30 @@ def _prebind_assertions(config: pytest.Config) -> None:
     if errors:
         raise pytest.UsageError("\n".join(errors))
 
-    table, summary = prebind.prebind(
+    texts = prebind.unique_active_texts(
         pairs,
-        binder.binder_for(resolved_binder_config(config)),
         baseline=resolved_run_set(config).baseline,
         eval_set=option_str(config, "benchspec_set") or "",
         today=results.utc_today(),
     )
+    started = time.perf_counter()
+    try:
+        table = prebind.bind_unique(texts, binder.binder_for(resolved_binder_config(config)))
+    except binder.BinderAuthError as error:
+        raise pytest.UsageError(str(error)) from None
+
     config.stash[cases.BOUND_SPECS] = table
-    print(summary)
+    config.stash[_BIND_SUMMARY] = (
+        f"benchspec: bound {len(table)} of {len(texts)} unique assertions "
+        f"in {time.perf_counter() - started:.1f} s"
+    )
+
+
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Report the pre-bind pass in the session header, where the terminal reporter exists."""
+    summary = config.stash.get(_BIND_SUMMARY, None)
+
+    return [summary] if summary else []
 
 
 class _CellTracker:
@@ -344,13 +368,6 @@ class _CellTracker:
         """Flag the session once any eval cell reports."""
         if "benchspec" in report.keywords:
             self._config.stash[_RAN_CELLS] = True
-
-
-def _workerinput(config: pytest.Config) -> MutableMapping[str, object] | None:
-    """The xdist-attached `workerinput` on a worker's config; None on the controller."""
-    workerinput = getattr(config, "workerinput", None)
-
-    return workerinput if isinstance(workerinput, MutableMapping) else None
 
 
 class _WorkerNode(Protocol):
@@ -385,7 +402,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     # TerminalReporter's wrapper), so the summary can read what this wrote and a CI gate
     # can still change session.exitstatus.
     config = session.config
-    if _workerinput(config) is not None or not config.stash.get(_RAN_CELLS, False):
+    if prebind.workerinput(config) is not None or not config.stash.get(_RAN_CELLS, False):
         return
     iteration = workspace.current_iteration_or_none()
     if iteration is None:
