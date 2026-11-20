@@ -374,9 +374,10 @@ class RunView:
         count = max((sample.index for sample in planned), default=0) + 1
 
         if self._end is not None:
-            status = f"ended · exit {self._end['exit_status']}"
+            status, detail = f"ended · exit {self._end['exit_status']}", None
         else:
-            status = f"live · last event {live_duration(now_ms - self._last_event_ms)} ago"
+            status = "live"
+            detail = f"last event {live_duration(now_ms - self._last_event_ms)} ago"
 
         return {
             "iteration": self._plan["iteration"],
@@ -384,6 +385,7 @@ class RunView:
             "count": f"--count {count}" if count > 1 else None,
             "live": self._end is None,
             "status": status,
+            "detail": detail,
         }
 
     def _counter(self, counted: list[Sample], done: int, state: str, now_ms: int) -> dict:
@@ -401,7 +403,7 @@ class RunView:
             buckets["running"] = states.count("running") + states.count("booting")
             buckets["quiet"] = states.count("quiet")
             buckets["waiting"] = states.count("queued")
-        else:
+        elif state == "stopped":
             buckets["unfinished"] = states.count("unfinished")
 
         finished_line = f"{done} of {total} samples finished"
@@ -430,7 +432,7 @@ class RunView:
             ),
             "left": left,
             "tally": [{"bucket": bucket, "count": count} for bucket, count in buckets.items()],
-            "workers": f"-n {len(self._workers)}" if self._workers else None,
+            "workers": f"-n {len(self._workers)}" if self._workers and self._end is None else None,
         }
 
     def _matrix(self, planned: list[Sample], state: str, now_ms: int) -> dict:
@@ -572,6 +574,8 @@ class RunView:
             cost = closing.get("cost_usd")
             facts.append(f"${cost:.3f}" if cost is not None else "cost not reported")
 
+        wide = " · ".join(facts)
+
         agent_started = sample.phase_started_ms("agent") or 0
         scoped_to = self._scoped_to(sample)
 
@@ -588,7 +592,8 @@ class RunView:
             "bad": state in ("fail", "error"),
             "passes": state == "pass",
             "graded": sample.closed_ms is not None,
-            "facts": " · ".join(facts),
+            "facts": wide,
+            "facts_phone": wide.replace("first output", "first"),
             "message": sample.error["message"] if sample.error else None,
             "scoped": scoped_to,
             "phases": _phases(sample, now_ms),
@@ -694,7 +699,7 @@ class RunView:
                 {
                     "label": "Skill triggered",
                     "bars": True,
-                    "cells": _mark_best(cells, arms, fractions),
+                    "cells": _mark_best(cells, arms, fractions, alone_wins=True),
                 }
             )
 
@@ -760,10 +765,11 @@ def _mark_best(
     values: dict[str, float | None],
     *,
     lowest_wins: bool = False,
+    alone_wins: bool = False,
 ) -> list[dict]:
     """Mark each winning arm's cell `best`; where lowest wins, losers get their ratio to it."""
     known = {arm: value for arm, value in values.items() if value is not None}
-    if len(known) < 2:
+    if len(known) < (1 if alone_wins else 2):
         return cells
 
     winning = min(known.values()) if lowest_wins else max(known.values())
@@ -870,7 +876,7 @@ def _hover_row(sample: Sample, now_ms: int) -> dict:
         duration = ""
 
     return {
-        "sample": f"sample {sample.index + 1}",
+        "sample": f"Sample {sample.index + 1}",
         "verdict": verdict,
         "bad": state in ("fail", "error"),
         "duration": duration,

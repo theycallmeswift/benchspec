@@ -85,7 +85,11 @@ class Recording:
             file.write(json.dumps(event) + "\n")
 
     def begin(self) -> None:
-        """Emit `run.start` with the plan so far."""
+        """Emit `run.start` with the plan so far; n/a samples get their all-skipped grading."""
+        for planned in self.planned:
+            if not any(planned["applies"]):
+                self._write_artifacts(planned, 0, {}, errored=False)
+
         self.emit(
             "run.start",
             0,
@@ -161,6 +165,7 @@ class Recording:
         timed_out: bool = False,
         first_output_ms: int | None = 2400,
         cost_usd: float | None = 0.06,
+        output: tuple[tuple[str, str], ...] = (("Bash", "ls"),),
         worker: str = "gw0",
     ) -> None:
         """Run a sample start to `cell.done` at `at`, and write its grading and timing."""
@@ -169,7 +174,9 @@ class Recording:
         passed = total if passed is None else passed
 
         self.play(cell, at - wall_s, worker=worker)
-        self.delta(cell, at - wall_s + 6, worker=worker)
+        for index, (name, text) in enumerate(output):
+            self.delta(cell, at - wall_s + 6 + 9 * index, text, name=name, worker=worker)
+
         self.phase(cell, "grade", at - 5, worker=worker)
         timing: dict[str, object] = {
             "duration_ms": int(wall_s * 1000) - 9000,
@@ -279,63 +286,115 @@ def iteration(root: Path, name: str = "iteration_12") -> Path:
 
 
 def mid_run(root: Path) -> Recording:
-    """A two-arm run caught live: 19 of 54 samples finished, three samples a cell.
+    """The run of mockup frames A and D, caught live: 19 of 54 samples finished.
 
     Trigger evals grade only on `trial`, so their `baseline` samples are n/a. The run
     holds every fail step, an error, a quiet sample and samples booting and running.
     """
     elapsed_s = 401
-    run = Recording(iteration(root), start_ms=int(time.time() * 1000) - elapsed_s * 1000)
-    plans = (
-        "implement-task",
-        "review-judges-findings",
-        "splits-work",
-        "logged-out",
-        "rate-limited",
-    )
-    triggers = ("asks-for-codex", "names-a-task", "second-opinion", "review-branch", "job-status")
-    trial_only = {0: ["trial"]}
-
-    for eval_id in plans:
-        run.plan("plan", eval_id, checks=9, count=3)
-
-    for eval_id in triggers:
-        run.plan("triggers", eval_id, checks=["skill_invoked"], only=trial_only, count=3)
-
-    for eval_id in ("own-review", "install-codex", "other-model"):
-        run.plan("not-triggers", eval_id, checks=["not_skill_invoked"], only=trial_only, count=3)
-
-    run.begin()
+    run = _codex_plan(root, start_ms=int(time.time() * 1000) - elapsed_s * 1000)
+    skill = "delegating-to-codex"
 
     for sample, passed in enumerate((9, 9, 7)):
-        run.done(f"plan/implement-task/trial/{sample}", 100 + sample, passed=passed, wall_s=90.9)
+        run.done(
+            f"{skill}/plan-implement-task/trial/{sample}", 100 + sample, passed=passed, wall_s=90.9
+        )
 
     for sample, passed in enumerate((6, 5, 2)):
-        run.done(f"plan/review-judges-findings/baseline/{sample}", 120 + sample, passed=passed)
+        run.done(
+            f"{skill}/plan-review-judges-findings/baseline/{sample}", 120 + sample, passed=passed
+        )
 
-    run.done("plan/implement-task/baseline/0", 130, passed=7, wall_s=68)
-    run.play("plan/implement-task/baseline/1", elapsed_s - 124)
-    run.delta("plan/implement-task/baseline/1", elapsed_s - 3, "git status")
-    run.play("plan/implement-task/baseline/2", elapsed_s - 60)
-    run.delta("plan/implement-task/baseline/2", elapsed_s - 52, "cat PLAN.md", name="Read")
-    run.done("plan/logged-out/baseline/0", 150, passed=9)
-    run.error("plan/logged-out/baseline/1", 160)
-    run.done("plan/logged-out/baseline/2", 170, passed=8)
+    run.done(f"{skill}/plan-implement-task/baseline/0", 130, passed=7, wall_s=68)
+    run.play(f"{skill}/plan-implement-task/baseline/1", elapsed_s - 124)
+    run.delta(f"{skill}/plan-implement-task/baseline/1", elapsed_s - 3, "git status")
+    run.play(f"{skill}/plan-implement-task/baseline/2", elapsed_s - 60)
+    run.delta(f"{skill}/plan-implement-task/baseline/2", elapsed_s - 52, "cat PLAN.md", name="Read")
+    run.done(f"{skill}/codex-logged-out/baseline/0", 150, passed=9)
+    run.error(f"{skill}/codex-logged-out/baseline/1", 160)
+    run.done(f"{skill}/codex-logged-out/baseline/2", 170, passed=8)
 
     for sample in range(3):
-        run.done(f"plan/review-judges-findings/trial/{sample}", 200 + sample)
+        run.done(f"{skill}/plan-review-judges-findings/trial/{sample}", 200 + sample)
 
-    for index, eval_id in enumerate(("asks-for-codex", "names-a-task")):
+    for index, eval_id in enumerate(("codex-eperm-debug", "gemini-review")):
         for sample in range(3):
-            run.done(f"triggers/{eval_id}/trial/{sample}", 220 + index * 3 + sample, wall_s=20)
+            run.done(f"not-triggers/{eval_id}/trial/{sample}", 220 + index * 3 + sample, wall_s=20)
 
-    run.play("plan/splits-work/trial/0", elapsed_s - 9, worker="gw1")
-    run.play("plan/splits-work/trial/1", elapsed_s - 1, through="boot", worker="gw2")
-    run.play("triggers/second-opinion/trial/0", elapsed_s - 20, worker="gw3")
+    run.play(f"{skill}/python3-missing/trial/0", elapsed_s - 9, worker="gw1")
+    run.play(f"{skill}/python3-missing/trial/1", elapsed_s - 1, through="boot", worker="gw2")
+    run.play("triggers/codex-job-status/trial/0", elapsed_s - 20, worker="gw3")
 
     for second in range(7):
         at = elapsed_s - 14 + second
-        run.delta("triggers/second-opinion/trial/0", at, f"step {second + 1}", worker="gw3")
+        run.delta("triggers/codex-job-status/trial/0", at, f"step {second + 1}", worker="gw3")
+
+    return run
+
+
+def finished_frame(root: Path) -> Recording:
+    """The run of mockup frames B, C and D2: finished with exit 1 and one trial boot failure."""
+    run = _codex_plan(root, start_ms=T0_MS, trial_only_check=True)
+    at = 30.0
+    output = (
+        ("Bash", "codex exec --sandbox read-only -c model_reasoning_effort=high"),
+        ("Read", "pager.py"),
+        ("", "Codex returned two findings: an off-by-one and a missing guard."),
+        ("Edit", "pager.py"),
+        ("", "Fixed both. Which of the findings would you like to see first?"),
+    )
+
+    for planned in list(run.planned):
+        total = sum(planned["applies"])
+        if not total:
+            continue
+
+        at += 20
+        cell, arm_name, sample = planned["cell"], planned["arm"], planned["sample"]
+        if (planned["eval_id"], arm_name, sample) == ("plan-review-judges-findings", "trial", 2):
+            run.error(cell, at, phase="boot", message="sandbox failed to boot", worker="gw1")
+        elif arm_name == "baseline":
+            run.done(cell, at, passed=(6, 5, 8)[sample], wall_s=70.4, cost_usd=0.087, output=output)
+        else:
+            run.done(cell, at, wall_s=39, first_output_ms=3900, cost_usd=0.194, worker="gw1")
+
+    run.end(1182, exit_status=1)
+
+    return run
+
+
+def _codex_plan(root: Path, *, start_ms: int, trial_only_check: bool = False) -> Recording:
+    """Plan the mockups' run: 13 evals on two arms, three samples each, trigger evals trial-only."""
+    run = Recording(iteration(root), start_ms=start_ms)
+    plans = (
+        "codex-logged-out",
+        "plan-implement-task",
+        "plan-review-judges-findings",
+        "python3-missing",
+        "user-review-presents",
+    )
+    quiet = ("codex-eperm-debug", "gemini-review", "review-codex-pr", "review-my-branch")
+    fires = (
+        "codex-job-status",
+        "continue-plan-codex-task",
+        "have-codex-review",
+        "send-findings-back",
+    )
+    trial_only = {0: ["trial"]}
+
+    checks = ["judge"] * 9 + ["skill_invoked"] * trial_only_check
+    scoped = {9: ["trial"]} if trial_only_check else None
+
+    for eval_id in plans:
+        run.plan("delegating-to-codex", eval_id, checks=checks, only=scoped, count=3)
+
+    for eval_id in quiet:
+        run.plan("not-triggers", eval_id, checks=["not_skill_invoked"], only=trial_only, count=3)
+
+    for eval_id in fires:
+        run.plan("triggers", eval_id, checks=["skill_invoked"], only=trial_only, count=3)
+
+    run.begin()
 
     return run
 

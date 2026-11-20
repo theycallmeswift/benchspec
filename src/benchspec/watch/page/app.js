@@ -141,7 +141,7 @@ function renderTop() {
   );
   const state = byId("run-state");
   setClass(state, top.live && connected ? "bs-live" : "");
-  setText(state, top.status);
+  fill(state, top.status, top.detail ? el("span", { class: "bs-wide", text: ` · ${top.detail}` }) : "");
 }
 
 function renderCounter(state) {
@@ -294,7 +294,7 @@ function renderMatrix() {
       const ref = refs.summaries[index];
       ref.text.replaceChildren(
         summary.text,
-        summary.count ? el("span", { class: "bs-wide", text: ` · ${summary.count}` }) : "",
+        summary.count ? el("span", { class: "bs-wide bs-muted", text: ` · ${summary.count}` }) : "",
       );
       setClass(ref.box, summary.muted ? "bs-gs bs-q" : "bs-gs");
       setClass(ref.bar, summary.live ? "bs-gbar bs-live" : "bs-gbar");
@@ -329,12 +329,7 @@ function buildMatrix(matrix, scrolls) {
       el("span", { class: "bs-narrow", text: "eval" }),
     ),
     matrix.arms.map((arm) =>
-      el(
-        "span",
-        { role: "columnheader" },
-        el("b", { text: arm.name }),
-        el("span", { class: "bs-wide", text: arm.detail }),
-      ),
+      el("span", { role: "columnheader" }, el("b", { text: arm.name }), el("span", { text: arm.detail })),
     ),
   );
   const body = [];
@@ -575,7 +570,8 @@ function renderHoverCard() {
   const sample = ref.data.samples[0];
   fill(
     card,
-    el("div", { class: "bs-muted", text: `${sample.eval_id} · ${sample.arm}` }),
+    el("div", { class: "bs-hid", text: `${sample.skill}/${sample.eval_id}` }),
+    el("div", { class: "bs-muted", text: sample.arm }),
     el(
       "div",
       { class: "bs-hh" },
@@ -589,7 +585,7 @@ function renderHoverCard() {
       el(
         "div",
         { class: "bs-hr" },
-        el("span", { class: "bs-muted", text: row.sample }),
+        el("span", { text: row.sample }),
         el("span", { class: row.bad ? "bs-x" : "", text: row.verdict }),
         el("span", { class: "bs-muted", text: row.duration }),
       ),
@@ -670,7 +666,7 @@ function renderDrawer() {
     el("span", { class: sample.bad ? "bs-bad" : "", text: sample.verdict }),
     sample.detail ? ` · ${sample.detail}` : "",
   );
-  setText(drawer.querySelector(".bs-facts"), sample.facts);
+  setText(drawer.querySelector(".bs-facts"), phone.matches ? sample.facts_phone : sample.facts);
   fillPhases(drawer.querySelector(".bs-phases"), sample.phases);
   drawer
     .querySelector(".bs-out")
@@ -696,6 +692,7 @@ function buildDrawer(drawer, samples, sample) {
     drawer.querySelector(by < 0 ? ".bs-prev" : ".bs-next").focus();
   };
   drawer.replaceChildren(
+    el("div", { class: "bs-grab", "aria-hidden": "true" }),
     el(
       "div",
       { class: "bs-dh" },
@@ -803,11 +800,13 @@ async function loadAssertions(sample) {
       return el(
         "li",
         {},
-        el("span"),
-        el("span", {
-          class: "bs-muted",
-          text: `${assertion.text} · ${sample.scoped[assertion.index] || "n/a"}`,
-        }),
+        el("span", { class: "bs-na", text: "–" }),
+        el(
+          "details",
+          {},
+          el("summary", { class: "bs-na" }, el("span", { text: assertion.text })),
+          el("div", { class: "bs-ev", text: sample.scoped[assertion.index] || "n/a" }),
+        ),
       );
     }
 
@@ -822,7 +821,7 @@ async function loadAssertions(sample) {
       el(
         "details",
         { open },
-        el("summary", { text: assertion.text }),
+        el("summary", {}, el("span", { text: assertion.text })),
         el("div", { class: "bs-ev", text: `${assertion.checker} · ${assertion.evidence}` }),
       ),
     );
@@ -837,31 +836,42 @@ function tip(label, text, id) {
   return el(
     "span",
     { class: "bs-lbwrap" },
-    el("button", { class: "bs-lgbtn bs-lbh", type: "button", "aria-describedby": id, text: label }),
+    el(
+      "button",
+      { class: "bs-lgbtn bs-lbh", type: "button", "aria-describedby": id, text: label },
+      el("span", { class: "bs-info", "aria-hidden": "true", text: "ⓘ" }),
+    ),
     el("span", { class: "bs-tip", id, role: "tooltip", text }),
   );
 }
 
-function valueOf(cell) {
+function valueOf(cell, bestInline) {
   return el(
     "span",
-    { class: cell.best ? "bs-v bs-best" : cell.na ? "bs-v bs-muted" : "bs-v" },
+    { class: cell.best ? "bs-v bs-best" : cell.na ? "bs-v bs-muted bs-na" : "bs-v" },
     cell.best ? "◆ " : "",
     cell.value,
-    cell.best ? el("span", { class: "bs-best-word", text: " best" }) : "",
+    cell.best && bestInline ? el("span", { class: "bs-best-word", text: " best" }) : "",
   );
 }
 
+// Under a desktop value: its sub-line with the word "best", then its delta.
 function subOf(cell) {
-  if (!cell.sub && !cell.delta) return "";
+  const own = cell.delta ? "" : cell.sub || "";
+  const first = cell.best ? (own ? `${own} · best` : "best") : own;
   const gain = cell.delta && cell.delta.startsWith("+");
 
-  return el(
-    "span",
-    { class: cell.err ? "bs-sub bs-err" : "bs-sub bs-delta" },
-    cell.delta ? el(gain ? "b" : "span", { text: `${cell.delta} ` }) : "",
-    cell.sub || "",
-  );
+  return [
+    first ? el("span", { class: cell.err ? "bs-sub bs-err" : "bs-sub", text: first }) : "",
+    cell.delta
+      ? el(
+          "span",
+          { class: "bs-sub bs-delta" },
+          el(gain ? "b" : "span", { text: `${cell.delta} ` }),
+          cell.sub,
+        )
+      : "",
+  ];
 }
 
 let boardShown = "";
@@ -883,7 +893,7 @@ function renderLeaderboard() {
       el(
         "tr",
         {},
-        el("th", { scope: "col", text: "Metric" }),
+        el("th", { scope: "col" }, el("span", { class: "bs-sr", text: "Metric" })),
         board.arms.map((arm) => el("th", { scope: "col" }, el("b", { text: arm.name }), arm.detail)),
       ),
     ),
@@ -907,6 +917,7 @@ function renderLeaderboard() {
   for (const row of board.rows) {
     if (row.bars) {
       const best = row.cells.findIndex((cell) => cell.best);
+      const winner = row.cells[best];
       const under =
         best < 0
           ? ""
@@ -914,9 +925,8 @@ function renderLeaderboard() {
               "p",
               { class: "bs-dl" },
               `${board.arms[best].name} is best`,
-              row.cells[best].delta
-                ? [" · ", el("b", { text: row.cells[best].delta }), ` ${row.cells[best].sub}`]
-                : "",
+              winner.delta ? [" · ", el("b", { text: winner.delta }), ` ${winner.sub}`] : "",
+              !winner.delta && winner.sub ? ` · ${winner.sub}` : "",
             );
       card.append(
         el(
@@ -926,13 +936,20 @@ function renderLeaderboard() {
             ? tip(row.label, row.tip, "tip-rate-phone")
             : el("span", { class: "bs-lbh", text: row.label }),
           row.cells.map((cell, index) => {
+            const name = el("span", { class: "bs-an", text: board.arms[index].name });
+
+            if (cell.na) return [name, el("span", { class: "bs-nr", text: cell.value })];
+
             const fill = el("i");
             fill.style.width = `${100 * (cell.fraction || 0)}%`;
 
             return [
-              el("span", { class: "bs-an", text: board.arms[index].name }),
+              name,
               el("div", { class: "bs-tr" }, fill),
-              el("span", { class: cell.best ? "bs-v bs-best" : "bs-v", text: cell.value }),
+              el("span", {
+                class: cell.best ? "bs-v bs-best" : "bs-v",
+                text: `${cell.best ? "◆ " : ""}${cell.value}`,
+              }),
             ];
           }),
           under,
@@ -952,7 +969,7 @@ function renderLeaderboard() {
               el(
                 "span",
                 {},
-                valueOf(cell),
+                valueOf(cell, true),
                 cell.err ? el("span", { class: "bs-err", text: ` ${cell.sub}` }) : "",
               ),
             ]),

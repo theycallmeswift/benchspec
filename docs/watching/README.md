@@ -89,4 +89,4 @@ showing as live: `last event … ago` in the top bar is the sign.
 `benchmark.md` stays the record: it holds the final figures and their noise
 bands.
 
-![A finished four-arm run's leaderboard](assets/leaderboard.png)
+![A finished run's leaderboard](assets/leaderboard.png)

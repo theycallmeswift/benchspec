@@ -9,7 +9,16 @@ import pytest
 
 from benchspec.reporting import report
 from benchspec.watch.view import assertions_view, fail_step, rate_text
-from tests.support.watch import Recording, arm, cell_of, finished_run, fold, iteration, mid_run
+from tests.support.watch import (
+    Recording,
+    arm,
+    cell_of,
+    finished_frame,
+    finished_run,
+    fold,
+    iteration,
+    mid_run,
+)
 
 CELL = "hello/greets/trial/0"
 
@@ -214,14 +223,14 @@ def test_scoped_off_samples_are_na_from_run_start_and_count_nowhere(tmp_path: Pa
     """Scoped off samples are na from run start and count nowhere."""
     view = fold(mid_run(tmp_path), at=401)
 
-    cell = cell_of(view, "asks-for-codex", "baseline")
+    cell = cell_of(view, "codex-eperm-debug", "baseline")
     counter = view["counter"]
 
     assert cell == {
         "kind": "na",
         "label": "n/a",
         "boxes": ["bs-b-na"] * 3,
-        "aria": "asks-for-codex on baseline: n/a",
+        "aria": "codex-eperm-debug on baseline: n/a",
     }
     assert (counter["done"], counter["total"], counter["percent"]) == (19, 54, 35)
     assert sum(_tally(view).values()) == 54
@@ -241,8 +250,8 @@ def test_a_cell_counts_every_check_its_graded_samples_ran(tmp_path: Path) -> Non
     """A cell counts every check its graded samples ran."""
     view = fold(mid_run(tmp_path), at=401)
 
-    errored = cell_of(view, "logged-out", "baseline")
-    live = cell_of(view, "implement-task", "baseline")
+    errored = cell_of(view, "codex-logged-out", "baseline")
+    live = cell_of(view, "plan-implement-task", "baseline")
 
     assert errored["label"] == "94%"
     assert errored["muted"] is False
@@ -255,7 +264,7 @@ def test_a_cell_counts_every_check_its_graded_samples_ran(tmp_path: Path) -> Non
     assert live["label"] == "1/3 · agent 2m 00s"
     assert live["hover"]["problem"] == {"text": "quiet · sample 3 silent 52s", "warn": True}
     assert live["hover"]["rows"][0] == {
-        "sample": "sample 1",
+        "sample": "Sample 1",
         "verdict": "✗ 7/9",
         "bad": True,
         "duration": "68s",
@@ -266,20 +275,24 @@ def test_unfinished_cells_are_labelled_by_progress(tmp_path: Path) -> None:
     """Unfinished cells are labelled by progress."""
     view = fold(mid_run(tmp_path), at=401)
 
-    assert cell_of(view, "rate-limited", "trial")["label"] == "queued"
-    assert cell_of(view, "splits-work", "trial")["label"] == "0/3 · agent 5s"
-    assert cell_of(view, "review-judges-findings", "trial")["muted"] is True
+    assert cell_of(view, "user-review-presents", "trial")["label"] == "queued"
+    assert cell_of(view, "python3-missing", "trial")["label"] == "0/3 · agent 5s"
+    assert cell_of(view, "plan-review-judges-findings", "trial")["muted"] is True
 
 
 def test_groups_follow_run_start_order_with_scope_notes_and_summaries(tmp_path: Path) -> None:
     """Groups follow run start order with scope notes and summaries."""
     groups = fold(mid_run(tmp_path), at=401)["matrix"]["groups"]
 
-    plan, triggers, quiet = groups
+    plan, quiet, triggers = groups
 
-    assert [group["name"] for group in groups] == ["plan/", "triggers/", "not-triggers/"]
+    assert [group["name"] for group in groups] == [
+        "delegating-to-codex/",
+        "not-triggers/",
+        "triggers/",
+    ]
     assert (plan["evals"], plan["note"]) == ("5 evals", None)
-    assert (triggers["evals"], triggers["note"]) == ("5 evals", "[trial-only]")
+    assert (triggers["evals"], triggers["note"]) == ("4 evals", "[trial-only]")
     assert plan["summaries"][0] == {
         "text": "69%",
         "count": "7/15",
@@ -287,13 +300,14 @@ def test_groups_follow_run_start_order_with_scope_notes_and_summaries(tmp_path: 
         "bar": 7 / 15,
         "live": True,
     }
-    assert triggers["summaries"][0]["text"] == "n/a"
-    assert quiet["summaries"][1] == {
-        "text": "queued",
-        "count": "0/9",
+    assert quiet["summaries"][0]["text"] == "n/a"
+    assert quiet["summaries"][1]["text"] == "100%"
+    assert triggers["summaries"][1] == {
+        "text": "running",
+        "count": "0/12",
         "muted": True,
         "bar": 0,
-        "live": False,
+        "live": True,
     }
     assert all(group["open"] for group in groups)
 
@@ -344,7 +358,7 @@ def test_the_drawer_keeps_the_last_five_deltas_and_the_phases_in_order(tmp_path:
     """The drawer keeps the last five deltas and the phases in order."""
     view = fold(mid_run(tmp_path), at=401)
 
-    sample = cell_of(view, "second-opinion", "trial")["samples"][0]
+    sample = cell_of(view, "codex-job-status", "trial")["samples"][0]
 
     assert [line["text"] for line in sample["output"]] == [f"step {n}" for n in range(3, 8)]
     assert sample["output"][0] == {"offset": "+0:04", "name": "Bash", "text": "step 3"}
@@ -356,7 +370,7 @@ def test_the_drawer_keeps_the_last_five_deltas_and_the_phases_in_order(tmp_path:
     ]
     assert sample["phases"]["label"] == "bind 1.0s, boot 2.0s, setup 1.0s, agent 16.0s"
     assert sample["path"] == (
-        "tmp/evals/iteration_12/skills/triggers/eval-second-opinion/trial/sample-0/"
+        "tmp/evals/iteration_12/skills/triggers/eval-codex-job-status/trial/sample-0/"
     )
 
 
@@ -493,3 +507,27 @@ def test_the_drawer_lists_failures_first_and_scoped_off_lines_last(tmp_path: Pat
     ] == [(1, "fail", "judge"), (0, "pass", "file_exists"), (2, "n/a", "judge")]
     assert sample["scoped"] == {"2": "runs only on trial"}
     assert (sample["verdict"], sample["detail"]) == ("FAIL", "1/2 assertions")
+
+
+def test_a_finished_run_tallies_only_what_happened_and_marks_a_lone_arm_best(
+    tmp_path: Path,
+) -> None:
+    """A finished run tallies only what happened and marks a lone arm best."""
+    view = fold(finished_frame(tmp_path), at=0)
+
+    assert view["state"] == "finished"
+    assert _tally(view) == {"passed": 38, "failed": 15, "errored": 1}
+    assert view["counter"]["workers"] is None
+    assert _row(view, "Skill triggered") == [
+        {"value": "n/a", "na": True},
+        {"value": "38/38", "sub": "100%", "fraction": 1.0, "best": True},
+    ]
+    assert [cell["value"] for cell in _row(view, "Pass rate")] == ["70%", "100%"]
+    assert view["top"] == {
+        "iteration": "iteration_12",
+        "suite": "e2e",
+        "count": "--count 3",
+        "live": False,
+        "status": "ended · exit 1",
+        "detail": None,
+    }
