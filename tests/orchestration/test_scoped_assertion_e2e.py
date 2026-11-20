@@ -13,6 +13,7 @@ module, the way the plugin's `pytest_sessionfinish` does.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -146,6 +147,7 @@ class _RecordingGrader:
         judge_config: JudgeConfig | None = None,
         original_shas: dict[str, str] | None = None,
         process_facts: str = "",
+        remaining_seconds: Callable[[], float] | None = None,
     ) -> dict:
         """Record the batch and grade every assertion as passed."""
         self.seen.extend(assertions)

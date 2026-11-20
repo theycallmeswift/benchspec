@@ -54,7 +54,7 @@ def test_run_collects_one_test_per_eval_arm_pair(tmp_path: Path) -> None:
 
 
 def test_run_unknown_set_is_a_usage_error(tmp_path: Path) -> None:
-    """Verify an unknown `--set` fails at collection and maps to exit 2."""
+    """Verify an unknown `--set` is refused up front as one error line and maps to exit 2."""
     repo_root = tmp_path / "repo"
     write_eval(repo_root, ["./out.md exists"])
     (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
@@ -64,7 +64,7 @@ def test_run_unknown_set_is_a_usage_error(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "no eval set named `nope` (declared: ['demo'])" in result.stdout
+    assert "ERROR: no eval set named `nope` (declared: ['demo'])" in result.stderr
 
 
 def test_run_without_gemini_key_exits_two_before_spawning_pytest(tmp_path: Path) -> None:
@@ -173,8 +173,8 @@ def test_run_unmapped_effort_is_a_usage_error_before_any_arm_runs(tmp_path: Path
     result = run_benchspec("run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path)
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "arm `deep`: harness `opencode` cannot map effort `thorough`" in result.stdout
-    assert "accepted: ['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh']" in result.stdout
+    assert "arm `deep`: harness `opencode` cannot map effort `thorough`" in result.stderr
+    assert "accepted: ['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh']" in result.stderr
 
 
 def test_run_undeliverable_routing_is_a_usage_error_before_any_arm_runs(tmp_path: Path) -> None:
@@ -197,4 +197,36 @@ def test_run_undeliverable_routing_is_a_usage_error_before_any_arm_runs(tmp_path
     result = run_benchspec("run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path)
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "arm `pinned`: harness `codex` cannot deliver `routing`" in result.stdout
+    assert "arm `pinned`: harness `codex` cannot deliver `routing`" in result.stderr
+
+
+def test_run_rejects_a_cell_timeout_at_the_judge_timeout_before_spawning_pytest(
+    tmp_path: Path,
+) -> None:
+    """`--timeout 300` against the default 300 s judge is one `error:` line and exit 2."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec("run", str(repo_root), "--timeout", "300", cwd=tmp_path)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert output.count("cell timeout must exceed the judge timeout (300s)") == 1
+    assert "in validate_cell_caps" not in output
+
+
+def test_run_accepts_a_cell_timeout_over_a_lowered_judge_timeout(tmp_path: Path) -> None:
+    """`--judge-timeout` reaches the preflight's cap rule, so `--timeout 20` is not refused."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec(
+        "run", str(repo_root), "--timeout", "20", "--judge-timeout", "10",
+        cwd=tmp_path, drop=("GEMINI_API_KEY",),
+    )
+
+    output = result.stdout + result.stderr
+    assert "cell timeout must exceed" not in output
+    assert "GEMINI_API_KEY" in output

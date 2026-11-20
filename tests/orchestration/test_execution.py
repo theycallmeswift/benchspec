@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -19,6 +19,7 @@ from benchspec.grading.binder import BinderAuthError
 from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.trajectory import trajectory_from_session
 from benchspec.orchestration import workspace
+from benchspec.orchestration.deadline import CellDeadline
 from benchspec.orchestration.execution import SessionFactory, run_eval_arm
 from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import Facts
@@ -67,6 +68,7 @@ def _grade_all_pass(
     judge_config: JudgeConfig | None = None,
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
+    remaining_seconds: Callable[[], float] | None = None,
 ) -> dict:
     """Build the grade all pass test fixture."""
     return {
@@ -968,7 +970,7 @@ def test_run_eval_arm_threads_harness_args(tmp_path: Path) -> None:
 
 
 def test_run_eval_arm_threads_arm_timeout(tmp_path: Path) -> None:
-    """The arm's turn timeout reaches the session factory unchanged."""
+    """The arm's timeout becomes the cell deadline the session factory draws from."""
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -996,7 +998,9 @@ def test_run_eval_arm_threads_arm_timeout(tmp_path: Path) -> None:
         bind=_punt_all,
     )
 
-    assert session_factory.calls[0]["timeout"] == 1800
+    deadline = session_factory.calls[0]["deadline"]
+    assert isinstance(deadline, CellDeadline)
+    assert deadline.cap_seconds == 1800
 
 
 def test_run_eval_arm_threads_sandbox_name_to_resolve_sandbox(
@@ -1740,6 +1744,7 @@ def test_process_facts_reach_the_judge(tmp_path: Path) -> None:
         judge_config: JudgeConfig | None = None,
         original_shas: dict[str, str] | None = None,
         process_facts: str = "",
+        remaining_seconds: Callable[[], float] | None = None,
     ) -> dict:
         """Grade."""
         seen_process_facts.append(process_facts)

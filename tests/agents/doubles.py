@@ -12,7 +12,7 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from benchspec.testing import FakeExecOutput, FakeSandbox
+from benchspec.testing import FakeExecOutput, FakeExecStream, FakeSandbox
 
 SLOW_EXEC_SECONDS = 0.05
 
@@ -28,7 +28,7 @@ class ShellCall:
 
 @dataclass(frozen=True)
 class ExecCall:
-    """One recorded `FakeSandbox.exec` call."""
+    """One recorded `FakeSandbox.exec` or `exec_stream` call."""
 
     cmd: str
     args: list[str]
@@ -73,7 +73,7 @@ def shell_call(sandbox: FakeSandbox, index: int = 0) -> ShellCall:
 def exec_call(sandbox: FakeSandbox, index: int = 0) -> ExecCall:
     """Return the recorded exec call at `index`, failing if it is another kind."""
     kind, cmd, raw_args, raw_kwargs = sandbox.calls[index]
-    assert kind == "exec"
+    assert kind in ("exec", "exec_stream")
     assert isinstance(cmd, str)
     assert isinstance(raw_args, list)
     kwargs = _recorded_kwargs(raw_kwargs)
@@ -91,6 +91,19 @@ def exec_call(sandbox: FakeSandbox, index: int = 0) -> ExecCall:
 
 class SlowSandbox(FakeSandbox):
     """A `FakeSandbox` whose every exec takes `SLOW_EXEC_SECONDS` before returning."""
+
+    async def exec_stream(
+        self,
+        cmd: str,
+        args: list[str] | None = None,
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        stdin: bytes | None = None,
+    ) -> FakeExecStream:
+        """Wait, then record and answer the streamed exec like `FakeSandbox`."""
+        await asyncio.sleep(SLOW_EXEC_SECONDS)
+        return await super().exec_stream(cmd, args, cwd=cwd, env=env, stdin=stdin)
 
     async def exec(
         self,

@@ -832,6 +832,10 @@ class DockerBackend(SharedBackendBehavior):
 
         return output
 
+    async def discard_quietly(self, name: str) -> None:
+        """Remove the container `name` a cancelled boot may have left running."""
+        await self._remove_container(name)
+
     async def _remove_container(self, name: str) -> None:
         """Remove a container by name, ignoring failure.
 

@@ -918,6 +918,7 @@ def test_index_rows_flatten_evals(tmp_path: Path) -> None:
         "input_tokens": 300,
         "output_tokens": 100,
         "stopped": False,
+        "timed_out": False,
     }
     errored = next(row for row in evals if row["sample"] == 1)
     assert errored["errored"] is True

@@ -13,12 +13,11 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import replace
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
-    DEFAULT_AGENT_TIMEOUT,
+    DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     FIXED_SKILLS_HOME,
     OPENROUTER_PROVIDER,
@@ -28,8 +27,8 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.grading.trigger import StopRule
-from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
-from benchspec.orchestration.results import RunResult, mark_errored_by_nonzero_exit
+from benchspec.orchestration.environments import ExecutionEnv, Host
+from benchspec.orchestration.results import RunResult
 from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
@@ -391,7 +390,7 @@ class CodexAgent(BaseAgent):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
-        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
@@ -408,26 +407,7 @@ class CodexAgent(BaseAgent):
         env = {**self.guest_env(), **(extra_env or {})}
         try:
             await self._write_auth_json(sandbox)
-            if stop is not None:
-                return await self.invoke_watched(
-                    sandbox,
-                    cmd,
-                    stop=stop,
-                    parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
-                    cwd=workdir,
-                    env=env,
-                    timeout=timeout,
-                    eval_id=eval_id,
-                    config=config,
-                )
-            res = await GuestSandbox(sandbox).exec(
-                cmd,
-                cwd=workdir,
-                env=env,
-                timeout=timeout,
-                stdin=b"",
-            )
-        except (TimeoutError, SandboxError, OSError, RuntimeError) as error:
+        except (SandboxError, OSError, RuntimeError) as error:
             return RunResult(
                 eval_id,
                 config,
@@ -437,13 +417,18 @@ class CodexAgent(BaseAgent):
                 is_error=True,
             )
         # `codex exec --json` events carry no timing, so the run's time is the process's.
-        result = replace(
-            parse_codex_jsonl(res.stdout, eval_id, config, detect_skill),
-            duration_ms=res.duration_ms,
+        return await self.invoke_streamed(
+            sandbox,
+            cmd,
+            stop=stop,
+            parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
+            cwd=workdir,
+            env=env,
+            timeout=timeout,
+            eval_id=eval_id,
+            config=config,
+            process_duration=True,
         )
-        if res.exit_code != 0:
-            return mark_errored_by_nonzero_exit(result, res.stderr)
-        return result
 
     async def judge(
         self,

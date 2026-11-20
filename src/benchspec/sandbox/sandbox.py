@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fcntl
 import os
 import shlex
 import tomllib
-from collections.abc import Iterable, Iterator
+from collections.abc import Coroutine, Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from benchspec.agents import (
-    DEFAULT_AGENT_TIMEOUT,
     DEFAULT_PROVIDER,
     CodingAgent,
     credential_preflight_error,
@@ -23,6 +23,12 @@ from benchspec.agents import (
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.trigger import StopRule
 from benchspec.orchestration import workspace
+from benchspec.orchestration.deadline import (
+    PHASE_BOOT,
+    PHASE_SETUP,
+    CellDeadline,
+    CellTimeoutError,
+)
 from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import (
     changed_paths,
@@ -45,6 +51,8 @@ from benchspec.sandbox.project import discard_stage, stage_project
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, registered_backends, resolve_sandbox
 from benchspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from benchspec.specs.schema import SchemaError
+
+_Result = TypeVar("_Result")
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
@@ -284,7 +292,8 @@ class SandboxSession:
         baseline: str = "",
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
-        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        deadline: CellDeadline,
+        judge_reserve: float = 0.0,
         stop: StopRule | None = None,
     ) -> None:
         """Initialize the instance."""
@@ -302,8 +311,9 @@ class SandboxSession:
         self._eval_set = eval_set
         self._baseline = baseline
         self._harness_args = harness_args
-        # Wall-clock cap on each graded turn, handed to the agent's `invoke` unchanged.
-        self._timeout = timeout
+        # The agent turn leaves `judge_reserve` seconds of the deadline for the judge.
+        self._deadline = deadline
+        self._judge_reserve = judge_reserve
         self._stop = stop
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
@@ -321,30 +331,40 @@ class SandboxSession:
         self._staged_project = (
             stage_project(self._host_repo_root) if self._host_repo_root is not None else None
         )
+        run_name = _sandbox_run_name(self._eval_id, self._config)
         try:
-            self._sandbox = await self._backend.create_sandbox(
-                agent=self._agent,
-                snapshot=self._snapshot,
-                name=_sandbox_run_name(self._eval_id, self._config),
-                host_workdir=self._host_workdir,
-                host_repo_root=self._staged_project,
-                extra_volumes=_agent_extra_volumes,
+            self._sandbox = await self._within_deadline(
+                PHASE_BOOT,
+                self._backend.create_sandbox(
+                    agent=self._agent,
+                    snapshot=self._snapshot,
+                    name=run_name,
+                    host_workdir=self._host_workdir,
+                    host_repo_root=self._staged_project,
+                    extra_volumes=_agent_extra_volumes,
+                ),
             )
-        except BaseException:
+        except BaseException as error:
+            if isinstance(error, CellTimeoutError):
+                # A cancelled boot returns no handle, so remove the sandbox by name.
+                await self._backend.discard_quietly(run_name)
             discard_stage(self._staged_project)
             raise
         # Install before the artifact baseline so only later agent-authored files surface.
         if self._setup_reldir is not None:
             try:
-                await run_setup_sh(
-                    self._sandbox,
-                    self._agent,
-                    setup_reldir=self._setup_reldir,
-                    arm=self._arm,
-                    model=self._model,
-                    eval_set=self._eval_set,
-                    baseline=self._baseline,
-                    arm_env=self._arm_env,
+                await self._within_deadline(
+                    PHASE_SETUP,
+                    run_setup_sh(
+                        self._sandbox,
+                        self._agent,
+                        setup_reldir=self._setup_reldir,
+                        arm=self._arm,
+                        model=self._model,
+                        eval_set=self._eval_set,
+                        baseline=self._baseline,
+                        arm_env=self._arm_env,
+                    ),
                 )
             except BaseException:
                 await self._backend.stop_quietly(self._sandbox)
@@ -354,6 +374,22 @@ class SandboxSession:
             self._sandbox, self._agent, self._backend
         )
         return self._run
+
+    async def _within_deadline(
+        self, phase: str, pending: Coroutine[object, object, _Result]
+    ) -> _Result:
+        """Await `pending` for at most the cell's remaining budget.
+
+        Raises:
+            CellTimeoutError: Naming `phase`, when the cell's cap fired before it finished.
+        """
+        try:
+            async with asyncio.timeout(self._deadline.remaining()) as budget:
+                return await pending
+        except TimeoutError as error:
+            if budget.expired():
+                raise CellTimeoutError(phase, self._deadline.cap_seconds) from error
+            raise
 
     def _live(self) -> LiveSandbox:
         """The booted guest; a call before `__aenter__` is a programming error."""
@@ -379,7 +415,7 @@ class SandboxSession:
             detect_skill=detect_skill,
             extra_env=self._arm_env,
             harness_args=self._harness_args,
-            timeout=self._timeout,
+            timeout=self._deadline.phase_budget(reserve=self._judge_reserve),
             stop=self._stop,
         )
         # Capture new or changed skill artifacts written outside the workdir mount.
@@ -414,7 +450,8 @@ def arm_session(
     baseline: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
-    timeout: int = DEFAULT_AGENT_TIMEOUT,
+    deadline: CellDeadline,
+    judge_reserve: float = 0.0,
     stop: StopRule | None = None,
 ) -> SandboxSession:
     """Open an async arm session around one sandboxed eval cell."""
@@ -435,7 +472,8 @@ def arm_session(
         baseline=baseline,
         project_marker=project_marker,
         harness_args=harness_args,
-        timeout=timeout,
+        deadline=deadline,
+        judge_reserve=judge_reserve,
         stop=stop,
     )
 
