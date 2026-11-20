@@ -255,6 +255,10 @@ class SandboxBackend(Protocol):
         """Best-effort VM teardown that never masks the real flow."""
         ...
 
+    async def discard_quietly(self, name: str) -> None:
+        """Best-effort removal of the sandbox named `name`, for a boot that left no handle."""
+        ...
+
     def prune(self) -> None:
         """Remove every `benchspec-*` artifact this backend owns."""
         ...

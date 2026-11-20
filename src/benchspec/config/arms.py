@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from benchspec.agents import (
-    DEFAULT_AGENT_TIMEOUT,
+    DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     known_harnesses,
@@ -39,7 +39,7 @@ class Arm:
     env: dict[str, str] = field(default_factory=dict, hash=False)  # unhashable; keep Arm hashable
     harness_args: list[str] = field(default_factory=list, hash=False)
     provider: str = DEFAULT_PROVIDER
-    timeout: int = DEFAULT_AGENT_TIMEOUT
+    timeout: int = DEFAULT_CELL_TIMEOUT
 
 
 _SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "timeout", "env", "harness_args")
@@ -90,7 +90,7 @@ def _validate_harness_args(where: str, value: object) -> list[str]:
 
 
 def _validate_timeout(where: str, value: object) -> int:
-    """Validate an agent-turn timeout (whole seconds) from configuration."""
+    """Validate a whole-cell timeout (whole seconds) from configuration."""
     # bool is an int subclass, so `timeout = true` would otherwise pass as 1 second.
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise SchemaError(f"{where}: `timeout` must be a positive integer")
@@ -263,7 +263,7 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
         if model_error:
             raise SchemaError(f"{where} arm `{name}`: {model_error}")
     effort = raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
-    timeout = raw.get("timeout", defaults.get("timeout", DEFAULT_AGENT_TIMEOUT))
+    timeout = raw.get("timeout", defaults.get("timeout", DEFAULT_CELL_TIMEOUT))
     merged = {**defaults.get("env", {}), **raw.get("env", {})}
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
 

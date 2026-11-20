@@ -103,7 +103,7 @@ def _stream(*lines: str, exit_code: int | None = None) -> list[FakeExecEvent]:
 
 
 def _invoke(
-    harness: _Harness, guest: FakeSandbox, stop: StopRule, *, timeout: int = 30
+    harness: _Harness, guest: FakeSandbox, stop: StopRule | None, *, timeout: float = 30
 ) -> RunResult:
     """Run one watched turn through the adapter's real `invoke`."""
     return asyncio.run(
@@ -188,26 +188,86 @@ def test_watched_invoke_reads_partial_usage_from_a_stopped_claude_stream() -> No
     assert result.total_tokens == 210
 
 
-def test_watched_invoke_that_outlives_its_timeout_is_an_infra_error() -> None:
-    """A run that works past the timeout without settling is errored, like any timeout."""
+@pytest.mark.parametrize("harness_name", sorted(HARNESSES))
+def test_invoke_that_outlives_its_timeout_keeps_its_partial_run(harness_name: str) -> None:
+    """A turn that streamed work past the cap is a timed-out run with its usage, not an error."""
+    harness = HARNESSES[harness_name]
+    guest = FakeSandbox(
+        stream_events=_stream(harness.startup, harness.plain_tool_call), stream_stalls=True
+    )
+
+    result = _invoke(harness, guest, None, timeout=0.01)
+
+    assert result.timed_out is True
+    assert result.is_error is False
+    assert result.stopped is False
+    assert len(result.trajectory) == 1
+    assert harness.plain_tool_call in result.raw
+    assert guest.streams[0].killed is True
+
+
+def test_timed_out_claude_run_reads_usage_from_the_partial_stream() -> None:
+    """Usage streamed before the cap is recorded on the timed-out run."""
     harness = HARNESSES["claude-code"]
     guest = FakeSandbox(
         stream_events=_stream(harness.startup, harness.plain_tool_call), stream_stalls=True
     )
 
-    result = _invoke(harness, guest, settled_once_dispatched({"hello"}), timeout=1)
+    result = _invoke(harness, guest, None, timeout=0.01)
+
+    assert (result.input_tokens, result.cache_read_tokens, result.output_tokens) == (10, 90, 5)
+
+
+@pytest.mark.parametrize("harness_name", sorted(HARNESSES))
+def test_invoke_cut_off_mid_record_still_parses_the_lines_before_it(harness_name: str) -> None:
+    """A stream truncated in the middle of a JSON record keeps every whole record before it."""
+    harness = HARNESSES[harness_name]
+    truncated = harness.plain_tool_call[: len(harness.plain_tool_call) // 2]
+    guest = FakeSandbox(
+        stream_events=_stream(harness.startup, harness.plain_tool_call)
+        + [FakeExecEvent("stdout", data=truncated.encode())],
+        stream_stalls=True,
+    )
+
+    result = _invoke(harness, guest, None, timeout=0.01)
+
+    assert result.timed_out is True
+    assert len(result.trajectory) == 1
+
+
+@pytest.mark.parametrize("harness_name", sorted(HARNESSES))
+def test_invoke_that_streams_nothing_before_its_timeout_is_an_infra_error(
+    harness_name: str,
+) -> None:
+    """A stalled launch, with no output at all, is a broken host rather than a slow agent."""
+    harness = HARNESSES[harness_name]
+    guest = FakeSandbox(stream_stalls=True)
+
+    result = _invoke(harness, guest, None, timeout=0.01)
 
     assert result.is_error is True
-    assert result.stopped is False
+    assert result.timed_out is False
     assert result.result_text.startswith("<sandbox-error> ")
-    assert result.result_text.endswith("claude timed out after 1s")
     assert guest.streams[0].killed is True
 
 
-def test_unwatched_invoke_keeps_the_buffered_exec() -> None:
-    """Without a stop rule the turn runs through the buffered exec, never a stream."""
+def test_run_stopped_by_its_rule_is_never_timed_out() -> None:
+    """The stream ends at the first event: a stop before the cap is `stopped` only."""
     harness = HARNESSES["claude-code"]
-    guest = FakeSandbox()
+    guest = FakeSandbox(
+        stream_events=_stream(harness.startup, harness.hello_dispatch), stream_stalls=True
+    )
+
+    result = _invoke(harness, guest, settled_once_dispatched({"hello"}), timeout=5)
+
+    assert result.stopped is True
+    assert result.timed_out is False
+
+
+def test_a_turn_without_a_stop_rule_still_streams() -> None:
+    """Every turn goes through the streamed exec, with or without a stop rule."""
+    harness = HARNESSES["claude-code"]
+    guest = FakeSandbox(stream_events=_stream(harness.startup, exit_code=0))
 
     asyncio.run(
         harness.agent.invoke(
@@ -224,7 +284,7 @@ def test_unwatched_invoke_keeps_the_buffered_exec() -> None:
         )
     )
 
-    assert [call[0] for call in guest.calls] == ["exec"]
+    assert [call[0] for call in guest.calls] == ["exec_stream"]
 
 
 SLOW_STREAM_SECONDS = 0.05
