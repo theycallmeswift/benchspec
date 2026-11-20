@@ -155,10 +155,10 @@ While cells run, the run prints one line per finished sample, in finish order:
 | Field | Meaning |
 |---|---|
 | `[n/N]` | Samples finished, over the samples collected (after `-k`, `--eval-paths` and `--count`). `?` when the total is unknown. |
-| State | `PASS`: every assertion held. `FAIL`: at least one did not. `TIMEOUT`: `timing.json` records `timed_out`. `ERROR`: the sample errored, a fixture failed or the cell raised; the line ends with the first line of the failure, cut to 120 characters. |
+| State | `PASS`: every assertion held. `FAIL`: at least one did not. `TIMEOUT`: `timing.json` records `timed_out`. `ERROR`: the sample errored, a fixture failed, the sample raised or its xdist worker died; the line ends with the first line of the failure, cut to 120 characters. |
 | `<skill>/eval-<id>`, arm, `s<n>` | The sample's folder: `skills/<skill>/eval-<id>/<arm>/sample-<n>/`. |
 | `passed/total` | Graded assertions that held. |
-| Time | Wall time of the cell. |
+| Time | Wall time of the sample. |
 | `first <time>` | Time to the agent's first output, `first_output_ms` in `timing.json`. |
 | Cost | `cost_usd` in `timing.json`. |
 
@@ -166,7 +166,7 @@ A `—` means the run did not report that value. A sample whose every assertion
 is scoped off its arm is n/a: it prints no line and counts in neither number.
 The lines are plain and append-only, the same in a terminal, a pipe and a CI
 log; only the state word is colored, where the terminal supports color. Under
-`-v`, pytest's own line for each cell prints above it.
+`-v`, pytest's own line for each sample prints above it.
 
 `--progress dots` (or `progress = "dots"` in `[tool.benchspec]`) keeps pytest's
 progress line instead. It names the authored eval file each cell came from,

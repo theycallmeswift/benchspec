@@ -7,6 +7,9 @@ import pytest
 PROGRESS_STYLES = ("cells", "dots")
 DEFAULT_PROGRESS_STYLE = "cells"
 
+# The resolved format, stashed on the pytest config of every process in the run.
+PROGRESS_STYLE = pytest.StashKey[str]()
+
 
 def resolve_progress_style(flag: str | None, configured: object) -> str:
     """The progress format for this run: --benchspec-progress > [tool.benchspec] progress > cells.

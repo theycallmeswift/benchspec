@@ -23,6 +23,7 @@ import pytest
 
 from benchspec.config.arms import Arm
 from benchspec.config.options import RunOptions, option_str
+from benchspec.config.progress import PROGRESS_STYLE
 from benchspec.config.sets import (
     resolved_binder_config,
     resolved_judge_config,
@@ -342,6 +343,28 @@ def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
     return request.config.stash.get(BOUND_SPECS, {})
 
 
+@pytest.fixture
+def record_cell_result(request: pytest.FixtureRequest) -> Callable[[ArmOutcome], None]:
+    """Return the recorder that puts a sample's result on its report for the `cells` format.
+
+    A JSON string, because xdist ships properties through execnet. Under `dots` the
+    recorder does nothing, so those reports carry nothing extra.
+    """
+
+    def record(outcome: ArmOutcome) -> None:
+        """Record the sample's assertion counts and timing."""
+        if request.config.stash[PROGRESS_STYLE] != "cells":
+            return
+
+        passed, total = assertion_counts(outcome.grading.get("assertions", []))
+        result = CellResult(
+            passed=passed, total=total, errored=outcome.errored, timing=outcome.timing
+        )
+        request.node.user_properties.append((RESULT_PROPERTY, result.to_json()))
+
+    return record
+
+
 def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
@@ -375,7 +398,7 @@ def test_eval(
     eval_sandbox: str,
     baseline_arm: str | None,
     bound_specs: prebind.BoundSpecs,
-    record_property: Callable[[str, object], None],
+    record_cell_result: Callable[[ArmOutcome], None],
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -402,13 +425,7 @@ def test_eval(
         baseline=baseline_arm,
     )
 
-    passed, total = assertion_counts(outcome.grading.get("assertions", []))
-    # Before the assert, so an errored cell still reports its numbers in the progress
-    # line. A JSON string, because xdist ships properties through execnet.
-    result = CellResult(
-        passed=passed, total=total, errored=outcome.errored, timing=outcome.timing
-    )
-    record_property(RESULT_PROPERTY, result.to_json())
+    record_cell_result(outcome)
 
     # Both arms grade identically and symmetrically. A failed assertion (including a
     # baseline that legitimately doesn't fire the skill) is the recorded measurement, not a

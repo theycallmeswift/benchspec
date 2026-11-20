@@ -9,9 +9,7 @@ import pytest
 
 from benchspec.reporting.cells import (
     CellIdentity,
-    CellPropertyError,
     CellResult,
-    ColumnWidths,
     Timing,
     assertion_counts,
     cell_state,
@@ -22,7 +20,8 @@ RESULTS_DOC = Path(__file__).resolve().parents[2] / "docs" / "results.md"
 
 GREETS = CellIdentity(skill="hello", eval_id="greets-by-name", arm="baseline", sample=0)
 WRITES = CellIdentity(skill="hello", eval_id="writes-file", arm="trial", sample=0)
-ISSUE_WIDTHS = ColumnWidths(label=len("hello/eval-greets-by-name"), arm=len("baseline"))
+LABEL_WIDTH = len("hello/eval-greets-by-name")
+ARM_WIDTH = len("baseline")
 
 
 def _result(
@@ -88,7 +87,8 @@ def test_pass_line_shows_every_reported_field() -> None:
         cell=GREETS,
         result=_result(2, 2, first_output_ms=2800, cost_usd=0.024),
         wall_seconds=31.4,
-        widths=ISSUE_WIDTHS,
+        label_width=LABEL_WIDTH,
+        arm_width=ARM_WIDTH,
     )
 
     assert line == (
@@ -104,7 +104,8 @@ def test_fail_line_counts_the_assertions_that_held() -> None:
         cell=CellIdentity(skill="hello", eval_id="greets-by-name", arm="trial", sample=0),
         result=_result(1, 2, first_output_ms=2100, cost_usd=0.031),
         wall_seconds=38.2,
-        widths=ISSUE_WIDTHS,
+        label_width=LABEL_WIDTH,
+        arm_width=ARM_WIDTH,
     )
 
     assert line == (
@@ -120,7 +121,8 @@ def test_timeout_line_keeps_its_partial_counts() -> None:
         cell=CellIdentity(skill="hello", eval_id="writes-file", arm="baseline", sample=0),
         result=_result(0, 3, timed_out=True, first_output_ms=4000, cost_usd=0.212),
         wall_seconds=600.0,
-        widths=ISSUE_WIDTHS,
+        label_width=LABEL_WIDTH,
+        arm_width=ARM_WIDTH,
     )
 
     assert line == (
@@ -138,7 +140,8 @@ def test_error_line_without_a_result_ends_with_the_first_failure_line() -> None:
         wall_seconds=9.7,
         failed_report=True,
         message="setup.sh exited 2\nTraceback follows",
-        widths=ISSUE_WIDTHS,
+        label_width=LABEL_WIDTH,
+        arm_width=ARM_WIDTH,
     )
 
     assert line == (
@@ -257,23 +260,9 @@ def test_identity_and_result_survive_the_property_round_trip() -> None:
     assert CellResult.from_json(result.to_json()) == result
 
 
-@pytest.mark.parametrize("text", ["not json", "[]", '{"skill": "hello"}'])
-def test_a_malformed_identity_property_names_itself(text: str) -> None:
-    """Verify a malformed identity property names itself."""
-    with pytest.raises(CellPropertyError, match="benchspec_cell"):
-        CellIdentity.from_json(text)
-
-
-@pytest.mark.parametrize("text", ["not json", "[]", '{"passed": true, "total": 1}'])
-def test_a_malformed_result_property_names_itself(text: str) -> None:
-    """Verify a malformed result property names itself."""
-    with pytest.raises(CellPropertyError, match="benchspec_cell_result"):
-        CellResult.from_json(text)
-
-
 def test_results_doc_example_is_what_the_formatter_prints() -> None:
     """Verify results doc example is what the formatter prints."""
-    widths = ColumnWidths(label=len("hello-file/eval-writes-greeting-file"), arm=len("baseline"))
+    label_width = len("hello-file/eval-writes-greeting-file")
     greets = {"skill": "hello", "eval_id": "greets-by-name", "sample": 0}
     writes = {"skill": "hello-file", "eval_id": "writes-greeting-file", "sample": 0}
     lines = [
@@ -283,7 +272,8 @@ def test_results_doc_example_is_what_the_formatter_prints() -> None:
             cell=CellIdentity(arm="baseline", **greets),
             result=_result(2, 2),
             wall_seconds=31.4,
-            widths=widths,
+            label_width=label_width,
+            arm_width=ARM_WIDTH,
         ),
         format_cell_line(
             index=2,
@@ -291,7 +281,8 @@ def test_results_doc_example_is_what_the_formatter_prints() -> None:
             cell=CellIdentity(arm="trial", **greets),
             result=_result(1, 2),
             wall_seconds=38.2,
-            widths=widths,
+            label_width=label_width,
+            arm_width=ARM_WIDTH,
         ),
         format_cell_line(
             index=3,
@@ -299,7 +290,8 @@ def test_results_doc_example_is_what_the_formatter_prints() -> None:
             cell=CellIdentity(arm="baseline", **writes),
             result=_result(3, 3),
             wall_seconds=44.0,
-            widths=widths,
+            label_width=label_width,
+            arm_width=ARM_WIDTH,
         ),
         format_cell_line(
             index=4,
@@ -312,7 +304,8 @@ def test_results_doc_example_is_what_the_formatter_prints() -> None:
                 "AssertionError: trial run errored (see the arm's grading.json)\n"
                 "assert not True"
             ),
-            widths=widths,
+            label_width=label_width,
+            arm_width=ARM_WIDTH,
         ),
     ]
 

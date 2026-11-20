@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import TypeGuard
 
 from benchspec.reporting import ansi
 
@@ -37,10 +36,6 @@ _STATE_COLORS = {
 Timing = dict[str, int | float | bool | str | None]
 
 
-class CellPropertyError(ValueError):
-    """Signal a cell property that does not hold the JSON a worker records."""
-
-
 @dataclass(frozen=True)
 class CellIdentity:
     """Which sample a line is about: the eval, the arm, and the sample number."""
@@ -61,27 +56,8 @@ class CellIdentity:
 
     @classmethod
     def from_json(cls, text: str) -> CellIdentity:
-        """Parse what `to_json` wrote.
-
-        Raises:
-            CellPropertyError: `text` is not an identity object.
-        """
-        fields = _json_object(text, CELL_PROPERTY)
-        skill, eval_id, arm, sample = (
-            fields.get("skill"),
-            fields.get("eval_id"),
-            fields.get("arm"),
-            fields.get("sample"),
-        )
-        if (
-            not isinstance(skill, str)
-            or not isinstance(eval_id, str)
-            or not isinstance(arm, str)
-            or not _is_count(sample)
-        ):
-            raise CellPropertyError(f"{CELL_PROPERTY} is not a cell identity: {text}")
-
-        return cls(skill=skill, eval_id=eval_id, arm=arm, sample=sample)
+        """Parse what `to_json` wrote."""
+        return cls(**json.loads(text))
 
 
 @dataclass(frozen=True)
@@ -109,44 +85,8 @@ class CellResult:
 
     @classmethod
     def from_json(cls, text: str) -> CellResult:
-        """Parse what `to_json` wrote.
-
-        Raises:
-            CellPropertyError: `text` is not a result object.
-        """
-        fields = _json_object(text, RESULT_PROPERTY)
-        passed, total, errored, timing = (
-            fields.get("passed"),
-            fields.get("total"),
-            fields.get("errored"),
-            fields.get("timing"),
-        )
-        if (
-            not _is_count(passed)
-            or not _is_count(total)
-            or not isinstance(errored, bool)
-            or not isinstance(timing, dict)
-        ):
-            raise CellPropertyError(f"{RESULT_PROPERTY} is not a cell result: {text}")
-
-        return cls(passed=passed, total=total, errored=errored, timing=timing)
-
-
-def _json_object(text: str, property_name: str) -> dict[str, object]:
-    """Parse a property's JSON text into an object, naming the property on failure."""
-    try:
-        fields = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise CellPropertyError(f"{property_name} is not JSON: {text}") from error
-    if not isinstance(fields, dict):
-        raise CellPropertyError(f"{property_name} is not a JSON object: {text}")
-
-    return fields
-
-
-def _is_count(value: object) -> TypeGuard[int]:
-    """Whether a parsed JSON value is a plain integer, not a boolean."""
-    return isinstance(value, int) and not isinstance(value, bool)
+        """Parse what `to_json` wrote."""
+        return cls(**json.loads(text))
 
 
 def assertion_counts(assertions: list[dict]) -> tuple[int, int]:
@@ -184,17 +124,6 @@ def cell_state(
     return "PASS"
 
 
-@dataclass(frozen=True)
-class ColumnWidths:
-    """How wide the run's longest eval label and arm name are, so lines share columns."""
-
-    label: int = 0
-    arm: int = 0
-
-
-_UNPADDED = ColumnWidths()
-
-
 def _seconds(milliseconds: object) -> str | None:
     """Render a millisecond reading as `2.1s`; None when it was not reported."""
     if isinstance(milliseconds, bool) or not isinstance(milliseconds, int | float):
@@ -220,7 +149,8 @@ def format_cell_line(
     wall_seconds: float,
     failed_report: bool = False,
     message: str = "",
-    widths: ColumnWidths = _UNPADDED,
+    label_width: int = 0,
+    arm_width: int = 0,
     color: bool = False,
 ) -> str:
     """Render one finished sample as a single plain line.
@@ -234,7 +164,8 @@ def format_cell_line(
         failed_report: Whether the pytest report failed.
         message: The failure text; its first line, cut to 120 characters, ends an
             `ERROR` line.
-        widths: Column widths that keep the eval and arm columns aligned across lines.
+        label_width: Width of the run's longest eval label, so lines share columns.
+        arm_width: Width of the run's longest arm name.
         color: Wrap the state word in its ANSI color.
 
     Returns:
@@ -259,8 +190,8 @@ def format_cell_line(
 
     fields = [
         padded_state,
-        cell.label.ljust(widths.label),
-        cell.arm.ljust(widths.arm),
+        cell.label.ljust(label_width),
+        cell.arm.ljust(arm_width),
         f"s{cell.sample}".ljust(_SAMPLE_WIDTH),
         assertions.ljust(_ASSERTIONS_WIDTH),
         f"{wall_seconds:.1f}s".rjust(_SECONDS_WIDTH),

@@ -75,6 +75,8 @@ STAND_IN_CONFTEST = textwrap.dedent(
 
     def stand_in_arm(eval_case, arm, *args, repo_root, sample, baseline, eval_set, **kwargs):
         cell = f"{eval_case.eval_id}-{arm.name}"
+        if cell == os.environ.get("CRASH_WORKER_ON"):
+            os._exit(1)
         if cell == "beta-trial":
             raise RuntimeError("setup.sh exited 2\\nsecond line")
 
@@ -127,6 +129,20 @@ STAND_IN_CONFTEST = textwrap.dedent(
     cases.run_eval_arm = stand_in_arm
     report.make_agent = lambda harness=None: StubAgent()
     manifest.probe_judge_version = lambda harness: "judge-1.0.0"
+    """
+)
+
+# A `-p` plugin, not the conftest: the cells live outside the project directory, where a
+# conftest's hooks do not reach.
+TEARDOWN_BREAKER_PLUGIN = textwrap.dedent(
+    """\
+    import pytest
+
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_runtest_teardown(item):
+        if "alpha-baseline" in item.name:
+            raise RuntimeError("teardown failed")
     """
 )
 
@@ -326,6 +342,58 @@ def test_a_failing_setup_fixture_prints_one_error_line_per_cell(
         "  RuntimeError: workspace seed failed",
     ]
     result.assert_outcomes(errors=2)
+
+
+@pytest.mark.parametrize("workers", [(), ("-n", "2")], ids=["serial", "xdist"])
+def test_a_failing_teardown_adds_no_line_and_leaks_no_progress_letter(
+    pytester: pytest.Pytester, workers: tuple[str, ...]
+) -> None:
+    """Verify a failing teardown adds no line and leaks no progress letter."""
+    _make_project(pytester)
+    pytester.makepyfile(teardown_breaker=TEARDOWN_BREAKER_PLUGIN)
+
+    result = _run(pytester, "-p", "teardown_breaker", "-k", "alpha", *workers)
+
+    lines = _cell_lines(result)
+    assert _counters(lines) == ["[1/2]", "[2/2]"]
+    assert len([line for line in lines if " PASS " in line]) == 1
+    assert len([line for line in lines if " FAIL " in line]) == 1
+    before_errors = result.stdout.str().split("= ERRORS =")[0]
+    assert not PROGRESS_LETTERS.search(before_errors)
+    assert "%]" not in before_errors
+    result.assert_outcomes(passed=2, errors=1)
+    result.stdout.re_match_lines([r"ERROR .*test_eval\[myskill-alpha-baseline\]"])
+
+
+def test_a_sample_whose_xdist_worker_dies_prints_an_error_line(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a sample whose xdist worker dies prints an error line."""
+    _make_project(pytester)
+    monkeypatch.setenv("CRASH_WORKER_ON", "alpha-trial")
+
+    result = _run(pytester, "-n", "2", "--count", "2", "-k", "alpha")
+
+    lines = _cell_lines(result)
+    assert _counters(lines) == ["[1/4]", "[2/4]", "[3/4]", "[4/4]"]
+    crashed = [line for line in lines if "ERROR    myskill/eval-alpha  trial " in line]
+    assert sorted(re.findall(r" s\d ", "".join(crashed))) == [" s0 ", " s1 "]
+    assert all(re.search(r"—  worker 'gw\d+' crashed while running", line) for line in crashed)
+    before_failures = result.stdout.str().split("= FAILURES =")[0]
+    assert not PROGRESS_LETTERS.search(before_failures)
+    assert "%]" not in before_failures
+
+
+def test_dots_reports_carry_no_cell_properties(pytester: pytest.Pytester) -> None:
+    """Verify dots reports carry no cell properties."""
+    _make_project(pytester)
+
+    _run(pytester, "--benchspec-progress=dots", "--junitxml=dots.xml")
+    shutil.rmtree(pytester.path / "tmp")
+    _run(pytester, "--junitxml=cells.xml")
+
+    assert "benchspec_cell" not in (pytester.path / "dots.xml").read_text(encoding="utf-8")
+    assert "benchspec_cell_result" in (pytester.path / "cells.xml").read_text(encoding="utf-8")
 
 
 def test_the_counter_total_follows_the_selection(pytester: pytest.Pytester) -> None:
