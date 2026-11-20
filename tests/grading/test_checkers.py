@@ -241,7 +241,7 @@ def test_result_shape_matches_grading_entries(workdir: Path) -> None:
         "path": "Greetings/Alice.md",
     }
     result = _run(spec, workdir)
-    assert set(result) == {"text", "passed", "evidence", "type"}
+    assert set(result) == {"text", "passed", "evidence", "type", "checker"}
     assert result["type"] == "deterministic"
     assert result["text"] == "the file Greetings/Alice.md exists"  # derived
 
@@ -502,3 +502,10 @@ def test_existing_checker_ignores_context(tmp_path: Path) -> None:
         context=GradeContext(()),
     )
     assert out["passed"] is True
+
+
+def test_a_deterministic_entry_names_its_checker(workdir: Path) -> None:
+    """Verify a deterministic grading entry carries its checker's name."""
+    spec = {"type": "deterministic", "checker": "file_exists", "path": "missing.md"}
+
+    assert _run(spec, workdir)["checker"] == "file_exists"

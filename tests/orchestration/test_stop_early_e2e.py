@@ -154,6 +154,7 @@ def test_all_activation_eval_gets_a_stop_rule_and_grades_the_stopped_run(tmp_pat
             "passed": True,
             "evidence": "CHECK skill_invoked: `hello` invoked",
             "type": "deterministic",
+            "checker": "skill_invoked",
         }
     ]
     assert timing["stopped"] is True

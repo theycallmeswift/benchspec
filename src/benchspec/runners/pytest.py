@@ -111,6 +111,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "value (baseline = first). File-free single-axis comparison.",
     )
     group.addoption(
+        "--benchspec-iteration",
+        default=None,
+        metavar="iteration_NN",
+        help="name this run's iteration directory, which must not exist yet "
+        "(default: the next free one); `benchspec run --watch` passes it",
+    )
+    group.addoption(
         "--benchspec-set",
         default=None,
         help="name of the eval set to run (default: the pyproject `default-set`)",
@@ -350,7 +357,7 @@ def pytest_configure(config: pytest.Config) -> None:
         workspace.set_current_iteration(str(workerinput["benchspec_iteration"]))
     else:
         # Controller / serial run: choose once.
-        workspace.set_current_iteration(workspace.next_iteration_name(repo_root))
+        workspace.set_current_iteration(_iteration_name(config, repo_root))
         config.stash[_RUN_ID] = uuid.uuid4().hex
         config.stash[_STARTED_AT] = datetime.datetime.now(datetime.UTC).isoformat(
             timespec="seconds"
@@ -366,6 +373,24 @@ def pytest_configure(config: pytest.Config) -> None:
     worker = workspace.worker_tag()
     sink = JsonlEventSink(workspace.events_path(repo_root, worker), worker)
     config.stash[cases.EVENT_SINK] = sink
+
+
+def _iteration_name(config: pytest.Config, repo_root: Path) -> str:
+    """The run's iteration: the one `--benchspec-iteration` names, else the next free one.
+
+    Raises:
+        pytest.UsageError: the named iteration is malformed or its directory exists.
+    """
+    name = option_str(config, "benchspec_iteration")
+    if name is None:
+        return workspace.next_iteration_name(repo_root)
+
+    if not re.fullmatch(r"iteration_\d+", name):
+        raise pytest.UsageError(f"--benchspec-iteration must look like iteration_NN, got {name}")
+    if (workspace.evals_root(repo_root) / name).exists():
+        raise pytest.UsageError(f"--benchspec-iteration: {name} already exists")
+
+    return name
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

@@ -263,10 +263,11 @@ sample's `provenance.json` records the arm's resolved `effort`, `provider`, and
 
 ## The command line
 
-`benchspec` has five subcommands. `run` and `sandbox:build` follow the full
+`benchspec` has six subcommands. `run` and `sandbox:build` follow the full
 exit-code contract below; `lint` and `analyze` never exit `5`: an empty root just
 reports zero findings or classifications and exits `0`. `sandbox:clean` only
 exits `0` (nothing to prune is success) or `2` on a malformed invocation.
+`watch` exits `0` on Ctrl-C or `2` when there is nothing it can serve.
 
 Every subcommand preflights what it needs before spending anything: `analyze`
 the binder credential; `sandbox:build` the host and agent credential; `run` all
@@ -279,6 +280,7 @@ nothing paid follows.
 benchspec lint [root]            # static assertion checks — no credentials, no sandbox
 benchspec analyze [root]         # classify assertions deterministic / judge-backed
 benchspec run [root] [flags] [-- pytest-args]
+benchspec watch [root] [--iteration NAME] [--port P]
 benchspec sandbox:build [--set S] [--config F] [root]
 benchspec sandbox:clean [root]   # prune eval sandboxes + snapshots; stops running ones
 ```
@@ -303,6 +305,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
 | `--progress {cells,dots}` | `--benchspec-progress` | Live progress: one line per finished sample, or pytest's dots. See [`results.md`](results.md#the-terminal-summary). |
+| `--watch` | `--benchspec-iteration` | Serve this run's [live view](watching/README.md) on `127.0.0.1` until the run ends. `run` picks the next iteration name and passes it on, so the page knows which directory to follow. |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is in seconds and must stay below every arm's `--timeout`. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
@@ -334,8 +337,27 @@ pytest arguments, so `make e2e WORKERS=1` restores a sequential run.
 A few plugin options have no curated `run` flag and are reached the same way:
 `--benchspec-judge-timeout`, `--benchspec-judge-env K=V`,
 `--benchspec-judge-harness-arg` (which, unlike set/arm `harness_args`, fully
-*replaces* the configured judge `harness_args` when given), and
-`--benchspec-repo-root`.
+*replaces* the configured judge `harness_args` when given),
+`--benchspec-repo-root`, and `--benchspec-iteration iteration_NN`, which names
+the run's iteration directory and refuses one that exists.
+
+### `benchspec watch`
+
+`watch` serves the [live view](watching/README.md) of one iteration under
+`root`'s `tmp/evals/` and prints its address:
+
+```text
+Watching tmp/evals/iteration_07: http://127.0.0.1:52904/   (Ctrl-C to stop)
+```
+
+| Flag | Effect |
+|---|---|
+| `--iteration NAME` | Watch this iteration. Default: the highest-numbered one with an event stream. |
+| `--port P` | Bind this port on `127.0.0.1`. Default: any free port. |
+
+It exits `2` with one `error:` line when no iteration has an event stream, the
+named one has none, the port cannot be bound, or the events carry a
+`format_version` this benchspec does not read.
 
 ### The `--fail-under` gate
 

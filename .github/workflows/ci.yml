@@ -33,10 +33,21 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
+      - name: Install Chromium for the watch page tests
+        run: uv run playwright install --with-deps chromium
+
       - name: Run tests
         env:
           GEMINI_API_KEY: test-key
         run: make test
+
+      - name: Upload the watch page screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: watch-screenshots-${{ matrix.python-version }}
+          path: tmp/watch-screenshots/
+          if-no-files-found: ignore
 
   lint:
     runs-on: ubuntu-latest

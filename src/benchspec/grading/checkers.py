@@ -4,9 +4,9 @@ checkable facts, run on the host against the workdir before the judge.
 
 Each checker takes a schema-validated spec (see `schema._CHECKER_FIELDS`), the host
 workdir, and the pre-run SHA map, and returns a grading entry shaped exactly like a
-judge-graded one plus `"type": "deterministic"`. Checkers see the FINAL workspace state;
-{TODAY} is substituted upstream and a leading `./` anchor is stripped here (checker
-paths are workdir-relative on the host).
+judge-graded one plus `"type": "deterministic"` and its `checker`. Checkers see the FINAL
+workspace state; {TODAY} is substituted upstream and a leading `./` anchor is stripped
+here (checker paths are workdir-relative on the host).
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ class GradeContext:
 
     fired_skills: tuple[str, ...] = ()
 
+
+# The checkers a skill's first dispatch settles for good.
+ACTIVATION_CHECKERS = ("skill_invoked", "not_skill_invoked")
 
 # A checker maps (spec, workdir, pre-run SHA map, process-fact context) to (passed, evidence).
 Checker = Callable[[dict, Path, dict, GradeContext | None], tuple[bool, str]]
@@ -270,4 +273,5 @@ def run_assertion(
         "passed": passed,
         "evidence": f"CHECK {spec['checker']}: {evidence}",
         "type": "deterministic",
+        "checker": spec["checker"],
     }

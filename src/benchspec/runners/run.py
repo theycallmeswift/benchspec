@@ -21,10 +21,11 @@ import pytest
 
 from benchspec.config.sets import resolved_judge_config, session_run_set, validate_cell_caps
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
-from benchspec.orchestration import cases
+from benchspec.orchestration import cases, workspace
 from benchspec.sandbox.sandbox import format_preflight_failure
 from benchspec.specs import discovery
 from benchspec.specs.schema import SchemaError
+from benchspec.watch.server import WatchServer
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
 # `option=value` token so a value that starts with `-` is never mistaken for a flag.
@@ -279,10 +280,13 @@ def run(
     once (no `-p benchspec.runners.pytest`, which would double-register it), and the
     child's return code maps through the shared exit-code contract.
 
+    `--watch` names the run's iteration itself, serves its live view from a daemon thread
+    for as long as the child runs, and stops it when the child exits.
+
     Args:
         args: The parsed `run` namespace — `root` (a `Path`), the curated `--benchspec-*`
-            flags, `workers` (an int, `auto`, or None), and `passthrough` (verbatim pytest
-            args after `--`).
+            flags, `workers` (an int, `auto`, or None), `watch`, and `passthrough`
+            (verbatim pytest args after `--`).
         runner: Injectable process launcher with `subprocess.run`'s contract; called as
             `runner(argv, env=child_env)` and expected to expose `.returncode`.
         preflight: Injectable preflight with `preflight_run`'s contract.
@@ -325,13 +329,28 @@ def run(
         if workers.count > 1:
             worker_tokens = [f"-n={workers.count}"]
 
+    watch_tokens: list[str] = []
+    server = None
+    if args.watch and not collect_only:
+        iteration = workspace.next_iteration_name(root)
+        watch_tokens = [f"--benchspec-iteration={iteration}"]
+        server = WatchServer(workspace.evals_root(root) / iteration)
+        server.start()
+        print(f"Watching: {server.url}", flush=True)
+
     argv = [
         sys.executable,
         "-m",
         "pytest",
         *worker_tokens,
         *translate_run_flags(args),
+        *watch_tokens,
         *args.passthrough,
     ]
-    completed = runner(argv, env=child_env)
+    try:
+        completed = runner(argv, env=child_env)
+    finally:
+        if server is not None:
+            server.stop()
+
     return exit_code_for_pytest_status(int(completed.returncode))
