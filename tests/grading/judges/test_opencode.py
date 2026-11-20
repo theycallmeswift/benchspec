@@ -66,6 +66,14 @@ def test_judge_wraps_final_text_events_in_result_envelope(monkeypatch: pytest.Mo
     assert captured["command"][-1] == "grade this"
 
 
+def test_judge_refuses_an_effort_it_cannot_map_before_spawning() -> None:
+    """An unmapped judge effort raises instead of running on the `default` variant."""
+    config = JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6", effort="xhigh")
+
+    with pytest.raises(ValueError, match=r"cannot map effort 'xhigh'"):
+        _judge(config)
+
+
 def test_judge_raises_runtimeerror_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify judge raises RuntimeError on a nonzero exit."""
     monkeypatch.setattr(

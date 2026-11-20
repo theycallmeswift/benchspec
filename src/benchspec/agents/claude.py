@@ -143,6 +143,7 @@ class ClaudeCodeAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = "/root/.claude/skills"
     capabilities = AgentCapabilities(multi_turn=True, token_split=True)
+    accepted_efforts = frozenset({"low", "medium", "high", "xhigh", "max"})
 
     def provision_script(self) -> str:
         """Install script — the Claude installer always fetches latest; no version is baked in."""

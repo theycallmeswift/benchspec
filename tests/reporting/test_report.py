@@ -1321,6 +1321,7 @@ def test_planned_arms_carry_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         "provider",
         "model",
         "effort",
+        "routing",
         "timeout",
         "env",
         "harness_args",

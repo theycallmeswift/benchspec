@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -2120,6 +2120,10 @@ class _FakeAgent:
         self.for_host_called = True
         return self
 
+    def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
+        """Deliver routing as one visible env var, so a test can see it reach the session."""
+        return {"FAKE_ROUTING": json.dumps(routing)} if routing else {}
+
 
 class _FakeArmSession:
     """A live-sandbox session double: `__aenter__` returns the bound `_run` method.
@@ -2189,6 +2193,9 @@ def test_provenance_json_written_with_arm_and_guest_version(
     run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
     data = json.loads((run_dir / "provenance.json").read_text())
     assert data["arm"] == "trial"
+    assert data["effort"] == "medium"
+    assert data["provider"] == "default"
+    assert data["routing"] == {}
     assert data["actual_version"] == "1.2.3"
     assert data["actual_version_status"] == "available"
     assert data["actual_version_error"] is None
@@ -2200,6 +2207,55 @@ def test_provenance_json_written_with_arm_and_guest_version(
     assert sandbox["env_script_sha256"] == _CANNED_FINGERPRINT.env_script_sha256
     assert sandbox["image_digest"] == "sha256:cafef00d"
     assert sandbox["image_digest_status"] == "available"
+
+
+def test_arm_routing_reaches_the_session_env_and_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An arm's routing is handed to the agent's exec env and recorded in provenance.json."""
+    workspace.set_current_iteration("iteration_01")
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    agent = _FakeAgent()
+    backend = _FakeBackend(image=ImageIdentity.available("sha256:cafef00d"))
+    monkeypatch.setattr(
+        "benchspec.orchestration.execution.make_agent",
+        lambda harness=None, provider="default": agent,
+    )
+    monkeypatch.setattr(
+        "benchspec.orchestration.execution.resolve_sandbox", lambda name: backend
+    )
+    eval_case = _case(tmp_path, {"id": "alpha", "prompt": "work", "assertions": ["a"]})
+    result = RunResult("alpha", "pinned", "done", 1, 1, False, session_id="s1", fired=True)
+    routing: dict[str, object] = {"order": ["DeepInfra"], "allow_fallbacks": False}
+    pinned = Arm(
+        "pinned",
+        "opencode",
+        "openrouter/qwen/qwen3-coder",
+        effort="low",
+        env={"LIT": "plain"},
+        provider="openrouter",
+        routing=routing,
+    )
+    session_kwargs: list[dict[str, object]] = []
+
+    def session_factory(**kwargs: object) -> _FakeArmSession:
+        """Record the session's arguments and open a live-sandbox double."""
+        session_kwargs.append(kwargs)
+        return _FakeArmSession(FakeSandbox(), result)
+
+    run_eval_arm(
+        eval_case, pinned, workdir, {}, tmp_path,
+        today="2099-01-01", repo_root=tmp_path, sample=0,
+        session_factory=session_factory, grade=_grade_all_pass, bind=_punt_all,
+    )
+
+    assert session_kwargs[0]["arm_env"] == {"LIT": "plain", "FAKE_ROUTING": json.dumps(routing)}
+    run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "pinned", sample=0)
+    data = json.loads((run_dir / "provenance.json").read_text())
+    assert data["effort"] == "low"
+    assert data["provider"] == "openrouter"
+    assert data["routing"] == routing
 
 
 def test_guest_probe_uses_live_sandbox_seam_not_host(

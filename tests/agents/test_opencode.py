@@ -105,6 +105,43 @@ def test_build_command_effort_high_maps_to_thorough_variant() -> None:
     assert cmd[cmd.index("--variant") + 1] == "thorough"
 
 
+def test_build_command_refuses_an_effort_it_cannot_map() -> None:
+    """An unmapped effort raises naming the accepted set, never the `default` variant."""
+    with pytest.raises(ValueError, match=r"cannot map effort 'xhigh'.*'high', 'low', 'medium'"):
+        _opencode_agent().build_command(
+            "question",
+            plugin_dir=None,
+            model="provider/model",
+            effort="xhigh",
+            resume_session_id=None,
+            detect_skill=None,
+        )
+
+
+def test_routing_env_sets_provider_options_on_the_arm_model() -> None:
+    """Routing becomes inline config whose `options.provider` sits on the arm's own model."""
+    routing = {"order": ["DeepInfra"], "allow_fallbacks": False}
+
+    env = _opencode_agent("OPENROUTER_API_KEY").routing_env("openrouter/qwen/qwen3-coder", routing)
+
+    assert json.loads(env["OPENCODE_CONFIG_CONTENT"]) == {
+        "provider": {
+            "openrouter": {"models": {"qwen/qwen3-coder": {"options": {"provider": routing}}}}
+        }
+    }
+
+
+def test_routing_env_is_empty_without_routing() -> None:
+    """An arm with no routing adds nothing to the exec env."""
+    assert _opencode_agent().routing_env("openrouter/qwen/qwen3-coder", {}) == {}
+
+
+def test_routing_env_refuses_a_model_that_bypasses_openrouter() -> None:
+    """Routing on a direct-vendor model raises, since OpenRouter would never see it."""
+    with pytest.raises(ValueError, match="openrouter/"):
+        _opencode_agent().routing_env("anthropic/claude-sonnet-4-6", {"sort": "latency"})
+
+
 def test_build_command_ignores_plugin_and_resume() -> None:
     """Verify build command ignores plugin and resume."""
     # OpenCode v1 has no plugin-dir or resume equivalents; the args are accepted for

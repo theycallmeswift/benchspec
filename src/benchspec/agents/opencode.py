@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from benchspec.agents.base import (
     DEFAULT_AGENT_TIMEOUT,
@@ -99,8 +99,24 @@ _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.sta
 _RESERVED_HARNESS_SHORT_FLAGS = {
     arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
 }
-# Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
+# OpenCode expresses reasoning effort as a --variant; the keys are the accepted efforts.
 _EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
+# OpenCode merges this inline JSON over its config files, so routing reaches one exec
+# without touching the snapshot's opencode.json.
+_INLINE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
+
+
+def _variant_for_effort(effort: str) -> str:
+    """Return the `--variant` for an effort tier.
+
+    Raises:
+        ValueError: If `effort` is not one OpenCode maps; never a silent default.
+    """
+    if effort not in _EFFORT_TO_VARIANT:
+        raise ValueError(
+            f"OpenCode cannot map effort {effort!r} (accepted: {sorted(_EFFORT_TO_VARIANT)})"
+        )
+    return _EFFORT_TO_VARIANT[effort]
 
 
 def openrouter_model_error(model: str) -> str | None:
@@ -251,6 +267,37 @@ class OpenCodeAgent(BaseAgent):
     # multi_turn: invoke() accepts resume_session_id but does not
     # honor it — each call is a fresh session.
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
+    accepted_efforts = frozenset(_EFFORT_TO_VARIANT)
+    routing_env_var: ClassVar[str | None] = _INLINE_CONFIG_ENV
+
+    def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
+        """Return inline OpenCode config that sends `routing` as the request's `provider`.
+
+        OpenCode copies a model's `options.provider` into the OpenRouter request body, so
+        the table is set on the arm's own model and no other.
+
+        Args:
+            model: The arm's `openrouter/<vendor>/<model>` slug.
+            routing: The arm's OpenRouter provider-routing table; empty for none.
+
+        Returns:
+            `{OPENCODE_CONFIG_CONTENT: <json>}`, or empty when `routing` is empty.
+
+        Raises:
+            ValueError: If `routing` is set on a model that does not go through OpenRouter.
+        """
+        if not routing:
+            return {}
+        model_error = openrouter_model_error(model)
+        if model_error:
+            raise ValueError(f"OpenCode: {model_error}")
+        model_id = model.removeprefix(OPENROUTER_MODEL_PREFIX)
+        inline_config = {
+            "provider": {
+                "openrouter": {"models": {model_id: {"options": {"provider": dict(routing)}}}}
+            }
+        }
+        return {_INLINE_CONFIG_ENV: json.dumps(inline_config, separators=_COMPACT_SEPARATORS)}
 
     def provision_script(self) -> str:
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
@@ -411,15 +458,13 @@ class OpenCodeAgent(BaseAgent):
             model_error = openrouter_model_error(model)
             if model_error:
                 raise ValueError(f"OpenCode: {model_error}")
-        # Map the agent-neutral effort tier to OpenCode's --variant.
-        variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
             self.agent_bin,
             "run",
             "--format",
             "json",
             "--variant",
-            variant,
+            _variant_for_effort(effort),
             "-m",
             model,
             *_validate_harness_args(harness_args),
@@ -526,7 +571,7 @@ class OpenCodeAgent(BaseAgent):
             model_error = openrouter_model_error(config.model)
             if model_error:
                 raise RuntimeError(f"opencode judge: {model_error}")
-        variant = _EFFORT_TO_VARIANT.get(config.effort, "default")
+        variant = _variant_for_effort(config.effort)
         command = [
             self.agent_bin, "run", "--format", "json", "--variant", variant,
             "-m", config.model, *config.harness_args, prompt,

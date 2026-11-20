@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from benchspec.agents import (
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
+    agent_class,
     known_providers,
     unqualified_openrouter_model_error,
 )
@@ -144,6 +145,12 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
         raise SchemaError(
             f"[tool.benchspec.judge] harness_args invalid for `{config.harness}`: {error}"
         ) from error
+    accepted_efforts = agent_class(config.harness).accepted_efforts
+    if config.effort not in accepted_efforts:
+        raise SchemaError(
+            f"[tool.benchspec.judge] harness `{config.harness}` cannot map effort "
+            f"`{config.effort}` (accepted: {sorted(accepted_efforts)})"
+        )
     if config.provider == OPENROUTER_PROVIDER:
         model_error = unqualified_openrouter_model_error(config.model)
         if model_error:
