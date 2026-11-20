@@ -1772,3 +1772,41 @@ def test_sessionfinish_reports_scoped_assertions_beside_the_matrix(
     eval_row = next(line for line in printed if line.startswith("archive/alpha"))
     assert eval_row.split() == ["archive/alpha", "100%", "100%"]  # the skipped line pools out
     assert any(line.startswith("All evals") for line in printed)
+
+
+def test_collection_rejects_a_cell_timeout_at_the_judge_timeout(
+    pytester: pytest.Pytester,
+) -> None:
+    """`--benchspec-timeout` equal to the judge timeout fails collection with the fix named."""
+    _make_project(pytester)
+
+    result = _collect(pytester, "--benchspec-timeout", "300")
+
+    output = result.stderr.str() + result.stdout.str()
+    assert result.ret != 0
+    assert "cell timeout must exceed the judge timeout (300s)" in output
+    assert "Traceback" not in output
+
+
+def test_collection_accepts_a_cell_timeout_just_above_the_judge_timeout(
+    pytester: pytest.Pytester,
+) -> None:
+    """One second over the judge timeout is a valid cap."""
+    _make_project(pytester)
+
+    result = _collect(pytester, "--benchspec-timeout", "301")
+
+    assert result.ret == 0
+
+
+def test_collection_accepts_a_short_cell_timeout_under_a_lowered_judge_timeout(
+    pytester: pytest.Pytester,
+) -> None:
+    """Lowering the judge timeout alongside `--benchspec-timeout` makes a 20 s cap valid."""
+    _make_project(pytester)
+
+    result = _collect(
+        pytester, "--benchspec-timeout", "20", "--benchspec-judge-timeout", "10"
+    )
+
+    assert result.ret == 0

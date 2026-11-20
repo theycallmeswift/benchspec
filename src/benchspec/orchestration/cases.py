@@ -28,6 +28,7 @@ from benchspec.config.sets import (
     resolved_run_set,
     run_set_when_needed,
     session_run_set,
+    validate_cell_caps,
 )
 from benchspec.grading import binder
 from benchspec.grading.binder_config import BinderConfig
@@ -65,8 +66,10 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
         # Structural judge and binder preflight — before ANY paid task arm runs. Raises
         # pytest.UsageError at collection on a bad config; binary-on-PATH and credentials
         # are checked separately, later, only when tests actually execute.
-        resolved_judge_config(config)
+        judge_config = resolved_judge_config(config)
         resolved_binder_config(config)
+        if run_set is not None:
+            validate_cell_caps(run_set, judge_config)
     pairs: list[tuple[EvalCase, Arm]] = []
     ids: list[str] = []
     for case in cases:

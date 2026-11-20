@@ -226,6 +226,32 @@ def resolved_judge_config(config: RunOptions) -> JudgeConfig:
         raise pytest.UsageError(str(error)) from None
 
 
+def validate_cell_caps(run_set: EvalSet, judge_config: JudgeConfig) -> None:
+    """Reject an arm whose cell cap leaves no room for the judge.
+
+    A cell reserves the judge's `timeout` from its cap whenever a line is judge-bound,
+    which collection cannot know, so every arm's cap must exceed the judge's.
+
+    Args:
+        run_set: The resolved eval set, each arm carrying its cell `timeout`.
+        judge_config: The resolved judge.
+
+    Raises:
+        pytest.UsageError: Naming each offending arm, both values, and what to change.
+    """
+    too_short = [arm for arm in run_set.arms if arm.timeout <= judge_config.timeout]
+    if not too_short:
+        return
+
+    arms = ", ".join(f"{arm.name} ({arm.timeout}s)" for arm in too_short)
+    raise pytest.UsageError(
+        f"cell timeout must exceed the judge timeout ({judge_config.timeout}s) because the "
+        f"judge's share is reserved from every cell's cap; too short: {arms}. Raise "
+        "`timeout` (or `--timeout`), or lower the judge `timeout` "
+        "(`[tool.benchspec.judge]` or `--benchspec-judge-timeout`)."
+    )
+
+
 def _parse_binder_cli_table(config: RunOptions) -> dict:
     """The CLI-override layer for resolve_binder_config: only the flags the user passed."""
     cli_table: dict = {}

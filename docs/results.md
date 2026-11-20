@@ -152,18 +152,30 @@ locally; a judge-bound line is judged only when the cap leaves the judge time,
 and otherwise fails with `CELL TIMEOUT: <phase> hit the <N>s cap before this
 line was judged`.
 
+The cap starts when the cell's own work does, just before the binder runs, so a
+first-run snapshot build is not charged to a cell.
+
 The agent turn does not get the whole cap. When an eval has a judge-bound line,
-the agent gets the cap minus the judge `timeout` (default 300 s), floored at 1
-second, so the judge is not starved by a slow agent. A cap at or below the judge
-timeout leaves the agent about a second.
+the agent gets the cap minus the judge `timeout` (default 300 s), so the judge is
+not starved by a slow agent. Whether a line is judge-bound is only known after
+binding, so every arm's cap must exceed the judge `timeout`: a run whose `timeout`
+(set, arm, or `--timeout`) is at or below it is refused at collection with an
+error naming both values. Raise `timeout`, or lower the judge `timeout`
+(`[tool.benchspec.judge]` or `--benchspec-judge-timeout`).
+
+Deterministic checkers run on the workspace whatever fired, including after a bind,
+boot, or setup timeout. A check that asserts absence (a file that must not exist)
+can therefore pass on an untouched workspace when the cap fired before the agent
+ran; read `timeout_phase` before trusting such a pass.
 
 A timed-out sample is a result, not an infra error: `errored` is `false`, so it
 counts in the pass rate, which is how a slow arm's rate reflects its slowness.
 It carries `"timed_out": true` in `grading.json`, and `"timed_out": true` plus
 `"timeout_phase"` (`bind`, `boot`, `setup`, `agent`, or `grade`) in
-`timing.json`; both are absent otherwise. The exception is a turn that
-streamed no output at all before the cap, a stalled launch, which is an errored
-sample.
+`timing.json`; both are absent otherwise. An errored sample is never also
+timed out: a turn that streamed no output at all before the cap (a stalled
+launch) is errored, and so is an agent timeout followed by a judge failure, which
+shows only as `errored`, with no `timed_out` marker.
 
 ## The terminal summary
 
