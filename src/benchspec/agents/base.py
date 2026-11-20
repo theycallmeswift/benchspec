@@ -56,10 +56,8 @@ _VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
 # an explained-unavailable result like any other probe failure.
 GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
 
-# The wall-clock cap on one whole cell (bind, boot, agent, judge), seconds. The built-in
-# default every arm inherits when neither the set, the arm, nor `--benchspec-timeout` says
-# otherwise; sized so a typical bind, boot, and judge leave the agent about 600 s. The
-# adapters' `invoke` defaults to it as its own turn cap for a direct call.
+# Default wall-clock cap on one whole cell (bind, boot, agent, judge), seconds. Leaves the
+# agent about 600 s after a typical bind, boot, and 300 s judge. Also `invoke`'s turn cap.
 DEFAULT_CELL_TIMEOUT = 900
 
 
@@ -238,27 +236,23 @@ class BaseAgent(ABC):
     ) -> RunResult:
         """Stream one turn, ending it on a stop, the timeout, or its own exit.
 
-        A stop is ours, not a crash: with a `stop` rule the turn is killed once every
-        verdict is fixed, its exit is ignored, and the run is graded from the stream so
-        far. A timeout that streamed output is a slow agent, not a broken host: the run is
-        parsed from the partial stream and marked `timed_out`. A timeout with no output
-        is a stalled launch, and like a sandbox failure it is an infra error. A nonzero
-        exit is marked errored. The run's duration is the harness's own when its parser
-        reports one (Claude Code's closing `result`), else the process wall time.
+        A stop is ours, not a crash: the killed process's exit is ignored and the run is
+        graded from the stream so far. A timeout that streamed output is a slow agent: the
+        partial stream is parsed and marked `timed_out`. A timeout with no output is a
+        stalled launch, an infra error like a sandbox failure. A nonzero exit is marked
+        errored. Duration is the parser's when it reports one, else the process wall time.
 
         Args:
             sandbox: The live guest.
             command: The harness argv.
-            stop: The run's stop rule over the trajectory streamed so far, or None to
-                run to the turn's own end.
+            stop: The stop rule over the streamed trajectory, or None to run to the end.
             parse: The adapter's stream parser, bound to this turn.
             cwd: Working directory inside the guest.
             env: The process environment.
             timeout: Wall-clock cap on the turn, seconds.
             eval_id: The eval the turn belongs to.
             config: The arm name.
-            process_duration: Take the process wall time over the parser's duration, for
-                harnesses whose events do not span the whole process.
+            process_duration: Prefer the process wall time to the parser's duration.
 
         Returns:
             The parsed run, with `stopped` or `timed_out` set when it was cut short.

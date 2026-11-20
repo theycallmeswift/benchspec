@@ -231,8 +231,8 @@ def _stop_rule(specs: list[dict | None]) -> StopRule | None:
 def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
     """The token fields for timing.json.
 
-    A stopped or timed-out run killed before its harness reported any usage records null
-    tokens, so it can never read as a free run.
+    A stopped or timed-out run killed before any reported usage records null tokens, so it
+    never reads as a free run.
     """
     fields = {
         "total_tokens": arm_run.total_tokens,
@@ -268,11 +268,9 @@ def _grade_mixed(
 ) -> tuple[list[dict], int, bool]:
     """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
-    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Checkers run
-    locally whatever the clock says. With an `unjudged_phase`, the cap left the judge no
-    time: the judge-bound lines are recorded failed with that timeout as evidence, never
-    judged and never errored. Otherwise the judge runs under `remaining_seconds`, the cell's
-    remaining budget, on every attempt.
+    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Checkers always
+    run. With an `unjudged_phase` the cap left the judge no time, so its lines fail with
+    the timeout as evidence; otherwise every judge attempt runs under `remaining_seconds`.
 
     Returns:
         (results, judge_ms, judge_errored).
@@ -346,9 +344,8 @@ async def _run_arm_turns(
 ) -> _ArmRun:
     """Execute every prompt turn for one eval arm.
 
-    A cap that fires while the sandbox boots ends the cell with no agent run; one that
-    fires during the agent turn keeps the turn's partial output. Either way the workspace
-    as it stands is gathered for grading.
+    A cap that fires during boot skips the agent; one that fires during the agent keeps
+    its partial output. Either way the workspace as it stands is gathered.
     """
     # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
     # guest is bound to the loop it was created in. Grading runs afterward, on the host.
@@ -427,7 +424,7 @@ async def _run_arm_turns(
 
 
 def _no_time_left_run(workdir: Path) -> _ArmRun:
-    """The run of a cell whose cap fired during bind: no sandbox, the workspace as it stands."""
+    """The run of a cell whose cap fired during bind: no sandbox, workspace as it stands."""
     tree, contents, shas = gather_facts(workdir)
     return _ArmRun(
         tree=tree, contents=contents, shas=shas, timed_out_phase=PHASE_BIND
@@ -595,14 +592,12 @@ def run_eval_arm(
     # assertions are activation checks (no separate recognizer), and the stop rule needs
     # that before the sandbox starts. Binding is a pure function of the assertion text, so
     # its place in the order changes no verdict. A BinderAuthError propagates here, before
-    # the sandbox spends anything. The cell's cap starts here, with the first phase that is
-    # the cell's own work; a snapshot build above is shared setup, not a cost any one cell
-    # should be capped on.
+    # the sandbox spends anything. The cap starts here: a snapshot build above is shared
+    # setup, not one cell's cost.
     deadline = CellDeadline(arm.timeout)
     specs, binder_degraded = _bind_all(active_assertions, bind)
     stop = _stop_rule(specs) if eval_case.stop_early else None
-    # The judge only runs when a line was punted to it, and only then does the agent turn
-    # leave it a share of the cap.
+    # The agent turn leaves the judge a share of the cap only when a line is judge-bound.
     judge_reserve = judge_config.timeout if any(spec is None for spec in specs) else 0
 
     if deadline.remaining() == 0:
@@ -668,8 +663,7 @@ def run_eval_arm(
     # pre-run (above) so a date-bearing path checker grades against the real date.
     fired_phase = arm_run.timed_out_phase
     judge_bound = judge_reserve > 0
-    # A judge-bound line goes unjudged once the cap fired before the agent ran, or when
-    # what the cap has left is less than a judge can usefully be given.
+    # Judge-bound lines go unjudged if the cap fired before the agent ran or left <1 s.
     unjudged_phase = None
     if judge_bound and (
         fired_phase in (PHASE_BIND, PHASE_BOOT, PHASE_SETUP)
@@ -707,7 +701,7 @@ def run_eval_arm(
     # `errored` lets the report tell an infra failure (excluded from the benchmark) apart
     # from an honest measurement; a failed assertion is an honest result, not an error.
     errored = arm_run.errored or judge_errored
-    # An infra failure is excluded from rates whole; it is never also a measured timeout.
+    # An infra failure is excluded from rates; it is never also a timeout.
     timed_out_phase = None if errored else timed_out_phase
     grading = {
         "eval_id": eval_id,

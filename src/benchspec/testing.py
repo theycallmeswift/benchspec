@@ -80,9 +80,9 @@ class FakeSandbox:
     """Records calls; returns canned outputs.
 
     `exec_outputs` is consumed in order, one per exec call, falling back to `default_exec`
-    when exhausted; a streamed exec with no `stream_events` replays the next one as its
-    stdout, stderr, and exit. `stream_events` feeds every `exec_stream` call, and `stream_stalls`
-    leaves each stream hanging after them; `streams` keeps every handle handed out. Each
+    when exhausted; a streamed exec with no `stream_events` replays the next one.
+    `stream_events` feeds every `exec_stream` call, and `stream_stalls` leaves each
+    stream hanging after them; `streams` keeps every handle handed out. Each
     recorded call is a `(kind, ...)` tuple: `("shell", script, kwargs)`,
     `("exec", cmd, args, kwargs)`, or `("exec_stream", cmd, args, kwargs)`.
     """

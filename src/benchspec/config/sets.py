@@ -229,8 +229,8 @@ def resolved_judge_config(config: RunOptions) -> JudgeConfig:
 def validate_cell_caps(run_set: EvalSet, judge_config: JudgeConfig) -> None:
     """Reject an arm whose cell cap leaves no room for the judge.
 
-    A cell reserves the judge's `timeout` from its cap whenever a line is judge-bound,
-    which collection cannot know, so every arm's cap must exceed the judge's.
+    A cell reserves the judge's `timeout` from its cap when a line is judge-bound, which
+    is only known after binding, so every arm's cap must exceed it.
 
     Args:
         run_set: The resolved eval set, each arm carrying its cell `timeout`.

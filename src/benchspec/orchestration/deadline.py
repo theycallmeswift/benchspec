@@ -1,9 +1,8 @@
 """The wall-clock cap on one cell, shared by every phase that runs inside it.
 
-A cell is one `(eval, arm, sample)`. Its phases (bind, boot, setup, agent, grade) draw
-from a single `CellDeadline`: each phase is clamped to what the earlier ones left, so the
-cap holds no matter which phase is slow. A blocking call cannot be interrupted, so the
-cap is enforced by clamping and by checking at phase boundaries, never by signals.
+A cell's phases (bind, boot, setup, agent, grade) draw from one `CellDeadline`, each
+clamped to what the earlier ones left. Blocking calls cannot be interrupted, so the cap
+is enforced by clamping and boundary checks, never by signals.
 """
 
 from __future__ import annotations
@@ -17,13 +16,12 @@ PHASE_SETUP = "setup"
 PHASE_AGENT = "agent"
 PHASE_GRADE = "grade"
 
-# The shortest budget handed to a phase that still has to run, so an exhausted deadline
-# never reaches a subprocess or exec as a zero or negative timeout.
+# Shortest budget given a phase that still runs, so a timeout is never zero or negative.
 MINIMUM_PHASE_SECONDS = 1.0
 
 
 class CellTimeoutError(TimeoutError):
-    """The cell's cap fired before a phase finished; `phase` names the phase it ended."""
+    """The cell's cap fired in `phase`."""
 
     def __init__(self, phase: str, cap_seconds: int) -> None:
         """Record the phase that was running and the cap it hit."""
@@ -53,7 +51,7 @@ class CellDeadline:
     def phase_budget(self, *, reserve: float = 0.0) -> float:
         """Seconds a running phase may use, keeping `reserve` for the phases after it.
 
-        Floored at `MINIMUM_PHASE_SECONDS` so the phase always gets a usable timeout.
+        Floored at `MINIMUM_PHASE_SECONDS`.
         """
         return max(MINIMUM_PHASE_SECONDS, self.remaining() - reserve)
 

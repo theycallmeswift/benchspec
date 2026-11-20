@@ -311,8 +311,7 @@ class SandboxSession:
         self._eval_set = eval_set
         self._baseline = baseline
         self._harness_args = harness_args
-        # Boot, setup, and the agent turn draw from the cell's deadline; the turn leaves
-        # `judge_reserve` seconds of it for the judge that grades after.
+        # The agent turn leaves `judge_reserve` seconds of the deadline for the judge.
         self._deadline = deadline
         self._judge_reserve = judge_reserve
         self._stop = stop
@@ -347,7 +346,7 @@ class SandboxSession:
             )
         except BaseException as error:
             if isinstance(error, CellTimeoutError):
-                # The cancelled boot returned no handle to stop, so remove it by name.
+                # A cancelled boot returns no handle, so remove the sandbox by name.
                 await self._backend.discard_quietly(run_name)
             discard_stage(self._staged_project)
             raise

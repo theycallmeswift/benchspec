@@ -77,7 +77,7 @@ pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
 tokens per sample, an errored-sample count, and a per-eval table with sample
 counts and flakiness (the stdev across samples). An arm with
 [timed-out samples](#timed-out-samples) adds a `Timed out` line, and each
-affected eval row notes `N timed out`. An arm with samples that
+eval row notes `N timed out`. An arm with samples that
 [stopped early](writing-evals.md#runs-that-stop-early) adds a `Stopped early`
 line, and each affected eval row notes `N stopped early`: those samples' time
 and tokens are the cost of a routing decision, not of the full task.
@@ -145,38 +145,31 @@ bands were lost to errored samples, which prints neither text marker.
 
 ### Timed-out samples
 
-A cell's `timeout` caps the whole cell: binder, sandbox boot and `setup.sh`, the
-agent turn, and the judge. When it fires, the agent's partial output is kept and
-the sample is graded from `/workspace` as the agent left it. Checkers run
-locally; a judge-bound line is judged only when the cap leaves the judge time,
-and otherwise fails with `CELL TIMEOUT: <phase> hit the <N>s cap before this
-line was judged`.
+A cell's `timeout` caps the whole cell: binder, boot and `setup.sh`, agent, and
+judge. The cap starts just before the binder runs, so a first-run snapshot
+build is not charged to a cell. When it fires, the agent's partial output is
+kept and the sample is graded from `/workspace` as the agent left it.
 
-The cap starts when the cell's own work does, just before the binder runs, so a
-first-run snapshot build is not charged to a cell.
+- **Checkers** always run, even after a bind, boot, or setup timeout, so an
+  absence check can pass on an untouched workspace. Read `timeout_phase` first.
+- **Judge-bound lines** are judged only if the cap leaves time. Otherwise they
+  fail with `CELL TIMEOUT: <phase> hit the <N>s cap before this line was judged`.
+- **The agent** gets the cap minus the judge `timeout` (default 300 s) when a
+  line is judge-bound. Each judge attempt, retry included, runs under the time
+  left; the retry is skipped under one second.
+- **The rule:** binding decides which lines are judge-bound, so every arm's
+  cap must exceed the judge `timeout`. A run that breaks it is refused with
+  one error naming both values. Raise `timeout`, or lower the judge `timeout`
+  (`--judge-timeout` or `[tool.benchspec.judge]`).
 
-The agent turn does not get the whole cap. When an eval has a judge-bound line,
-the agent gets the cap minus the judge `timeout` (default 300 s), so the judge is
-not starved by a slow agent. Each judge attempt, including its one retry, runs
-under what the cap has left, and the retry is skipped once under a second remains. Whether a line is judge-bound is only known after
-binding, so every arm's cap must exceed the judge `timeout`: a run whose `timeout`
-(set, arm, or `--timeout`) is at or below it is refused at collection with an
-error naming both values. Raise `timeout`, or lower the judge `timeout`
-(`[tool.benchspec.judge]` or `--benchspec-judge-timeout`).
+A timed-out sample is a result, not an infra error: `errored` is `false` and it
+counts in the pass rate. `grading.json` and `timing.json` carry
+`"timed_out": true`, and `timing.json` adds `"timeout_phase"` (`bind`, `boot`,
+`setup`, `agent`, or `grade`); all are absent otherwise.
 
-Deterministic checkers run on the workspace whatever fired, including after a bind,
-boot, or setup timeout. A check that asserts absence (a file that must not exist)
-can therefore pass on an untouched workspace when the cap fired before the agent
-ran; read `timeout_phase` before trusting such a pass.
-
-A timed-out sample is a result, not an infra error: `errored` is `false`, so it
-counts in the pass rate, which is how a slow arm's rate reflects its slowness.
-It carries `"timed_out": true` in `grading.json`, and `"timed_out": true` plus
-`"timeout_phase"` (`bind`, `boot`, `setup`, `agent`, or `grade`) in
-`timing.json`; both are absent otherwise. An errored sample is never also
-timed out: a turn that streamed no output at all before the cap (a stalled
-launch) is errored, and so is an agent timeout followed by a judge failure, which
-shows only as `errored`, with no `timed_out` marker.
+An errored sample is never also timed out: a turn that streamed nothing before
+the cap (a stalled launch) is errored, and so is an agent timeout followed by a
+judge failure.
 
 ## The terminal summary
 
@@ -245,8 +238,8 @@ group, then `kind`, `eval_id`, `arm`, `sample`), the arm's three core axes
 (`harness`, `model`, `effort`) denormalized onto the row so no join with
 `meta.json` is needed, `errored`, `passed`/`total`/`scoped`/`skipped` assertion
 counts (`total` excludes skipped lines), and the timing and token figures from
-the sample's `timing.json`, including `stopped` and `timed_out` (`false` for a
-run that ended on its own). Derivable from the tree; persisted so tools never hardcode the
+the sample's `timing.json`, including `stopped` and `timed_out` (`false` when
+absent). Derivable from the tree; persisted so tools never hardcode the
 layout.
 
 ### `benchmark.json`
@@ -258,8 +251,8 @@ against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
 (pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, `delta_noise_capped_cells`, errored and
 binder-degraded, `stopped_samples`, and `timed_out_samples` counts, per-eval rows
-with their own `stopped_samples` and `timed_out_samples` counts), the `scoped` rows (`group`, `eval_id`,
-`index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
+with their own `stopped_samples` and `timed_out_samples`), the `scoped` rows
+(`group`, `eval_id`, `index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
 `runner` and `binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
 `arms` here is *result stats*; `planned_arms` is configuration.
@@ -276,10 +269,9 @@ with their own `stopped_samples` and `timed_out_samples` counts), the `scoped` r
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
   `cache_creation_tokens`; zero where the harness does not report them). A run
   that [stopped early](writing-evals.md#runs-that-stop-early) adds
-  `"stopped": true` (absent for a run that ended on its own); a
-  [timed-out sample](#timed-out-samples) adds `"timed_out": true` and
-  `"timeout_phase"`. A stopped run's
-  `duration_ms` is the process wall time up to the stop, CLI startup included,
+  `"stopped": true`; a [timed-out sample](#timed-out-samples) adds
+  `"timed_out": true` and `"timeout_phase"` (both absent otherwise). A stopped
+  run's `duration_ms` is the process wall time up to the stop, CLI startup included,
   and its tokens are only what the harness reported before it: Claude Code's
   per-message usage, OpenCode's finished steps, and nothing from Codex, which
   reports usage only when a turn completes. When nothing was reported the

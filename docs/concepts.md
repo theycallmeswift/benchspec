@@ -91,8 +91,8 @@ hold. An **errored** sample is infrastructure: the CLI crashed or never started,
 `setup.sh` exited non-zero, or the judge failed at the transport level. Errored
 samples are excluded from pass rates but counted in the report, so a
 half-crashed run cannot read like a clean one. A cell that hits its wall-clock
-cap is neither: it is a **timed-out** sample, graded on the work finished and
-counted in the rate, because a slow agent is a measurement of that arm. See
+cap is a **timed-out** sample: graded on the work finished and counted in the
+rate. See
 [results.md](results.md#noise-samples-and-flakiness).
 
 ## Eval

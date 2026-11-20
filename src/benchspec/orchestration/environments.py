@@ -59,9 +59,9 @@ class ProcResult:
 class WatchedProc:
     """The outcome of a harness process streamed past a line watcher.
 
-    It ended one of three ways: the watcher stopped it (`stopped`), it outlived its timeout
-    and was killed (`timed_out`), or it exited on its own. `exit_code` is None unless it
-    exited. A stopped or timed-out process keeps every line it streamed before the end.
+    It was stopped by the watcher (`stopped`), killed at its timeout (`timed_out`), or
+    exited on its own; `exit_code` is None unless it exited. A stopped or timed-out
+    process keeps every line it streamed.
     """
 
     command: list[str]
@@ -156,11 +156,10 @@ class GuestSandbox:
     ) -> WatchedProc:
         """Stream `command` inside the guest, feeding each stdout line to `watch`.
 
-        The process is killed the moment `watch` returns True, or when it outlives
-        `timeout`, keeping the lines streamed so far. Chunks are reassembled into whole
-        lines first, since a stream chunk can split a JSONL record (or a multibyte
-        character) anywhere. A timeout keeps the unfinished final line too, so a consumer
-        must tolerate a truncated record.
+        The process is killed when `watch` returns True or at `timeout`, keeping the lines
+        streamed so far. Chunks are reassembled into whole lines first, since a chunk can
+        split a JSONL record or a multibyte character. A timeout also keeps the unfinished
+        final line, so consumers must tolerate a truncated record.
 
         Args:
             command: The harness argv.

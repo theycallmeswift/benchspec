@@ -122,9 +122,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--benchspec-timeout",
         type=int,
         default=None,
-        help="scalar override of the selected set's `timeout` default: the wall-clock cap "
-        "on one whole cell (bind, boot, agent, judge), seconds (default: 900, or the "
-        "set/arm `timeout`)",
+        help="scalar override of the selected set's `timeout` default: the cap on one whole "
+        "cell (bind, boot, agent, judge), seconds (default: 900, or the set/arm `timeout`)",
     )
     group.addoption(
         "--benchspec-env",
@@ -308,9 +307,8 @@ def pytest_configure(config: pytest.Config) -> None:
 def _validate_cell_caps(config: pytest.Config) -> None:
     """Refuse the run when an arm's cell cap does not exceed the judge timeout.
 
-    Runs on the controller for every run with eval cases, so each way of invoking the
-    plugin reports the one rule violation as a single usage error, before any worker or
-    cell starts.
+    Runs on the controller for every run with eval cases, so each invocation path reports
+    one usage error before any worker or cell starts.
 
     Raises:
         pytest.UsageError: an arm's `timeout` is at or below the judge's.

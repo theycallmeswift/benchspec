@@ -1,10 +1,7 @@
 """End-to-end artifact tests for a cell whose wall-clock cap fires.
 
-Each test drives the real `run_eval_arm` and artifact writer. Only the guest and time are
-doubles: a session factory that answers (or fails) the cell's phases as a real session
-would, and a hand-driven clock behind the cell's deadline so no test waits. A cell that
-hits its cap is graded from the workspace as it stands and recorded as `timed_out`, not
-`errored`, and counts in the report's rates.
+Each test drives the real `run_eval_arm` and artifact writer. Only the guest (a session
+factory double) and the clock behind the cell's deadline are doubles, so no test waits.
 """
 
 from __future__ import annotations

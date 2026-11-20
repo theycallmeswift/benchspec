@@ -57,7 +57,7 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument(
         "--judge-timeout",
         type=int,
-        help="judge subprocess timeout in seconds; every arm's --timeout must exceed it "
+        help="judge timeout in seconds; must be below every --timeout "
         "(--benchspec-judge-timeout)",
     )
     run_parser.add_argument(

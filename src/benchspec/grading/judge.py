@@ -186,9 +186,8 @@ def grade_run(
 ) -> dict:
     """Grade one completed agent run against assertions.
 
-    With `remaining_seconds`, each judge attempt runs under what the caller has left (at
-    most the judge's own timeout), and the retry is skipped once under a second remains,
-    so grading never outlives its caller's budget.
+    With `remaining_seconds`, each attempt runs under the lesser of the judge timeout and
+    what the caller has left, and the retry is skipped under a second.
     """
     judge_config = judge_config or JudgeConfig()
     prompt = build_judge_prompt(
