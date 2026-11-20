@@ -270,6 +270,14 @@ class OpenCodeAgent(BaseAgent):
     accepted_efforts = frozenset(_EFFORT_TO_VARIANT)
     routing_env_var: ClassVar[str | None] = _INLINE_CONFIG_ENV
 
+    @staticmethod
+    def routing_model_error(model: str) -> str | None:
+        """Why OpenCode cannot route `model`'s requests, or None when it can.
+
+        Only an `openrouter/`-prefixed model goes through OpenRouter at all.
+        """
+        return openrouter_model_error(model)
+
     def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
         """Return inline OpenCode config that sends `routing` as the request's `provider`.
 
@@ -288,7 +296,7 @@ class OpenCodeAgent(BaseAgent):
         """
         if not routing:
             return {}
-        model_error = openrouter_model_error(model)
+        model_error = self.routing_model_error(model)
         if model_error:
             raise ValueError(f"OpenCode: {model_error}")
         model_id = model.removeprefix(OPENROUTER_MODEL_PREFIX)

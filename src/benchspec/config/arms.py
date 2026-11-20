@@ -142,8 +142,9 @@ def _validate_routing(where: str, value: object) -> dict[str, object]:
         The table, unchanged.
 
     Raises:
-        SchemaError: On a non-table, an unknown key, a provider list that is not a list
-            of non-empty names, an unknown `sort`, or a non-bool `allow_fallbacks`.
+        SchemaError: On a non-table, an unknown key, a provider list that is not a
+            non-empty list of non-empty names, an unknown `sort`, or a non-bool
+            `allow_fallbacks`.
     """
     if not isinstance(value, dict):
         raise SchemaError(f"{where}: `routing` must be a table")
@@ -156,11 +157,13 @@ def _validate_routing(where: str, value: object) -> dict[str, object]:
         if key not in value:
             continue
         names = value[key]
-        if not isinstance(names, list) or not all(
-            isinstance(name, str) and name for name in names
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(isinstance(name, str) and name for name in names)
         ):
             raise SchemaError(
-                f"{where}: `routing.{key}` must be a list of non-empty provider names"
+                f"{where}: `routing.{key}` must be a non-empty list of non-empty provider names"
             )
     if "sort" in value and value["sort"] not in _ROUTING_SORTS:
         raise SchemaError(
@@ -183,7 +186,7 @@ def _validate_effort(where: str, harness: str, value: object) -> str:
 
 
 def _validate_routing_delivery(
-    where: str, harness: str, provider: str, env: Mapping[str, str]
+    where: str, harness: str, provider: str, model: str, env: Mapping[str, str]
 ) -> None:
     """Raise SchemaError unless this arm's harness can deliver its `routing` to OpenRouter.
 
@@ -191,15 +194,20 @@ def _validate_routing_delivery(
         where: The config location, for the error message.
         harness: The arm's harness.
         provider: The arm's resolved provider.
+        model: The arm's model.
         env: The arm's merged, unexpanded env.
     """
     if provider != OPENROUTER_PROVIDER:
         raise SchemaError(
             f"{where}: `routing` needs provider `{OPENROUTER_PROVIDER}`, got `{provider}`"
         )
-    routing_env_var = agent_class(harness).routing_env_var
+    adapter = agent_class(harness)
+    routing_env_var = adapter.routing_env_var
     if routing_env_var is None:
         raise SchemaError(f"{where}: harness `{harness}` cannot deliver `routing` to OpenRouter")
+    model_error = adapter.routing_model_error(model)
+    if model_error:
+        raise SchemaError(f"{where}: `routing` cannot be delivered: {model_error}")
     if routing_env_var in env:
         raise SchemaError(
             f"{where}: `routing` is delivered through `{routing_env_var}`, "
@@ -366,7 +374,7 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
     routing = {**defaults.get("routing", {}), **raw.get("routing", {})}
     if routing:
-        _validate_routing_delivery(f"{where} arm `{name}`", harness, provider, merged)
+        _validate_routing_delivery(f"{where} arm `{name}`", harness, provider, model, merged)
 
     # Env stays unexpanded until the arm executes.
     return Arm(

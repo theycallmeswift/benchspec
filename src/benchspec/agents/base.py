@@ -192,6 +192,15 @@ class BaseAgent(ABC):
     # harness cannot deliver it. Config validation rejects `routing` on a None.
     routing_env_var: ClassVar[str | None] = None
 
+    @staticmethod
+    def routing_model_error(model: str) -> str | None:
+        """Why the harness cannot route `model`'s requests, or None when it can.
+
+        Config validation calls this for an arm that sets `routing`, so a model the
+        harness would send around OpenRouter fails at config-read time.
+        """
+        return None
+
     def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
         """Return the guest env that makes the harness send `routing` to OpenRouter.
 

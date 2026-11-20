@@ -230,10 +230,12 @@ The table is sent as the request's
 Host names are OpenRouter's and are not checked by benchspec. Each of these is an
 error at config-read time, never an ignored setting:
 
-- An unknown key, a wrong type, an empty host name, or an unknown `sort`.
+- An unknown key, a wrong type, an empty host list or host name, or an unknown
+  `sort`.
 - `routing` on an arm whose provider is `default`.
 - `routing` on a harness that cannot deliver it. Only OpenCode can; see
   [`harnesses.md`](harnesses.md).
+- `routing` on an OpenCode arm whose model lacks the `openrouter/` prefix.
 - `routing` on an OpenCode arm whose `env` sets `OPENCODE_CONFIG_CONTENT`, the
   variable the table is delivered through.
 

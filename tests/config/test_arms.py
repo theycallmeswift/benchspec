@@ -1000,9 +1000,12 @@ def test_resolve_set_merges_routing_with_arm_keys_winning() -> None:
     [
         (["DeepInfra"], r"`routing` must be a table"),
         ({"prefer": ["DeepInfra"]}, r"unknown `routing` key\(s\) \['prefer'\]"),
-        ({"only": "DeepInfra"}, r"`routing.only` must be a list"),
-        ({"order": ["DeepInfra", ""]}, r"`routing.order` must be a list of non-empty"),
-        ({"ignore": [7]}, r"`routing.ignore` must be a list"),
+        ({"only": "DeepInfra"}, r"`routing.only` must be a non-empty list"),
+        ({"order": ["DeepInfra", ""]}, r"`routing.order` must be a non-empty list of non-empty"),
+        ({"ignore": [7]}, r"`routing.ignore` must be a non-empty list"),
+        ({"only": []}, r"`routing.only` must be a non-empty list"),
+        ({"order": []}, r"`routing.order` must be a non-empty list"),
+        ({"ignore": []}, r"`routing.ignore` must be a non-empty list"),
         ({"sort": "fastest"}, r"unknown `routing.sort` `fastest`"),
         ({"allow_fallbacks": "no"}, r"`routing.allow_fallbacks` must be true or false"),
     ],
@@ -1061,4 +1064,16 @@ def test_resolve_set_rejects_routing_when_env_sets_its_delivery_variable() -> No
     )
 
     with pytest.raises(SchemaError, match=r"delivered through `OPENCODE_CONFIG_CONTENT`"):
+        resolve_set(rawsets, default, environ={})
+
+
+def test_resolve_set_rejects_routing_on_an_opencode_model_that_bypasses_openrouter() -> None:
+    """An OpenCode arm whose model lacks the `openrouter/` prefix cannot carry routing."""
+    rawsets, default = parse_sets(
+        _openrouter_set({"model": "qwen/qwen3-coder", "routing": {"order": ["DeepInfra"]}})
+    )
+
+    with pytest.raises(
+        SchemaError, match=r"arm `alpha`: `routing` cannot be delivered: .*`openrouter/`-prefixed"
+    ):
         resolve_set(rawsets, default, environ={})
