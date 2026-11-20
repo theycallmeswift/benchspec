@@ -499,6 +499,11 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
   .bs-narrow { display: inline; }
   .bs-lbc.bs-narrow { display: block; }
   .bs-tally .bs-zero:not(.bs-failed) { display: none; }
+  /* A live run's top bar stays on one row: the suite name gives way first. */
+  .bs-top.bs-live-run, .bs-top.bs-live-run .bs-id { flex-wrap: nowrap; }
+  .bs-top.bs-live-run .bs-id:first-child { flex: 1; min-width: 0; }
+  .bs-top.bs-live-run .bs-id > * { flex: none; white-space: nowrap; }
+  .bs-top.bs-live-run #suite { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .bs-tally { gap: var(--space-4) var(--space-8); }
   .bs-tally li:not(.bs-zero) ~ li::before, .bs-tally li.bs-failed ~ li::before { content: "· "; color: var(--muted); }
   .bs-gmeta > span { white-space: normal; }

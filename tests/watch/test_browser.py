@@ -401,6 +401,8 @@ def test_a_phone_shows_boxes_short_rates_and_a_bottom_sheet(tmp_path: Path, page
 
         assert page.evaluate("document.documentElement.scrollWidth") == PHONE["width"]
         expect(page.locator("#run-state")).to_have_text("live", use_inner_text=True)
+        expect(page.locator("#suite")).to_be_visible()
+        assert _rect(page.locator(".bs-top"))["height"] == _rect(page.locator("#theme"))["height"]
         expect(page.locator(JUDGES).locator(".bs-t")).to_be_visible()
         expect(page.locator(f"{IMPLEMENT} .bs-t")).to_be_hidden()
         expect(page.locator("#arm-hint")).to_be_hidden()

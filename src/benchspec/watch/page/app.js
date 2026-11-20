@@ -140,6 +140,7 @@ function renderTop() {
     top.count ? el("span", { class: "bs-wide", text: ` · ${top.count}` }) : "",
   );
   const state = byId("run-state");
+  document.querySelector(".bs-top").classList.toggle("bs-live-run", top.live);
   setClass(state, top.live && connected ? "bs-live" : "");
   fill(state, top.status, top.detail ? el("span", { class: "bs-wide", text: ` · ${top.detail}` }) : "");
 }
