@@ -17,7 +17,7 @@ import pytest
 
 from benchspec.config.arms import Arm
 from benchspec.grading.judges import JudgeConfig
-from benchspec.orchestration import execution, workspace
+from benchspec.orchestration import execution, prebind, workspace
 from benchspec.orchestration.deadline import CellDeadline, CellTimeoutError
 from benchspec.orchestration.execution import run_eval_arm
 from benchspec.orchestration.results import RunResult
@@ -360,3 +360,61 @@ def test_timed_out_samples_count_in_the_rates_and_the_report(
         "they count in the rates"
     ) in markdown
     assert "| alpha | 1 | 2 | 2 | 100% |  | 1 timed out |" in markdown
+
+
+def _remaining_after_bind(
+    tmp_path: Path, clock: _Clock, table: prebind.BoundSpecs
+) -> tuple[float, list[str]]:
+    """Run a cell binding through `table`, a live binder costing 100 s a call, on a miss.
+
+    Returns the budget the session saw left after bind, and the texts bound live.
+    """
+    bound_live: list[str] = []
+
+    def live(text: str) -> dict | None:
+        """Bind live, spending 100 s of the cell's cap."""
+        bound_live.append(text)
+        clock.now += 100
+        return None
+
+    session = _Session(turn=lambda: RunResult("alpha", "trial", "done", 5_000, 50, False))
+    _run_cell(
+        tmp_path,
+        session,
+        _JudgeDouble(),
+        assertions=[FILE_LINE, JUDGED_LINE],
+        bind=prebind.table_or_live(table, live),
+    )
+
+    deadline = session.opened_with["deadline"]
+    assert isinstance(deadline, CellDeadline)
+    return deadline.remaining(), bound_live
+
+
+def test_prebound_assertions_spend_none_of_the_cells_budget_on_binding(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """A cell whose lines were all bound before the run starts with its whole cap."""
+    table: prebind.BoundSpecs = {
+        FILE_LINE: {"type": "deterministic", "checker": "file_exists", "path": "out.txt"},
+        JUDGED_LINE: None,
+    }
+
+    remaining, bound_live = _remaining_after_bind(tmp_path, clock, table)
+
+    assert remaining == CAP_SECONDS
+    assert bound_live == []
+
+
+def test_a_line_rebound_in_the_cell_draws_on_the_cells_deadline(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """A text missing from the pre-bound table is bound live, and that time is the cell's."""
+    table: prebind.BoundSpecs = {
+        FILE_LINE: {"type": "deterministic", "checker": "file_exists", "path": "out.txt"}
+    }
+
+    remaining, bound_live = _remaining_after_bind(tmp_path, clock, table)
+
+    assert bound_live == [JUDGED_LINE]
+    assert remaining == CAP_SECONDS - 100
