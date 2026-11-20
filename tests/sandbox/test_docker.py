@@ -624,3 +624,17 @@ def test_exec_stream_survives_a_guest_that_never_reads_its_stdin(
     events = asyncio.run(asyncio.wait_for(_feed_then_drain(), timeout=30))
 
     assert (events[-1].event_type, events[-1].code) == ("exited", 0)
+
+
+def test_discard_quietly_force_removes_the_named_container(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A cancelled boot's container is removed by name, and a missing one is no error."""
+    command_log = tmp_path / "commands.log"
+    monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
+    monkeypatch.setenv("BENCHSPEC_SHIM_RM_EXIT", "1")
+    backend = _docker_backend(tmp_path, monkeypatch)
+
+    asyncio.run(backend.discard_quietly("benchspec-eval-x-y-main"))
+
+    assert command_log.read_text().splitlines()[-1] == "rm -f benchspec-eval-x-y-main"

@@ -41,7 +41,7 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 | `provider` | string | Default transport the harness reaches its model through: `default` (the vendor's own API or CLI login; the default) or `openrouter` (every request through OpenRouter on `OPENROUTER_API_KEY`). Under `openrouter` the model must be a vendor-qualified slug (`anthropic/claude-sonnet-4.6`; `openrouter/anthropic/...` for OpenCode). See [Providers](#providers). |
 | `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
 | `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for how each CLI receives it. |
-| `timeout` | integer | Default wall-clock cap on one graded agent turn, seconds (default `600`). A turn that exceeds it is recorded as an errored sample, never a failed one. Arm-level `timeout` overrides it. |
+| `timeout` | integer | Wall-clock cap on one whole cell (binder, boot, agent, judge), seconds (default `900`). A cell that hits it is graded on `/workspace` and recorded as a [timed-out sample](results.md#timed-out-samples). Must exceed the judge `timeout`. Arm-level `timeout` overrides it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
 | `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags benchspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
 | `baseline` | string | The arm every other arm's delta is measured against. Optional: without it, arms report absolute rates and no delta. Must name a declared arm. |
@@ -110,7 +110,7 @@ model   = "gpt-5.5"
 | `provider` | string | `default` | `default` (the harness vendor's own API or CLI login) or `openrouter` (grade through OpenRouter on `OPENROUTER_API_KEY`; no CLI login involved). See [Providers](#providers). |
 | `model` | string | `sonnet` | Harness-specific, like an arm's model. Structural checks at collection: an `opencode` judge needs a provider-qualified model (`anthropic/...`), and any judge under `openrouter` needs a vendor-qualified slug (`openrouter/...` for OpenCode). |
 | `effort` | string | `medium` | Passed to the judge harness the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, a `--variant` mapping for OpenCode. |
-| `timeout` | integer | `300` | Judge subprocess timeout, seconds. |
+| `timeout` | integer | `300` | Judge subprocess timeout, seconds. Must stay below every arm's cell `timeout`. |
 | `harness_args` | array of strings | `[]` | Pass-through CLI tokens; benchspec-owned flags are rejected per harness. |
 | `env` | table | `{}` | Judge-only env, `$VAR`-expanded at judge execution time by the same rule as arm env. |
 
@@ -251,13 +251,13 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--models M1,M2` | `--benchspec-models` | Sweep: replace the set's arms with one arm per model (named after it), all inheriting the set defaults; the first model becomes the baseline. |
 | `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
 | `--effort E` | `--benchspec-effort` | Override the set's `effort` default. |
-| `--timeout S` | `--benchspec-timeout` | Override the set's `timeout` default (seconds). Arms that declared their own keep it. |
+| `--timeout S` | `--benchspec-timeout` | Override the set's `timeout` default (whole-cell cap, seconds). Arms that declared their own keep it. |
 | `--workers N\|auto` | none (resolved by `run`) | Parallel cells: a positive integer or `auto`. Beats `[tool.benchspec] workers`. `auto` sizes from CPU cores and total RAM at 2 GB per cell, capped at 12; `1` runs in-process. Combining it with a passthrough `-n` exits `2`. |
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
 | `--progress {cells,dots}` | `--benchspec-progress` | Live progress format (default `cells`, or `[tool.benchspec] progress`). See [`results.md`](results.md#the-terminal-summary). |
-| `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
+| `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is in seconds and must stay below every arm's `--timeout`. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
 `run` prints its worker count once at start: `workers: 5 (auto: 8 cores, 11.4 GB RAM)`,

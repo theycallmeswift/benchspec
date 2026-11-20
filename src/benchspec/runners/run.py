@@ -19,6 +19,7 @@ from typing import Literal
 
 import pytest
 
+from benchspec.config.sets import resolved_judge_config, session_run_set, validate_cell_caps
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
 from benchspec.orchestration import cases
 from benchspec.sandbox.sandbox import format_preflight_failure
@@ -42,6 +43,7 @@ _SCALAR_OPTIONS = {
     "judge_provider": "--benchspec-judge-provider",
     "judge_model": "--benchspec-judge-model",
     "judge_effort": "--benchspec-judge-effort",
+    "judge_timeout": "--benchspec-judge-timeout",
     "binder_provider": "--benchspec-binder-provider",
     "binder_model": "--benchspec-binder-model",
 }
@@ -72,7 +74,7 @@ class PluginOptions:
     rather than a second copy of the config layering.
 
     Only the curated `run` flags are mapped. Any other plugin option — today the
-    passthrough-only judge timeout/env/harness-arg, tomorrow whatever the plugin grows —
+    passthrough-only judge env/harness-arg, tomorrow whatever the plugin grows —
     reads as unset, exactly as when the user omits it, so a new plugin option never
     needs a matching line here to keep the preflight working.
     """
@@ -116,10 +118,14 @@ def preflight_run(args: argparse.Namespace) -> None:
     Raises:
         RuntimeError: a missing credential, an absent binary, or an unready host; every
             such failure listed.
-        pytest.UsageError: a malformed or unknown set, or a malformed judge config.
+        pytest.UsageError: a malformed or unknown set, a malformed judge config, or an arm
+            whose cell `timeout` does not exceed the judge's.
         SchemaError: an unsupported sandbox backend or a malformed eval.
     """
     options = PluginOptions.from_args(args)
+    run_set = session_run_set(options)
+    if run_set is not None:
+        validate_cell_caps(run_set, resolved_judge_config(options))
 
     errors = cases.grading_preflight_errors(options) + cases.sandbox_preflight_errors(options)
     if errors:

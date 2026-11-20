@@ -347,7 +347,7 @@ Say hi to Dana for me.
   `` Skill `Y` not invoked `` keeps it going until Y fires too.
 - A run that never fires runs to its end: a should-not-trigger prompt, or a
   should-trigger prompt the model misses, costs whatever the task costs, and
-  one that outlives the arm's `timeout` is an errored sample like any other.
+  one that outlives the arm's `timeout` is a [timed-out sample](results.md#timed-out-samples).
 - Any other line makes the run whole: one outcome line, an activation line the
   binder did not bind, or an arm whose every line is scoped off, and the arm
   runs to its end as a mixed eval always has.

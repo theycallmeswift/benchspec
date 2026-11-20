@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from benchspec.config import sets
+from benchspec.grading.judges import JudgeConfig
 
 
 class _SetConfig:
@@ -253,3 +254,82 @@ class _FakeConfig:
             "benchspec_judge_env": [],
             "benchspec_fail_under": self._fail_under,
         }.get(name)
+
+
+def _write_timeout_pyproject(tmp_path: Path, *, set_timeout: int, arm_timeout: int) -> None:
+    """Write a set whose set-level and `slow` arm-level cell timeouts are given."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.benchspec]\n"
+        'default-set = "default"\n'
+        "[tool.benchspec.sets.default]\n"
+        'harness = "claude-code"\n'
+        'model = "sonnet"\n'
+        f"timeout = {set_timeout}\n"
+        'baseline = "baseline"\n'
+        "arms = [\n"
+        '  {name="baseline"},\n'
+        f'  {{name="slow", timeout={arm_timeout}}},\n'
+        "]\n"
+    )
+
+
+@pytest.mark.parametrize("set_timeout", [299, 300])
+def test_set_level_timeout_at_or_below_the_judge_timeout_is_rejected(
+    tmp_path: Path, set_timeout: int
+) -> None:
+    """A set-level cap at or below the judge timeout fails naming both values and the fix."""
+    _write_timeout_pyproject(tmp_path, set_timeout=set_timeout, arm_timeout=900)
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path))
+
+    with pytest.raises(pytest.UsageError) as raised:
+        sets.validate_cell_caps(run_set, JudgeConfig(timeout=300))
+
+    message = str(raised.value)
+    assert f"baseline ({set_timeout}s)" in message
+    assert "slow" not in message
+    assert "judge timeout (300s)" in message
+    assert "Raise `timeout`" in message
+    assert "lower the judge `timeout`" in message
+
+
+@pytest.mark.parametrize("arm_timeout", [299, 300])
+def test_arm_level_timeout_at_or_below_the_judge_timeout_is_rejected(
+    tmp_path: Path, arm_timeout: int
+) -> None:
+    """An arm's own cap is checked too, and only the offending arm is named."""
+    _write_timeout_pyproject(tmp_path, set_timeout=900, arm_timeout=arm_timeout)
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path))
+
+    with pytest.raises(pytest.UsageError) as raised:
+        sets.validate_cell_caps(run_set, JudgeConfig(timeout=300))
+
+    assert f"slow ({arm_timeout}s)" in str(raised.value)
+    assert "baseline" not in str(raised.value)
+
+
+@pytest.mark.parametrize("cli_timeout", [200, 300])
+def test_cli_timeout_at_or_below_the_judge_timeout_is_rejected(
+    tmp_path: Path, cli_timeout: int
+) -> None:
+    """`--timeout` replaces the set default, so it is checked against the judge timeout."""
+    _write_timeout_pyproject(tmp_path, set_timeout=900, arm_timeout=900)
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path, timeout=cli_timeout))
+
+    with pytest.raises(pytest.UsageError, match=rf"baseline \({cli_timeout}s\)"):
+        sets.validate_cell_caps(run_set, JudgeConfig(timeout=300))
+
+
+def test_timeouts_just_above_the_judge_timeout_are_accepted(tmp_path: Path) -> None:
+    """A cap one second over the judge timeout leaves the agent a second, and is valid."""
+    _write_timeout_pyproject(tmp_path, set_timeout=301, arm_timeout=301)
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path, timeout=301))
+
+    sets.validate_cell_caps(run_set, JudgeConfig(timeout=300))
+
+
+def test_lowering_the_judge_timeout_makes_a_short_cap_valid(tmp_path: Path) -> None:
+    """A 20 s cap is valid once the judge timeout is below it."""
+    _write_timeout_pyproject(tmp_path, set_timeout=900, arm_timeout=900)
+    run_set = sets.resolved_run_set(_SetConfig(tmp_path, timeout=20))
+
+    sets.validate_cell_caps(run_set, JudgeConfig(timeout=10))

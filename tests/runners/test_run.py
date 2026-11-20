@@ -83,6 +83,7 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
             "judge_provider",
             "judge_model",
             "judge_effort",
+            "judge_timeout",
             "binder_provider",
             "binder_model",
         )
@@ -195,6 +196,7 @@ def test_translates_common_judge_flags() -> None:
         judge_harness="gemini",
         judge_model="gemini-2.5-pro",
         judge_effort="low",
+        judge_timeout=120,
     )
 
     tokens = translate_run_flags(args)
@@ -202,6 +204,7 @@ def test_translates_common_judge_flags() -> None:
     assert "--benchspec-judge-harness=gemini" in tokens
     assert "--benchspec-judge-model=gemini-2.5-pro" in tokens
     assert "--benchspec-judge-effort=low" in tokens
+    assert "--benchspec-judge-timeout=120" in tokens
 
 
 def test_repeatable_env_emits_one_token_per_value() -> None:
@@ -364,7 +367,7 @@ def test_plugin_options_answer_none_for_any_uncurated_option(tmp_path: Path) -> 
     """A plugin option `run` does not curate reads as unset, so new options need no mapping."""
     options = PluginOptions.from_args(_run_namespace(tmp_path))
 
-    assert options.getoption("benchspec_judge_timeout") is None
+    assert options.getoption("benchspec_judge_harness_arg") is None
     assert options.getoption("benchspec_option_added_next_year") is None
 
 

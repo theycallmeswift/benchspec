@@ -210,6 +210,7 @@ def _arm_stats(
     judge_ms: list[int] = []
     tokens: list[int] = []
     stopped_total = 0
+    timed_out_total = 0
     errored_total = 0
     binder_degraded_total = 0
 
@@ -222,6 +223,7 @@ def _arm_stats(
         total_total = 0
         errored_count = 0
         stopped_count = 0
+        timed_out_count = 0
         pooled_out = excluded.get(_eval_key(eval_dir), set())
 
         for sample_dir in _sample_dirs(arm_dir):
@@ -238,6 +240,9 @@ def _arm_stats(
             if timing and timing.get("stopped"):
                 stopped_total += 1
                 stopped_count += 1
+            if timing and timing.get("timed_out"):
+                timed_out_total += 1
+                timed_out_count += 1
 
             assertions = [
                 assertion
@@ -273,6 +278,7 @@ def _arm_stats(
                 "samples": len(sample_rates),
                 "errored_samples": errored_count,
                 "stopped_samples": stopped_count,
+                "timed_out_samples": timed_out_count,
                 "passed_total": passed_total,
                 "total_total": total_total,
                 "pass_rate_mean": statistics.mean(sample_rates),
@@ -291,6 +297,7 @@ def _arm_stats(
         "tokens_stdev": statistics.stdev(tokens) if len(tokens) > 1 else None,
         "errored_samples": errored_total,
         "stopped_samples": stopped_total,
+        "timed_out_samples": timed_out_total,
         "binder_degraded": binder_degraded_total,
         "n": len(pair_rates),
         "per_eval": per_eval,
@@ -385,6 +392,7 @@ def index_rows(
                         "input_tokens": timing.get("input_tokens"),
                         "output_tokens": timing.get("output_tokens"),
                         "stopped": bool(timing.get("stopped")),
+                        "timed_out": bool(timing.get("timed_out")),
                     }
                 )
     return rows
@@ -817,6 +825,8 @@ def _format_markdown(benchmark: dict) -> str:
             )
         if stats["stopped_samples"]:
             lines.append(_stopped_line(stats))
+        if stats["timed_out_samples"]:
+            lines.append(_timed_out_line(stats))
 
         lines += [""]
         lines.append("| Eval | Samples | Passed | Total | Rate | Flakiness | Note |")
@@ -831,6 +841,8 @@ def _format_markdown(benchmark: dict) -> str:
                 notes.append(f"{row['errored_samples']} errored")
             if row["stopped_samples"]:
                 notes.append(f"{row['stopped_samples']} stopped early")
+            if row["timed_out_samples"]:
+                notes.append(f"{row['timed_out_samples']} timed out")
             lines.append(
                 f"| {row['eval_id']} | {row['samples']} | {row['passed_total']} "
                 f"| {row['total_total']} | {row['pass_rate_mean']:.0%} | {flakiness} "
@@ -849,6 +861,14 @@ def _stopped_line(stats: dict) -> str:
     return (
         f"- Stopped early: {stats['stopped_samples']} sample(s) ended once every "
         "verdict was fixed; their time and tokens are not full-task costs"
+    )
+
+
+def _timed_out_line(stats: dict) -> str:
+    """Render the per-arm note on samples that hit the cell's wall-clock cap."""
+    return (
+        f"- Timed out: {stats['timed_out_samples']} sample(s) hit the cell cap and were "
+        "graded on the work finished; they count in the rates"
     )
 
 

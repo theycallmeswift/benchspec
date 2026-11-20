@@ -29,6 +29,8 @@ from benchspec.config.sets import (
     resolved_judge_config,
     resolved_run_set,
     run_set_when_needed,
+    session_run_set,
+    validate_cell_caps,
 )
 from benchspec.grading import binder
 from benchspec.grading.binder import binder_identity
@@ -129,8 +131,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--benchspec-timeout",
         type=int,
         default=None,
-        help="scalar override of the selected set's `timeout` default: the wall-clock cap "
-        "on one agent turn, seconds (default: 600, or the set/arm `timeout`)",
+        help="scalar override of the selected set's `timeout` default: the cap on one whole "
+        "cell (bind, boot, agent, judge), seconds (default: 900, or the set/arm `timeout`)",
     )
     group.addoption(
         "--benchspec-env",
@@ -350,7 +352,22 @@ def pytest_configure(config: pytest.Config) -> None:
         config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
         if config.stash[PROGRESS_STYLE] == "cells":
             config.pluginmanager.register(_CellProgress(config), "benchspec-cell-progress")
+        _validate_cell_caps(config)
         _prebind_assertions(config)
+
+
+def _validate_cell_caps(config: pytest.Config) -> None:
+    """Refuse the run when an arm's cell cap does not exceed the judge timeout.
+
+    Runs on the controller for every run with eval cases, so each invocation path reports
+    one usage error before any worker or cell starts.
+
+    Raises:
+        pytest.UsageError: an arm's `timeout` is at or below the judge's.
+    """
+    run_set = session_run_set(config)
+    if run_set is not None:
+        validate_cell_caps(run_set, resolved_judge_config(config))
 
 
 def _targets_cases(config: pytest.Config) -> bool:

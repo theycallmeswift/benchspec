@@ -82,7 +82,8 @@ STAND_IN_CONFTEST = textwrap.dedent(
 
         graded = scope.applicable(eval_case, arm, baseline=baseline, eval_set=eval_set)
         errored = cell == "beta-baseline"
-        failing = len(graded) if errored else 1 if cell == "alpha-trial" else 0
+        timed_out = cell == os.environ.get("TIME_OUT_ON")
+        failing = len(graded) if errored or timed_out else 1 if cell == "alpha-trial" else 0
         assertions = [
             {"text": text, "passed": index >= failing, "evidence": ""}
             if holds
@@ -101,6 +102,8 @@ STAND_IN_CONFTEST = textwrap.dedent(
         timing = {"duration_ms": 1000, "judge_ms": 200, "total_tokens": 500}
         if cell == "alpha-trial":
             timing.update(first_output_ms=2100, cost_usd=0.031)
+        if timed_out:
+            timing.update(timed_out=True, timeout_phase="agent")
 
         run_dir = workspace.arm_dir(
             repo_root, eval_case.skill, eval_case.eval_id, arm.name, sample=sample
@@ -394,6 +397,22 @@ def test_dots_reports_carry_no_cell_properties(pytester: pytest.Pytester) -> Non
 
     assert "benchspec_cell" not in (pytester.path / "dots.xml").read_text(encoding="utf-8")
     assert "benchspec_cell_result" in (pytester.path / "cells.xml").read_text(encoding="utf-8")
+
+
+def test_a_timed_out_sample_prints_timeout_with_its_partial_counts(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a timed out sample prints timeout with its partial counts."""
+    _make_project(pytester)
+    monkeypatch.setenv("TIME_OUT_ON", "alpha-baseline")
+
+    result = _run(pytester, "-k", "alpha")
+
+    assert _cell_lines(result) == [
+        "[1/2] TIMEOUT  myskill/eval-alpha  baseline  s0   0/2    0.0s  first —     —",
+        "[2/2] FAIL     myskill/eval-alpha  trial     s0   1/2    0.0s  first 2.1s  $0.031",
+    ]
+    result.assert_outcomes(passed=2)
 
 
 def test_the_counter_total_follows_the_selection(pytester: pytest.Pytester) -> None:
