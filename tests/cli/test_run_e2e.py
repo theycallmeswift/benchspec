@@ -168,3 +168,19 @@ def test_run_rejects_a_cell_timeout_at_the_judge_timeout_before_spawning_pytest(
     assert result.returncode == 2, output
     assert output.count("cell timeout must exceed the judge timeout (300s)") == 1
     assert "in validate_cell_caps" not in output
+
+
+def test_run_accepts_a_cell_timeout_over_a_lowered_judge_timeout(tmp_path: Path) -> None:
+    """`--judge-timeout` reaches the preflight's cap rule, so `--timeout 20` is not refused."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec(
+        "run", str(repo_root), "--timeout", "20", "--judge-timeout", "10",
+        cwd=tmp_path, drop=("GEMINI_API_KEY",),
+    )
+
+    output = result.stdout + result.stderr
+    assert "cell timeout must exceed" not in output
+    assert "GEMINI_API_KEY" in output

@@ -255,7 +255,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
-| `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
+| `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is the judge subprocess timeout in seconds; every arm's `--timeout` must exceed it. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
 `run` prints its worker count once at start: `workers: 5 (auto: 8 cores, 11.4 GB RAM)`,

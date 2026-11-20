@@ -42,6 +42,7 @@ _SCALAR_OPTIONS = {
     "judge_provider": "--benchspec-judge-provider",
     "judge_model": "--benchspec-judge-model",
     "judge_effort": "--benchspec-judge-effort",
+    "judge_timeout": "--benchspec-judge-timeout",
     "binder_provider": "--benchspec-binder-provider",
     "binder_model": "--benchspec-binder-model",
 }
@@ -72,7 +73,7 @@ class PluginOptions:
     rather than a second copy of the config layering.
 
     Only the curated `run` flags are mapped. Any other plugin option — today the
-    passthrough-only judge timeout/env/harness-arg, tomorrow whatever the plugin grows —
+    passthrough-only judge env/harness-arg, tomorrow whatever the plugin grows —
     reads as unset, exactly as when the user omits it, so a new plugin option never
     needs a matching line here to keep the preflight working.
     """

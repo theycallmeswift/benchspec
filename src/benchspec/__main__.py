@@ -55,6 +55,12 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument("--judge-model", help="judge model (--benchspec-judge-model)")
     run_parser.add_argument("--judge-effort", help="judge effort (--benchspec-judge-effort)")
     run_parser.add_argument(
+        "--judge-timeout",
+        type=int,
+        help="judge subprocess timeout in seconds; every arm's --timeout must exceed it "
+        "(--benchspec-judge-timeout)",
+    )
+    run_parser.add_argument(
         "--binder-provider",
         help="binder provider: gemini or openrouter (--benchspec-binder-provider)",
     )
