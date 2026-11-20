@@ -962,6 +962,9 @@ def _seed_provenance(
     """
     record = RuntimeProvenance(
         arm=arm,
+        effort="medium",
+        provider="default",
+        routing={},
         actual_version=actual_version,
         actual_version_status="available",
         actual_version_error=None,

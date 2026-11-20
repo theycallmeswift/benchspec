@@ -200,3 +200,18 @@ def test_resolve_judge_config_opencode_under_openrouter_accepts_the_openrouter_p
     })
 
     assert config.model == "openrouter/anthropic/claude-sonnet-4.6"
+
+
+def test_resolve_judge_config_rejects_effort_the_harness_cannot_map() -> None:
+    """A judge effort outside the harness's accepted set fails naming the value and the set."""
+    with pytest.raises(SchemaError, match=r"`claude-code` cannot map effort `minimal`.*'low'"):
+        resolve_judge_config(pyproject_table={"harness": "claude-code", "effort": "minimal"})
+
+
+def test_resolve_judge_config_accepts_effort_the_harness_maps() -> None:
+    """The same effort passes on a harness whose CLI accepts it."""
+    config = resolve_judge_config(
+        pyproject_table={"harness": "codex", "model": "gpt-5.5", "effort": "minimal"}
+    )
+
+    assert config.effort == "minimal"

@@ -27,7 +27,7 @@ tmp/evals/iteration_01/
             │       ├── grading.json     # per-assertion verdicts + evidence
             │       ├── timing.json      # duration, judge time, token counts
             │       ├── transcript.json  # per-turn summary: prompt, result, tool counts
-            │       ├── provenance.json  # what actually ran: guest version, snapshot
+            │       ├── provenance.json  # what actually ran: effort, provider, routing, guest version, snapshot
             │       └── session.jsonl    # the lossless raw agent stream (only when the harness produced output)
             └── trial/
                 └── sample-0/ …
@@ -227,8 +227,8 @@ versus observed**:
 | `run_id` / `commit` / `config_hash` | Identity for cross-run joins. `config_hash` covers only planned selectors, never what happened to run or which binary versions were probed, so two runs of identical config hash identically. |
 | `iteration` / `started_at` / `benchspec_version` | Run bookkeeping. |
 | `set` / `runner` | The resolved set name and runner. |
-| `arms` | The **planned** roster: every configured arm (name, harness, model, effort, timeout, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
-| `observed_arms` | The **observed** side, keyed by arm name: only arms with a persisted runtime record appear. Each carries the guest-probed `actual_version` and the sandbox identity (backend, snapshot, fingerprint and its inputs, pulled `image_digest`). Probes that fail record an explicit `*_status: "unavailable"` plus an error, never a silent null. |
+| `arms` | The **planned** roster: every configured arm (name, harness, provider, model, effort, routing, timeout, redacted env, harness_args, `requested_version`, the install selector such as `latest`, and `capabilities`), whether or not it ran. |
+| `observed_arms` | The **observed** side, keyed by arm name: only arms with a persisted runtime record appear. Each carries the `effort`, `provider`, and `routing` the arm was configured with (`routing` is `{}` when none was set; for OpenCode, see [`harnesses.md`](harnesses.md) on ignored variants), the guest-probed `actual_version`, and the sandbox identity (backend, snapshot, fingerprint and its inputs, pulled `image_digest`). Probes that fail record an explicit `*_status: "unavailable"` plus an error, never a silent null. Samples of one arm that disagree on any of these fail the report instead of merging. |
 | `judge` | The resolved judge (harness, model, effort, timeout, redacted env, args) plus its host-probed `actual_version`. |
 | `binder` | The binder's transport identity: provider, model, API path. Never key material. |
 

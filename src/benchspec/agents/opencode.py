@@ -30,7 +30,7 @@ import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from benchspec.agents.base import (
     DEFAULT_CELL_TIMEOUT,
@@ -98,8 +98,24 @@ _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.sta
 _RESERVED_HARNESS_SHORT_FLAGS = {
     arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
 }
-# Judge-mode effort mapping: opencode expresses reasoning effort as a --variant.
-_EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
+# OpenCode expresses reasoning effort as a --variant, passed through by name. These are
+# the variant names its model catalog defines; it ignores a variant the model lacks.
+_VARIANTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+# OpenCode merges this inline JSON over its config files, so routing reaches one exec
+# without touching the snapshot's opencode.json.
+_INLINE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
+
+
+def _variant_for_effort(effort: str) -> str:
+    """Return the `--variant` for an effort: the effort itself, once it names a variant.
+
+    Raises:
+        ValueError: If `effort` is not an OpenCode variant name; never a silent default.
+    """
+    if effort not in _VARIANTS:
+        raise ValueError(f"OpenCode cannot map effort {effort!r} (accepted: {sorted(_VARIANTS)})")
+
+    return effort
 
 
 def openrouter_model_error(model: str) -> str | None:
@@ -250,6 +266,48 @@ class OpenCodeAgent(BaseAgent):
     # multi_turn: invoke() accepts resume_session_id but does not
     # honor it — each call is a fresh session.
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
+    accepted_efforts = _VARIANTS
+    routing_env_var: ClassVar[str | None] = _INLINE_CONFIG_ENV
+
+    @staticmethod
+    def routing_model_error(model: str) -> str | None:
+        """Why OpenCode cannot route `model`'s requests, or None when it can.
+
+        Only an `openrouter/`-prefixed model goes through OpenRouter at all.
+        """
+        return openrouter_model_error(model)
+
+    def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
+        """Return inline OpenCode config that sends `routing` as the request's `provider`.
+
+        OpenCode copies a model's `options.provider` into the OpenRouter request body, so
+        the table is set on the arm's own model and no other.
+
+        Args:
+            model: The arm's `openrouter/<vendor>/<model>` slug.
+            routing: The arm's OpenRouter provider-routing table; empty for none.
+
+        Returns:
+            `{OPENCODE_CONFIG_CONTENT: <json>}`, or empty when `routing` is empty.
+
+        Raises:
+            ValueError: If `routing` is set on a model that does not go through OpenRouter.
+        """
+        if not routing:
+            return {}
+
+        model_error = self.routing_model_error(model)
+        if model_error:
+            raise ValueError(f"OpenCode: {model_error}")
+
+        model_id = model.removeprefix(OPENROUTER_MODEL_PREFIX)
+        inline_config = {
+            "provider": {
+                "openrouter": {"models": {model_id: {"options": {"provider": dict(routing)}}}}
+            }
+        }
+
+        return {_INLINE_CONFIG_ENV: json.dumps(inline_config, separators=_COMPACT_SEPARATORS)}
 
     def provision_script(self) -> str:
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
@@ -410,15 +468,13 @@ class OpenCodeAgent(BaseAgent):
             model_error = openrouter_model_error(model)
             if model_error:
                 raise ValueError(f"OpenCode: {model_error}")
-        # Map the agent-neutral effort tier to OpenCode's --variant.
-        variant = {"low": "fast", "medium": "default", "high": "thorough"}.get(effort, "default")
         return [
             self.agent_bin,
             "run",
             "--format",
             "json",
             "--variant",
-            variant,
+            _variant_for_effort(effort),
             "-m",
             model,
             *_validate_harness_args(harness_args),
@@ -501,7 +557,7 @@ class OpenCodeAgent(BaseAgent):
             model_error = openrouter_model_error(config.model)
             if model_error:
                 raise RuntimeError(f"opencode judge: {model_error}")
-        variant = _EFFORT_TO_VARIANT.get(config.effort, "default")
+        variant = _variant_for_effort(config.effort)
         command = [
             self.agent_bin, "run", "--format", "json", "--variant", variant,
             "-m", config.model, *config.harness_args, prompt,

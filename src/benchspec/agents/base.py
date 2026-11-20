@@ -23,7 +23,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
 from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import GuestSandbox
@@ -177,8 +177,8 @@ class AgentCapabilities:
 
     Typed, not a dict: every field here has a consumer in the harness, and an
     unknown field is a type error rather than silently ignored documentation.
-    Effort is deliberately not a capability: every driver forwards it verbatim and
-    the agent's CLI is the validator, the same way model names are handled.
+    Effort and routing are not here: an adapter declares them as `accepted_efforts` and
+    `routing_env_var`, read at config-read time before any instance exists.
     """
 
     multi_turn: bool  # honors resume_session_id (session chaining across turns)
@@ -221,6 +221,39 @@ class BaseAgent(ABC):
     agent_bin: str
     # The transport this instance reaches its model through (`HARNESS_PROVIDERS`).
     provider: str
+    # Every `effort` value the adapter can map onto its CLI. Config validation reads this,
+    # so the accepted set and the mapping in `build_command` share one source.
+    accepted_efforts: ClassVar[frozenset[str]]
+    # The guest env var the adapter delivers OpenRouter `routing` through, or None when the
+    # harness cannot deliver it. Config validation rejects `routing` on a None.
+    routing_env_var: ClassVar[str | None] = None
+
+    @staticmethod
+    def routing_model_error(model: str) -> str | None:
+        """Why the harness cannot route `model`'s requests, or None when it can.
+
+        Config validation calls this for an arm that sets `routing`, so a model the
+        harness would send around OpenRouter fails at config-read time.
+        """
+        return None
+
+    def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
+        """Return the guest env that makes the harness send `routing` to OpenRouter.
+
+        Args:
+            model: The arm's model, as configured.
+            routing: The arm's OpenRouter provider-routing table; empty for none.
+
+        Returns:
+            The env to merge into the agent's exec env; empty when `routing` is empty.
+
+        Raises:
+            ValueError: If `routing` is set and this harness cannot deliver it.
+        """
+        if routing:
+            raise ValueError(f"harness `{self.id}` cannot deliver OpenRouter `routing`")
+
+        return {}
 
     @classmethod
     @abstractmethod
@@ -448,6 +481,10 @@ class CodingAgent(Protocol):
     agent_bin: str  # the binary this instance runs (guest install path; for_host() rebinds)
     provider: str  # the transport this instance reaches its model through
     capabilities: AgentCapabilities
+
+    def routing_env(self, model: str, routing: Mapping[str, object]) -> dict[str, str]:
+        """Return the guest env that makes the harness send `routing` to OpenRouter."""
+        ...
 
     def version(self) -> str:
         """Return the agent CLI version string."""

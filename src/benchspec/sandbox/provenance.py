@@ -2,8 +2,9 @@
 
 `RuntimeProvenance` is captured once per arm as execution resolves and uses a
 snapshot: the sandbox's static identity (`SandboxProvenance`, including the
-backend-native `ImageIdentity`) plus the task-harness binary version observed
-inside the guest. Records persist beside a sample (`provenance.json`) and
+backend-native `ImageIdentity`), the task-harness binary version observed
+inside the guest, and the resolved `effort`, `provider`, and `routing` the arm
+ran with. Records persist beside a sample (`provenance.json`) and
 aggregate at session-finish via `aggregate_observed` into the `observed_arms`
 shape of `meta.json`/`benchmark.json`. Aggregation never synthesizes an entry
 for an arm that has no persisted record, and it raises loudly rather than
@@ -17,7 +18,7 @@ unrepresentable: constructing one raises `ValueError` immediately.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 Status = Literal["available", "unavailable"]
@@ -135,9 +136,12 @@ class SandboxProvenance:
 
 @dataclass(frozen=True)
 class RuntimeProvenance:
-    """Observed runtime identity for one arm: guest harness version + sandbox."""
+    """Observed runtime identity for one arm: its settings, guest harness version, sandbox."""
 
     arm: str
+    effort: str
+    provider: str
+    routing: dict[str, object] = field(hash=False)
     actual_version: str | None
     actual_version_status: Status
     actual_version_error: str | None
@@ -164,6 +168,9 @@ class RuntimeProvenance:
             The `observed_arms[arm]` dict as defined by spec lines 57–71.
         """
         observed: dict = {
+            "effort": self.effort,
+            "provider": self.provider,
+            "routing": self.routing,
             "actual_version": self.actual_version,
             "actual_version_status": self.actual_version_status,
         }
@@ -199,6 +206,9 @@ class RuntimeProvenance:
         """
         return {
             "arm": self.arm,
+            "effort": self.effort,
+            "provider": self.provider,
+            "routing": self.routing,
             "actual_version": self.actual_version,
             "actual_version_status": self.actual_version_status,
             "actual_version_error": self.actual_version_error,
@@ -239,6 +249,9 @@ class RuntimeProvenance:
         )
         return cls(
             arm=data["arm"],
+            effort=data["effort"],
+            provider=data["provider"],
+            routing=data["routing"],
             actual_version=data["actual_version"],
             actual_version_status=data["actual_version_status"],
             actual_version_error=data["actual_version_error"],
@@ -246,11 +259,15 @@ class RuntimeProvenance:
         )
 
 
-# The fields that define an arm's environment identity. Diagnostic `*_error` strings are
+# The fields that define what an arm measured and where. Diagnostic `*_error` strings are
 # deliberately excluded: two unavailable records for one arm describe the same environment
 # even when their transient error text differs (a probe times out on one sample, resets on
 # the next), so they dedupe rather than abort every report as a false conflict.
+_ARM_CONFLICT_FIELDS = ("effort", "provider", "routing", "actual_version", "actual_version_status")
 _CONFLICT_FIELDS = (
+    "effort",
+    "provider",
+    "routing",
     "actual_version",
     "actual_version_status",
     "snapshot",
@@ -263,9 +280,9 @@ _CONFLICT_FIELDS = (
 )
 
 
-def _conflict_field_value(record: RuntimeProvenance, field_name: str) -> str | None:
+def _conflict_field_value(record: RuntimeProvenance, field_name: str) -> object:
     """Read one of the identity fields `aggregate_observed` checks for cross-record conflicts."""
-    if field_name in ("actual_version", "actual_version_status"):
+    if field_name in _ARM_CONFLICT_FIELDS:
         return getattr(record, field_name)
     return getattr(record.sandbox, field_name)
 
@@ -276,9 +293,9 @@ def aggregate_observed(records: Iterable[RuntimeProvenance]) -> dict[str, dict]:
     Records for one arm with matching environment identity (for example, one per
     sample) dedupe to a single entry — the first seen — even when their transient
     `*_error` diagnostic text differs. Records for one arm that disagree on an
-    identity field (`snapshot`, `image_digest`, `actual_version`, either status,
-    or a fingerprint input) describe unlike environments and raise rather than
-    silently combining into one report.
+    identity field (`effort`, `provider`, `routing`, `snapshot`, `image_digest`,
+    `actual_version`, either status, or a fingerprint input) measured unlike things and
+    raise rather than silently combining into one report.
 
     Args:
         records: Runtime-provenance records loaded from `provenance.json` files.

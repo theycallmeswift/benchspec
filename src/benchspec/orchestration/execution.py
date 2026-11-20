@@ -479,9 +479,9 @@ def _capture_sandbox_provenance(
 
 
 def _build_runtime_provenance(
-    arm_name: str, sandbox_prov: SandboxProvenance | None, arm_run: _ArmRun
+    arm: Arm, sandbox_prov: SandboxProvenance | None, arm_run: _ArmRun
 ) -> RuntimeProvenance | None:
-    """Fold the guest version probe onto the static sandbox identity into one record.
+    """Fold the arm's settings and guest version probe onto the static sandbox identity.
 
     Returns None when the sandbox identity could not be captured (no partial record is
     persisted). The guest version follows the available/unavailable contract: a probed
@@ -496,7 +496,10 @@ def _build_runtime_provenance(
         version, status = None, "unavailable"
         error = arm_run.guest_version_error or "guest task-harness version not probed"
     return RuntimeProvenance(
-        arm=arm_name,
+        arm=arm.name,
+        effort=arm.effort,
+        provider=arm.provider,
+        routing=arm.routing,
         actual_version=version,
         actual_version_status=status,
         actual_version_error=error,
@@ -690,6 +693,7 @@ def _run_cell(
     stop = _stop_rule(specs) if eval_case.stop_early else None
     # The agent turn leaves the judge a share of the cap only when a line is judge-bound.
     judge_reserve = judge_config.timeout if any(spec is None for spec in specs) else 0
+    routing_env = agent.routing_env(arm.model, arm.routing) if agent is not None else {}
 
     if deadline.remaining() == 0:
         arm_run = _no_time_left_run(workdir)
@@ -712,7 +716,7 @@ def _run_cell(
                 backend=backend,
                 # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
                 # actually runs, never at collection (a deselected arm's secret is never read).
-                arm_env=expand_env(arm.env, os.environ),
+                arm_env={**expand_env(arm.env, os.environ), **routing_env},
                 eval_set=eval_set,
                 baseline=baseline or "",
                 harness_args=arm.harness_args,
@@ -731,7 +735,7 @@ def _run_cell(
     # Absent only on the no-sandbox path (a stubbed-away harness in unit tests).
     run_dir = workspace.arm_dir(repo_root, eval_case.skill, eval_id, arm_name, sample=sample)
     run_dir.mkdir(parents=True, exist_ok=True)
-    provenance = _build_runtime_provenance(arm_name, sandbox_prov, arm_run)
+    provenance = _build_runtime_provenance(arm, sandbox_prov, arm_run)
     if provenance is not None:
         (run_dir / "provenance.json").write_text(
             json.dumps(provenance.to_disk_dict(), indent=2) + "\n"
