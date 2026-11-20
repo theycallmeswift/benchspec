@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
-import os
 import shlex
 import tomllib
 from collections.abc import Coroutine, Iterable, Iterator
@@ -21,10 +20,13 @@ from benchspec.agents import (
     resolve_agent_name,
 )
 from benchspec.config.arms import parse_sets, resolve_set
+from benchspec.events.cell import CellEvents
 from benchspec.grading.trigger import StopRule
 from benchspec.orchestration import workspace
 from benchspec.orchestration.deadline import (
+    PHASE_AGENT,
     PHASE_BOOT,
+    PHASE_GRADE,
     PHASE_SETUP,
     CellDeadline,
     CellTimeoutError,
@@ -189,14 +191,9 @@ def ensure_snapshot(
     return name
 
 
-def _worker_tag() -> str:
-    """Return the pytest worker suffix used for per-worker snapshot names."""
-    return os.environ.get("PYTEST_XDIST_WORKER", "main")
-
-
 def _sandbox_run_name(eval_id: str, config: str) -> str:
     """Build a stable guest run name for a snapshot or cell."""
-    return f"{NAME_PREFIX}eval-{eval_id}-{config}-{_worker_tag()}"
+    return f"{NAME_PREFIX}eval-{eval_id}-{config}-{workspace.worker_tag()}"
 
 
 DEFAULT_PROJECT_MARKER = ".claude-plugin/plugin.json"
@@ -293,6 +290,7 @@ class SandboxSession:
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
         deadline: CellDeadline,
+        events: CellEvents,
         judge_reserve: float = 0.0,
         stop: StopRule | None = None,
     ) -> None:
@@ -315,6 +313,7 @@ class SandboxSession:
         self._deadline = deadline
         self._judge_reserve = judge_reserve
         self._stop = stop
+        self._events = events
         # The eval folder's path relative to the mount; None skips per-cell setup.
         self._setup_reldir = setup_reldir
         self._arm = arm if arm is not None else config
@@ -350,6 +349,7 @@ class SandboxSession:
                 await self._backend.discard_quietly(run_name)
             discard_stage(self._staged_project)
             raise
+        self._events.phase(PHASE_SETUP)
         # Install before the artifact baseline so only later agent-authored files surface.
         if self._setup_reldir is not None:
             try:
@@ -402,6 +402,7 @@ class SandboxSession:
     ) -> RunResult:
         """Provide the run helper."""
         sandbox = self._live()
+        self._events.phase(PHASE_AGENT)
         result = await self._agent.invoke(
             sandbox,
             prompt,
@@ -417,7 +418,9 @@ class SandboxSession:
             harness_args=self._harness_args,
             timeout=self._deadline.phase_budget(reserve=self._judge_reserve),
             stop=self._stop,
+            on_delta=self._events.delta,
         )
+        self._events.phase(PHASE_GRADE)
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
         if authored:
@@ -451,6 +454,7 @@ def arm_session(
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
     deadline: CellDeadline,
+    events: CellEvents,
     judge_reserve: float = 0.0,
     stop: StopRule | None = None,
 ) -> SandboxSession:
@@ -473,6 +477,7 @@ def arm_session(
         project_marker=project_marker,
         harness_args=harness_args,
         deadline=deadline,
+        events=events,
         judge_reserve=judge_reserve,
         stop=stop,
     )

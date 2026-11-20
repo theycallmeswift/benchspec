@@ -25,6 +25,9 @@ from pathlib import Path
 from benchspec.agents import CodingAgent, make_agent
 from benchspec.agents.base import probe_guest_version
 from benchspec.config.arms import Arm, expand_env
+from benchspec.events.cell import CellEvents
+from benchspec.events.schema import Timing, cell_key
+from benchspec.events.sink import NULL_SINK, EventSink
 from benchspec.grading import binder, checkers
 from benchspec.grading.judge import grade_run
 from benchspec.grading.judges import JudgeConfig
@@ -42,7 +45,12 @@ from benchspec.orchestration.deadline import (
     CellTimeoutError,
     unjudged_evidence,
 )
-from benchspec.orchestration.results import RunResult, substitute_assertions, substitute_prompt
+from benchspec.orchestration.results import (
+    RunResult,
+    graded_counts,
+    substitute_assertions,
+    substitute_prompt,
+)
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
 from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
 from benchspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
@@ -102,6 +110,7 @@ class _ArmRun:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     stopped: bool = False
+    cost_usd: float | None = None
     # The phase the cell's cap fired in, or None when it did not fire.
     timed_out_phase: str | None = None
     # Guest task-harness version probed inside the live snapshot. The default is the
@@ -339,6 +348,7 @@ async def _run_arm_turns(
     baseline: str = "",
     harness_args: list[str] | None = None,
     deadline: CellDeadline,
+    events: CellEvents,
     judge_reserve: float = 0.0,
     stop: StopRule | None = None,
 ) -> _ArmRun:
@@ -369,6 +379,7 @@ async def _run_arm_turns(
             baseline=baseline,
             harness_args=harness_args,
             deadline=deadline,
+            events=events,
             judge_reserve=judge_reserve,
             stop=stop,
             backend=backend,
@@ -405,6 +416,7 @@ async def _run_arm_turns(
             if result.timed_out:
                 run_acc.timed_out_phase = PHASE_AGENT
             run_acc.stopped = result.stopped
+            run_acc.cost_usd = result.cost_usd
 
             tree, contents, shas = gather_facts(workdir)
             # Fold in skill artifacts the agent wrote outside the workdir mount (its
@@ -524,6 +536,21 @@ def _document_order(
     return merged
 
 
+def _infra_error_message(arm_run: _ArmRun, assertions: list[dict]) -> str:
+    """What failed in an errored sample: the agent's own report, else the judge's."""
+    if arm_run.errored:
+        return arm_run.result_text
+
+    return next(
+        (
+            entry["evidence"]
+            for entry in assertions
+            if "JUDGE INFRA ERROR" in entry.get("evidence", "")
+        ),
+        "",
+    )
+
+
 def run_eval_arm(
     eval_case: EvalCase,
     arm: Arm,
@@ -542,8 +569,71 @@ def run_eval_arm(
     session_factory: SessionFactory = arm_session,
     grade: Grader = grade_run,
     bind: Binder = binder.bind,
+    events: EventSink = NULL_SINK,
 ) -> ArmOutcome:
-    """Run all cases for one eval arm and write result artifacts."""
+    """Run one sample, write its artifacts, and emit its events to `events`.
+
+    Raises:
+        Exception: whatever the cell raised, unchanged, after its `cell.error` is emitted.
+    """
+    cell_events = CellEvents(
+        events,
+        cell_key(skill=eval_case.skill, eval_id=eval_case.eval_id, arm=arm.name, sample=sample),
+    )
+    cell_events.start(
+        skill=eval_case.skill,
+        eval_id=eval_case.eval_id,
+        arm=arm.name,
+        sample=sample,
+        harness=arm.harness,
+        model=arm.model,
+    )
+    try:
+        return _run_cell(
+            eval_case,
+            arm,
+            workdir,
+            pre_run_shas,
+            project,
+            today=today,
+            repo_root=repo_root,
+            sample=sample,
+            eval_set=eval_set,
+            baseline=baseline,
+            sandbox_name=sandbox_name,
+            project_marker=project_marker,
+            judge_config=judge_config,
+            session_factory=session_factory,
+            grade=grade,
+            bind=bind,
+            events=cell_events,
+        )
+    except Exception as error:
+        cell_events.error(error_kind="exception", message=str(error), timing=None)
+        raise
+
+
+def _run_cell(
+    eval_case: EvalCase,
+    arm: Arm,
+    workdir: Path,
+    pre_run_shas: dict[str, str],
+    project: Path | None,
+    *,
+    today: str,
+    repo_root: Path,
+    sample: int,
+    eval_set: str,
+    baseline: str | None,
+    sandbox_name: str,
+    project_marker: str,
+    judge_config: JudgeConfig | None,
+    session_factory: SessionFactory,
+    grade: Grader,
+    bind: Binder,
+    events: CellEvents,
+) -> ArmOutcome:
+    """Run the agent, grade it, write the artifacts, and emit the cell's closing event."""
     judge_config = judge_config or JudgeConfig()
     eval_id = eval_case.eval_id
     # Every downstream sink keys on the arm NAME string (artifact paths, grading["arm"],
@@ -595,6 +685,7 @@ def run_eval_arm(
     # the sandbox spends anything. The cap starts here: a snapshot build above is shared
     # setup, not one cell's cost.
     deadline = CellDeadline(arm.timeout)
+    events.phase(PHASE_BIND)
     specs, binder_degraded = _bind_all(active_assertions, bind)
     stop = _stop_rule(specs) if eval_case.stop_early else None
     # The agent turn leaves the judge a share of the cap only when a line is judge-bound.
@@ -603,6 +694,7 @@ def run_eval_arm(
     if deadline.remaining() == 0:
         arm_run = _no_time_left_run(workdir)
     else:
+        events.phase(PHASE_BOOT)
         arm_run = asyncio.run(
             _run_arm_turns(
                 session_factory,
@@ -625,10 +717,13 @@ def run_eval_arm(
                 baseline=baseline or "",
                 harness_args=arm.harness_args,
                 deadline=deadline,
+                events=events,
                 judge_reserve=judge_reserve,
                 stop=stop,
             )
         )
+    # A cell whose cap fired before the agent returned enters grading here.
+    events.phase(PHASE_GRADE)
 
     # Persist runtime provenance now — the sandbox has run, and grading below can abort.
     # An arm whose sandbox actually ran must stay observed rather than vanish from
@@ -718,10 +813,17 @@ def run_eval_arm(
     # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
     # once its verdicts were fixed, so its time and tokens never read as a full task's.
     # run_dir was created above when provenance was persisted.
-    timing: dict[str, int | bool | str | None] = {
+    usage = _usage_fields(arm_run)
+    timing: Timing = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
-        **_usage_fields(arm_run),
+        "total_tokens": usage["total_tokens"],
+        "cache_read_tokens": usage["cache_read_tokens"],
+        "cache_creation_tokens": usage["cache_creation_tokens"],
+        "input_tokens": usage["input_tokens"],
+        "output_tokens": usage["output_tokens"],
+        "first_output_ms": events.first_output_ms,
+        "cost_usd": arm_run.cost_usd,
     }
     if arm_run.stopped:
         timing["stopped"] = True
@@ -737,6 +839,17 @@ def run_eval_arm(
     if arm_run.raw:
         block = arm_run.raw if arm_run.raw.endswith("\n") else arm_run.raw + "\n"
         (run_dir / "session.jsonl").write_text(json.dumps({TURN_DELIM: 1}) + "\n" + block)
+
+    if errored:
+        events.error(
+            error_kind="agent" if arm_run.errored else "judge",
+            message=_infra_error_message(arm_run, merged),
+            timing=timing,
+        )
+    else:
+        passed, total = graded_counts(merged)
+        events.done(passed=passed, total=total, timing=timing)
+
     return ArmOutcome(
         grading,
         errored,

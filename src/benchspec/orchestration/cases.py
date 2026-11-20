@@ -15,7 +15,7 @@ recorded measurement, not a gate.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import cast
 
@@ -30,6 +30,8 @@ from benchspec.config.sets import (
     run_set_when_needed,
     session_run_set,
 )
+from benchspec.events.schema import PlannedCell, cell_key
+from benchspec.events.sink import NULL_SINK, EventSink, JsonlEventSink
 from benchspec.grading import binder
 from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig
@@ -52,6 +54,7 @@ from benchspec.specs.discovery import (
 )
 
 BOUND_SPECS = pytest.StashKey[prebind.BoundSpecs]()
+EVENT_SINK = pytest.StashKey[JsonlEventSink]()
 
 
 def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], list[str]]:
@@ -75,12 +78,68 @@ def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], lis
     for case in cases:
         for arm in arms:
             pairs.append((case, arm))
-            ids.append(f"{case.param_id}-{arm.name}")
+            ids.append(_param_id(case, arm))
 
     if run_set is not None:
         _resolve_scope_clauses(pairs, run_set.baseline, _eval_set_name(config))
 
     return pairs, ids
+
+
+def _param_id(case: EvalCase, arm: Arm) -> str:
+    """The `eval_arm` parameter id of one pair, as it appears in the cell's node id."""
+    return f"{case.param_id}-{arm.name}"
+
+
+def planned_cells(
+    nodeids: Iterable[str],
+    pairs: Iterable[tuple[EvalCase, Arm]],
+    *,
+    count: int,
+    baseline: str | None,
+    eval_set: str,
+) -> list[PlannedCell]:
+    """The samples a run collected, in `pairs` order, for `run.start`.
+
+    A pair's samples are matched to node ids by their exact parameter string, never a
+    prefix: arms `trial` and `trial-overrides` share one.
+
+    Args:
+        nodeids: Every collected node id; those that are not eval cells are ignored.
+        pairs: The run's `(case, arm)` table.
+        count: Samples per pair (`--count`).
+        baseline: The set's baseline arm, for scope clauses.
+        eval_set: The selected set's name, for scope clauses.
+    """
+    collected = {
+        nodeid.partition("::test_eval[")[2].removesuffix("]")
+        for nodeid in nodeids
+        if "::test_eval[" in nodeid
+    }
+    cells: list[PlannedCell] = []
+    for case, arm in pairs:
+        for sample in range(count):
+            # pytest-repeat suffixes its one-based step only when it repeats.
+            repeat = f"-{sample + 1}-{count}" if count > 1 else ""
+            if _param_id(case, arm) + repeat not in collected:
+                continue
+
+            cells.append(
+                {
+                    "cell": cell_key(
+                        skill=case.skill, eval_id=case.eval_id, arm=arm.name, sample=sample
+                    ),
+                    "skill": case.skill,
+                    "eval_id": case.eval_id,
+                    "arm": arm.name,
+                    "sample": sample,
+                    "applies": scope.applicable(
+                        case, arm, baseline=baseline, eval_set=eval_set
+                    ),
+                }
+            )
+
+    return cells
 
 
 def _resolve_scope_clauses(
@@ -312,6 +371,12 @@ def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
     return request.config.stash.get(BOUND_SPECS, {})
 
 
+@pytest.fixture(scope="session")
+def event_sink(request: pytest.FixtureRequest) -> EventSink:
+    """This process's run event sink; a sink that drops events outside a benchspec run."""
+    return request.config.stash.get(EVENT_SINK, NULL_SINK)
+
+
 def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
@@ -345,6 +410,7 @@ def test_eval(
     eval_sandbox: str,
     baseline_arm: str | None,
     bound_specs: prebind.BoundSpecs,
+    event_sink: EventSink,
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -369,6 +435,7 @@ def test_eval(
         sandbox_name=eval_sandbox,
         bind=prebind.table_or_live(bound_specs, binder.binder_for(binder_config)),
         baseline=baseline_arm,
+        events=event_sink,
     )
 
     # Both arms grade identically and symmetrically. A failed assertion (including a

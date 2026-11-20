@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import uuid
 from pathlib import Path
 
 import benchspec
@@ -94,6 +93,7 @@ def write_manifest(
     binder_meta: dict,
     observed_arms: dict,
     *,
+    run_id: str,
     started_at: str | None,
 ) -> None:
     """What produced this run — identity + resolved config, so artifacts self-describe.
@@ -120,7 +120,7 @@ def write_manifest(
         "binder": binder_meta,
     }
     manifest = build_manifest(
-        run_id=uuid.uuid4().hex,
+        run_id=run_id,
         started_at=started_at,
         commit=_git_commit(repo_root),
         iteration=iteration,

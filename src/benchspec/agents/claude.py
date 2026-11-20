@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
@@ -25,8 +25,9 @@ from benchspec.agents.base import (
     AgentCapabilities,
     BaseAgent,
     Credential,
+    StreamDelta,
 )
-from benchspec.grading.trajectory import extract_trajectory
+from benchspec.grading.trajectory import dict_or_empty, extract_trajectory, iter_events
 from benchspec.grading.trigger import StopRule
 from benchspec.orchestration.environments import ExecutionEnv, Host
 from benchspec.orchestration.results import (
@@ -356,6 +357,18 @@ class ClaudeCodeAgent(BaseAgent):
         """Return the tool calls one stream-json line carries, as the trajectory records them."""
         return [event for event in extract_trajectory(line) if event["kind"] == "tool_call"]
 
+    def stream_text(self, line: str) -> list[str]:
+        """Return the text blocks of the `assistant` message one stream-json line carries."""
+        return [
+            block["text"]
+            for event in iter_events(line)
+            if event.get("type") == "assistant"
+            for block in dict_or_empty(event.get("message")).get("content") or []
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ]
+
     async def invoke(
         self,
         sandbox: LiveSandbox,
@@ -373,6 +386,7 @@ class ClaudeCodeAgent(BaseAgent):
         extra_env: dict[str, str] | None = None,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
+        on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -391,6 +405,7 @@ class ClaudeCodeAgent(BaseAgent):
             sandbox,
             cmd,
             stop=stop,
+            on_delta=on_delta,
             parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
             cwd=workdir,
             env=env,

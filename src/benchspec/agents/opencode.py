@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -39,6 +39,7 @@ from benchspec.agents.base import (
     AgentCapabilities,
     BaseAgent,
     Credential,
+    StreamDelta,
 )
 from benchspec.grading.trajectory import (
     dict_or_empty,
@@ -449,6 +450,7 @@ class OpenCodeAgent(BaseAgent):
         extra_env: dict[str, str] | None = None,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
+        on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -468,6 +470,7 @@ class OpenCodeAgent(BaseAgent):
             sandbox,
             cmd,
             stop=stop,
+            on_delta=on_delta,
             parse=lambda stdout: parse_opencode_jsonl(stdout, eval_id, config, detect_skill),
             cwd=workdir,
             env=env,
@@ -520,6 +523,16 @@ class OpenCodeAgent(BaseAgent):
         """
         return opencode_trajectory(list(iter_events(line)))
 
+    def stream_text(self, line: str) -> list[str]:
+        """Return the text of each `text` event the line carries."""
+        parts = [
+            dict_or_empty(event.get("part"))
+            for event in iter_events(line)
+            if event.get("type") == "text"
+        ]
+
+        return [part["text"] for part in parts if isinstance(part.get("text"), str)]
+
 
 def _tool_dispatches_skill(part: dict, skill_name: str) -> bool:
     """True if this tool_use event's `part` block dispatches the named skill."""
@@ -568,6 +581,7 @@ def parse_opencode_jsonl(
     output_tokens = 0
     cache_read_tokens = 0
     cache_creation_tokens = 0
+    costs: list[float] = []
     session_id = ""
     fired = False
     last_tool_rejected = False
@@ -588,6 +602,8 @@ def parse_opencode_jsonl(
             output_tokens += _token_count(tokens, "output") + _token_count(tokens, "reasoning")
             cache_read_tokens += _token_count(cache, "read")
             cache_creation_tokens += _token_count(cache, "write")
+            if isinstance(part.get("cost"), (int, float)):
+                costs.append(part["cost"])
         elif event_type == "text":
             text_value = part.get("text")
             if isinstance(text_value, str) and text_value.strip():
@@ -621,4 +637,5 @@ def parse_opencode_jsonl(
         cache_creation_tokens=cache_creation_tokens,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cost_usd=sum(costs) if costs else None,
     )

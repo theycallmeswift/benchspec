@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from benchspec.agents import make_agent
+from benchspec.orchestration.results import graded_counts
 
 if TYPE_CHECKING:
     from benchspec.config.arms import Set as EvalSet
@@ -361,6 +362,7 @@ def index_rows(
                     continue
                 timing = _load_json(sample_dir / "timing.json") or {}
                 assertions = grading.get("assertions", [])
+                passed, total = graded_counts(assertions)
                 # Core axes sit right after `arm` so the row reads config-first, then
                 # results. Omitted entirely for an unrecognized arm, never faked as null.
                 core_axes = (
@@ -381,8 +383,8 @@ def index_rows(
                         **core_axes,
                         "sample": int(sample_dir.name.removeprefix("sample-")),
                         "errored": bool(grading.get("errored")),
-                        "passed": sum(1 for assertion in assertions if assertion.get("passed")),
-                        "total": sum(1 for assertion in assertions if not assertion.get("skipped")),
+                        "passed": passed,
+                        "total": total,
                         "scoped": sum(1 for assertion in assertions if assertion.get("scoped")),
                         "skipped": sum(1 for assertion in assertions if assertion.get("skipped")),
                         "duration_ms": timing.get("duration_ms"),
@@ -390,6 +392,8 @@ def index_rows(
                         "total_tokens": timing.get("total_tokens"),
                         "input_tokens": timing.get("input_tokens"),
                         "output_tokens": timing.get("output_tokens"),
+                        "first_output_ms": timing.get("first_output_ms"),
+                        "cost_usd": timing.get("cost_usd"),
                         "stopped": bool(timing.get("stopped")),
                         "timed_out": bool(timing.get("timed_out")),
                     }

@@ -917,6 +917,8 @@ def test_index_rows_flatten_evals(tmp_path: Path) -> None:
         "total_tokens": 500,
         "input_tokens": 300,
         "output_tokens": 100,
+        "first_output_ms": None,
+        "cost_usd": None,
         "stopped": False,
         "timed_out": False,
     }

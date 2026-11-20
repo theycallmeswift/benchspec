@@ -58,6 +58,8 @@ class RunResult:
     # True when the turn was killed at its cap after streaming output and parsed from the
     # partial stream. A timeout with no output is an `is_error` run instead.
     timed_out: bool = False
+    # What the harness reported the run cost, never computed; None when it reported nothing.
+    cost_usd: float | None = None
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:
@@ -138,6 +140,7 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
     """Parse one agent run JSON record from stdout."""
     data = json.loads(raw)
     usage = data.get("usage", {})
+    cost = data.get("total_cost_usd")
 
     return RunResult(
         eval_id=eval_id,
@@ -152,7 +155,16 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
         input_tokens=int(usage.get("input_tokens", 0) or 0),
         output_tokens=int(usage.get("output_tokens", 0) or 0),
         result_subtype=str(data.get("subtype", "")),
+        cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
     )
+
+
+def graded_counts(assertions: Sequence[dict]) -> tuple[int, int]:
+    """Count a sample's `grading.json` entries as (passed, graded); skipped lines are neither."""
+    passed = sum(1 for assertion in assertions if assertion.get("passed"))
+    graded = sum(1 for assertion in assertions if not assertion.get("skipped"))
+
+    return passed, graded
 
 
 def mark_errored_by_nonzero_exit(result: RunResult, stderr: str) -> RunResult:

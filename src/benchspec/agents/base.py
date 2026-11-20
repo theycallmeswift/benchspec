@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import subprocess
 from abc import ABC, abstractmethod
@@ -59,6 +60,42 @@ GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
 # Default wall-clock cap on one whole cell (bind, boot, agent, judge), seconds. Leaves the
 # agent about 600 s after a typical bind, boot, and 300 s judge. Also `invoke`'s turn cap.
 DEFAULT_CELL_TIMEOUT = 900
+
+# The arguments that best say what a tool call does, most telling first.
+_SUMMARY_ARGUMENTS = ("command", "file_path", "path", "pattern", "skill")
+
+
+@dataclass(frozen=True)
+class StreamDelta:
+    """One thing the agent just did: a tool call (`name` is the tool) or a text block."""
+
+    kind: str
+    name: str | None
+    text: str
+
+
+def tool_call_delta(call: dict) -> StreamDelta:
+    """Summarize a trajectory tool call by its most telling argument, else its compact JSON."""
+    arguments = call.get("arguments") or {}
+    summary = next(
+        (
+            arguments[key]
+            for key in _SUMMARY_ARGUMENTS
+            if isinstance(arguments.get(key), str)
+        ),
+        None,
+    )
+    if summary is None:
+        summary = json.dumps(arguments, separators=(",", ":"))
+
+    return StreamDelta("tool_call", call.get("name") or "", summary.replace("\n", " "))
+
+
+def text_delta(block: str) -> StreamDelta | None:
+    """The first non-empty line of an assistant text block; None for a blank block."""
+    first_line = next((line.strip() for line in block.splitlines() if line.strip()), None)
+
+    return None if first_line is None else StreamDelta("text", None, first_line)
 
 
 def unqualified_openrouter_model_error(model: str) -> str | None:
@@ -220,12 +257,17 @@ class BaseAgent(ABC):
         stream, so an early stop and the grade read a dispatch identically.
         """
 
+    @abstractmethod
+    def stream_text(self, line: str) -> list[str]:
+        """Return the assistant text blocks one raw stream line carries, in order."""
+
     async def invoke_streamed(
         self,
         sandbox: LiveSandbox,
         command: list[str],
         *,
         stop: StopRule | None,
+        on_delta: Callable[[StreamDelta], None] | None,
         parse: Callable[[str], RunResult],
         cwd: str,
         env: dict[str, str],
@@ -246,6 +288,7 @@ class BaseAgent(ABC):
             sandbox: The live guest.
             command: The harness argv.
             stop: The stop rule over the streamed trajectory, or None to run to the end.
+            on_delta: Called once per text block and tool call as each line streams.
             parse: The adapter's stream parser, bound to this turn.
             cwd: Working directory inside the guest.
             env: The process environment.
@@ -260,11 +303,21 @@ class BaseAgent(ABC):
         trajectory: list[dict] = []
 
         def watch(line: str) -> bool:
-            """Whether the tool calls this line adds settle every verdict."""
+            """Report the line's deltas, then whether its tool calls settle every verdict."""
+            if stop is None and on_delta is None:
+                return False
+
+            calls = self.stream_tool_calls(line)
+            if on_delta is not None:
+                texts = [text_delta(block) for block in self.stream_text(line)]
+                for delta in [*filter(None, texts), *map(tool_call_delta, calls)]:
+                    on_delta(delta)
+
             if stop is None:
                 return False
-            calls = self.stream_tool_calls(line)
+
             trajectory.extend(calls)
+
             return bool(calls) and stop(trajectory)
 
         try:
@@ -471,12 +524,13 @@ class CodingAgent(Protocol):
         extra_env: dict[str, str] | None = None,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
+        on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest, streamed.
 
         The turn ends at its own exit, at `timeout` (a partial run marked `timed_out`), or,
         with a `stop` rule, once every graded verdict is fixed
-        (`BaseAgent.invoke_streamed`).
+        (`BaseAgent.invoke_streamed`). `on_delta` hears each text block and tool call.
         """
         ...
 
@@ -509,4 +563,8 @@ class CodingAgent(Protocol):
 
     def stream_tool_calls(self, line: str) -> list[dict]:
         """Return the trajectory tool calls one raw stream line carries, in order."""
+        ...
+
+    def stream_text(self, line: str) -> list[str]:
+        """Return the assistant text blocks one raw stream line carries, in order."""
         ...

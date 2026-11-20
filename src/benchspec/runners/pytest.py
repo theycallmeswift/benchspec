@@ -11,7 +11,8 @@ import datetime
 import json
 import os
 import time
-from collections.abc import MutableMapping
+import uuid
+from collections.abc import MutableMapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -30,6 +31,7 @@ from benchspec.config.sets import (
     session_run_set,
     validate_cell_caps,
 )
+from benchspec.events.sink import JsonlEventSink
 from benchspec.grading import binder
 from benchspec.grading.binder import binder_identity
 from benchspec.grading.binder_config import BinderConfig
@@ -45,6 +47,9 @@ _STARTED_AT = pytest.StashKey[str]()
 _RAN_CELLS = pytest.StashKey[bool]()
 _SUMMARY_LINES = pytest.StashKey[list[str]]()
 _BIND_SUMMARY = pytest.StashKey[str]()
+_RUN_ID = pytest.StashKey[str]()
+# The monotonic time `run.start` was emitted; unset until it is.
+_RUN_STARTED = pytest.StashKey[float]()
 
 
 def _help(*parts: str) -> str:
@@ -296,12 +301,108 @@ def pytest_configure(config: pytest.Config) -> None:
     else:
         # Controller / serial run: choose once.
         workspace.set_current_iteration(workspace.next_iteration_name(repo_root))
+        config.stash[_RUN_ID] = uuid.uuid4().hex
         config.stash[_STARTED_AT] = datetime.datetime.now(datetime.UTC).isoformat(
             timespec="seconds"
         )
-        config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
+        tracker = _CellTracker(config)
+        config.stash[_CELL_TRACKER] = tracker
+        config.pluginmanager.register(tracker, "benchspec-cell-tracker")
         _validate_cell_caps(config)
         _prebind_assertions(config)
+
+    worker = workspace.worker_tag()
+    sink = JsonlEventSink(workspace.events_path(repo_root, worker), worker)
+    config.stash[cases.EVENT_SINK] = sink
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Close this process's event file."""
+    sink = config.stash.get(cases.EVENT_SINK, None)
+    if sink is not None:
+        sink.close()
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Emit `run.start` on a serial run; xdist's controller collects nothing itself."""
+    config = session.config
+    if prebind.workerinput(config) is None and not config.option.collectonly:
+        _emit_run_start(config, [item.nodeid for item in session.items])
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_node_collection_finished(node: _WorkerNode, ids: Sequence[str]) -> None:
+    """Emit `run.start` on the xdist controller from the first worker's collection."""
+    _emit_run_start(node.config, ids)
+
+
+def _emit_run_start(config: pytest.Config, nodeids: Sequence[str]) -> None:
+    """Emit `run.start` once, for a run that collected eval cells."""
+    if _RUN_STARTED in config.stash:
+        return
+
+    run_set = session_run_set(config)
+    pairs, _ = cases.eval_arm_params(config)
+    planned = cases.planned_cells(
+        nodeids,
+        pairs,
+        count=getattr(config.option, "count", 1),
+        baseline=run_set.baseline if run_set else None,
+        eval_set=option_str(config, "benchspec_set") or "",
+    )
+    if run_set is None or not planned:
+        return
+
+    config.stash[_RUN_STARTED] = time.monotonic()
+    config.stash[cases.EVENT_SINK].emit(
+        {
+            "type": "run.start",
+            "iteration": workspace.current_iteration(),
+            "run_id": config.stash[_RUN_ID],
+            "set": run_set.name,
+            "baseline": run_set.baseline,
+            "arms": [
+                {
+                    "name": arm.name,
+                    "harness": arm.harness,
+                    "model": arm.model,
+                    "effort": arm.effort,
+                }
+                for arm in run_set.arms
+            ],
+            "cells": planned,
+            "cell_count": len(planned),
+        }
+    )
+
+
+def _emit_run_end(session: pytest.Session) -> None:
+    """Emit `run.end` on the process that emitted `run.start`."""
+    config = session.config
+    if _RUN_STARTED not in config.stash:
+        return
+
+    repo_root = resolve_repo_root(config)
+    tracker = config.stash[_CELL_TRACKER]
+    benchmarks = {
+        name: workspace.iteration_root(repo_root) / name
+        for name in ("benchmark.md", "benchmark.json")
+    }
+    config.stash[cases.EVENT_SINK].emit(
+        {
+            "type": "run.end",
+            "exit_status": int(session.exitstatus),
+            "wall_ms": int((time.monotonic() - config.stash[_RUN_STARTED]) * 1000),
+            "done": tracker.done,
+            "errored": tracker.errored,
+            **{
+                name.replace(".", "_"): (
+                    path.relative_to(repo_root).as_posix() if path.is_file() else None
+                )
+                for name, path in benchmarks.items()
+            },
+        }
+    )
 
 
 def _validate_cell_caps(config: pytest.Config) -> None:
@@ -371,20 +472,31 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 
 class _CellTracker:
-    """Flags the config once an eval cell reports, on the process that finishes the session.
+    """Counts the eval cells that report, on the process that finishes the session.
 
     Under xdist the controller collects nothing itself; it learns that cells ran only from
     the reports the workers send, which carry the `benchspec` marker as a keyword.
     """
 
     def __init__(self, config: pytest.Config) -> None:
-        """Bind to the config whose stash carries the flag."""
+        """Bind to the config whose stash carries the ran-cells flag."""
         self._config = config
+        self.done = 0
+        self.errored = 0
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        """Flag the session once any eval cell reports."""
-        if "benchspec" in report.keywords:
-            self._config.stash[_RAN_CELLS] = True
+        """Flag the session and count the cell: done when it passed, errored when it failed."""
+        if "benchspec" not in report.keywords:
+            return
+
+        self._config.stash[_RAN_CELLS] = True
+        if report.when == "call" and report.passed:
+            self.done += 1
+        elif report.when in ("setup", "call") and report.failed:
+            self.errored += 1
+
+
+_CELL_TRACKER = pytest.StashKey[_CellTracker]()
 
 
 class _WorkerNode(Protocol):
@@ -411,7 +523,15 @@ def pytest_configure_node(node: _WorkerNode) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Aggregate binder corpus records after the pytest session."""
+    """Write the run's reports, then close its event stream with `run.end`."""
+    try:
+        _write_reports(session)
+    finally:
+        _emit_run_end(session)
+
+
+def _write_reports(session: pytest.Session) -> None:
+    """Aggregate the run's samples into the manifest, benchmark and index."""
     # Controller-only, and only when this session ran eval cells: a session that ran none
     # (`--collect-only`, or an unrelated pytest run with the plugin autoloaded) picked an
     # iteration name it never used, and another process may have filled that name in the
@@ -452,6 +572,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         judge_meta,
         binder_meta,
         observed_arms,
+        run_id=config.stash[_RUN_ID],
         started_at=config.stash.get(_STARTED_AT, None),
     )
     lines: list[str] = []
