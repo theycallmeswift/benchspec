@@ -115,6 +115,7 @@ def _variant_for_effort(effort: str) -> str:
     """
     if effort not in _VARIANTS:
         raise ValueError(f"OpenCode cannot map effort {effort!r} (accepted: {sorted(_VARIANTS)})")
+
     return effort
 
 
@@ -295,15 +296,18 @@ class OpenCodeAgent(BaseAgent):
         """
         if not routing:
             return {}
+
         model_error = self.routing_model_error(model)
         if model_error:
             raise ValueError(f"OpenCode: {model_error}")
+
         model_id = model.removeprefix(OPENROUTER_MODEL_PREFIX)
         inline_config = {
             "provider": {
                 "openrouter": {"models": {model_id: {"options": {"provider": dict(routing)}}}}
             }
         }
+
         return {_INLINE_CONFIG_ENV: json.dumps(inline_config, separators=_COMPACT_SEPARATORS)}
 
     def provision_script(self) -> str:

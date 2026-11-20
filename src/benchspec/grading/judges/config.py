@@ -151,6 +151,7 @@ def _preflight_judge_config(config: JudgeConfig) -> None:
             f"[tool.benchspec.judge] harness `{config.harness}` cannot map effort "
             f"`{config.effort}` (accepted: {sorted(accepted_efforts)})"
         )
+
     if config.provider == OPENROUTER_PROVIDER:
         model_error = unqualified_openrouter_model_error(config.model)
         if model_error:

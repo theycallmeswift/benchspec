@@ -216,6 +216,7 @@ class BaseAgent(ABC):
         """
         if routing:
             raise ValueError(f"harness `{self.id}` cannot deliver OpenRouter `routing`")
+
         return {}
 
     @classmethod

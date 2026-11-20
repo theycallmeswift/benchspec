@@ -148,14 +148,17 @@ def _validate_routing(where: str, value: object) -> dict[str, object]:
     """
     if not isinstance(value, dict):
         raise SchemaError(f"{where}: `routing` must be a table")
+
     unknown = sorted(set(value) - set(_ROUTING_KEYS))
     if unknown:
         raise SchemaError(
             f"{where}: unknown `routing` key(s) {unknown} (known: {list(_ROUTING_KEYS)})"
         )
+
     for key in _ROUTING_NAME_LIST_KEYS:
         if key not in value:
             continue
+
         names = value[key]
         if (
             not isinstance(names, list)
@@ -165,23 +168,28 @@ def _validate_routing(where: str, value: object) -> dict[str, object]:
             raise SchemaError(
                 f"{where}: `routing.{key}` must be a non-empty list of non-empty provider names"
             )
+
     if "sort" in value and value["sort"] not in _ROUTING_SORTS:
         raise SchemaError(
             f"{where}: unknown `routing.sort` `{value['sort']}` (known: {list(_ROUTING_SORTS)})"
         )
+
     if "allow_fallbacks" in value and not isinstance(value["allow_fallbacks"], bool):
         raise SchemaError(f"{where}: `routing.allow_fallbacks` must be true or false")
+
     return value
 
 
 def _validate_effort(where: str, harness: str, value: object) -> str:
     """Return `value` when the harness can map it, else raise SchemaError naming the set."""
     accepted = agent_class(harness).accepted_efforts
+
     if not isinstance(value, str) or value not in accepted:
         raise SchemaError(
             f"{where}: harness `{harness}` cannot map effort `{value}` "
             f"(accepted: {sorted(accepted)})"
         )
+
     return value
 
 
@@ -201,13 +209,16 @@ def _validate_routing_delivery(
         raise SchemaError(
             f"{where}: `routing` needs provider `{OPENROUTER_PROVIDER}`, got `{provider}`"
         )
+
     adapter = agent_class(harness)
     routing_env_var = adapter.routing_env_var
     if routing_env_var is None:
         raise SchemaError(f"{where}: harness `{harness}` cannot deliver `routing` to OpenRouter")
+
     model_error = adapter.routing_model_error(model)
     if model_error:
         raise SchemaError(f"{where}: `routing` cannot be delivered: {model_error}")
+
     if routing_env_var in env:
         raise SchemaError(
             f"{where}: `routing` is delivered through `{routing_env_var}`, "
