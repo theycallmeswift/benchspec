@@ -1789,6 +1789,72 @@ def test_sessionfinish_reports_scoped_assertions_beside_the_matrix(
     assert any(line.startswith("All evals") for line in printed)
 
 
+def _assert_one_cap_error(result: pytest.RunResult) -> None:
+    """The run was refused as a usage error with the cap rule as one line and no frames."""
+    output = result.stdout.str() + result.stderr.str()
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert result.stderr.str().count("ERROR: cell timeout must exceed the judge timeout") == 1
+    assert "(300s)" in output
+    assert "in validate_cell_caps" not in output
+
+
+def test_run_rejects_a_cell_timeout_at_the_judge_timeout(pytester: pytest.Pytester) -> None:
+    """A real run with `--benchspec-timeout` equal to the judge timeout is one clean error."""
+    _make_project(pytester)
+
+    result = pytester.runpytest_subprocess(
+        *_plugin_args(pytester, "--benchspec-timeout", "300")
+    )
+
+    _assert_one_cap_error(result)
+
+
+def test_parallel_run_reports_the_cell_timeout_rule_once(pytester: pytest.Pytester) -> None:
+    """With `-n 2` the controller refuses the run before any worker repeats the error."""
+    _make_project(pytester)
+
+    result = pytester.runpytest_subprocess(
+        *_plugin_args(pytester, "--benchspec-timeout", "300", "-p", "xdist", "-n", "2")
+    )
+
+    _assert_one_cap_error(result)
+
+
+def test_collect_only_reports_the_cell_timeout_rule_without_frames(
+    pytester: pytest.Pytester,
+) -> None:
+    """`--collect-only` refuses the same way, with no collection frame listing."""
+    _make_project(pytester)
+
+    result = _collect(pytester, "--benchspec-timeout", "300")
+
+    _assert_one_cap_error(result)
+
+
+def test_run_accepts_a_cell_timeout_just_above_the_judge_timeout(
+    pytester: pytest.Pytester,
+) -> None:
+    """One second over the judge timeout is a valid cap."""
+    _make_project(pytester)
+
+    result = _collect(pytester, "--benchspec-timeout", "301")
+
+    assert result.ret == 0
+
+
+def test_run_accepts_a_short_cell_timeout_under_a_lowered_judge_timeout(
+    pytester: pytest.Pytester,
+) -> None:
+    """Lowering the judge timeout alongside `--benchspec-timeout` makes a 20 s cap valid."""
+    _make_project(pytester)
+
+    result = _collect(
+        pytester, "--benchspec-timeout", "20", "--benchspec-judge-timeout", "10"
+    )
+
+    assert result.ret == 0
+
+
 def _plugin_args(pytester: pytest.Pytester, *extra: str) -> list[str]:
     """The arguments of a run that targets the cases module by default."""
     return ["-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path), *extra]

@@ -351,6 +351,11 @@ class MicrosandboxBackend(SharedBackendBehavior):
                 async with _translate_runtime_errors():
                     await _destroy_if_present(build_name)
 
+    async def discard_quietly(self, name: str) -> None:
+        """Destroy the sandbox `name` a cancelled boot may have left running."""
+        with contextlib.suppress(SandboxError, TimeoutError, OSError):
+            await _destroy_if_present(name)
+
     async def create_sandbox(
         self,
         *,

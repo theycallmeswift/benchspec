@@ -94,8 +94,8 @@ def test_parse_sets_arm_level_timeout_wins_over_set_level() -> None:
     assert trial.timeout == 1800
 
 
-def test_parse_sets_omitted_timeout_defaults_to_600() -> None:
-    """Verify an arm with no set or arm `timeout` gets the built-in 600 seconds."""
+def test_parse_sets_omitted_timeout_defaults_to_900() -> None:
+    """Verify an arm with no set or arm `timeout` gets the built-in 900-second cell cap."""
     rawsets, default = parse_sets(
         _sets_table(
             {
@@ -109,7 +109,7 @@ def test_parse_sets_omitted_timeout_defaults_to_600() -> None:
 
     resolved_set = resolve_set(rawsets, default, environ={})
 
-    assert resolved_set.arms[0].timeout == 600
+    assert resolved_set.arms[0].timeout == 900
 
 
 def test_parse_sets_rejects_non_integer_set_level_timeout() -> None:

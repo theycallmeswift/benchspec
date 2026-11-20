@@ -10,7 +10,9 @@ from typing import NoReturn
 
 import pytest
 
+from benchspec.agents import DEFAULT_CELL_TIMEOUT
 from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.orchestration.deadline import CellDeadline
 from benchspec.sandbox import project, registry, sandbox
 from benchspec.testing import FakeSandbox
 
@@ -193,6 +195,7 @@ def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
     async def drive() -> Path:
         """Open a session and report what was mounted while it was live."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -236,6 +239,7 @@ def test_arm_session_removes_the_stage_when_boot_fails(
     async def drive() -> None:
         """Open a session that fails to boot."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",

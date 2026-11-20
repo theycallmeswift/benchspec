@@ -13,6 +13,7 @@ from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.orchestration.results import parse_run_json, parse_stream_run
 from benchspec.sandbox.errors import SandboxError
+from benchspec.testing import FakeExecStream
 from tests.agents.doubles import exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
@@ -342,7 +343,7 @@ def test_invoke_baseline_parses_stream_result() -> None:
     assert res.session_id == "s1"
     assert res.is_error is False
     assert res.fired is False
-    assert res.raw == payload
+    assert res.raw == payload.rstrip("\n")
     recorded = exec_call(sandbox)
     assert recorded.cmd == "/root/.local/bin/claude"
     assert recorded.cwd == "/workspace"
@@ -493,7 +494,7 @@ def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
     parsed = parse_stream_run(stream, "e1", "without_skill", None)
     assert res.is_error is True
     assert res.result_text == "segfault at exit"
-    assert res.raw == stream
+    assert res.raw == stream.rstrip("\n")
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
     assert res.duration_ms == parsed.duration_ms
@@ -524,7 +525,7 @@ def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:
     parsed = parse_stream_run(stream, "e1", "without_skill", None)
     assert res.is_error is True
     assert res.result_text == parsed.result_text
-    assert res.raw == stream
+    assert res.raw == stream.rstrip("\n")
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
 
@@ -535,16 +536,15 @@ def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     class DyingSandbox(FakeSandbox):
         """A sandbox whose exec fails the way a torn-down VM does."""
 
-        async def exec(
+        async def exec_stream(
             self,
             cmd: str,
             args: list[str] | None = None,
             *,
             cwd: str | None = None,
             env: Mapping[str, str] | None = None,
-            timeout: float | None = None,
             stdin: bytes | None = None,
-        ) -> FakeExecOutput:
+        ) -> FakeExecStream:
             """Fail like a torn-down VM."""
             raise SandboxError("container gone")
 

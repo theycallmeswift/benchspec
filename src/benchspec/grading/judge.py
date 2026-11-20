@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 
 from benchspec.grading.judges import JudgeConfig, run_judge
 
@@ -157,6 +158,18 @@ def parse_judge_json(raw: str, eval_id: str, config: str) -> dict:
     }
 
 
+# The least time worth starting a judge attempt with, seconds.
+_MINIMUM_ATTEMPT_SECONDS = 1
+
+
+def _attempt_config(
+    judge_config: JudgeConfig, remaining_seconds: Callable[[], float]
+) -> JudgeConfig:
+    """`judge_config` with its timeout clamped to what the caller has left, at least a second."""
+    budget = max(_MINIMUM_ATTEMPT_SECONDS, int(remaining_seconds()))
+    return replace(judge_config, timeout=min(judge_config.timeout, budget))
+
+
 def grade_run(
     assertions: list[str],
     tree: str,
@@ -169,8 +182,13 @@ def grade_run(
     judge_config: JudgeConfig | None = None,
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
+    remaining_seconds: Callable[[], float] | None = None,
 ) -> dict:
-    """Grade one completed agent run against assertions."""
+    """Grade one completed agent run against assertions.
+
+    With `remaining_seconds`, each attempt runs under the lesser of the judge timeout and
+    what the caller has left, and the retry is skipped under a second.
+    """
     judge_config = judge_config or JudgeConfig()
     prompt = build_judge_prompt(
         assertions,
@@ -182,8 +200,16 @@ def grade_run(
         process_facts=process_facts,
     )
     for attempt in (1, 2):
+        if attempt == 2 and remaining_seconds is not None:
+            if remaining_seconds() < _MINIMUM_ATTEMPT_SECONDS:
+                break
+        attempt_config = (
+            judge_config
+            if remaining_seconds is None
+            else _attempt_config(judge_config, remaining_seconds)
+        )
         try:
-            raw = run_judge(prompt, config=judge_config)
+            raw = run_judge(prompt, config=attempt_config)
             outer = json.loads(raw)
             graded = parse_judge_json(outer.get("result", ""), eval_id, config)
             if len(graded["assertions"]) != len(assertions):
@@ -203,18 +229,17 @@ def grade_run(
             KeyError,
             ValueError,
         ):
-            if attempt == 1:
-                continue
-            return {
-                "eval_id": eval_id,
-                "arm": config,
-                "assertions": [
-                    {
-                        "text": assertion,
-                        "passed": False,
-                        "evidence": "JUDGE ERROR: unparseable output",
-                    }
-                    for assertion in assertions
-                ],
+            continue
+
+    return {
+        "eval_id": eval_id,
+        "arm": config,
+        "assertions": [
+            {
+                "text": assertion,
+                "passed": False,
+                "evidence": "JUDGE ERROR: unparseable output",
             }
-    raise AssertionError("unreachable: loop exits via return in both branches")
+            for assertion in assertions
+        ],
+    }
