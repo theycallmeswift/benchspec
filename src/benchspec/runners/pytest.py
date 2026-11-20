@@ -469,6 +469,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                 "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
+                "routing": arm.routing,
                 "timeout": arm.timeout,
                 "env": report.redact_env(arm.env),
                 "harness_args": arm.harness_args,

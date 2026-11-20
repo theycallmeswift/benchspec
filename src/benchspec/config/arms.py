@@ -1,11 +1,13 @@
 """Parse benchspec config into typed eval sets/arms and resolve a run.
 
-An arm is a `harness×model` cell — plus its own `provider`, `effort`, `timeout`, and
-`env` — carried verbatim into one `(eval × arm)` test. Arms live in a named set
-(`[tool.benchspec.sets.<name>]`): the set adds harness/provider/model/effort/timeout/env
-defaults (inherited by arms that omit a key) and a `baseline` (the arm every other arm's
-Δ is measured against). `env` `$VAR`s expand lazily at exec time, not resolve time. Validation
-is fail-fast at config-read time — a bad table raises SchemaError naming the defect, not
+An arm is a `harness×model` cell — plus its own `provider`, `effort`, `routing`, `timeout`,
+and `env` — carried verbatim into one `(eval × arm)` test. Arms live in a named set
+(`[tool.benchspec.sets.<name>]`): the set adds harness/provider/model/effort/routing/
+timeout/env defaults (inherited by arms that omit a key) and a `baseline` (the arm every
+other arm's Δ is measured against). `effort` and `routing` are checked against what the
+arm's harness declares it can deliver, so neither is ever accepted and ignored. `env`
+`$VAR`s expand lazily at exec time, not resolve time. Validation is fail-fast at
+config-read time — a bad table raises SchemaError naming the defect, not
 a silent no-op mid-run.
 """
 
@@ -20,6 +22,7 @@ from benchspec.agents import (
     DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
+    agent_class,
     known_harnesses,
     known_providers,
     unqualified_openrouter_model_error,
@@ -40,9 +43,22 @@ class Arm:
     harness_args: list[str] = field(default_factory=list, hash=False)
     provider: str = DEFAULT_PROVIDER
     timeout: int = DEFAULT_CELL_TIMEOUT
+    routing: dict[str, object] = field(default_factory=dict, hash=False)
 
 
-_SET_DEFAULT_KEYS = ("harness", "provider", "model", "effort", "timeout", "env", "harness_args")
+_SET_DEFAULT_KEYS = (
+    "harness",
+    "provider",
+    "model",
+    "effort",
+    "routing",
+    "timeout",
+    "env",
+    "harness_args",
+)
+_ROUTING_NAME_LIST_KEYS = ("only", "order", "ignore")
+_ROUTING_SORTS = ("price", "throughput", "latency")
+_ROUTING_KEYS = (*_ROUTING_NAME_LIST_KEYS, "sort", "allow_fallbacks")
 _VAR = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
 _DEFAULT_EFFORT = "medium"
 _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
@@ -115,6 +131,101 @@ def _validate_env_table(where: str, value: object) -> None:
             raise SchemaError(f"{where}: `env.{key}` must be a string")
 
 
+def _validate_routing(where: str, value: object) -> dict[str, object]:
+    """Validate the shape of an OpenRouter provider-routing table from configuration.
+
+    Args:
+        where: The config location, for the error message.
+        value: The raw `routing` value.
+
+    Returns:
+        The table, unchanged.
+
+    Raises:
+        SchemaError: On a non-table, an unknown key, a provider list that is not a
+            non-empty list of non-empty names, an unknown `sort`, or a non-bool
+            `allow_fallbacks`.
+    """
+    if not isinstance(value, dict):
+        raise SchemaError(f"{where}: `routing` must be a table")
+
+    unknown = sorted(set(value) - set(_ROUTING_KEYS))
+    if unknown:
+        raise SchemaError(
+            f"{where}: unknown `routing` key(s) {unknown} (known: {list(_ROUTING_KEYS)})"
+        )
+
+    for key in _ROUTING_NAME_LIST_KEYS:
+        if key not in value:
+            continue
+
+        names = value[key]
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(isinstance(name, str) and name for name in names)
+        ):
+            raise SchemaError(
+                f"{where}: `routing.{key}` must be a non-empty list of non-empty provider names"
+            )
+
+    if "sort" in value and value["sort"] not in _ROUTING_SORTS:
+        raise SchemaError(
+            f"{where}: unknown `routing.sort` `{value['sort']}` (known: {list(_ROUTING_SORTS)})"
+        )
+
+    if "allow_fallbacks" in value and not isinstance(value["allow_fallbacks"], bool):
+        raise SchemaError(f"{where}: `routing.allow_fallbacks` must be true or false")
+
+    return value
+
+
+def _validate_effort(where: str, harness: str, value: object) -> str:
+    """Return `value` when the harness can map it, else raise SchemaError naming the set."""
+    accepted = agent_class(harness).accepted_efforts
+
+    if not isinstance(value, str) or value not in accepted:
+        raise SchemaError(
+            f"{where}: harness `{harness}` cannot map effort `{value}` "
+            f"(accepted: {sorted(accepted)})"
+        )
+
+    return value
+
+
+def _validate_routing_delivery(
+    where: str, harness: str, provider: str, model: str, env: Mapping[str, str]
+) -> None:
+    """Raise SchemaError unless this arm's harness can deliver its `routing` to OpenRouter.
+
+    Args:
+        where: The config location, for the error message.
+        harness: The arm's harness.
+        provider: The arm's resolved provider.
+        model: The arm's model.
+        env: The arm's merged, unexpanded env.
+    """
+    if provider != OPENROUTER_PROVIDER:
+        raise SchemaError(
+            f"{where}: `routing` needs provider `{OPENROUTER_PROVIDER}`, got `{provider}`"
+        )
+
+    adapter = agent_class(harness)
+    routing_env_var = adapter.routing_env_var
+    if routing_env_var is None:
+        raise SchemaError(f"{where}: harness `{harness}` cannot deliver `routing` to OpenRouter")
+
+    model_error = adapter.routing_model_error(model)
+    if model_error:
+        raise SchemaError(f"{where}: `routing` cannot be delivered: {model_error}")
+
+    if routing_env_var in env:
+        raise SchemaError(
+            f"{where}: `routing` is delivered through `{routing_env_var}`, "
+            "which this arm's `env` also sets"
+        )
+
+
 def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
     """Parse eval set definitions from pyproject configuration."""
     sets_table = table.get("sets")
@@ -138,6 +249,8 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
             _validate_timeout(f"{where}: set-level", defaults["timeout"])
         if "env" in defaults:
             _validate_env_table(f"{where}: set-level `env`", defaults["env"])
+        if "routing" in defaults:
+            _validate_routing(f"{where}: set-level", defaults["routing"])
         if "harness_args" in defaults:
             defaults["harness_args"] = _validate_harness_args(
                 f"{where}: set-level `harness_args`",
@@ -174,6 +287,8 @@ def parse_sets(table: dict) -> tuple[dict[str, RawSet], str]:
                 _validate_timeout(f"{at}: arm-level", entry["timeout"])
             if "env" in entry:
                 _validate_env_table(f"{at}: arm-level `env`", entry["env"])
+            if "routing" in entry:
+                _validate_routing(f"{at}: arm-level", entry["routing"])
             if "harness_args" in entry:
                 _validate_harness_args(f"{at}: arm-level `harness_args`", entry["harness_args"])
 
@@ -262,14 +377,27 @@ def _materialize_arm(name: str, raw: dict, defaults: dict, where: str) -> Arm:
         model_error = unqualified_openrouter_model_error(model)
         if model_error:
             raise SchemaError(f"{where} arm `{name}`: {model_error}")
-    effort = raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
+    effort = _validate_effort(
+        f"{where} arm `{name}`", harness, raw.get("effort", defaults.get("effort", _DEFAULT_EFFORT))
+    )
     timeout = raw.get("timeout", defaults.get("timeout", DEFAULT_CELL_TIMEOUT))
     merged = {**defaults.get("env", {}), **raw.get("env", {})}
     harness_args = [*defaults.get("harness_args", []), *raw.get("harness_args", [])]
+    routing = {**defaults.get("routing", {}), **raw.get("routing", {})}
+    if routing:
+        _validate_routing_delivery(f"{where} arm `{name}`", harness, provider, model, merged)
 
     # Env stays unexpanded until the arm executes.
     return Arm(
-        name, harness, model, effort, merged, harness_args, provider=provider, timeout=timeout
+        name,
+        harness,
+        model,
+        effort,
+        merged,
+        harness_args,
+        provider=provider,
+        timeout=timeout,
+        routing=routing,
     )
 
 

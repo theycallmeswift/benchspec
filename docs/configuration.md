@@ -36,11 +36,12 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 
 | Key | Type | Notes |
 |---|---|---|
-| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `provider` / `model` / `effort` / `timeout` / `env` / `harness_args`. |
+| `arms` | array of tables | Required, non-empty. Each entry is one arm: `name` (required, unique in the set) plus any of `harness` / `provider` / `model` / `effort` / `routing` / `timeout` / `env` / `harness_args`. |
 | `harness` | string | Default harness: `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
 | `provider` | string | Default transport the harness reaches its model through: `default` (the vendor's own API or CLI login; the default) or `openrouter` (every request through OpenRouter on `OPENROUTER_API_KEY`). Under `openrouter` the model must be a vendor-qualified slug (`anthropic/claude-sonnet-4.6`; `openrouter/anthropic/...` for OpenCode). See [Providers](#providers). |
 | `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
-| `effort` | string | Default reasoning effort (default `medium`). Passed through to the harness unvalidated; see [`harnesses.md`](harnesses.md) for how each CLI receives it. |
+| `effort` | string | Default reasoning effort (default `medium`). Checked against the arm's harness at config-read time: a value the harness cannot map is an error naming the arm and the accepted set. See [`harnesses.md`](harnesses.md) for each harness's set and how its CLI receives it; an OpenCode model without variants ignores it. |
+| `routing` | table | Default OpenRouter upstream-host routing; needs `provider = "openrouter"` and a harness that can deliver it (OpenCode only). Arm `routing` shallow-merges over it (arm keys win). See [Routing](#routing). |
 | `timeout` | integer | Wall-clock cap on one whole cell (binder, boot, agent, judge), seconds (default `900`). A cell that hits it is graded on `/workspace` and recorded as a [timed-out sample](results.md#timed-out-samples). Must exceed the judge `timeout`. Arm-level `timeout` overrides it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
 | `harness_args` | array of strings | Raw CLI tokens appended to the harness invocation. Arm-level args append *after* set-level args. Flags benchspec owns (model, effort, prompt delivery, output format, session and permission controls) are reserved and rejected by the adapter. |
@@ -53,8 +54,9 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 > set-level only: no arm override, no CLI override.
 
 Validation is structural and fail-fast: unknown harnesses or providers, duplicate arm
-names, a bare model alias under `openrouter`, a `baseline` or `default-set` naming an
-undeclared thing, a non-table `env`. Each
+names, a bare model alias under `openrouter`, an `effort` or `routing` the
+arm's harness cannot honour, a `baseline` or `default-set` naming an undeclared
+thing, a non-table `env`. Each
 raises at config-read time (a pytest `UsageError` at collection, exit `2` from
 the CLI), never a silent no-op mid-run. What benchspec deliberately does *not*
 validate is harness × model semantics; models change too fast for an allow-list,
@@ -109,7 +111,7 @@ model   = "gpt-5.5"
 | `harness` | string | `claude-code` | `claude-code`, `codex`, or `opencode`. Validated at collection. |
 | `provider` | string | `default` | `default` (the harness vendor's own API or CLI login) or `openrouter` (grade through OpenRouter on `OPENROUTER_API_KEY`; no CLI login involved). See [Providers](#providers). |
 | `model` | string | `sonnet` | Harness-specific, like an arm's model. Structural checks at collection: an `opencode` judge needs a provider-qualified model (`anthropic/...`), and any judge under `openrouter` needs a vendor-qualified slug (`openrouter/...` for OpenCode). |
-| `effort` | string | `medium` | Passed to the judge harness the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, a `--variant` mapping for OpenCode. |
+| `effort` | string | `medium` | Checked against the judge harness and passed the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, `--variant` for OpenCode. |
 | `timeout` | integer | `300` | Judge subprocess timeout, seconds. Must stay below every arm's cell `timeout`. |
 | `harness_args` | array of strings | `[]` | Pass-through CLI tokens; benchspec-owned flags are rejected per harness. |
 | `env` | table | `{}` | Judge-only env, `$VAR`-expanded at judge execution time by the same rule as arm env. |
@@ -199,6 +201,50 @@ config error under `openrouter`: OpenRouter does not map them, so every model
 must be a vendor-qualified slug. `meta.json` records `provider` on the binder,
 the judge, and every arm. Cross-family judging still applies: this repo's
 `make e2e` puts Anthropic and OpenAI arms under a Codex judge on a Google slug.
+
+### Routing
+
+OpenRouter picks the upstream host for each request, and the host changes
+latency, quantization, and sometimes whether reasoning can be turned down. An
+arm's `routing` table fixes that choice, so the arm measures one route:
+
+```toml
+[tool.benchspec.sets.routed]
+harness  = "opencode"
+provider = "openrouter"
+arms = [
+  # 2026-11-11: Venice timed out; DeepInfra answered in ~1s. Pinned.
+  { name = "pinned", model = "openrouter/qwen/qwen3-coder",
+    routing = { order = ["DeepInfra"], allow_fallbacks = false } },
+]
+```
+
+| Key | Type | Notes |
+|---|---|---|
+| `only` | array of strings | The only upstream hosts OpenRouter may use. |
+| `order` | array of strings | Hosts to try first, in order. |
+| `ignore` | array of strings | Hosts never to use. |
+| `sort` | string | `price`, `throughput`, or `latency`. |
+| `allow_fallbacks` | boolean | `false` fails the request instead of leaving the listed hosts. |
+
+The table is sent as the request's
+[`provider` object](https://openrouter.ai/docs/features/provider-routing).
+Host names are OpenRouter's and are not checked by benchspec. Each of these is an
+error at config-read time, never an ignored setting:
+
+- An unknown key, a wrong type, an empty host list or host name, or an unknown
+  `sort`.
+- `routing` on an arm whose provider is `default`.
+- `routing` on a harness that cannot deliver it. Only OpenCode can; see
+  [`harnesses.md`](harnesses.md).
+- `routing` on an OpenCode arm whose model lacks the `openrouter/` prefix.
+- `routing` on an OpenCode arm whose `env` sets `OPENCODE_CONFIG_CONTENT`, the
+  variable the table is delivered through.
+
+Routing applies to arms only, not to the judge or the binder. A TOML comment
+beside the arm is the place to record when and why a route was pinned. Each
+sample's `provenance.json` records the arm's resolved `effort`, `provider`, and
+`routing`.
 
 ## Top-level `[tool.benchspec]` keys
 

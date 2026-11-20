@@ -38,7 +38,9 @@ arms = [
 |---|---|---|---|
 | CLI | Claude Code | OpenAI Codex CLI | [sst/opencode](https://github.com/sst/opencode) |
 | Model names | Aliases: `sonnet`, `opus`, `haiku` | What `codex exec -m` accepts (e.g. `gpt-5.4`) | Provider-qualified: `anthropic/claude-sonnet-4-6` |
-| How effort is passed | `--effort <value>`, unvalidated | `-c model_reasoning_effort=<value>`, unvalidated | `--variant`: `low` → `fast`, `medium` → `default`, `high` → `thorough` (anything else → `default`) |
+| How effort is passed | `--effort <value>` | `-c model_reasoning_effort=<value>` | `--variant <value>`, the effort passed through as the variant name |
+| Accepted `effort` | `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| OpenRouter `routing` | rejected | rejected | delivered: the arm model's `options.provider`, set inline through `OPENCODE_CONFIG_CONTENT` |
 | Token split (input/output) | yes | yes | yes; reasoning counts as output |
 | Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
 | `provider = "openrouter"` | `OPENROUTER_API_KEY`, injected as `ANTHROPIC_AUTH_TOKEN` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and an empty `ANTHROPIC_API_KEY`; model is a vendor slug (`anthropic/claude-sonnet-4.6`) | `OPENROUTER_API_KEY`, with benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*` overrides on every invocation; model is a vendor slug (`openai/gpt-5.5`) | `OPENROUTER_API_KEY` only; model is `openrouter/<vendor>/<model>` |
@@ -48,12 +50,26 @@ arms = [
 
 Notes that matter in practice:
 
-- **Effort is trust-and-record.** benchspec passes the arm's `effort` to the
-  harness in the form above and does not pre-validate the value; an unsupported
-  one surfaces as a loud error from the CLI, not a silent downgrade. The Claude
-  Code installer always fetches the latest release, so `BENCHSPEC_CLAUDE_VERSION`
-  changes the snapshot name without pinning the binary; the version that actually
-  ran is recorded in `meta.json`.
+- **Effort is validated per harness.** Each adapter declares the `effort`
+  values it can map, and an arm or judge `effort` outside that set fails at
+  config-read time. The Claude Code set is the one `claude --effort` lists. The
+  Codex CLI forwards any string to the model, so its set is the one the CLI
+  documents; whether a given model honours a value is the model's call. The
+  OpenCode set is every variant name its model catalog defines
+  (`opencode models --verbose`). OpenCode sends a variant as the request's
+  reasoning effort only for a model that defines it, and ignores it without an
+  error otherwise, so an `effort` on a model with no variants changes nothing.
+  An OpenCode arm that sets no `effort` sends the default, `medium`.
+- **`routing` is rejected unless the harness is confirmed to deliver it.**
+  OpenCode copies a model's `options.provider` into the OpenRouter request
+  body, observed on OpenCode 1.19.6 against a local endpoint. It applies to
+  the arm's model only: OpenCode's own session-title request uses another
+  model and carries no routing. Claude Code and Codex reach OpenRouter through
+  a fixed wire format whose body benchspec does not control, so they reject
+  `routing`. See [`configuration.md`](configuration.md#routing).
+- **The Claude Code installer always fetches the latest release,** so
+  `BENCHSPEC_CLAUDE_VERSION` changes the snapshot name without pinning the
+  binary; the version that actually ran is recorded in `meta.json`.
 - **`history:` works on every harness.** History renders into the prompt as a
   transcript block rather than relying on session resumption, so multi-turn
   context does not depend on the CLI.

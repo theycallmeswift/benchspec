@@ -69,6 +69,7 @@ def planned_arms(run_set: EvalSet | None) -> list[dict]:
                 "provider": arm.provider,
                 "model": arm.model,
                 "effort": arm.effort,
+                "routing": arm.routing,
                 "timeout": arm.timeout,
                 "env": redact_env(arm.env),
                 "harness_args": arm.harness_args,

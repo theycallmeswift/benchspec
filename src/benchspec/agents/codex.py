@@ -175,6 +175,7 @@ class CodexAgent(BaseAgent):
     guest_home = "/root"
     skill_load_dir = _CODEX_SKILL_LOAD_DIR
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
+    accepted_efforts = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 
     def provision_script(self) -> str:
         """Install the instance's pinned Codex CLI version (baked in so the cache key tracks it)."""

@@ -865,3 +865,219 @@ def test_resolve_set_models_sweep_inherits_set_provider() -> None:
     )
 
     assert [arm.provider for arm in resolved.arms] == ["openrouter", "openrouter"]
+
+
+def _openrouter_set(arm: dict, **set_level: object) -> dict:
+    """Build a one-arm OpenRouter set table, the arm merged over an OpenCode default."""
+    body = {
+        "harness": "opencode",
+        "provider": "openrouter",
+        "model": "openrouter/qwen/qwen3-coder",
+        **set_level,
+        "arms": [{"name": "alpha", **arm}],
+    }
+    return _sets_table({"default": body})
+
+
+@pytest.mark.parametrize(
+    ("harness", "model", "accepted"),
+    [
+        ("claude-code", "sonnet", ["low", "medium", "high", "xhigh", "max"]),
+        ("codex", "gpt-5.5", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+        (
+            "opencode",
+            "anthropic/claude-sonnet-4-6",
+            ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        ),
+    ],
+)
+def test_resolve_set_accepts_exactly_the_efforts_a_harness_declares(
+    harness: str, model: str, accepted: list[str]
+) -> None:
+    """Each harness resolves every effort it declares and rejects the rest."""
+    every_effort = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "thorough", ""]
+
+    resolved = []
+    for effort in every_effort:
+        rawsets, default = parse_sets(
+            _sets_table(
+                {
+                    "default": {
+                        "harness": harness,
+                        "model": model,
+                        "arms": [{"name": "alpha", "effort": effort}],
+                    }
+                }
+            )
+        )
+        try:
+            resolved.append(resolve_set(rawsets, default, environ={}).arms[0].effort)
+        except SchemaError:
+            continue
+
+    assert resolved == accepted
+
+
+def test_resolve_set_rejects_unmapped_effort_naming_arm_value_and_accepted_set() -> None:
+    """An effort that names no OpenCode variant fails at resolve, never silently ignored."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "harness": "opencode",
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "arms": [{"name": "alpha", "effort": "thorough"}],
+                }
+            }
+        )
+    )
+
+    with pytest.raises(
+        SchemaError,
+        match=r"arm `alpha`: harness `opencode` cannot map effort `thorough` "
+        r"\(accepted: \['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh'\]\)",
+    ):
+        resolve_set(rawsets, default, environ={})
+
+
+def test_resolve_set_checks_an_effort_override_against_each_arm_harness() -> None:
+    """A run-level effort override is validated like a configured one."""
+    rawsets, default = parse_sets(
+        _sets_table(
+            {
+                "default": {
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "arms": [
+                        {"name": "open", "harness": "opencode"},
+                        {"name": "claude", "harness": "claude-code", "model": "sonnet"},
+                    ],
+                }
+            }
+        )
+    )
+
+    with pytest.raises(SchemaError, match=r"arm `claude`.*cannot map effort `minimal`"):
+        resolve_set(rawsets, default, effort="minimal", environ={})
+
+
+def test_resolve_set_carries_a_valid_routing_table() -> None:
+    """Every routing key parses and reaches the arm unchanged."""
+    routing = {
+        "only": ["DeepInfra", "Together"],
+        "order": ["DeepInfra"],
+        "ignore": ["Venice"],
+        "sort": "throughput",
+        "allow_fallbacks": False,
+    }
+    rawsets, default = parse_sets(_openrouter_set({"routing": routing}))
+
+    arm = resolve_set(rawsets, default, environ={}).arms[0]
+
+    assert arm.routing == routing
+
+
+def test_resolve_set_arm_without_routing_has_an_empty_table() -> None:
+    """Routing is optional: an arm that sets none carries `{}`."""
+    rawsets, default = parse_sets(_openrouter_set({}))
+
+    arm = resolve_set(rawsets, default, environ={}).arms[0]
+
+    assert arm.routing == {}
+
+
+def test_resolve_set_merges_routing_with_arm_keys_winning() -> None:
+    """Set-level routing is inherited key by key; an arm's key replaces the set's."""
+    rawsets, default = parse_sets(
+        _openrouter_set(
+            {"routing": {"order": ["DeepInfra"], "allow_fallbacks": False}},
+            routing={"order": ["Together"], "sort": "price"},
+        )
+    )
+
+    arm = resolve_set(rawsets, default, environ={}).arms[0]
+
+    assert arm.routing == {"order": ["DeepInfra"], "sort": "price", "allow_fallbacks": False}
+
+
+@pytest.mark.parametrize(
+    ("routing", "match"),
+    [
+        (["DeepInfra"], r"`routing` must be a table"),
+        ({"prefer": ["DeepInfra"]}, r"unknown `routing` key\(s\) \['prefer'\]"),
+        ({"only": "DeepInfra"}, r"`routing.only` must be a non-empty list"),
+        ({"order": ["DeepInfra", ""]}, r"`routing.order` must be a non-empty list of non-empty"),
+        ({"ignore": [7]}, r"`routing.ignore` must be a non-empty list"),
+        ({"only": []}, r"`routing.only` must be a non-empty list"),
+        ({"order": []}, r"`routing.order` must be a non-empty list"),
+        ({"ignore": []}, r"`routing.ignore` must be a non-empty list"),
+        ({"sort": "fastest"}, r"unknown `routing.sort` `fastest`"),
+        ({"allow_fallbacks": "no"}, r"`routing.allow_fallbacks` must be true or false"),
+    ],
+)
+@pytest.mark.parametrize("level", ["set", "arm"])
+def test_parse_sets_rejects_malformed_routing_naming_the_key(
+    level: str, routing: object, match: str
+) -> None:
+    """A malformed routing table at either level is a SchemaError naming the defect."""
+    table = (
+        _openrouter_set({}, routing=routing)
+        if level == "set"
+        else _openrouter_set({"routing": routing})
+    )
+
+    with pytest.raises(SchemaError, match=match):
+        parse_sets(table)
+
+
+def test_resolve_set_rejects_routing_under_the_default_provider() -> None:
+    """Routing is an OpenRouter setting, so a `default`-provider arm cannot carry it."""
+    rawsets, default = parse_sets(
+        _openrouter_set(
+            {"provider": "default", "routing": {"order": ["DeepInfra"]}},
+        )
+    )
+
+    with pytest.raises(SchemaError, match=r"arm `alpha`: `routing` needs provider `openrouter`"):
+        resolve_set(rawsets, default, environ={})
+
+
+@pytest.mark.parametrize(
+    ("harness", "model"),
+    [("claude-code", "anthropic/claude-sonnet-4.6"), ("codex", "openai/gpt-5.5")],
+)
+def test_resolve_set_rejects_routing_on_a_harness_that_cannot_deliver_it(
+    harness: str, model: str
+) -> None:
+    """A harness with no way to send routing to OpenRouter refuses it at resolve."""
+    rawsets, default = parse_sets(
+        _openrouter_set({"harness": harness, "model": model, "routing": {"sort": "latency"}})
+    )
+
+    with pytest.raises(
+        SchemaError, match=rf"arm `alpha`: harness `{harness}` cannot deliver `routing`"
+    ):
+        resolve_set(rawsets, default, environ={})
+
+
+def test_resolve_set_rejects_routing_when_env_sets_its_delivery_variable() -> None:
+    """An arm cannot both route and set the env var routing is delivered through."""
+    rawsets, default = parse_sets(
+        _openrouter_set(
+            {"routing": {"sort": "latency"}, "env": {"OPENCODE_CONFIG_CONTENT": "{}"}},
+        )
+    )
+
+    with pytest.raises(SchemaError, match=r"delivered through `OPENCODE_CONFIG_CONTENT`"):
+        resolve_set(rawsets, default, environ={})
+
+
+def test_resolve_set_rejects_routing_on_an_opencode_model_that_bypasses_openrouter() -> None:
+    """An OpenCode arm whose model lacks the `openrouter/` prefix cannot carry routing."""
+    rawsets, default = parse_sets(
+        _openrouter_set({"model": "qwen/qwen3-coder", "routing": {"order": ["DeepInfra"]}})
+    )
+
+    with pytest.raises(
+        SchemaError, match=r"arm `alpha`: `routing` cannot be delivered: .*`openrouter/`-prefixed"
+    ):
+        resolve_set(rawsets, default, environ={})

@@ -154,6 +154,52 @@ def test_run_rejects_malformed_clause_at_collection(tmp_path: Path) -> None:
     assert "test session starts" not in result.stdout
 
 
+def test_run_unmapped_effort_is_a_usage_error_before_any_arm_runs(tmp_path: Path) -> None:
+    """Verify an effort the arm's harness cannot map fails collection with exit 2."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(
+        dedent("""\
+            [tool.benchspec]
+            default-set = "demo"
+
+            [tool.benchspec.sets.demo]
+            harness = "opencode"
+            model = "anthropic/claude-sonnet-4-6"
+            arms = [{ name = "deep", effort = "thorough" }]
+        """)
+    )
+
+    result = run_benchspec("run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "arm `deep`: harness `opencode` cannot map effort `thorough`" in result.stderr
+    assert "accepted: ['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh']" in result.stderr
+
+
+def test_run_undeliverable_routing_is_a_usage_error_before_any_arm_runs(tmp_path: Path) -> None:
+    """Verify routing on a harness that cannot deliver it fails collection with exit 2."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(
+        dedent("""\
+            [tool.benchspec]
+            default-set = "demo"
+
+            [tool.benchspec.sets.demo]
+            harness = "codex"
+            provider = "openrouter"
+            model = "openai/gpt-5.5"
+            arms = [{ name = "pinned", routing = { order = ["DeepInfra"] } }]
+        """)
+    )
+
+    result = run_benchspec("run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "arm `pinned`: harness `codex` cannot deliver `routing`" in result.stderr
+
+
 def test_run_rejects_a_cell_timeout_at_the_judge_timeout_before_spawning_pytest(
     tmp_path: Path,
 ) -> None:

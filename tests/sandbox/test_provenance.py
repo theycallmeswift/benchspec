@@ -39,6 +39,9 @@ def _sandbox(
 def _runtime(
     *,
     arm: str = "opus",
+    effort: str = "medium",
+    provider: str = "default",
+    routing: dict[str, object] | None = None,
     actual_version: str | None = "1.2.3",
     actual_version_status: Status = "available",
     actual_version_error: str | None = None,
@@ -47,6 +50,9 @@ def _runtime(
     """Build a runtime-provenance fixture with sensible defaults."""
     return RuntimeProvenance(
         arm=arm,
+        effort=effort,
+        provider=provider,
+        routing=routing if routing is not None else {},
         actual_version=actual_version,
         actual_version_status=actual_version_status,
         actual_version_error=actual_version_error,
@@ -187,6 +193,9 @@ class TestToObservedDict:
         observed = record.to_observed_dict()
 
         assert observed == {
+            "effort": "medium",
+            "provider": "default",
+            "routing": {},
             "actual_version": "1.2.3",
             "actual_version_status": "available",
             "sandbox": {
@@ -219,6 +228,9 @@ class TestToObservedDict:
         observed = record.to_observed_dict()
 
         assert observed == {
+            "effort": "medium",
+            "provider": "default",
+            "routing": {},
             "actual_version": None,
             "actual_version_status": "unavailable",
             "actual_version_error": "guest probe failed: no such binary",
@@ -246,6 +258,19 @@ class TestDiskRoundTrip:
         restored = RuntimeProvenance.from_disk_dict(record.to_disk_dict())
 
         assert restored == record
+
+    def test_round_trip_keeps_effort_provider_and_routing(self) -> None:
+        """Verify the arm's settings survive the disk dict and show in the observed shape."""
+        routing: dict[str, object] = {"order": ["DeepInfra"], "allow_fallbacks": False}
+        record = _runtime(effort="low", provider="openrouter", routing=routing)
+
+        restored = RuntimeProvenance.from_disk_dict(json.loads(json.dumps(record.to_disk_dict())))
+
+        assert restored == record
+        observed = restored.to_observed_dict()
+        assert observed["effort"] == "low"
+        assert observed["provider"] == "openrouter"
+        assert observed["routing"] == routing
 
     def test_round_trip_unavailable_record(self) -> None:
         """Verify an unavailable record round-trips through disk dict exactly."""
@@ -344,6 +369,24 @@ class TestAggregateObserved:
         second = _runtime(arm="opus", sandbox=_sandbox(image_digest="sha256:bbbb"))
 
         with pytest.raises(ValueError, match=r"arm `opus`.*`image_digest`"):
+            aggregate_observed([first, second])
+
+    @pytest.mark.parametrize(
+        ("field_name", "other"),
+        [
+            ("effort", {"effort": "high"}),
+            ("provider", {"provider": "openrouter"}),
+            ("routing", {"routing": {"order": ["DeepInfra"]}}),
+        ],
+    )
+    def test_conflicting_arm_setting_raises_naming_arm_and_field(
+        self, field_name: str, other: dict
+    ) -> None:
+        """Two records for one arm that ran with different settings raise, naming the field."""
+        first = _runtime(arm="opus")
+        second = _runtime(arm="opus", **other)
+
+        with pytest.raises(ValueError, match=rf"opus.*{field_name}"):
             aggregate_observed([first, second])
 
     def test_conflicting_actual_version_raises_naming_arm_and_field(self) -> None:
