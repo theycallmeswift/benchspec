@@ -567,9 +567,10 @@ def test_workers_flag_with_passthrough_n_is_a_usage_error(
     assert exit_code == 2
 
 
-def test_collect_only_adds_no_n_token(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("collect_flag", ["--collect-only", "--co"])
+def test_collect_only_adds_no_n_token(monkeypatch: pytest.MonkeyPatch, collect_flag: str) -> None:
     """Verify a collect-only run adds no `-n` token."""
-    args = _run_namespace(Path("repo"), workers=4, passthrough=["--collect-only"])
+    args = _run_namespace(Path("repo"), workers=4, passthrough=[collect_flag])
 
     _, recorder = _spawn(monkeypatch, args)
 

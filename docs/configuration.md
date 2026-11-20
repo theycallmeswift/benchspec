@@ -296,7 +296,7 @@ away by another group's win. `--fail-under 0` means "every arm must at least
 match baseline in every group":
 
 ```bash
-benchspec run --fail-under 0 -- --count 3 -n 6
+benchspec run --fail-under 0 --workers 6 -- --count 3
 ```
 
 The gate uses the raw delta, and a banded (multi-sample) run is the

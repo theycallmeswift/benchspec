@@ -60,9 +60,6 @@ GIB_PER_CELL = 2
 # Binder fan-out past about 12 workers trips the Gemini call's 60 s timeout.
 MAX_AUTO_WORKERS = 12
 
-# pytest-xdist spellings of the worker count in a `--` passthrough.
-_XDIST_WORKER_FLAGS = ("-n", "--numprocesses")
-
 
 @dataclass(frozen=True)
 class PluginOptions:
@@ -243,7 +240,7 @@ def resolve_workers(args: argparse.Namespace) -> Workers:
     Raises:
         SchemaError: the project `workers` value is malformed.
     """
-    flag = getattr(args, "workers", None)
+    flag = args.workers
     if flag is not None and flag != "auto":
         return Workers(count=flag, source="flag")
     if flag == "auto":
@@ -298,7 +295,7 @@ def run(
         return ExitCode.NOTHING_TO_DO
 
     passthrough_sets_workers = _passthrough_sets_workers(args.passthrough)
-    if getattr(args, "workers", None) is not None and passthrough_sets_workers:
+    if args.workers is not None and passthrough_sets_workers:
         print("error: --workers conflicts with -n/--numprocesses; pass one", file=sys.stderr)
         return ExitCode.USAGE
 
@@ -317,7 +314,7 @@ def run(
 
     worker_tokens: list[str] = []
     if not collect_only and not passthrough_sets_workers:
-        print(workers.describe())
+        print(workers.describe(), flush=True)
         if workers.count > 1:
             worker_tokens = [f"-n={workers.count}"]
 
