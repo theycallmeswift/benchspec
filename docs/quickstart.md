@@ -187,12 +187,16 @@ A malformed eval fails here, loudly, with the offending path quoted.
 The first run builds the sandbox snapshot (about a minute to download the base
 image and install the agent CLI); later runs reuse it, or run
 `benchspec sandbox:build` once to pay that cost up front. Both cells then run
-three times each under their eval file's progress line, grade, and the session
-ends with the benchmark table:
+three times each, print one line per finished sample, and the session ends
+with the benchmark table:
 
-```
-evals/hello/greets-by-name.eval.md ......                                 [100%]
-
+```text
+[1/6] FAIL     hello/eval-greets-by-name  baseline  s0   0/1   24.3s  first —     —
+[2/6] FAIL     hello/eval-greets-by-name  baseline  s1   0/1   22.9s  first —     —
+[3/6] FAIL     hello/eval-greets-by-name  baseline  s2   0/1   25.1s  first —     —
+[4/6] PASS     hello/eval-greets-by-name  trial     s0   2/2   31.8s  first —     —
+[5/6] PASS     hello/eval-greets-by-name  trial     s1   2/2   29.4s  first —     —
+[6/6] PASS     hello/eval-greets-by-name  trial     s2   2/2   30.6s  first —     —
 ============================= benchspec benchmark ==============================
 Eval                  baseline   trial
 hello/greets-by-name        0%    100%
@@ -202,7 +206,9 @@ vs baseline                     +100pp
 Report: tmp/evals/iteration_01/benchmark.md
 ```
 
-On a color terminal, rates are color-coded by band (green from 80%, yellow from
+Each line is a sample: its state, eval, arm, sample number, assertions passed
+and wall time ([the terminal summary](results.md#the-terminal-summary)). On a
+color terminal, rates are color-coded by band (green from 80%, yellow from
 50%, red below) and the `vs baseline` delta by sign.
 
 Your numbers will differ: the baseline arm may guess the right shape, the trial

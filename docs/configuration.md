@@ -207,6 +207,7 @@ the judge, and every arm. Cross-family judging still applies: this repo's
 | `judge` | table | The run's judge (above). |
 | `binder` | table | The run's binder (above). |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
+| `progress` | string | Live progress format: `cells` (default), one line per finished sample, or `dots`, pytest's own progress line. `--progress` wins over this key. See [`results.md`](results.md#the-terminal-summary). |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
 | `opencode_version` | string | Default OpenCode version pin when `BENCHSPEC_OPENCODE_VERSION` is unset. |
@@ -251,6 +252,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
+| `--progress {cells,dots}` | `--benchspec-progress` | Live progress format (default `cells`, or `[tool.benchspec] progress`). See [`results.md`](results.md#the-terminal-summary). |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 

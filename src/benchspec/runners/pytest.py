@@ -10,7 +10,8 @@ from __future__ import annotations
 import datetime
 import json
 import os
-from collections.abc import MutableMapping
+import re
+from collections.abc import Generator, MutableMapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -20,6 +21,7 @@ from dotenv import find_dotenv, load_dotenv
 from benchspec.agents import resolve_agent_name
 from benchspec.config.arms import Arm
 from benchspec.config.options import option_float, option_str
+from benchspec.config.progress import resolve_progress_style
 from benchspec.config.sets import (
     has_configured_set,
     resolved_binder_config,
@@ -31,6 +33,14 @@ from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig
 from benchspec.orchestration import cases, workspace
 from benchspec.reporting import manifest, report
+from benchspec.reporting.cells import (
+    CELL_PROPERTY,
+    RESULT_PROPERTY,
+    CellIdentity,
+    CellResult,
+    ColumnWidths,
+    format_cell_line,
+)
 from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_root
 
 _CASES = Path(cases.__file__)
@@ -227,6 +237,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
              "in meta.json under `binder.model`.",
     )
     group.addoption(
+        "--benchspec-progress",
+        default=None,
+        metavar="{cells,dots}",
+        help="live progress format: `cells` prints one line per finished sample, `dots` "
+        "keeps pytest's own progress line (default: cells, or [tool.benchspec] "
+        "progress). Must default to None so an unset flag never shadows the config key.",
+    )
+    group.addoption(
         "--benchspec-fail-under",
         type=float,
         default=None,
@@ -246,10 +264,35 @@ def sample_index(request: pytest.FixtureRequest) -> int:
     # param (0..N-1). Without --count, the param is absent — default to 0 so single-sample
     # runs still shard cleanly under sample-0/. Lives on the plugin (not cases.py) so user
     # test bodies under pytester can resolve it the same way real eval cases do.
-    params = _callspec_params(request.node)
+    return _repeat_step(_callspec_params(request.node))
+
+
+def _repeat_step(params: dict[str, object]) -> int:
+    """The pytest-repeat step behind a collected item; 0 without `--count`."""
     step = params.get("__pytest_repeat_step_number", 0)
 
     return step if isinstance(step, int) else 0
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Record an eval cell's identity on its reports before any fixture runs.
+
+    Ahead of setup, so a cell whose fixture fails or whose arm raises still names itself
+    in the progress line. A JSON string, because xdist ships properties through execnet.
+    """
+    params = _callspec_params(item)
+    if "eval_arm" not in params:
+        return
+
+    eval_case, arm = _eval_arm_param(params["eval_arm"])
+    identity = CellIdentity(
+        skill=eval_case.skill,
+        eval_id=eval_case.eval_id,
+        arm=arm.name,
+        sample=_repeat_step(params),
+    )
+    item.user_properties.append((CELL_PROPERTY, identity.to_json()))
 
 
 def _callspec_params(node: object) -> dict[str, object]:
@@ -266,10 +309,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers", "benchspec: skill-eval cases run via `benchspec run` (not `make test`)"
     )
     repo_root = resolve_repo_root(config)
+    project_table = pyproject_table(repo_root)
     try:
         agent_name = resolve_agent_name(
             option_str(config, "benchspec_agent"),
-            pyproject_table(repo_root).get("agent"),
+            project_table.get("agent"),
         )
     except RuntimeError as error:
         raise pytest.UsageError(str(error)) from None
@@ -294,6 +338,11 @@ def pytest_configure(config: pytest.Config) -> None:
             timespec="seconds"
         )
         config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
+        progress_style = resolve_progress_style(
+            option_str(config, "benchspec_progress"), project_table.get("progress")
+        )
+        if progress_style == "cells":
+            config.pluginmanager.register(_CellProgress(config), "benchspec-cell-progress")
 
 
 class _CellTracker:
@@ -311,6 +360,187 @@ class _CellTracker:
         """Flag the session once any eval cell reports."""
         if "benchspec" in report.keywords:
             self._config.stash[_RAN_CELLS] = True
+
+
+# pytest-repeat appends `<step>-<count>` to a repeated item's parameter id.
+_REPEAT_ID_SUFFIX = re.compile(r"-\d+-\d+$")
+
+
+def _param_id(nodeid: str) -> str:
+    """The bracketed parameter id at the end of a node id; empty for an unparametrized one."""
+    _path, bracket, tail = nodeid.rpartition("[")
+
+    return tail.removesuffix("]") if bracket and tail.endswith("]") else ""
+
+
+class _CellProgress:
+    """Prints one line per finished sample on the process that owns the terminal.
+
+    Registered on the controller (or the serial process) when the progress format is
+    `cells`. A worker's report carries the cell's identity and result as properties, so
+    a serial run and an xdist run share this one path.
+    """
+
+    def __init__(self, config: pytest.Config) -> None:
+        """Bind to the config whose terminal reporter the lines go through."""
+        self._config = config
+        self._finished = 0
+        self._collected_ids: list[str] | None = None
+        self._eval_nodeids: frozenset[str] = frozenset()
+        self._total: int | None = None
+        self._widths = ColumnWidths()
+        self._planned = False
+        self._being_logged: pytest.TestReport | None = None
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        """Remember a serial run's collected eval cells, the counter's denominator."""
+        if self._collected_ids is not None:
+            return
+
+        self._collected_ids = [
+            item.nodeid for item in session.items if item.get_closest_marker("benchspec")
+        ]
+        self._eval_nodeids = frozenset(self._collected_ids)
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node: object, ids: Sequence[str]) -> None:
+        """Remember the node ids every xdist worker collected, the counter's denominator."""
+        self._collected_ids = list(ids)
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_logstart(self, nodeid: str) -> None:
+        """Keep pytest from writing an eval file's path ahead of its cells' lines."""
+        reporter = self._reporter()
+        if reporter is None or nodeid not in self._eval_nodeids:
+            return
+        if self._config.get_verbosity() > 0:
+            return
+
+        # The reporter writes a path only when it differs from the one it wrote last, so
+        # claiming this cell's path as already written leaves the line start clean.
+        eval_path = self._config.rootpath / nodeid.split("::")[0]
+        if reporter.currentfspath != eval_path:
+            reporter.ensure_newline()
+            reporter.currentfspath = eval_path
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_report_teststatus(self, report: pytest.TestReport) -> tuple[str, str, str] | None:
+        """Drop pytest's progress letter for a finished cell, keeping its count in the footer.
+
+        Only while the report is being logged: the summaries pytest prints at session end
+        ask for the status again and still get `FAILED` and `ERROR`.
+        """
+        if report is not self._being_logged or not _ends_cell(report):
+            return None
+
+        category = "error" if report.when == "setup" else report.outcome
+
+        return category, "", ""
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> Generator[None, None, None]:
+        """Print the line for a cell that just finished, once pytest has logged its report."""
+        self._being_logged = report
+        try:
+            yield
+        finally:
+            self._being_logged = None
+
+        self._print_cell_line(report)
+
+    def _print_cell_line(self, report: pytest.TestReport) -> None:
+        """Print one line for a report that finishes an applicable cell."""
+        if not _ends_cell(report):
+            return
+
+        properties = dict(report.user_properties)
+        recorded_result = properties.get(RESULT_PROPERTY)
+        result = CellResult.from_json(str(recorded_result)) if recorded_result else None
+        if result is not None and result.not_applicable:
+            return
+
+        reporter = self._reporter()
+        if reporter is None:
+            return
+
+        self._plan()
+        self._finished += 1
+        line = format_cell_line(
+            index=self._finished,
+            total=self._total,
+            cell=CellIdentity.from_json(str(properties[CELL_PROPERTY])),
+            result=result,
+            wall_seconds=report.duration,
+            failed_report=report.failed,
+            message=_failure_message(report),
+            widths=self._widths,
+            color=self._config.get_terminal_writer().hasmarkup,
+        )
+
+        if self._config.get_verbosity() > 0:
+            reporter.ensure_newline()
+        else:
+            reporter.currentfspath = None
+        reporter.line(line)
+
+    def _reporter(self) -> pytest.TerminalReporter | None:
+        """The terminal reporter the lines print through; None when it is disabled."""
+        reporter = self._config.pluginmanager.get_plugin("terminalreporter")
+
+        return reporter if isinstance(reporter, pytest.TerminalReporter) else None
+
+    def _plan(self) -> None:
+        """Work out the counter's total and the column widths, once, from the planned cells.
+
+        Deferred to the first finished cell so a session that runs no eval cells never
+        resolves an eval set.
+        """
+        if self._planned:
+            return
+        self._planned = True
+
+        pairs, ids = cases.eval_arm_params(self._config)
+        self._widths = ColumnWidths(
+            label=max(
+                (len(f"{case.skill}/eval-{case.eval_id}") for case, _arm in pairs), default=0
+            ),
+            arm=max((len(arm.name) for _case, arm in pairs), default=0),
+        )
+
+        if self._collected_ids is None:
+            return
+        not_applicable = cases.not_applicable_param_ids(self._config, pairs, ids)
+        self._total = sum(
+            1
+            for nodeid in self._collected_ids
+            if _param_id(nodeid) not in not_applicable
+            and _REPEAT_ID_SUFFIX.sub("", _param_id(nodeid)) not in not_applicable
+        )
+
+
+def _ends_cell(report: pytest.TestReport) -> bool:
+    """Whether a report is the one that finishes an eval cell.
+
+    A cell ends on its call report, or on a failed setup report: a fixture error ends the
+    cell with no call phase. A skipped report is left to pytest.
+    """
+    if "benchspec" not in report.keywords or report.skipped:
+        return False
+    if CELL_PROPERTY not in dict(report.user_properties):
+        return False
+
+    return report.when == "call" or (report.when == "setup" and report.failed)
+
+
+def _failure_message(report: pytest.TestReport) -> str:
+    """The exception message behind a failed report; empty for a passing one."""
+    if not report.failed:
+        return ""
+
+    crash = getattr(report.longrepr, "reprcrash", None)
+    message = getattr(crash, "message", None)
+
+    return message if isinstance(message, str) and message else report.longreprtext
 
 
 def _workerinput(config: pytest.Config) -> MutableMapping[str, object] | None:

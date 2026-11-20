@@ -9,6 +9,7 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
+from benchspec.config.progress import PROGRESS_STYLES
 from benchspec.exit_codes import ExitCode
 from benchspec.grading.binder import BinderAuthError
 from benchspec.reporting import analyze
@@ -45,6 +46,13 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
         "--eval-paths", help="comma-separated search paths (--benchspec-eval-paths)"
     )
     run_parser.add_argument("--fail-under", help="pass-rate gate (--benchspec-fail-under)")
+    run_parser.add_argument(
+        "--progress",
+        choices=PROGRESS_STYLES,
+        help="live progress format: cells prints one line per finished sample, dots keeps "
+        "pytest's progress line (default: cells, or [tool.benchspec] progress) "
+        "(--benchspec-progress)",
+    )
     run_parser.add_argument(
         "--judge-harness", help="judge harness (--benchspec-judge-harness)"
     )

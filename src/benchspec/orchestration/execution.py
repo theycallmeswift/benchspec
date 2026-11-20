@@ -70,6 +70,8 @@ class ArmOutcome:
     errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
+    # The mapping written to timing.json, as written.
+    timing: dict[str, int | float | bool | str | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -636,7 +638,7 @@ def run_eval_arm(
     # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
     # once its verdicts were fixed, so its time and tokens never read as a full task's.
     # run_dir was created above when provenance was persisted.
-    timing: dict[str, int | bool | None] = {
+    timing: dict[str, int | float | bool | str | None] = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
         **_usage_fields(arm_run),
@@ -657,4 +659,5 @@ def run_eval_arm(
         errored,
         arm_run.total_duration_ms,
         arm_run.total_tokens,
+        timing,
     )
