@@ -92,7 +92,7 @@ def test_pass_line_shows_every_reported_field() -> None:
     )
 
     assert line == (
-        "[1/4] PASS     hello/eval-greets-by-name  baseline  s0   2/2   31.4s  first 2.8s  $0.024"
+        "[1/4] PASS     hello/eval-greets-by-name  baseline  s0   2/2   31.4s  first   2.8s  $0.024"
     )
 
 
@@ -109,7 +109,7 @@ def test_fail_line_counts_the_assertions_that_held() -> None:
     )
 
     assert line == (
-        "[2/4] FAIL     hello/eval-greets-by-name  trial     s0   1/2   38.2s  first 2.1s  $0.031"
+        "[2/4] FAIL     hello/eval-greets-by-name  trial     s0   1/2   38.2s  first   2.1s  $0.031"
     )
 
 
@@ -126,8 +126,33 @@ def test_timeout_line_keeps_its_partial_counts() -> None:
     )
 
     assert line == (
-        "[3/4] TIMEOUT  hello/eval-writes-file     baseline  s0   0/3  600.0s  first 4.0s  $0.212"
+        "[3/4] TIMEOUT  hello/eval-writes-file     baseline  s0   0/3  600.0s  first   4.0s  $0.212"
     )
+
+
+@pytest.mark.parametrize(
+    ("first_output_ms", "tail"),
+    [
+        (7500, "19.8s  first   7.5s  $0.088"),
+        (11500, "19.8s  first  11.5s  $0.088"),
+        (None, "19.8s  first      —  $0.088"),
+    ],
+)
+def test_cost_column_holds_its_place_whatever_the_first_output_time(
+    first_output_ms: int | None, tail: str
+) -> None:
+    """Verify cost column holds its place whatever the first output time."""
+    line = format_cell_line(
+        index=1,
+        total=4,
+        cell=GREETS,
+        result=_result(2, 2, first_output_ms=first_output_ms, cost_usd=0.088),
+        wall_seconds=19.8,
+        label_width=LABEL_WIDTH,
+        arm_width=ARM_WIDTH,
+    )
+
+    assert line.endswith(tail)
 
 
 def test_error_line_without_a_result_ends_with_the_first_failure_line() -> None:
@@ -145,7 +170,7 @@ def test_error_line_without_a_result_ends_with_the_first_failure_line() -> None:
     )
 
     assert line == (
-        "[4/4] ERROR    hello/eval-writes-file     trial     s0   —      9.7s  first —     —"
+        "[4/4] ERROR    hello/eval-writes-file     trial     s0   —      9.7s  first      —  —"
         "  setup.sh exited 2"
     )
 
@@ -191,7 +216,7 @@ def test_unreported_first_output_and_cost_print_a_dash(timing: Timing) -> None:
     )
 
     assert line == (
-        "[1/1] PASS     hello/eval-greets-by-name  baseline  s0   2/2   31.4s  first —     —"
+        "[1/1] PASS     hello/eval-greets-by-name  baseline  s0   2/2   31.4s  first      —  —"
     )
 
 

@@ -21,7 +21,6 @@ _STATE_WIDTH = len("TIMEOUT")
 _SAMPLE_WIDTH = len("s00")
 _ASSERTIONS_WIDTH = len("0/0")
 _SECONDS_WIDTH = len("600.0s")
-_FIRST_OUTPUT_WIDTH = len("first 0.0s")
 _MESSAGE_LIMIT = 120
 
 _STATE_COLORS = {
@@ -189,7 +188,7 @@ def format_cell_line(
         f"s{cell.sample}".ljust(_SAMPLE_WIDTH),
         assertions.ljust(_ASSERTIONS_WIDTH),
         f"{wall_seconds:.1f}s".rjust(_SECONDS_WIDTH),
-        f"first {first_output}".ljust(_FIRST_OUTPUT_WIDTH),
+        f"first {first_output.rjust(_SECONDS_WIDTH)}",
         _cost(timing.get("cost_usd")),
     ]
 

@@ -218,11 +218,11 @@ def test_serial_run_prints_one_line_per_finished_sample_before_the_matrix(
     result = _run(pytester)
 
     assert _cell_lines(result) == [
-        "[1/4] PASS     myskill/eval-alpha  baseline  s0   2/2    0.0s  first —     —",
-        "[2/4] FAIL     myskill/eval-alpha  trial     s0   1/2    0.0s  first 2.1s  $0.031",
-        "[3/4] ERROR    myskill/eval-beta   baseline  s0   0/1    0.0s  first —     —"
+        "[1/4] PASS     myskill/eval-alpha  baseline  s0   2/2    0.0s  first      —  —",
+        "[2/4] FAIL     myskill/eval-alpha  trial     s0   1/2    0.0s  first   2.1s  $0.031",
+        "[3/4] ERROR    myskill/eval-beta   baseline  s0   0/1    0.0s  first      —  —"
         "  AssertionError: baseline run errored (see the arm's grading.json)",
-        "[4/4] ERROR    myskill/eval-beta   trial     s0   —      0.0s  first —     —"
+        "[4/4] ERROR    myskill/eval-beta   trial     s0   —      0.0s  first      —  —"
         "  RuntimeError: setup.sh exited 2",
     ]
     last_cell_line = max(
@@ -339,9 +339,9 @@ def test_a_failing_setup_fixture_prints_one_error_line_per_cell(
     result = _run(pytester, "-k", "alpha")
 
     assert _cell_lines(result) == [
-        "[1/2] ERROR    myskill/eval-alpha  baseline  s0   —      0.0s  first —     —"
+        "[1/2] ERROR    myskill/eval-alpha  baseline  s0   —      0.0s  first      —  —"
         "  RuntimeError: workspace seed failed",
-        "[2/2] ERROR    myskill/eval-alpha  trial     s0   —      0.0s  first —     —"
+        "[2/2] ERROR    myskill/eval-alpha  trial     s0   —      0.0s  first      —  —"
         "  RuntimeError: workspace seed failed",
     ]
     result.assert_outcomes(errors=2)
@@ -409,8 +409,8 @@ def test_a_timed_out_sample_prints_timeout_with_its_partial_counts(
     result = _run(pytester, "-k", "alpha")
 
     assert _cell_lines(result) == [
-        "[1/2] TIMEOUT  myskill/eval-alpha  baseline  s0   0/2    0.0s  first —     —",
-        "[2/2] FAIL     myskill/eval-alpha  trial     s0   1/2    0.0s  first 2.1s  $0.031",
+        "[1/2] TIMEOUT  myskill/eval-alpha  baseline  s0   0/2    0.0s  first      —  —",
+        "[2/2] FAIL     myskill/eval-alpha  trial     s0   1/2    0.0s  first   2.1s  $0.031",
     ]
     result.assert_outcomes(passed=2)
 
@@ -422,9 +422,9 @@ def test_the_counter_total_follows_the_selection(pytester: pytest.Pytester) -> N
     result = _run(pytester, "-k", "alpha-baseline", "--count", "3")
 
     assert _cell_lines(result) == [
-        "[1/3] PASS     myskill/eval-alpha  baseline  s0   2/2    0.0s  first —     —",
-        "[2/3] PASS     myskill/eval-alpha  baseline  s1   2/2    0.0s  first —     —",
-        "[3/3] PASS     myskill/eval-alpha  baseline  s2   2/2    0.0s  first —     —",
+        "[1/3] PASS     myskill/eval-alpha  baseline  s0   2/2    0.0s  first      —  —",
+        "[2/3] PASS     myskill/eval-alpha  baseline  s1   2/2    0.0s  first      —  —",
+        "[3/3] PASS     myskill/eval-alpha  baseline  s2   2/2    0.0s  first      —  —",
     ]
 
 

@@ -191,12 +191,12 @@ three times each, print one line per finished sample, and the session ends
 with the benchmark table:
 
 ```text
-[1/6] FAIL     hello/eval-greets-by-name  baseline  s0   0/1   24.3s  first 2.2s  $0.041
-[2/6] FAIL     hello/eval-greets-by-name  baseline  s1   0/1   22.9s  first 2.5s  $0.039
-[3/6] FAIL     hello/eval-greets-by-name  baseline  s2   0/1   25.1s  first 2.1s  $0.043
-[4/6] PASS     hello/eval-greets-by-name  trial     s0   2/2   31.8s  first 2.6s  $0.058
-[5/6] PASS     hello/eval-greets-by-name  trial     s1   2/2   29.4s  first 2.3s  $0.055
-[6/6] PASS     hello/eval-greets-by-name  trial     s2   2/2   30.6s  first 2.4s  $0.057
+[1/6] FAIL     hello/eval-greets-by-name  baseline  s0   0/1   24.3s  first   2.2s  $0.041
+[2/6] FAIL     hello/eval-greets-by-name  baseline  s1   0/1   22.9s  first   2.5s  $0.039
+[3/6] FAIL     hello/eval-greets-by-name  baseline  s2   0/1   25.1s  first   2.1s  $0.043
+[4/6] PASS     hello/eval-greets-by-name  trial     s0   2/2   31.8s  first   2.6s  $0.058
+[5/6] PASS     hello/eval-greets-by-name  trial     s1   2/2   29.4s  first   2.3s  $0.055
+[6/6] PASS     hello/eval-greets-by-name  trial     s2   2/2   30.6s  first   2.4s  $0.057
 ============================= benchspec benchmark ==============================
 Eval                  baseline   trial
 hello/greets-by-name        0%    100%

@@ -199,6 +199,6 @@ def test_terminal_prints_sample_lines_with_the_reported_cost_and_no_event(
     result = _run(pytester, monkeypatch, "-k", "alpha")
 
     output = result.stdout.str()
-    assert "PASS     myskill/eval-alpha  baseline  s0   1/1    0.0s  first —     $0.031" in output
+    assert "PASS     myskill/eval-alpha  baseline  s0   1/1    0.0s  first      —  $0.031" in output
     assert "format_version" not in output
     assert "cell.start" not in output

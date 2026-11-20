@@ -177,10 +177,10 @@ judge failure.
 While cells run, the run prints one line per finished sample, in finish order:
 
 ```text
-[1/4] PASS     hello/eval-greets-by-name             baseline  s0   2/2   31.4s  first 2.4s  $0.060
-[2/4] FAIL     hello/eval-greets-by-name             trial     s0   1/2   38.2s  first 3.1s  $0.071
-[3/4] PASS     hello-file/eval-writes-greeting-file  baseline  s0   3/3   44.0s  first 2.8s  $0.083
-[4/4] ERROR    hello-file/eval-writes-greeting-file  trial     s0   0/3    9.7s  first —     —  AssertionError: trial run errored (see the arm's grading.json)
+[1/4] PASS     hello/eval-greets-by-name             baseline  s0   2/2   31.4s  first   2.4s  $0.060
+[2/4] FAIL     hello/eval-greets-by-name             trial     s0   1/2   38.2s  first   3.1s  $0.071
+[3/4] PASS     hello-file/eval-writes-greeting-file  baseline  s0   3/3   44.0s  first   2.8s  $0.083
+[4/4] ERROR    hello-file/eval-writes-greeting-file  trial     s0   0/3    9.7s  first      —  —  AssertionError: trial run errored (see the arm's grading.json)
 ```
 
 | Field | Meaning |
