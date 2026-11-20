@@ -929,7 +929,7 @@ def test_build_command_rejects_reserved_harness_arg_equals_form() -> None:
             effort="medium",
             resume_session_id=None,
             detect_skill=None,
-            harness_args=["--variant=fast"],
+            harness_args=["--variant=high"],
         )
 
 

@@ -59,6 +59,7 @@ Notes that matter in practice:
   (`opencode models --verbose`). OpenCode sends a variant as the request's
   reasoning effort only for a model that defines it, and ignores it without an
   error otherwise, so an `effort` on a model with no variants changes nothing.
+  An OpenCode arm that sets no `effort` sends the default, `medium`.
 - **`routing` is rejected unless the harness is confirmed to deliver it.**
   OpenCode copies a model's `options.provider` into the OpenRouter request
   body, observed on OpenCode 1.19.6 against a local endpoint. It applies to
