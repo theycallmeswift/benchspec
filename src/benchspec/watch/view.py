@@ -374,10 +374,9 @@ class RunView:
         count = max((sample.index for sample in planned), default=0) + 1
 
         if self._end is not None:
-            status, detail = f"ended · exit {self._end['exit_status']}", None
+            status = f"ended · exit {self._end['exit_status']}"
         else:
-            status = "live"
-            detail = f"last event {live_duration(now_ms - self._last_event_ms)} ago"
+            status = f"live · last event {live_duration(now_ms - self._last_event_ms)} ago"
 
         return {
             "iteration": self._plan["iteration"],
@@ -385,7 +384,6 @@ class RunView:
             "count": f"--count {count}" if count > 1 else None,
             "live": self._end is None,
             "status": status,
-            "detail": detail,
         }
 
     def _counter(self, counted: list[Sample], done: int, state: str, now_ms: int) -> dict:
@@ -408,6 +406,11 @@ class RunView:
 
         finished_line = f"{done} of {total} samples finished"
         line = f"Run stopped · {done} of {total} finished" if state == "stopped" else finished_line
+        announce = {
+            "empty": "No cells in this run.",
+            "finished": f"Run finished · {done} of {total} samples",
+            "stopped": f"Run stopped · {done} of {total} samples",
+        }.get(state, finished_line)
         left = None
         if state == "live" and 0 < done < total:
             left = f"~{_coarse_duration(elapsed_ms / done * (total - done))} left"
@@ -418,9 +421,7 @@ class RunView:
             "total": total,
             "line": line,
             "progress": finished_line,
-            "announce": (
-                finished_line if state == "live" else f"Run {state} · {done} of {total} samples"
-            ),
+            "announce": announce,
             "clock_word": "elapsed" if self._end is None else "took",
             "clock": (
                 live_duration(self._end["wall_ms"])
@@ -819,12 +820,12 @@ def _state_words(sample: Sample, now_ms: int) -> str:
 
 def _progress(samples: list[Sample], now_ms: int) -> str:
     """The unfinished cell's phase and its elapsed time, from its earliest started sample."""
-    running = [
-        sample for sample in samples if sample.started_ms is not None and sample.closed_ms is None
-    ]
     if samples[0].run_ended:
         return "unfinished"
 
+    running = [
+        sample for sample in samples if sample.started_ms is not None and sample.closed_ms is None
+    ]
     if not running:
         return "queued"
 

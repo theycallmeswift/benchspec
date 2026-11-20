@@ -12,21 +12,23 @@ from benchspec.runners import run
 from tests.runners.test_cell_progress import EVALS, PYPROJECT, STAND_IN_CONFTEST
 from tests.support.watch import next_event, open_stream
 
-# The stand-in cells finish at once; slow them so the page is seen live.
-SLOW_CELLS = textwrap.dedent(
+# The stand-in cells finish at once; hold them until the test has seen the page live.
+GATED_CELLS = textwrap.dedent(
     """\
+    import pathlib
     import time
 
-    instant_arm = cases.run_eval_arm
+    ungated_arm = cases.run_eval_arm
 
 
-    def slow_arm(*args, **kwargs):
-        time.sleep(0.4)
+    def gated_arm(*args, **kwargs):
+        while not pathlib.Path(os.environ["WATCH_GATE"]).exists():
+            time.sleep(0.05)
 
-        return instant_arm(*args, **kwargs)
+        return ungated_arm(*args, **kwargs)
 
 
-    cases.run_eval_arm = slow_arm
+    cases.run_eval_arm = gated_arm
     """
 )
 
@@ -45,20 +47,30 @@ def test_watch_follows_a_real_run_from_no_run_to_its_final_view(
             encoding="utf-8",
         )
 
-    pytester.makeconftest(STAND_IN_CONFTEST + SLOW_CELLS)
+    pytester.makeconftest(STAND_IN_CONFTEST + GATED_CELLS)
     args = argparse.Namespace(
         root=pytester.path, eval_paths=None, workers=1, watch=True, passthrough=[], env=[]
     )
+    gate = pytester.path / "gate"
     streams = []
+    events = []
 
-    def runner(argv: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-        """Open the page's stream before the real pytest child starts."""
-        streams.append(open_stream(capsys.readouterr().out.split("Watching: ")[1].strip()))
+    def runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+        """Run the real pytest child, opening its cells once the page is live."""
+        stream = open_stream(capsys.readouterr().out.split("Watching: ")[1].strip())
+        streams.append(stream)
+        child = subprocess.Popen(
+            argv, env={**env, "WATCH_GATE": str(gate)}, stdout=subprocess.DEVNULL
+        )
+        events.append(next_event(stream))
+        while events[-1][1]["state"] != "live":
+            events.append(next_event(stream))
 
-        return subprocess.run(argv, env=env, capture_output=True, check=False)
+        gate.touch()
+
+        return subprocess.CompletedProcess(argv, child.wait(timeout=60))
 
     exit_code = run.run(args, runner=runner, preflight=lambda args: None)
-    events = [next_event(streams[0])]
     while events[-1][0] != "end":
         events.append(next_event(streams[0]))
 

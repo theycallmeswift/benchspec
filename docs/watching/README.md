@@ -46,12 +46,13 @@ Deltas carry agent output, so the page is reachable only from this computer:
   running, quiet, waiting, and the worker count.
 - **Matrix.** One row per eval, grouped by its folder, one column per arm, one
   box per sample. Hover or focus a cell for its samples; click it for one
-  sample's assertions, phases, last five output lines and artifact path.
-![One sample's drawer over the matrix](assets/drawer.png)
-
+  sample's assertions, phases, last five output lines and artifact path. A
+  group that finishes cleanly collapses while the run is live.
 - **Leaderboard.** Arms as columns: pass rate, skill triggered, samples, median
   time, median first output and mean cost. The page moves here when the run
   ends unless you already picked a tab.
+
+![One sample's drawer over the matrix](assets/drawer.png)
 
 | Box | Sample state |
 | --- | --- |

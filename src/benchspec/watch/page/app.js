@@ -141,7 +141,7 @@ function renderTop() {
   );
   const state = byId("run-state");
   setClass(state, top.live && connected ? "bs-live" : "");
-  setText(state, top.detail ? `${top.status} · ${top.detail}` : top.status);
+  setText(state, top.status);
 }
 
 function renderCounter(state) {
@@ -308,6 +308,7 @@ function renderMatrix() {
     }
   }
 
+  keepACellReachable();
   updateArmHint();
 }
 
@@ -389,10 +390,22 @@ function buildMatrix(matrix, scrolls) {
   } else {
     grid.replaceChildren(head, ...body);
   }
+}
 
-  const first = grid.querySelector("button.bs-cell");
+// Roving tabindex: one visible cell is always in the tab order, even after its group collapses.
+function keepACellReachable() {
+  const buttons = [...byId("matrix").querySelectorAll("button.bs-cell")];
+  const current = buttons.find((button) => button.tabIndex === 0);
 
-  if (first) first.tabIndex = 0;
+  if (current && current.offsetParent !== null) return;
+
+  const visible = buttons.find((button) => button.offsetParent !== null);
+
+  if (!visible) return;
+
+  if (current) current.tabIndex = -1;
+
+  visible.tabIndex = 0;
 }
 
 function keyOf(group, row, column) {

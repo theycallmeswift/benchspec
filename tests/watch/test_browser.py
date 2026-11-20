@@ -175,6 +175,35 @@ def test_the_keyboard_reaches_a_cell_and_opens_its_drawer(tmp_path: Path, pages:
         expect(page.locator(JUDGES)).to_be_focused()
 
 
+def test_the_keyboard_reaches_open_groups_after_the_first_one_collapses(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """The keyboard reaches open groups after the first one collapses."""
+    run = Recording(iteration(tmp_path))
+    run.plan("settled", "first")
+    run.plan("pending", "second")
+    run.begin()
+    run.done("settled/first/baseline/0", 70)
+    run.done("settled/first/trial/0", 80)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        expect(page.locator(".bs-gl").first).to_have_attribute("aria-expanded", "false")
+
+        page.locator(".bs-gl").nth(1).focus()
+        page.keyboard.press("Tab")
+        expect(page.locator("button.bs-cell[aria-label^='second on baseline']")).to_be_focused()
+
+        page.locator(".bs-gl").first.click()
+        page.locator(".bs-gl").nth(1).click()
+        reopened = page.locator("button.bs-cell[aria-label^='first on baseline']")
+        expect(reopened).to_have_attribute("tabindex", "0")
+        page.locator(".bs-gl").first.focus()
+        page.keyboard.press("Tab")
+        expect(reopened).to_be_focused()
+        expect(page.locator("button.bs-cell[tabindex='0']")).to_have_count(1)
+
+
 def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages: Pages) -> None:
     """A narrow desktop keeps a live cell's elapsed time."""
     mid_run(tmp_path)
