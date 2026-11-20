@@ -13,6 +13,7 @@ import os
 import shutil
 import textwrap
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from benchspec.runners import pytest as plugin
 from benchspec.runners.run import PluginOptions
 from benchspec.sandbox import sandbox
 from benchspec.sandbox.provenance import ImageIdentity, RuntimeProvenance, SandboxProvenance
+from benchspec.specs.discovery import EvalCase
 from benchspec.specs.schema import SchemaError
 from tests.support import seed_arm
 
@@ -574,6 +576,19 @@ class _StubAgent:
     def version(self) -> str:
         """Return the install selector the manifest records as `requested_version`."""
         return "9.9.9"
+
+
+@pytest.fixture(autouse=True)
+def bound_texts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Pass the grading preflight and record binder calls instead of reaching the network.
+
+    Returns the texts `binder.bind` was called with, in call order.
+    """
+    bound: list[str] = []
+    monkeypatch.setattr(cases, "grading_preflight_errors", lambda config: [])
+    monkeypatch.setattr(binder, "bind", lambda text, config=None: bound.append(text) or None)
+
+    return bound
 
 
 @pytest.fixture(autouse=True)
@@ -1810,3 +1825,173 @@ def test_collection_accepts_a_short_cell_timeout_under_a_lowered_judge_timeout(
     )
 
     assert result.ret == 0
+
+
+def _plugin_args(pytester: pytest.Pytester, *extra: str) -> list[str]:
+    """The arguments of a run that targets the cases module by default."""
+    return ["-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path), *extra]
+
+
+def _run_stub_cells(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *extra: str
+) -> pytest.RunResult:
+    """Run every cell with a stub arm that binds each of its assertions through its `bind`."""
+
+    def bind_each(
+        eval_case: EvalCase,
+        arm: Arm,
+        *args: object,
+        bind: Callable[[str], object],
+        **kwargs: object,
+    ) -> ArmOutcome:
+        """Stand in for the sandbox run: grade nothing, but bind like `run_eval_arm` does."""
+        for text in eval_case.assertions:
+            bind(text)
+        return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
+
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
+    monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
+    monkeypatch.setattr(cases, "run_eval_arm", bind_each)
+
+    return pytester.runpytest(*_plugin_args(pytester, *extra))
+
+
+def test_controller_binds_each_unique_assertion_once_before_cells(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, bound_texts: list[str]
+) -> None:
+    """Two evals across two arms and two samples bind each assertion once, none in cells."""
+    _make_project(pytester)
+
+    _run_stub_cells(pytester, monkeypatch, "--count", "2", "-p", "pytest_repeat")
+
+    assert sorted(bound_texts) == ["source note archived", "summary written"]
+
+
+def test_a_failed_pre_bind_is_bound_again_by_each_cell(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, bound_texts: list[str]
+) -> None:
+    """A text whose pre-bind raised RuntimeError is bound live by every cell that grades it."""
+
+    def flaky(text: str, config: object = None) -> None:
+        bound_texts.append(text)
+        if text == "summary written":
+            raise RuntimeError("blip")
+
+    _make_project(pytester)
+    monkeypatch.setattr(binder, "bind", flaky)
+
+    _run_stub_cells(pytester, monkeypatch)
+
+    # beta runs on two arms: one controller attempt, then one attempt per cell.
+    assert bound_texts.count("summary written") == 3
+    assert bound_texts.count("source note archived") == 1
+
+
+def test_collect_only_binds_nothing(pytester: pytest.Pytester, bound_texts: list[str]) -> None:
+    """`--collect-only` pays for no binder call."""
+    _make_project(pytester)
+
+    pytester.runpytest(*_plugin_args(pytester, "--collect-only"))
+
+    assert bound_texts == []
+
+
+def test_a_run_that_skips_the_cases_module_binds_nothing(
+    pytester: pytest.Pytester, bound_texts: list[str]
+) -> None:
+    """The binder corpus run targets its own tests, so no pre-bind and no key preflight."""
+    _make_project(pytester)
+
+    pytester.runpytest(*_plugin_args(pytester, "test_cases.py::test_eval"))
+
+    assert bound_texts == []
+
+
+def test_only_the_controller_prebinds(
+    pytester: pytest.Pytester, bound_texts: list[str]
+) -> None:
+    """A worker config reads the table from `workerinput`; the controller builds it."""
+    _make_project(pytester)
+    worker_config = pytester.parseconfig(*_plugin_args(pytester))
+    vars(worker_config)["workerinput"] = {"benchspec_iteration": "iter-x"}
+    controller_config = pytester.parseconfig(*_plugin_args(pytester))
+
+    plugin.pytest_configure(worker_config)
+    assert bound_texts == []
+
+    plugin.pytest_configure(controller_config)
+    assert sorted(bound_texts) == ["source note archived", "summary written"]
+
+
+def test_workers_receive_the_table_through_workerinput(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Under xdist each worker gets the controller's table, with a failed bind omitted."""
+
+    def flaky(text: str, config: object = None) -> dict | None:
+        if text == "summary written":
+            raise RuntimeError("blip")
+        return {"kind": "regex"}
+
+    _make_project(pytester)
+    monkeypatch.setattr(binder, "bind", flaky)
+    pytester.makepyfile(
+        handoff_plugin=f"""
+import json
+import pytest
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    workerinput = item.config.workerinput
+    with open(r"{tmp_path}/" + workerinput["workerid"], "w") as handoff:
+        json.dump(workerinput["benchspec_bound_specs"], handoff)
+    pytest.skip("handoff recorded")
+"""
+    )
+    monkeypatch.setenv("PYTHONPATH", str(pytester.path))
+
+    pytester.syspathinsert()
+
+    pytester.runpytest(
+        *_plugin_args(pytester, "-p", "xdist.plugin", "-p", "handoff_plugin", "-n", "2")
+    )
+
+    tables = [json.loads(path.read_text()) for path in tmp_path.glob("gw*")]
+    assert tables
+    assert all(table == {"source note archived": {"kind": "regex"}} for table in tables)
+
+
+def test_a_rejected_binder_key_is_a_usage_error(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A BinderAuthError during the pre-bind ends the run cleanly, not as an internal error."""
+
+    def reject(text: str, config: object = None) -> None:
+        raise binder.BinderAuthError("key rejected")
+
+    _make_project(pytester)
+    monkeypatch.setattr(binder, "bind", reject)
+
+    result = pytester.runpytest(*_plugin_args(pytester))
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "key rejected" in result.stderr.str()
+
+
+def test_a_failing_grading_preflight_is_a_usage_error_before_any_cell(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, bound_texts: list[str]
+) -> None:
+    """An empty binder key stops the run at configure, before any binder call."""
+    _make_project(pytester)
+    monkeypatch.setattr(
+        cases, "grading_preflight_errors", lambda config: ["GEMINI_API_KEY is empty"]
+    )
+
+    result = pytester.runpytest(*_plugin_args(pytester))
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "GEMINI_API_KEY is empty" in result.stderr.str()
+    assert bound_texts == []
