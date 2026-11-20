@@ -11,7 +11,7 @@ import pytest
 
 from benchspec.watch.server import WatchError, WatchServer, find_iteration
 from benchspec.watch.tail import UnsupportedFormatError
-from tests.support.watch import Recording, finished_run, iteration
+from tests.support.watch import Recording, finished_run, iteration, next_event
 
 CELL = "hello/greets/trial/0"
 
@@ -68,23 +68,10 @@ def _get(
     return connection.getresponse()
 
 
-def _next_event(stream: http.client.HTTPResponse) -> tuple[str, dict]:
-    """Read the stream's next named event."""
-    name = ""
-    for raw in stream:
-        line = raw.decode().rstrip("\n")
-        if line.startswith("event: "):
-            name = line.removeprefix("event: ")
-        elif line.startswith("data: ") and name:
-            return name, json.loads(line.removeprefix("data: "))
-
-    raise AssertionError("the stream closed without another event")
-
-
 def _view_with(stream: http.client.HTTPResponse, *, done: int) -> dict:
     """Read views until one counts `done` finished samples."""
     while True:
-        name, view = _next_event(stream)
+        name, view = next_event(stream)
         if name == "view" and view["counter"]["done"] == done:
             return view
 
@@ -109,8 +96,6 @@ def test_binds_the_loopback_interface_only(server: WatchServer) -> None:
         "/bracket.svg",
         "/fonts/jetbrains-mono-400.woff2",
         "/fonts/jetbrains-mono-500.woff2",
-        "/fonts/jetbrains-mono-600.woff2",
-        "/fonts/jetbrains-mono-700.woff2",
         "/fonts/dm-sans-opsz.woff2",
     ],
 )
@@ -126,7 +111,13 @@ def test_serves_each_packaged_file_same_origin_and_uncached(server: WatchServer,
 
 @pytest.mark.parametrize(
     "path",
-    ["/fonts/LICENSE-dm-sans.txt", "/fonts/../app.js", "/index.html", "/events-main.jsonl"],
+    [
+        "/fonts/jetbrains-mono-700.woff2",
+        "/fonts/LICENSE-dm-sans.txt",
+        "/fonts/../app.js",
+        "/index.html",
+        "/events-main.jsonl",
+    ],
 )
 def test_anything_else_is_not_found(server: WatchServer, path: str) -> None:
     """Anything else is not found."""
@@ -151,12 +142,12 @@ def test_streams_a_view_per_change_then_end_once_the_run_ends(
     """Streams a view per change then end once the run ends."""
     stream = _get(server, "/events")
 
-    first = _next_event(stream)
+    first = next_event(stream)
     run.done("hello/greets/baseline/0", 70)
     second = _view_with(stream, done=1)
     run.end(80)
-    third = _next_event(stream)
-    last = _next_event(stream)
+    third = next_event(stream)
+    last = next_event(stream)
 
     assert stream.getheader("Content-Type") == "text/event-stream"
     assert (first[0], first[1]["counter"]["done"]) == ("view", 0)
@@ -166,16 +157,14 @@ def test_streams_a_view_per_change_then_end_once_the_run_ends(
     assert stream.read().strip() == b""
 
 
-def test_stopping_sends_each_open_stream_its_last_view(
-    server: WatchServer, run: Recording
-) -> None:
+def test_stopping_sends_each_open_stream_its_last_view(server: WatchServer, run: Recording) -> None:
     """Stopping sends each open stream its last view."""
     stream = _get(server, "/events")
-    _next_event(stream)
+    next_event(stream)
 
     run.end(80)
     server.stop()
-    events = [_next_event(stream), _next_event(stream)]
+    events = [next_event(stream), next_event(stream)]
 
     assert events == [("view", events[0][1]), ("end", {})]
     assert events[0][1]["state"] == "stopped"
@@ -186,10 +175,10 @@ def test_a_sample_going_quiet_sends_a_view_with_no_new_event(
 ) -> None:
     """A sample going quiet sends a view with no new event."""
     stream = _get(server, "/events")
-    before = _next_event(stream)[1]
+    before = next_event(stream)[1]
 
     clock.now_ms += 30_000
-    after = _next_event(stream)[1]
+    after = next_event(stream)[1]
 
     assert _box(before) == "bs-b-running"
     assert _box(after) == "bs-b-quiet"
@@ -201,9 +190,9 @@ def test_reports_no_run_until_the_iteration_directory_exists(tmp_path: Path) -> 
     server.start()
 
     stream = _get(server, "/events")
-    waiting = _next_event(stream)
+    waiting = next_event(stream)
     Recording(iteration(tmp_path)).iteration_dir.mkdir(parents=True)
-    loading = _next_event(stream)
+    loading = next_event(stream)
     server.stop()
 
     assert waiting == ("view", {"state": "none"})
@@ -215,7 +204,7 @@ def test_a_live_tail_reports_an_unsupported_format_and_closes(
 ) -> None:
     """A live tail reports an unsupported format and closes."""
     stream = _get(server, "/events")
-    _next_event(stream)
+    next_event(stream)
 
     with (run.iteration_dir / "events-gw9.jsonl").open("w", encoding="utf-8") as file:
         file.write('{"format_version": 2, "type": "cell.start", "ts_ms": 1, "worker": "gw9"}\n')
@@ -282,6 +271,7 @@ def test_refuses_a_root_or_an_iteration_without_an_event_stream(tmp_path: Path) 
 
     with pytest.raises(WatchError, match="no iteration with an event stream"):
         find_iteration(tmp_path, None)
+
     with pytest.raises(WatchError, match="iteration_01 has no event stream"):
         find_iteration(tmp_path, "iteration_01")
 

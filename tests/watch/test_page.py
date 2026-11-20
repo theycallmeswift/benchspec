@@ -12,6 +12,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN = REPO_ROOT / "docs" / "design"
 PAGE = resources.files("benchspec.watch") / "page"
+# Wordmark and social-card styles, and the two weights only they use: not on the page.
+BRAND_ART = ("mono-600", "mono-700", "bs-type-wordmark", "bs-type-social", "bs-type-terminal")
 
 
 def _page(name: str) -> str:
@@ -45,7 +47,8 @@ def test_the_stylesheet_is_the_design_systems_tokens_and_components() -> None:
 
     stylesheet = _page("app.css")
 
-    assert stylesheet.startswith(tokens)
+    used = [line for line in tokens.splitlines() if not any(name in line for name in BRAND_ART)]
+    assert stylesheet.splitlines()[: len(used)] == used
     assert bundle.replace(bracket.group(), '  --bs-bracket: url("bracket.svg");\n') in stylesheet
 
 

@@ -387,6 +387,7 @@ def _iteration_name(config: pytest.Config, repo_root: Path) -> str:
 
     if not re.fullmatch(r"iteration_\d+", name):
         raise pytest.UsageError(f"--benchspec-iteration must look like iteration_NN, got {name}")
+
     if (workspace.evals_root(repo_root) / name).exists():
         raise pytest.UsageError(f"--benchspec-iteration: {name} already exists")
 

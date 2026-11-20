@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.watch import tail
 from benchspec.watch.tail import EventTail, UnsupportedFormatError, check_format
 
 
@@ -79,6 +80,17 @@ def test_skips_a_malformed_line_and_reports_it_once(
     assert capsys.readouterr().err.splitlines() == [f"{path}:2: skipped a malformed event"]
 
 
+def test_skips_a_file_removed_since_it_was_listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skips a file removed since it was listed."""
+    kept = tmp_path / "events-main.jsonl"
+    _append(kept, _line(text="kept"))
+    monkeypatch.setattr(tail, "event_files", lambda directory: [tmp_path / "gone.jsonl", kept])
+
+    assert [event["text"] for event in EventTail(tmp_path).poll()] == ["kept"]
+
+
 def test_refuses_another_format_version(tmp_path: Path) -> None:
     """Refuses another format version."""
     newer = _line().replace(b'"format_version": 1', b'"format_version": 2')
@@ -87,5 +99,6 @@ def test_refuses_another_format_version(tmp_path: Path) -> None:
 
     with pytest.raises(UnsupportedFormatError, match=message):
         EventTail(tmp_path).poll()
+
     with pytest.raises(UnsupportedFormatError, match=message):
         check_format(tmp_path)

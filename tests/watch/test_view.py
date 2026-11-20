@@ -131,7 +131,7 @@ def test_a_cell_error_before_bind_has_no_phase(tmp_path: Path) -> None:
 
     sample = cell_of(fold(run, at=30), "greets", "trial")["samples"][0]
 
-    assert sample["status"] == "ERROR · exception · before bind"
+    assert (sample["verdict"], sample["detail"]) == ("ERROR", "exception · before bind")
     assert sample["message"] == "snapshot build failed"
     assert sample["phases"] is None
 
@@ -146,9 +146,56 @@ def test_a_sample_that_never_starts_stays_queued_and_the_run_reads_stopped(tmp_p
 
     assert view["state"] == "stopped"
     assert _box(view, "baseline") == "bs-b-queued"
-    assert _tally(view)["waiting"] == 1
-    assert view["counter"]["line"] == "1 of 2 samples finished"
+    assert _tally(view) == {"passed": 1, "failed": 0, "errored": 0, "unfinished": 1}
+    assert view["counter"]["line"] == "Run stopped · 1 of 2 finished"
+    assert view["counter"]["progress"] == "1 of 2 samples finished"
+    assert view["counter"]["announce"] == "Run stopped · 1 of 2 samples"
     assert view["matrix"]["caption"] == "[ 1 eval × 2 arms · stopped ]"
+
+
+def test_no_sample_reads_as_active_once_the_run_has_ended(tmp_path: Path) -> None:
+    """No sample reads as active once the run has ended."""
+    run = _one_cell(tmp_path, count=2)
+    run.play("hello/greets/trial/0", 0)
+    run.play("hello/greets/trial/1", 0, through="boot")
+    run.done("hello/greets/baseline/0", 70)
+    run.end(80, exit_status=1)
+
+    view = fold(run, at=999)
+    killed = cell_of(view, "greets", "trial")
+    partial = cell_of(view, "greets", "baseline")
+
+    assert _tally(view) == {"passed": 1, "failed": 0, "errored": 0, "unfinished": 3}
+    assert (killed["kind"], killed["label"]) == ("queued", "unfinished")
+    assert killed["boxes"] == ["bs-b-queued", "bs-b-queued"]
+    assert killed["hover"]["problem"] is None
+    assert [row["verdict"] for row in killed["hover"]["rows"]] == ["unfinished", "unfinished"]
+    assert killed["samples"][0]["verdict"] == "unfinished"
+    assert killed["samples"][0]["pending"] is None
+    assert (partial["label"], partial["count"], partial["progress"]) == (
+        "1/2 · unfinished",
+        "1/2",
+        "unfinished",
+    )
+    assert view["matrix"]["groups"][0]["summaries"][1] == {
+        "text": "unfinished",
+        "count": "0/2",
+        "muted": True,
+        "bar": 0,
+        "live": False,
+    }
+
+
+def test_a_run_that_planned_no_samples_has_no_cells(tmp_path: Path) -> None:
+    """A run that planned no samples has no cells."""
+    run = Recording(iteration(tmp_path))
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert view["state"] == "empty"
+    assert view["top"]["count"] is None
+    assert view["matrix"]["groups"] == []
 
 
 def test_events_before_run_start_are_kept(tmp_path: Path) -> None:
@@ -445,4 +492,4 @@ def test_the_drawer_lists_failures_first_and_scoped_off_lines_last(tmp_path: Pat
         (entry["index"], entry["state"], entry["checker"]) for entry in shaped["assertions"]
     ] == [(1, "fail", "judge"), (0, "pass", "file_exists"), (2, "n/a", "judge")]
     assert sample["scoped"] == {"2": "runs only on trial"}
-    assert sample["status"] == "FAIL · 1/2 assertions"
+    assert (sample["verdict"], sample["detail"]) == ("FAIL", "1/2 assertions")

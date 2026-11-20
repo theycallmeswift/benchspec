@@ -75,6 +75,7 @@ include = [
     "evals",
     "docs/*.md",
     "docs/style",
+    "docs/watching",
     "Makefile",
     # Anchored: an unanchored `README.md` matches at any depth, so a README anywhere
     # under docs/ would ship too.

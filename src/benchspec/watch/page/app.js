@@ -26,6 +26,7 @@ const groupToggles = new Map();
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
+
   for (const [name, value] of Object.entries(props)) {
     if (value === null || value === undefined || value === false) continue;
     if (name === "class") node.className = value;
@@ -33,12 +34,16 @@ function el(tag, props = {}, ...children) {
     else if (name.startsWith("on")) node.addEventListener(name.slice(2), value);
     else node.setAttribute(name, value === true ? "" : value);
   }
+
   fill(node, ...children);
+
   return node;
 }
 
 function fill(node, ...children) {
-  node.replaceChildren(...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false));
+  node.replaceChildren(
+    ...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false),
+  );
 }
 
 function setText(node, text) {
@@ -75,6 +80,7 @@ source.addEventListener("error", (event) => {
   } else if (!ended) {
     connected = false;
   }
+
   schedule();
 });
 
@@ -88,6 +94,7 @@ function render() {
   byId("counter").hidden = !hasRun;
   byId("run").hidden = !hasRun || state === "empty";
   byId("run").setAttribute("aria-busy", String(state === "loading"));
+
   if (!hasRun) return;
 
   if (state !== "live" && state !== lastState && !pickedTab) tab = "leaderboard";
@@ -117,25 +124,36 @@ function renderEmpty(state) {
     empty: ["No cells in this run.", ""],
   }[state];
   byId("empty").hidden = !copy;
+
   if (!copy) return;
   setText(byId("empty-line"), copy[0]);
   setText(byId("empty-hint"), copy[1]);
+
   if (state !== "empty") setText(byId("status"), copy[0]);
 }
 
 function renderTop() {
   const top = view.top;
   setText(byId("iteration"), top.iteration);
-  byId("suite").replaceChildren(top.suite, top.count ? el("span", { class: "bs-wide", text: ` · ${top.count}` }) : "");
+  byId("suite").replaceChildren(
+    top.suite,
+    top.count ? el("span", { class: "bs-wide", text: ` · ${top.count}` }) : "",
+  );
   const state = byId("run-state");
   setClass(state, top.live && connected ? "bs-live" : "");
-  state.replaceChildren(top.status, top.detail ? el("span", { class: "bs-wide", text: ` · ${top.detail}` }) : "");
+  setText(state, top.detail ? `${top.status} · ${top.detail}` : top.status);
 }
 
 function renderCounter(state) {
   const counter = view.counter;
   const headline = byId("headline");
-  const percent = el("span", { class: "bs-num" }, String(counter.percent), el("span", { class: "bs-pct", text: "%" }));
+  const percent = el(
+    "span",
+    { class: "bs-num" },
+    String(counter.percent),
+    el("span", { class: "bs-pct", text: "%" }),
+  );
+
   if (state === "finished") {
     setClass(headline, "bs-n bs-fin");
     headline.replaceChildren(
@@ -143,19 +161,28 @@ function renderCounter(state) {
       el("span", { class: "bs-dot bs-wide", text: "·" }),
       percent,
       el("span", { class: "bs-dot", text: "·" }),
-      el("span", {}, `${counter.done} of ${counter.total}`, el("span", { class: "bs-narrow", text: " samples" })),
-      el("span", { class: "bs-el" }, el("span", { class: "bs-wide", text: "took " }), counter.clock),
-    );
-  } else {
-    const stopped = state === "stopped";
-    setClass(headline, "bs-n");
-    headline.replaceChildren(
-      percent,
-      el("span", { text: stopped ? `Run stopped · ${counter.done} of ${counter.total} finished` : counter.line }),
+      el(
+        "span",
+        {},
+        `${counter.done} of ${counter.total}`,
+        el("span", { class: "bs-narrow", text: " samples" }),
+      ),
       el(
         "span",
         { class: "bs-el" },
-        `${stopped ? "took" : "elapsed"} ${counter.clock}`,
+        el("span", { class: "bs-wide", text: `${counter.clock_word} ` }),
+        counter.clock,
+      ),
+    );
+  } else {
+    setClass(headline, "bs-n");
+    headline.replaceChildren(
+      percent,
+      el("span", { text: counter.line }),
+      el(
+        "span",
+        { class: "bs-el" },
+        `${counter.clock_word} ${counter.clock}`,
         counter.left ? el("span", { class: "bs-wide", text: ` · ${counter.left}` }) : "",
       ),
     );
@@ -166,13 +193,22 @@ function renderCounter(state) {
   setClass(progress, state === "finished" ? "bs-prog bs-done" : "bs-prog");
   progress.setAttribute("aria-valuemax", counter.total);
   progress.setAttribute("aria-valuenow", counter.done);
-  progress.setAttribute("aria-valuetext", counter.line);
+  progress.setAttribute("aria-valuetext", counter.progress);
   progress.firstElementChild.style.width = `${counter.total ? (100 * counter.done) / counter.total : 0}%`;
 
-  const marks = { failed: "bs-att bs-failed", errored: "bs-att", quiet: "bs-warn", waiting: "bs-wait" };
+  const marks = {
+    failed: "bs-att bs-failed",
+    errored: "bs-att",
+    quiet: "bs-warn",
+    waiting: "bs-wait",
+    unfinished: "bs-warn",
+  };
   byId("tally").replaceChildren(
     ...counter.tally.map(({ bucket, count }) =>
-      el("li", { class: count ? marks[bucket] || "" : `bs-zero ${bucket === "failed" ? "bs-failed" : ""}`, text: `${count} ${bucket}` }),
+      el("li", {
+        class: count ? marks[bucket] || "" : `bs-zero ${bucket === "failed" ? "bs-failed" : ""}`,
+        text: `${count} ${bucket}`,
+      }),
     ),
     counter.workers ? el("li", { class: "bs-wk", text: counter.workers }) : "",
   );
@@ -186,10 +222,9 @@ function renderCounter(state) {
 
 function announce(state) {
   const terminal = state === "finished" || state === "stopped";
-  const text = terminal
-    ? `Run ${state} · ${view.counter.done} of ${view.counter.total} samples`
-    : view.counter.line;
+  const text = view.counter.announce;
   const now = Date.now();
+
   if (text === announced.text || (!terminal && now - announced.at < ANNOUNCE_EVERY_MS)) return;
   announced = { text, at: now };
   setText(byId("status"), text);
@@ -208,6 +243,7 @@ function pickTab(name, focus) {
   tab = name;
   pickedTab = true;
   render();
+
   if (focus) byId(`tab-${name}`).focus();
 }
 
@@ -217,6 +253,7 @@ function tokenPx(name) {
 
 function armsFit(count) {
   const column = tokenPx("--size-arm-phone") + tokenPx("--space-8");
+
   return tokenPx("--size-label-phone") + count * column <= byId("panel-matrix").clientWidth;
 }
 
@@ -227,8 +264,15 @@ function renderMatrix() {
   const next = JSON.stringify([
     scrolls,
     matrix.arms,
-    matrix.groups.map((group) => [group.name, group.rows.map((row) => [row.id, row.cells.map((cell) => [cell.kind === "na", (cell.boxes || []).length])])]),
+    matrix.groups.map((group) => [
+      group.name,
+      group.rows.map((row) => [
+        row.id,
+        row.cells.map((cell) => [cell.kind === "na", (cell.boxes || []).length]),
+      ]),
+    ]),
   ]);
+
   if (next !== shape) {
     shape = next;
     buildMatrix(matrix, scrolls);
@@ -239,21 +283,31 @@ function renderMatrix() {
     const open = groupToggles.has(group.name) ? groupToggles.get(group.name) : group.open;
     refs.button.setAttribute("aria-expanded", String(open));
     setText(refs.chevron, open ? "▾" : "▸");
-    refs.meta.replaceChildren(group.evals, group.note ? " · " : "", group.note ? el("span", { text: group.note }) : "");
+    refs.meta.replaceChildren(
+      group.evals,
+      group.note ? " · " : "",
+      group.note ? el("span", { text: group.note }) : "",
+    );
+
     for (const row of refs.rows) row.hidden = !open;
     group.summaries.forEach((summary, index) => {
       const ref = refs.summaries[index];
-      ref.text.replaceChildren(summary.text, summary.count ? el("span", { class: "bs-wide", text: ` · ${summary.count}` }) : "");
+      ref.text.replaceChildren(
+        summary.text,
+        summary.count ? el("span", { class: "bs-wide", text: ` · ${summary.count}` }) : "",
+      );
       setClass(ref.box, summary.muted ? "bs-gs bs-q" : "bs-gs");
       setClass(ref.bar, summary.live ? "bs-gbar bs-live" : "bs-gbar");
       ref.bar.firstElementChild.style.width = `${100 * summary.bar}%`;
     });
+
     for (const row of group.rows) {
       row.cells.forEach((cell, column) => {
         if (cells.has(keyOf(group, row, column))) updateCell(keyOf(group, row, column), cell);
       });
     }
   }
+
   updateArmHint();
 }
 
@@ -267,11 +321,24 @@ function buildMatrix(matrix, scrolls) {
   const head = el(
     "div",
     { class: "bs-mrow bs-mhead", role: "row" },
-    el("span", { role: "columnheader" }, el("span", { class: "bs-wide", text: "skill/eval_id" }), el("span", { class: "bs-narrow", text: "eval" })),
-    matrix.arms.map((arm) => el("span", { role: "columnheader" }, el("b", { text: arm.name }), el("span", { class: "bs-wide", text: arm.detail }))),
+    el(
+      "span",
+      { role: "columnheader" },
+      el("span", { class: "bs-wide", text: "skill/eval_id" }),
+      el("span", { class: "bs-narrow", text: "eval" }),
+    ),
+    matrix.arms.map((arm) =>
+      el(
+        "span",
+        { role: "columnheader" },
+        el("b", { text: arm.name }),
+        el("span", { class: "bs-wide", text: arm.detail }),
+      ),
+    ),
   );
   const body = [];
   let rowIndex = 0;
+
   for (const group of matrix.groups) {
     const chevron = el("span", { class: "bs-chev", "aria-hidden": "true" });
     const meta = el("span", { class: "bs-gmeta" });
@@ -284,18 +351,31 @@ function buildMatrix(matrix, scrolls) {
     const summaries = group.summaries.map(() => {
       const text = el("span");
       const bar = el("div", { class: "bs-gbar" }, el("i"));
+
       return { text, bar, box: el("div", { class: "bs-gs", role: "gridcell" }, text, bar) };
     });
-    body.push(el("div", { class: "bs-mrow bs-grp", role: "row" }, button, summaries.map((summary) => summary.box)));
+    body.push(
+      el(
+        "div",
+        { class: "bs-mrow bs-grp", role: "row" },
+        button,
+        summaries.map((summary) => summary.box),
+      ),
+    );
 
     const rows = group.rows.map((row) => {
       const position = rowIndex++;
+
       return el(
         "div",
         { class: "bs-mrow", role: "row" },
         el("span", { class: "bs-eval", role: "rowheader", text: row.id }),
         row.cells.map((cell, column) => {
-          return el("div", { role: "gridcell" }, buildCell(cell, keyOf(group, row, column), position, column, small));
+          return el(
+            "div",
+            { role: "gridcell" },
+            buildCell(cell, keyOf(group, row, column), position, column, small),
+          );
         }),
       );
     });
@@ -309,7 +389,9 @@ function buildMatrix(matrix, scrolls) {
   } else {
     grid.replaceChildren(head, ...body);
   }
+
   const first = grid.querySelector("button.bs-cell");
+
   if (first) first.tabIndex = 0;
 }
 
@@ -319,21 +401,32 @@ function keyOf(group, row, column) {
 
 function buildCell(cell, key, row, column, small) {
   if (cell.kind === "notrun") {
-    return el("div", { class: "bs-cell bs-k-notrun" }, el("span", { class: "bs-t bs-rate", text: cell.label }));
+    return el(
+      "div",
+      { class: "bs-cell bs-k-notrun" },
+      el("span", { class: "bs-t bs-rate", text: cell.label }),
+    );
   }
+
   if (cell.kind === "na") {
     return el(
       "div",
       { class: "bs-cell bs-k-na", role: "img", "aria-label": cell.aria },
-      el("span", { class: small ? "bs-bx bs-sm" : "bs-bx" }, cell.boxes.map((name) => el("i", { class: `bs-b ${name}` }))),
+      el(
+        "span",
+        { class: small ? "bs-bx bs-sm" : "bs-bx" },
+        cell.boxes.map((name) => el("i", { class: `bs-b ${name}` })),
+      ),
       el("span", { class: "bs-t bs-rate", text: cell.label }),
     );
   }
+
   const boxes = cell.boxes.map(() => el("i"));
   const label = el("span");
   const button = el(
     "button",
     {
+      class: "bs-cell",
       type: "button",
       tabindex: "-1",
       "aria-haspopup": "dialog",
@@ -351,6 +444,7 @@ function buildCell(cell, key, row, column, small) {
     label,
   );
   cells.set(key, { button, boxes, label, data: cell });
+
   return button;
 }
 
@@ -360,11 +454,14 @@ function updateCell(key, cell) {
   const isSelected = selected !== null && selected.key === key;
   setClass(ref.button, `bs-cell bs-k-${cell.kind}${isSelected ? " bs-sel" : ""}`);
   ref.button.setAttribute("aria-expanded", String(isSelected));
+
   if (cell.aria) ref.button.setAttribute("aria-label", cell.aria);
   cell.boxes.forEach((name, index) => setClass(ref.boxes[index], `bs-b ${name}`));
   const showsOnPhone = cell.short && cell.short === cell.label;
   setClass(ref.label, `bs-t${cell.muted ? " bs-q" : ""}${showsOnPhone ? " bs-rate" : ""}`);
-  setText(ref.label, cell.label);
+
+  if (cell.count) fill(ref.label, el("span", { class: "bs-count", text: `${cell.count} · ` }), cell.progress);
+  else setText(ref.label, cell.label);
 }
 
 function toggleGroup(name) {
@@ -384,6 +481,7 @@ function updateArmHint() {
   const hint = byId("arm-hint");
   const scroller = byId("matrix").querySelector(".bs-mx-scroll");
   hint.hidden = !scroller;
+
   if (!scroller) return;
   const total = view.matrix.arms.length;
   const column = tokenPx("--size-arm-phone") + tokenPx("--space-8");
@@ -396,21 +494,30 @@ function updateArmHint() {
 function moveInGrid(event) {
   const from = event.target.closest("button.bs-cell");
   const step = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[event.key];
+
   if (!from || !step) return;
   event.preventDefault();
-  const buttons = [...byId("matrix").querySelectorAll("button.bs-cell")].filter((button) => button.offsetParent !== null);
+  const buttons = [...byId("matrix").querySelectorAll("button.bs-cell")].filter(
+    (button) => button.offsetParent !== null,
+  );
   let row = Number(from.dataset.row);
   let column = Number(from.dataset.column);
   const rowLimit = Math.max(...buttons.map((button) => Number(button.dataset.row)));
+
   for (;;) {
     row += step[0];
     column += step[1];
+
     if (row < 0 || row > rowLimit || column < 0 || column >= view.matrix.arms.length) return;
-    const target = buttons.find((button) => Number(button.dataset.row) === row && Number(button.dataset.column) === column);
+    const target = buttons.find(
+      (button) => Number(button.dataset.row) === row && Number(button.dataset.column) === column,
+    );
+
     if (target) {
       from.tabIndex = -1;
       target.tabIndex = 0;
       target.focus();
+
       return;
     }
   }
@@ -435,6 +542,7 @@ function hideHover() {
 
 function dismissHover() {
   clearTimeout(hoverTimer);
+
   if (hovered !== null && cells.has(hovered)) cells.get(hovered).button.removeAttribute("aria-describedby");
   hovered = null;
   byId("hovercard").hidden = true;
@@ -443,17 +551,27 @@ function dismissHover() {
 function renderHoverCard() {
   const card = byId("hovercard");
   const ref = hovered === null ? null : cells.get(hovered);
+
   if (!ref || !ref.data.hover) {
     card.hidden = true;
+
     return;
   }
+
   const hover = ref.data.hover;
   const sample = ref.data.samples[0];
   fill(
     card,
     el("div", { class: "bs-muted", text: `${sample.eval_id} · ${sample.arm}` }),
-    el("div", { class: "bs-hh" }, el("b", { text: hover.rate }), el("span", { class: "bs-muted", text: hover.checks })),
-    hover.problem ? el("div", { class: hover.problem.warn ? "bs-hprob bs-warn" : "bs-hprob", text: hover.problem.text }) : "",
+    el(
+      "div",
+      { class: "bs-hh" },
+      el("b", { text: hover.rate }),
+      el("span", { class: "bs-muted", text: hover.checks }),
+    ),
+    hover.problem
+      ? el("div", { class: hover.problem.warn ? "bs-hprob bs-warn" : "bs-hprob", text: hover.problem.text })
+      : "",
     hover.rows.map((row) =>
       el(
         "div",
@@ -466,6 +584,7 @@ function renderHoverCard() {
     el("p", { text: "Open the cell for assertions and output." }),
   );
   ref.button.setAttribute("aria-describedby", "hovercard");
+
   if (!card.hidden) return;
 
   card.hidden = false;
@@ -479,6 +598,7 @@ function renderHoverCard() {
 
 function firstToShow(samples) {
   const index = samples.findIndex((sample) => !sample.passes);
+
   return index < 0 ? 0 : index;
 }
 
@@ -496,6 +616,7 @@ function closeDrawer() {
   const ref = cells.get(selected.key);
   selected = null;
   renderDrawer();
+
   if (view) renderMatrix();
   if (ref) ref.button.focus();
 }
@@ -512,31 +633,45 @@ function renderDrawer() {
   const ref = selected === null ? null : cells.get(selected.key);
   drawer.hidden = !ref;
   byId("scrim").hidden = !ref || !phone.matches;
+
   if (!ref) return;
 
   const samples = ref.data.samples;
   const sample = samples[Math.min(selected.sample, samples.length - 1)];
   setClass(drawer, phone.matches ? "bs-drawer bs-sheet" : "bs-drawer");
   const gap = tokenPx("--space-16");
-  drawer.style.top = phone.matches ? "" : `${Math.max(gap, byId("counter").getBoundingClientRect().bottom + gap)}px`;
+  drawer.style.top = phone.matches
+    ? ""
+    : `${Math.max(gap, byId("counter").getBoundingClientRect().bottom + gap)}px`;
 
   const showing = JSON.stringify([sample.cell, sample.graded]);
+
   if (showing !== drawerShown) {
     drawerShown = showing;
     buildDrawer(drawer, samples, sample);
     loadAssertions(sample);
   }
 
-  const [verdict, ...rest] = sample.status.split(" · ");
-  drawer.querySelector(".bs-st").replaceChildren(
-    el("span", { class: sample.bad ? "bs-bad" : "", text: verdict }),
-    rest.length ? ` · ${rest.join(" · ")}` : "",
+  fill(
+    drawer.querySelector(".bs-st"),
+    el("span", { class: sample.bad ? "bs-bad" : "", text: sample.verdict }),
+    sample.detail ? ` · ${sample.detail}` : "",
   );
   setText(drawer.querySelector(".bs-facts"), sample.facts);
   fillPhases(drawer.querySelector(".bs-phases"), sample.phases);
-  drawer.querySelector(".bs-out").replaceChildren(
-    ...sample.output.map((line) => el("li", {}, el("span", { text: line.offset }), el("span", { text: line.name }), el("span", { text: line.text }))),
-  );
+  drawer
+    .querySelector(".bs-out")
+    .replaceChildren(
+      ...sample.output.map((line) =>
+        el(
+          "li",
+          {},
+          el("span", { text: line.offset }),
+          el("span", { text: line.name }),
+          el("span", { text: line.text }),
+        ),
+      ),
+    );
   drawer.querySelector(".bs-output").hidden = sample.output.length === 0;
 }
 
@@ -552,7 +687,13 @@ function buildDrawer(drawer, samples, sample) {
       "div",
       { class: "bs-dh" },
       el("div", { class: "bs-st" }),
-      el("div", { class: "bs-id" }, el("span", { text: `${sample.skill}/` }), el("wbr"), el("b", { text: sample.eval_id })),
+      el(
+        "div",
+        { class: "bs-id" },
+        el("span", { text: `${sample.skill}/` }),
+        el("wbr"),
+        el("b", { text: sample.eval_id }),
+      ),
       el(
         "div",
         { class: "bs-sub" },
@@ -560,32 +701,73 @@ function buildDrawer(drawer, samples, sample) {
         el(
           "span",
           { class: "bs-nav" },
-          el("button", { class: "bs-iconbtn bs-prev", type: "button", "aria-label": "Previous sample", disabled: position === 0, onclick: step(-1), text: "‹" }),
-          el("button", { class: "bs-iconbtn bs-next", type: "button", "aria-label": "Next sample", disabled: position === samples.length - 1, onclick: step(1), text: "›" }),
+          el("button", {
+            class: "bs-iconbtn bs-prev",
+            type: "button",
+            "aria-label": "Previous sample",
+            disabled: position === 0,
+            onclick: step(-1),
+            text: "‹",
+          }),
+          el("button", {
+            class: "bs-iconbtn bs-next",
+            type: "button",
+            "aria-label": "Next sample",
+            disabled: position === samples.length - 1,
+            onclick: step(1),
+            text: "›",
+          }),
         ),
       ),
       el("div", { class: "bs-sub bs-facts" }),
       sample.message ? el("div", { class: "bs-sub bs-msg", text: sample.message }) : "",
-      el("button", { class: "bs-iconbtn bs-x", type: "button", "aria-label": "Close", onclick: closeDrawer, text: "×" }),
+      el("button", {
+        class: "bs-iconbtn bs-x",
+        type: "button",
+        "aria-label": "Close",
+        onclick: closeDrawer,
+        text: "×",
+      }),
     ),
-    el("section", { class: "bs-checks" }, el("h3", { class: "bs-section-label", text: "[ assertions ]" }), el("p", { class: "bs-muted", text: sample.graded ? "" : "Graded when the sample finishes." })),
+    el(
+      "section",
+      { class: "bs-checks" },
+      el("h3", { class: "bs-section-label", text: "[ assertions ]" }),
+      el("p", { class: "bs-muted", text: sample.pending || "" }),
+    ),
     el("section", { class: "bs-phases", hidden: true }),
-    el("section", { class: "bs-output" }, el("h3", { class: "bs-section-label", text: "[ recent output · last 5 lines ]" }), el("ul", { class: "bs-out" })),
+    el(
+      "section",
+      { class: "bs-output" },
+      el("h3", { class: "bs-section-label", text: "[ recent output · last 5 lines ]" }),
+      el("ul", { class: "bs-out" }),
+    ),
     el("p", { class: "bs-path" }, breakable(sample.path)),
   );
 }
 
 function fillPhases(section, phases) {
   section.hidden = !phases;
+
   if (!phases) return;
   const bar = el("div", { class: "bs-phase", role: "img", "aria-label": phases.label });
   const labels = el("div", { class: "bs-phl" });
+
   for (const segment of phases.segments) {
     const part = el("i", { class: `bs-p-${segment.kind}` });
     part.style.width = `${100 * segment.share}%`;
     bar.append(part);
-    labels.append(el("span", {}, el("i", { class: `bs-p-${segment.kind}` }), segment.name, el("b", { text: segment.time })));
+    labels.append(
+      el(
+        "span",
+        {},
+        el("i", { class: `bs-p-${segment.kind}` }),
+        segment.name,
+        el("b", { text: segment.time }),
+      ),
+    );
   }
+
   section.replaceChildren(el("h3", { class: "bs-section-label", text: phases.caption }), bar, labels);
 }
 
@@ -593,28 +775,49 @@ async function loadAssertions(sample) {
   if (!sample.graded) return;
   const response = await fetch(`grading?cell=${encodeURIComponent(sample.cell)}`);
   const section = byId("drawer").querySelector(".bs-checks");
+
   if (!section || drawerShown !== JSON.stringify([sample.cell, sample.graded])) return;
   if (!response.ok) {
     section.lastElementChild.textContent = "No grading for this sample.";
+
     return;
   }
+
   const grading = await response.json();
   let opened = false;
   const items = grading.assertions.map((assertion) => {
     if (assertion.state === "n/a") {
-      return el("li", {}, el("span"), el("span", { class: "bs-muted", text: `${assertion.text} · ${sample.scoped[assertion.index] || "n/a"}` }));
+      return el(
+        "li",
+        {},
+        el("span"),
+        el("span", {
+          class: "bs-muted",
+          text: `${assertion.text} · ${sample.scoped[assertion.index] || "n/a"}`,
+        }),
+      );
     }
+
     const failed = assertion.state === "fail";
     const open = failed && !opened;
     opened = opened || open;
+
     return el(
       "li",
       {},
       el("span", { class: failed ? "bs-no" : "bs-ok", text: failed ? "✗" : "✓" }),
-      el("details", { open }, el("summary", { text: assertion.text }), el("div", { class: "bs-ev", text: `${assertion.checker} · ${assertion.evidence}` })),
+      el(
+        "details",
+        { open },
+        el("summary", { text: assertion.text }),
+        el("div", { class: "bs-ev", text: `${assertion.checker} · ${assertion.evidence}` }),
+      ),
     );
   });
-  section.replaceChildren(el("h3", { class: "bs-section-label", text: grading.caption }), el("ul", { class: "bs-alst" }, items));
+  section.replaceChildren(
+    el("h3", { class: "bs-section-label", text: grading.caption }),
+    el("ul", { class: "bs-alst" }, items),
+  );
 }
 
 function tip(label, text, id) {
@@ -639,6 +842,7 @@ function valueOf(cell) {
 function subOf(cell) {
   if (!cell.sub && !cell.delta) return "";
   const gain = cell.delta && cell.delta.startsWith("+");
+
   return el(
     "span",
     { class: cell.err ? "bs-sub bs-err" : "bs-sub bs-delta" },
@@ -652,6 +856,7 @@ let boardShown = "";
 function renderLeaderboard() {
   const board = view.leaderboard;
   const next = JSON.stringify(board);
+
   if (next === boardShown) return;
   boardShown = next;
 
@@ -659,31 +864,63 @@ function renderLeaderboard() {
     "table",
     { class: "bs-lb bs-wide" },
     el("caption", { text: "Arms compared on graded samples" }),
-    el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Metric" }), board.arms.map((arm) => el("th", { scope: "col" }, el("b", { text: arm.name }), arm.detail)))),
+    el(
+      "thead",
+      {},
+      el(
+        "tr",
+        {},
+        el("th", { scope: "col", text: "Metric" }),
+        board.arms.map((arm) => el("th", { scope: "col" }, el("b", { text: arm.name }), arm.detail)),
+      ),
+    ),
     el(
       "tbody",
       {},
       board.rows.map((row) =>
-        el("tr", {}, el("th", { scope: "row" }, row.tip ? tip(row.label, row.tip, "tip-rate") : row.label), row.cells.map((cell) => el("td", {}, valueOf(cell), subOf(cell)))),
+        el(
+          "tr",
+          {},
+          el("th", { scope: "row" }, row.tip ? tip(row.label, row.tip, "tip-rate") : row.label),
+          row.cells.map((cell) => el("td", {}, valueOf(cell), subOf(cell))),
+        ),
       ),
     ),
   );
 
   const card = el("div", { class: "bs-lbc bs-narrow" });
   const list = el("ul", { class: "bs-lbl" });
+
   for (const row of board.rows) {
     if (row.bars) {
       const best = row.cells.findIndex((cell) => cell.best);
-      const under = best < 0 ? "" : el("p", { class: "bs-dl" }, `${board.arms[best].name} is best`, row.cells[best].delta ? [" · ", el("b", { text: row.cells[best].delta }), ` ${row.cells[best].sub}`] : "");
+      const under =
+        best < 0
+          ? ""
+          : el(
+              "p",
+              { class: "bs-dl" },
+              `${board.arms[best].name} is best`,
+              row.cells[best].delta
+                ? [" · ", el("b", { text: row.cells[best].delta }), ` ${row.cells[best].sub}`]
+                : "",
+            );
       card.append(
         el(
           "div",
           { class: row.tip ? "bs-lbm" : "bs-lbm bs-sm" },
-          row.tip ? tip(row.label, row.tip, "tip-rate-phone") : el("span", { class: "bs-lbh", text: row.label }),
+          row.tip
+            ? tip(row.label, row.tip, "tip-rate-phone")
+            : el("span", { class: "bs-lbh", text: row.label }),
           row.cells.map((cell, index) => {
             const fill = el("i");
             fill.style.width = `${100 * (cell.fraction || 0)}%`;
-            return [el("span", { class: "bs-an", text: board.arms[index].name }), el("div", { class: "bs-tr" }, fill), el("span", { class: cell.best ? "bs-v bs-best" : "bs-v", text: cell.value })];
+
+            return [
+              el("span", { class: "bs-an", text: board.arms[index].name }),
+              el("div", { class: "bs-tr" }, fill),
+              el("span", { class: cell.best ? "bs-v bs-best" : "bs-v", text: cell.value }),
+            ];
           }),
           under,
         ),
@@ -697,12 +934,21 @@ function renderLeaderboard() {
           el(
             "div",
             { class: board.arms.length > 2 ? "bs-vals bs-four" : "bs-vals" },
-            row.cells.map((cell, index) => [el("span", { class: "bs-an", text: board.arms[index].name }), el("span", {}, valueOf(cell), cell.err ? el("span", { class: "bs-err", text: ` ${cell.sub}` }) : "")]),
+            row.cells.map((cell, index) => [
+              el("span", { class: "bs-an", text: board.arms[index].name }),
+              el(
+                "span",
+                {},
+                valueOf(cell),
+                cell.err ? el("span", { class: "bs-err", text: ` ${cell.sub}` }) : "",
+              ),
+            ]),
           ),
         ),
       );
     }
   }
+
   card.append(list);
   byId("leaderboard").replaceChildren(table, card);
 }
@@ -725,6 +971,7 @@ function storedTheme() {
 byId("theme").addEventListener("click", () => {
   const light = document.documentElement.dataset.theme !== "light";
   applyTheme(light);
+
   try {
     localStorage.setItem("benchspec-watch-theme", light ? "light" : "dark");
   } catch {
@@ -736,8 +983,12 @@ applyTheme(storedTheme() === "light");
 for (const name of ["matrix", "leaderboard"]) {
   byId(`tab-${name}`).addEventListener("click", () => pickTab(name, false));
 }
+
 document.querySelector(".bs-tabs").addEventListener("keydown", (event) => {
-  const target = { ArrowLeft: "matrix", Home: "matrix", ArrowRight: "leaderboard", End: "leaderboard" }[event.key];
+  const target = { ArrowLeft: "matrix", Home: "matrix", ArrowRight: "leaderboard", End: "leaderboard" }[
+    event.key
+  ];
+
   if (!target) return;
   event.preventDefault();
   pickTab(target, true);
@@ -753,9 +1004,11 @@ document.addEventListener("keydown", (event) => {
     if (hovered !== null) dismissHover();
     else closeDrawer();
   }
+
   if (event.key === "Tab" && selected !== null && phone.matches) {
     const stops = [...byId("drawer").querySelectorAll("button:not(:disabled), summary")];
     const edge = event.shiftKey ? stops[0] : stops[stops.length - 1];
+
     if (document.activeElement === edge || !byId("drawer").contains(document.activeElement)) {
       event.preventDefault();
       (event.shiftKey ? stops[stops.length - 1] : stops[0]).focus();
@@ -763,14 +1016,17 @@ document.addEventListener("keydown", (event) => {
   }
 });
 document.addEventListener("focusout", (event) => {
-  if (event.target.classList && event.target.classList.contains("bs-lgbtn")) event.target.classList.remove("bs-dismissed");
+  if (event.target.classList && event.target.classList.contains("bs-lgbtn"))
+    event.target.classList.remove("bs-dismissed");
 });
 document.addEventListener("mouseout", (event) => {
-  if (event.target.classList && event.target.classList.contains("bs-lgbtn")) event.target.classList.remove("bs-dismissed");
+  if (event.target.classList && event.target.classList.contains("bs-lgbtn"))
+    event.target.classList.remove("bs-dismissed");
 });
 
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy]");
+
   if (!button) return;
   await navigator.clipboard.writeText(byId(button.dataset.copy).textContent);
 });
@@ -780,7 +1036,8 @@ byId("drawer").addEventListener("touchstart", (event) => {
   touchStart = byId("drawer").scrollTop === 0 ? event.touches[0].clientY : null;
 });
 byId("drawer").addEventListener("touchend", (event) => {
-  if (touchStart !== null && phone.matches && event.changedTouches[0].clientY - touchStart > SWIPE_CLOSE_PX) closeDrawer();
+  if (touchStart !== null && phone.matches && event.changedTouches[0].clientY - touchStart > SWIPE_CLOSE_PX)
+    closeDrawer();
   touchStart = null;
 });
 

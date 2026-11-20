@@ -151,6 +151,55 @@ def test_the_drawer_opens_on_the_first_sample_that_did_not_pass(
         expect(drawer.locator(".bs-out li").last).to_contain_text("step 7")
 
 
+def test_the_keyboard_reaches_a_cell_and_opens_its_drawer(tmp_path: Path, pages: Pages) -> None:
+    """The keyboard reaches a cell and opens its drawer."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        expect(page.locator("button.bs-cell[tabindex='0']")).to_have_count(1)
+
+        page.locator("#tab-matrix").focus()
+        page.keyboard.press("Tab")
+        page.keyboard.press("Tab")
+        expect(page.locator(IMPLEMENT)).to_be_focused()
+        expect(page.locator("#hovercard")).to_be_visible()
+
+        page.keyboard.press("ArrowDown")
+        expect(page.locator(JUDGES)).to_be_focused()
+        expect(page.locator("button.bs-cell[tabindex='0']")).to_have_count(1)
+
+        page.keyboard.press("Enter")
+        expect(page.locator("#drawer .bs-st")).to_have_text("FAIL · 6/9 assertions")
+        page.keyboard.press("Escape")
+        expect(page.locator(JUDGES)).to_be_focused()
+
+
+def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages: Pages) -> None:
+    """A narrow desktop keeps a live cell's elapsed time."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, {"width": 768, "height": 900})
+        label = page.locator(f"{IMPLEMENT} .bs-t")
+
+        expect(label).to_have_text(re.compile(r"^agent 2m \d\ds$"), use_inner_text=True)
+        assert label.evaluate("node => node.scrollWidth <= node.clientWidth")
+        assert page.evaluate("document.documentElement.scrollWidth") == 768
+
+
+def test_a_run_that_planned_nothing_says_so(tmp_path: Path, pages: Pages) -> None:
+    """A run that planned nothing says so."""
+    Recording(iteration(tmp_path)).begin()
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+
+        expect(page.locator("#empty-line")).to_have_text("No cells in this run.")
+        expect(page.locator("#banner")).to_be_hidden()
+        expect(page.locator("#run")).to_be_hidden()
+
+
 def test_new_events_update_the_page_without_a_reload(tmp_path: Path, pages: Pages) -> None:
     """New events update the page without a reload."""
     run = mid_run(tmp_path)
@@ -241,6 +290,14 @@ def test_the_page_moves_to_the_leaderboard_at_run_end_unless_a_tab_was_picked(
         expect(untouched.locator("#tab-leaderboard")).to_have_attribute("aria-selected", "true")
         expect(untouched.locator("#headline")).to_contain_text("Run stopped · 19 of 54 finished")
         expect(untouched.locator("#status")).to_have_text("Run stopped · 19 of 54 samples")
+        untouched.locator("#tab-matrix").click()
+        expect(untouched.locator("#tally")).to_have_text(
+            "12 passed6 failed1 errored35 unfinished-n 4"
+        )
+        untouched.locator(IMPLEMENT).click()
+        untouched.locator("#drawer .bs-next").click()
+        expect(untouched.locator("#drawer .bs-st")).to_have_text("unfinished")
+        expect(untouched.locator("#drawer .bs-checks")).to_have_text("[ assertions ]")
         expect(picked.locator("#reopen-line")).to_be_visible()
         expect(picked.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
         expect(picked.locator("#caption")).to_have_text("[ 13 evals × 2 arms · stopped ]")
@@ -254,7 +311,9 @@ def test_a_phone_shows_boxes_short_rates_and_a_bottom_sheet(tmp_path: Path, page
         page = pages.open(served, PHONE)
 
         assert page.evaluate("document.documentElement.scrollWidth") == PHONE["width"]
-        expect(page.locator("#run-state")).to_have_text("live", use_inner_text=True)
+        expect(page.locator("#run-state")).to_have_text(
+            re.compile(r"live · last event \d+s ago"), use_inner_text=True
+        )
         expect(page.locator(JUDGES).locator(".bs-t")).to_be_visible()
         expect(page.locator(f"{IMPLEMENT} .bs-t")).to_be_hidden()
         expect(page.locator("#arm-hint")).to_be_hidden()

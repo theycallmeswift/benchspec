@@ -344,7 +344,8 @@ artifact path does.
 
 - `grading.json`: the verdict. One entry per assertion with its text, `passed`,
   `evidence`, and `type` (`deterministic` for a checker, which also names its
-  `checker`; `semantic` for the judge), plus the sample's `errored` flag, a `binder_degraded` count, and, for a
+  `checker`; `semantic` for the judge), plus the sample's `errored` flag, a
+  `binder_degraded` count, and, for a
   [timed-out sample](#timed-out-samples), `"timed_out": true`. A
   clause-bearing entry adds `scoped: true`; a skipped one is `{"text",
   "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.

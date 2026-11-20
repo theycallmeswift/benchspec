@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ class Recording:
         """
         names = ["judge"] * checks if isinstance(checks, int) else checks
         self.checkers[(skill, eval_id)] = names
+
         for name in arms or [each["name"] for each in self.arms]:
             for sample in range(count):
                 self.planned.append(
@@ -143,6 +145,7 @@ class Recording:
     def play(self, cell: str, at: float, *, through: str = "agent", worker: str = "gw0") -> None:
         """Emit `cell.start` and each phase up to `through`, at the usual offsets."""
         self.start(cell, at, worker=worker)
+
         for phase, offset in PHASE_OFFSETS_S.items():
             self.phase(cell, phase, at + offset, worker=worker)
             if phase == through:
@@ -227,6 +230,7 @@ class Recording:
         names = self.checkers[(planned["skill"], planned["eval_id"])]
         assertions: list[dict] = []
         graded = 0
+
         for index, (name, applies) in enumerate(zip(names, planned["applies"], strict=True)):
             text = f"line {index + 1} holds"
             if not applies:
@@ -291,18 +295,24 @@ def mid_run(root: Path) -> Recording:
     )
     triggers = ("asks-for-codex", "names-a-task", "second-opinion", "review-branch", "job-status")
     trial_only = {0: ["trial"]}
+
     for eval_id in plans:
         run.plan("plan", eval_id, checks=9, count=3)
+
     for eval_id in triggers:
         run.plan("triggers", eval_id, checks=["skill_invoked"], only=trial_only, count=3)
+
     for eval_id in ("own-review", "install-codex", "other-model"):
         run.plan("not-triggers", eval_id, checks=["not_skill_invoked"], only=trial_only, count=3)
+
     run.begin()
 
     for sample, passed in enumerate((9, 9, 7)):
         run.done(f"plan/implement-task/trial/{sample}", 100 + sample, passed=passed, wall_s=90.9)
+
     for sample, passed in enumerate((6, 5, 2)):
         run.done(f"plan/review-judges-findings/baseline/{sample}", 120 + sample, passed=passed)
+
     run.done("plan/implement-task/baseline/0", 130, passed=7, wall_s=68)
     run.play("plan/implement-task/baseline/1", elapsed_s - 124)
     run.delta("plan/implement-task/baseline/1", elapsed_s - 3, "git status")
@@ -311,14 +321,18 @@ def mid_run(root: Path) -> Recording:
     run.done("plan/logged-out/baseline/0", 150, passed=9)
     run.error("plan/logged-out/baseline/1", 160)
     run.done("plan/logged-out/baseline/2", 170, passed=8)
+
     for sample in range(3):
         run.done(f"plan/review-judges-findings/trial/{sample}", 200 + sample)
+
     for index, eval_id in enumerate(("asks-for-codex", "names-a-task")):
         for sample in range(3):
             run.done(f"triggers/{eval_id}/trial/{sample}", 220 + index * 3 + sample, wall_s=20)
+
     run.play("plan/splits-work/trial/0", elapsed_s - 9, worker="gw1")
     run.play("plan/splits-work/trial/1", elapsed_s - 1, through="boot", worker="gw2")
     run.play("triggers/second-opinion/trial/0", elapsed_s - 20, worker="gw3")
+
     for second in range(7):
         at = elapsed_s - 14 + second
         run.delta("triggers/second-opinion/trial/0", at, f"step {second + 1}", worker="gw3")
@@ -353,6 +367,7 @@ def finished_run(root: Path) -> Recording:
         ("release", "tags-commit", 2),
         ("release", "skips-drafts", 1),
     ]
+
     for skill, eval_id, checks in evals:
         run.plan(
             skill,
@@ -362,9 +377,11 @@ def finished_run(root: Path) -> Recording:
             arms=harnessed if eval_id == "skips-drafts" else None,
             count=3,
         )
+
     run.begin()
 
     at = 30.0
+
     for skill, eval_id, _ in evals:
         for position, name in enumerate(names):
             for sample in range(3):
@@ -391,6 +408,7 @@ def finished_run(root: Path) -> Recording:
                         wall_s=40 + 12 * position + 3 * sample,
                         cost_usd=None if name == "opencode" else 0.04 + 0.02 * position,
                     )
+
     run.end(at + 20, exit_status=1)
 
     return run
@@ -399,6 +417,7 @@ def finished_run(root: Path) -> Recording:
 def fold(run: Recording, *, at: float) -> dict:
     """The view of a recording, `at` seconds into its run."""
     view = RunView("tmp/evals/iteration_12")
+
     for event in EventTail(run.iteration_dir).poll():
         view.apply(event)
 
@@ -413,3 +432,26 @@ def cell_of(view: dict, eval_id: str, arm: str) -> dict:
     rows = [row for group in view["matrix"]["groups"] for row in group["rows"]]
 
     return next(row for row in rows if row["id"] == eval_id)["cells"][column]
+
+
+def open_stream(url: str) -> http.client.HTTPResponse:
+    """Open the event stream of the page at `url`."""
+    host = url.removeprefix("http://").rstrip("/")
+    connection = http.client.HTTPConnection(host, timeout=10)
+    connection.request("GET", "/events")
+
+    return connection.getresponse()
+
+
+def next_event(stream: http.client.HTTPResponse) -> tuple[str, dict]:
+    """Read the stream's next named event."""
+    name = ""
+
+    for raw in stream:
+        line = raw.decode().rstrip("\n")
+        if line.startswith("event: "):
+            name = line.removeprefix("event: ")
+        elif line.startswith("data: ") and name:
+            return name, json.loads(line.removeprefix("data: "))
+
+    raise AssertionError("the stream closed without another event")

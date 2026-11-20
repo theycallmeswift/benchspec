@@ -1,8 +1,6 @@
 /* benchspec — tokens compiled from tokens.json (both themes). Fixed values once in :root; themed values per theme. */
 @font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-500.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-600.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-700.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
 @font-face { font-family: "DM Sans"; src: url("fonts/dm-sans-opsz.woff2") format("woff2"); font-weight: 100 1000; font-style: normal; font-display: swap; }
 :root {
   --brand-navy: #1B1F3B;
@@ -144,10 +142,6 @@
   --shadow-hovercard: 0 4px 12px rgba(27, 31, 59, 0.08);
   --shadow-sheet: 0 -12px 32px rgba(27, 31, 59, 0.16);
 }
-.bs-type-wordmark { font-family: var(--font-wordmark); font-size: 30px; line-height: 64px; font-weight: 600; letter-spacing: -0.01em; }
-.bs-type-social-wordmark { font-family: var(--font-wordmark); font-size: 64px; line-height: 1; font-weight: 700; }
-.bs-type-social-tagline { font-family: var(--font-wordmark); font-size: 30px; line-height: 44px; font-weight: 400; }
-.bs-type-terminal { font-family: var(--font-wordmark); font-size: 15px; line-height: 24px; font-weight: 400; }
 .bs-type-counter { font-family: var(--font-mono); font-size: 44px; line-height: 1; font-weight: 500; letter-spacing: -0.03em; }
 .bs-type-counter-finished { font-family: var(--font-mono); font-size: 30px; line-height: 1; font-weight: 500; letter-spacing: -0.03em; }
 .bs-type-metric { font-family: var(--font-mono); font-size: 24px; line-height: 1.1; font-weight: 500; }
@@ -500,3 +494,5 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
 .bs-lb .bs-v.bs-muted, .bs-lbl .bs-v.bs-muted { color: var(--muted); }
 .bs-cell.bs-k-na { cursor: default; }
 .bs-cell.bs-k-na:hover { background: transparent; }
+/* Between phone and desktop a live label keeps its phase and time, not its count. */
+@media (max-width: 1023px) { .bs-cell .bs-count { display: none; } }

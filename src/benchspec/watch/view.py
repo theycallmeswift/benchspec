@@ -21,7 +21,7 @@ RECENT_DELTAS = 5
 
 GRADED = ("pass", "fail", "timeout")
 FINISHED = (*GRADED, "error")
-ACTIVE = ("booting", "running", "quiet")
+IDLE = ("queued", "unfinished")
 PREP_PHASES = ("bind", "boot", "setup")
 
 _MEASURED_SECONDS_BELOW_MS = 120_000
@@ -45,6 +45,7 @@ class Sample:
     closed_ms: int | None = None
     done: dict | None = None
     error: dict | None = None
+    run_ended: bool = False
 
     @property
     def phase(self) -> str | None:
@@ -58,23 +59,32 @@ class Sample:
     def silent_ms(self, now_ms: int) -> int:
         """How long the agent has been silent, from its last delta or the phase's start."""
         since = self.last_delta_ms or self.phase_started_ms("agent") or now_ms
+
         return now_ms - since
 
     def state(self, now_ms: int) -> str:
         """The sample's state word."""
         if self.applies is not None and not any(self.applies):
             return "n/a"
+
         if self.error is not None:
             return "error"
+
         if self.done is not None:
             if self.done.get("timed_out"):
                 return "timeout"
 
             return "pass" if self.done["passed"] == self.done["total"] else "fail"
+
+        if self.run_ended:
+            return "unfinished"
+
         if self.started_ms is None:
             return "queued"
+
         if self.phase == "agent":
             return "quiet" if self.silent_ms(now_ms) >= QUIET_AFTER_S * 1000 else "running"
+
         if self.phase == "grade":
             return "running"
 
@@ -112,6 +122,7 @@ def read_gradings(iteration_dir: Path, arms: list[str], baseline: str | None) ->
     benchmark = report.build_benchmark(
         eval_dirs, iteration_dir.name, baseline=baseline, arm_meta={arm: {} for arm in arms}
     )
+
     for arm in arms:
         stats = benchmark["arms"][arm]
         gradings.pass_rate[arm] = stats["pass_rate"]
@@ -124,6 +135,7 @@ def read_gradings(iteration_dir: Path, arms: list[str], baseline: str | None) ->
 def _activation(eval_dirs: list[Path], arm: str) -> tuple[int, int]:
     """Activation lines passed and graded across an arm's graded samples."""
     passed = graded = 0
+
     for eval_dir in eval_dirs:
         for path in eval_dir.glob(f"{arm}/sample-*/grading.json"):
             grading = json.loads(path.read_text(encoding="utf-8"))
@@ -142,6 +154,7 @@ def assertions_view(grading: dict) -> dict:
     """Shape one `grading.json` for the drawer: failures first, scoped-off lines last."""
     order = ("fail", "pass", "n/a")
     entries = []
+
     for index, assertion in enumerate(grading.get("assertions", [])):
         if assertion.get("skipped"):
             state = "n/a"
@@ -173,6 +186,7 @@ def live_duration(milliseconds: int) -> str:
     seconds = max(milliseconds, 0) // 1000
     if seconds < 60:
         return f"{seconds}s"
+
     if seconds < 3600:
         return f"{seconds // 60}m {seconds % 60:02d}s"
 
@@ -192,6 +206,7 @@ def rate_text(passed: float, total: float) -> str:
     percent = math.floor(100 * passed / total + 0.5)
     if passed < total:
         percent = min(percent, 99)
+
     if passed > 0:
         percent = max(percent, 1)
 
@@ -275,19 +290,33 @@ class RunView:
 
         if kind == "run.start":
             self._start = event
+
             for planned in event["cells"]:
                 self._sample(planned).applies = planned["applies"]
+
         elif kind == "run.end":
             self._end = event
-        elif kind in ("cell.start", "cell.phase", "cell.delta", "cell.done", "cell.error"):
-            self._apply_to_sample(self._sample(event), event)
 
-    def _sample(self, event: dict) -> Sample:
-        """The sample an event names, created on first sight."""
-        cell = event["cell"]
+            for sample in self._samples.values():
+                sample.run_ended = True
+
+        elif kind == "cell.start":
+            self._apply_to_sample(self._sample(event), event)
+        elif event.get("cell") in self._samples:
+            self._apply_to_sample(self._samples[event["cell"]], event)
+
+    def _sample(self, named: dict) -> Sample:
+        """The sample a planned cell or a `cell.start` names, created on first sight."""
+        cell = named["cell"]
         if cell not in self._samples:
-            skill, eval_id, arm, index = cell.split("/")
-            self._samples[cell] = Sample(cell, skill, eval_id, arm, int(index))
+            self._samples[cell] = Sample(
+                cell,
+                named["skill"],
+                named["eval_id"],
+                named["arm"],
+                named["sample"],
+                run_ended=self.ended,
+            )
 
         return self._samples[cell]
 
@@ -295,10 +324,9 @@ class RunView:
         """Fold one sample event in."""
         kind = event["type"]
         ts_ms = event["ts_ms"]
-        if sample.started_ms is None:
+        if kind == "cell.start":
             sample.started_ms = ts_ms
-
-        if kind == "cell.phase":
+        elif kind == "cell.phase":
             sample.phases.append((event["phase"], ts_ms))
         elif kind == "cell.delta":
             sample.last_delta_ms = ts_ms
@@ -343,7 +371,7 @@ class RunView:
     def _top(self, planned: list[Sample], now_ms: int) -> dict:
         """The top bar: iteration, suite and run state."""
         skills = list(dict.fromkeys(sample.skill for sample in planned))
-        count = max(sample.index for sample in planned) + 1
+        count = max((sample.index for sample in planned), default=0) + 1
 
         if self._end is not None:
             status, detail = f"ended · exit {self._end['exit_status']}", None
@@ -370,10 +398,16 @@ class RunView:
             "passed": states.count("pass"),
             "failed": states.count("fail") + states.count("timeout"),
             "errored": states.count("error"),
-            "running": states.count("running") + states.count("booting"),
-            "quiet": states.count("quiet"),
-            "waiting": states.count("queued"),
         }
+        if self._end is None:
+            buckets["running"] = states.count("running") + states.count("booting")
+            buckets["quiet"] = states.count("quiet")
+            buckets["waiting"] = states.count("queued")
+        else:
+            buckets["unfinished"] = states.count("unfinished")
+
+        finished_line = f"{done} of {total} samples finished"
+        line = f"Run stopped · {done} of {total} finished" if state == "stopped" else finished_line
         left = None
         if state == "live" and 0 < done < total:
             left = f"~{_coarse_duration(elapsed_ms / done * (total - done))} left"
@@ -382,7 +416,12 @@ class RunView:
             "percent": 100 * done // total if total else 0,
             "done": done,
             "total": total,
-            "line": f"{done} of {total} samples finished",
+            "line": line,
+            "progress": finished_line,
+            "announce": (
+                finished_line if state == "live" else f"Run {state} · {done} of {total} samples"
+            ),
+            "clock_word": "elapsed" if self._end is None else "took",
             "clock": (
                 live_duration(self._end["wall_ms"])
                 if self._end is not None
@@ -398,10 +437,12 @@ class RunView:
         arms = self._plan["arms"]
         evals = list(dict.fromkeys((sample.skill, sample.eval_id) for sample in planned))
         by_cell: dict[tuple[str, str, str], list[Sample]] = {}
+
         for sample in planned:
             by_cell.setdefault((sample.skill, sample.eval_id, sample.arm), []).append(sample)
 
         groups = []
+
         for skill in dict.fromkeys(skill for skill, _ in evals):
             rows = [
                 {
@@ -467,20 +508,23 @@ class RunView:
         graded = any(state in GRADED for state in states)
         rate = rate_text(passed, checks) if graded and checks else "—"
 
-        kind, muted, short = "run", False, ""
+        kind, muted, short, count, progress = "run", False, "", None, None
         if done == len(samples):
             label = short = rate
             muted = all(state == "pass" for state in states)
-        elif all(state == "queued" for state in states):
-            kind, label = "queued", "queued"
+        elif all(state in IDLE for state in states):
+            kind, label = "queued", states[0]
         else:
-            label = f"{done}/{len(samples)} · {_progress(samples, now_ms)}"
+            count, progress = f"{done}/{len(samples)}", _progress(samples, now_ms)
+            label = f"{count} · {progress}"
 
         words = "; ".join(_state_words(sample, now_ms) for sample in samples)
 
         return {
             "kind": kind,
             "label": label,
+            "count": count,
+            "progress": progress,
             "short": short,
             "muted": muted,
             "boxes": boxes,
@@ -503,21 +547,26 @@ class RunView:
         closing = sample.done or sample.error or {}
         passed, total = sample.checks()
 
+        verdict, detail = state, None
         if state in GRADED:
-            status = f"{state.upper()} · {passed}/{total} assertions"
+            verdict, detail = state.upper(), f"{passed}/{total} assertions"
         elif sample.error is not None:
             where = sample.error["phase"] or "before bind"
-            status = f"ERROR · {sample.error['error_kind']} · {where}"
+            verdict, detail = "ERROR", f"{sample.error['error_kind']} · {where}"
         elif state == "quiet":
-            status = f"quiet {live_duration(sample.silent_ms(now_ms))}"
-        else:
-            status = state
+            verdict = f"quiet {live_duration(sample.silent_ms(now_ms))}"
+
+        pending = None
+        if sample.closed_ms is None and not sample.run_ended:
+            pending = "Graded when the sample finishes."
 
         facts = []
         if sample.started_ms is not None:
             facts.append(_sample_duration(sample, now_ms))
+
         if closing.get("first_output_ms") is not None:
             facts.append(f"first output {measured_duration(closing['first_output_ms'])}")
+
         if closing:
             cost = closing.get("cost_usd")
             facts.append(f"${cost:.3f}" if cost is not None else "cost not reported")
@@ -532,7 +581,9 @@ class RunView:
             "skill": sample.skill,
             "eval_id": sample.eval_id,
             "arm": sample.arm,
-            "status": status,
+            "verdict": verdict,
+            "detail": detail,
+            "pending": pending,
             "bad": state in ("fail", "error"),
             "passes": state == "pass",
             "graded": sample.closed_ms is not None,
@@ -557,6 +608,7 @@ class RunView:
     def _scoped_to(self, sample: Sample) -> dict[str, str]:
         """For each line scoped off this sample's arm, the arms it runs on."""
         notes: dict[str, str] = {}
+
         for index, holds in enumerate(sample.applies or []):
             if holds:
                 continue
@@ -597,6 +649,7 @@ class RunView:
 
         rates = {arm: self.gradings.pass_rate.get(arm) for arm in arms}
         pass_cells = []
+
         for arm in arms:
             rate = rates[arm]
             if rate is None:
@@ -664,8 +717,10 @@ class RunView:
             ("Median first output", "first_output_ms", statistics.median, measured_duration),
             ("Mean cost / sample", "cost_usd", statistics.mean, "${:.3f}".format),
         )
+
         for label, key, reduce, show in metrics:
             values: dict[str, float | None] = {}
+
             for arm in arms:
                 reported = [
                     sample.done[key]
@@ -675,6 +730,7 @@ class RunView:
                 values[arm] = reduce(reported) if reported else None
 
             cells = []
+
             for arm in arms:
                 value = values[arm]
                 if value is not None:
@@ -711,9 +767,11 @@ def _mark_best(
 
     winning = min(known.values()) if lowest_wins else max(known.values())
     winner = next(arm for arm in arms if known.get(arm) == winning)
+
     for arm, cell in zip(arms, cells, strict=True):
         if arm not in known:
             continue
+
         if known[arm] == winning:
             cell["best"] = True
         elif lowest_wins and winning > 0:
@@ -727,6 +785,7 @@ def _coarse_duration(milliseconds: float) -> str:
     seconds = int(milliseconds / 1000)
     if seconds < 60:
         return f"{seconds}s"
+
     if seconds < 3600:
         return f"{round(seconds / 60)}m"
 
@@ -739,7 +798,10 @@ def _box_class(sample: Sample, now_ms: int) -> str:
     if state == "fail":
         return f"bs-b-fail bs-f{fail_step(*sample.checks())}"
 
-    return "bs-b-na" if state == "n/a" else f"bs-b-{state}"
+    if state == "n/a":
+        return "bs-b-na"
+
+    return "bs-b-queued" if state in IDLE else f"bs-b-{state}"
 
 
 def _state_words(sample: Sample, now_ms: int) -> str:
@@ -748,6 +810,7 @@ def _state_words(sample: Sample, now_ms: int) -> str:
     passed, total = sample.checks()
     if state in ("fail", "timeout"):
         return f"{state}, {passed} of {total} checks"
+
     if state == "quiet":
         return f"quiet {live_duration(sample.silent_ms(now_ms))}"
 
@@ -759,6 +822,9 @@ def _progress(samples: list[Sample], now_ms: int) -> str:
     running = [
         sample for sample in samples if sample.started_ms is not None and sample.closed_ms is None
     ]
+    if samples[0].run_ended:
+        return "unfinished"
+
     if not running:
         return "queued"
 
@@ -813,6 +879,7 @@ def _hover_row(sample: Sample, now_ms: int) -> dict:
 def _worst_problem(samples: list[Sample], now_ms: int) -> dict | None:
     """The cell's worst problem in words: an error, else a timeout, else the longest silence."""
     states = {sample.index: sample.state(now_ms) for sample in samples}
+
     for sample in samples:
         if states[sample.index] == "error" and sample.error is not None:
             message = sample.error["message"].splitlines()[0] if sample.error["message"] else ""
@@ -850,6 +917,7 @@ def _phases(sample: Sample, now_ms: int) -> dict | None:
     end_ms = sample.closed_ms or now_ms
     total_ms = max(end_ms - sample.phases[0][1], 1)
     segments = []
+
     for position, (phase, started_ms) in enumerate(sample.phases):
         later = sample.phases[position + 1 :]
         phase_ms = (later[0][1] if later else end_ms) - started_ms
@@ -893,15 +961,18 @@ def _group_summary(samples: list[Sample], now_ms: int) -> dict:
 
     if done == len(counted):
         return {"text": rate or "—", "count": None, "muted": False, "bar": 1, "live": False}
-    if all(state == "queued" for state in counted):
-        return {"text": "queued", "count": count, "muted": True, "bar": 0, "live": False}
+
+    if all(state in IDLE for state in counted):
+        return {"text": counted[0], "count": count, "muted": True, "bar": 0, "live": False}
+
+    ended = "unfinished" in counted
 
     return {
-        "text": rate or "running",
+        "text": rate or ("unfinished" if ended else "running"),
         "count": count,
         "muted": rate is None,
         "bar": done / len(counted),
-        "live": True,
+        "live": not ended,
     }
 
 
@@ -909,14 +980,17 @@ def _scope_note(samples: list[Sample], arms: list[str]) -> str | None:
     """The group's scope note, such as `[trial-only]` or `[1 check skips bare]`."""
     lines: dict[tuple[str, int], set[str]] = {}
     present: dict[str, set[str]] = {}
+
     for sample in samples:
         present.setdefault(sample.eval_id, set()).add(sample.arm)
+
         for index, holds in enumerate(sample.applies or []):
             line = lines.setdefault((sample.eval_id, index), set())
             if holds:
                 line.add(sample.arm)
 
     scoped: dict[str, dict[str, int]] = {}
+
     for (eval_id, _), runs_on in lines.items():
         skips = present[eval_id] - runs_on
         if not runs_on or not skips:

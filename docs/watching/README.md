@@ -47,6 +47,8 @@ Deltas carry agent output, so the page is reachable only from this computer:
 - **Matrix.** One row per eval, grouped by its folder, one column per arm, one
   box per sample. Hover or focus a cell for its samples; click it for one
   sample's assertions, phases, last five output lines and artifact path.
+![One sample's drawer over the matrix](assets/drawer.png)
+
 - **Leaderboard.** Arms as columns: pass rate, skill triggered, samples, median
   time, median first output and mean cost. The page moves here when the run
   ends unless you already picked a tab.
@@ -61,16 +63,20 @@ Deltas carry agent output, so the page is reachable only from this computer:
 | timeout | Hit its cap and was graded as it stood. |
 | error | An infra failure; never graded. |
 | n/a | Every assertion is scoped off this arm. |
+| unfinished | Never closed before the run ended; drawn as queued. |
 
-A sample whose fixtures fail never starts, so it stays `queued` and the run
-ends as `Run stopped · N of M finished`.
+Once the run ends, a sample that never closed (its fixtures failed, or its
+worker was killed) reads `unfinished`, and the run as
+`Run stopped · N of M finished`. A run killed before it wrote `run.end` keeps
+showing as live: `last event … ago` in the top bar is the sign.
 
 ## How it counts
 
 - **The unit is a sample.** `M` is every planned sample that grades something;
   `N` is those that finished (pass, fail, timeout or error). n/a samples count
   nowhere.
-- **Tally.** A timeout counts as failed; the buckets sum to `M`.
+- **Tally.** A timeout counts as failed; the buckets sum to `M`. After the run
+  ends, samples that never closed count as unfinished.
 - **A cell's rate** counts every check its graded samples ran. Errored samples
   add none; a cell whose every sample errored shows `—`.
 - **The leaderboard pass rate** pools only checks every arm runs, exactly as
@@ -82,11 +88,4 @@ ends as `Run stopped · N of M finished`.
 `benchmark.md` stays the record: it holds the final figures and their noise
 bands.
 
-## More views
-
-| | |
-| --- | --- |
-| ![The finished run's leaderboard](assets/leaderboard.png) | ![One sample's drawer](assets/drawer.png) |
-| ![The light theme](assets/live-light.png) | ![Four arms with a hover card on an errored cell](assets/four-arms.png) |
-| ![The matrix on a phone](assets/phone-matrix.png) | ![The sample sheet on a phone](assets/phone-sheet.png) |
-| ![The leaderboard on a phone](assets/phone-leaderboard.png) | ![Four arms on a phone under a pinned eval column](assets/phone-four-arms.png) |
+![A finished four-arm run's leaderboard](assets/leaderboard.png)

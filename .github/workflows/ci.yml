@@ -33,19 +33,28 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
-      - name: Install Chromium for the watch page tests
+      # The watch page's browser tests run on one Python only: Chromium is slow to install.
+      - name: Cache Chromium
+        if: matrix.python-version == '3.13'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Chromium
+        if: matrix.python-version == '3.13'
         run: uv run playwright install --with-deps chromium
 
       - name: Run tests
         env:
           GEMINI_API_KEY: test-key
-        run: make test
+        run: make test PYTEST_ARGS="${{ matrix.python-version != '3.13' && '--deselect tests/watch/test_browser.py' || '' }}"
 
       - name: Upload the watch page screenshots
-        if: always()
+        if: always() && matrix.python-version == '3.13'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: watch-screenshots-${{ matrix.python-version }}
+          name: watch-screenshots
           path: tmp/watch-screenshots/
           if-no-files-found: ignore
 
@@ -110,7 +119,7 @@ jobs:
           tar tzf dist/*.tar.gz \
             | sed 's#^[^/]*/##' \
             | grep -v '^$' \
-            | grep -v -E '^(src/|tests/|evals/|docs/[a-z-]+\.md$|docs/style/|Makefile$|README\.md$|LICENSE$|pyproject\.toml$|PKG-INFO$|\.gitignore$)' \
+            | grep -v -E '^(src/|tests/|evals/|docs/[a-z-]+\.md$|docs/style/|docs/watching/|Makefile$|README\.md$|LICENSE$|pyproject\.toml$|PKG-INFO$|\.gitignore$)' \
             > unexpected.txt || true
           if [ -s unexpected.txt ]; then
             echo "::error::unexpected files in the sdist:"

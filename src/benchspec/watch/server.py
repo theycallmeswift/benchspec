@@ -22,7 +22,7 @@ from benchspec.watch.tail import (
     check_format,
     event_files,
 )
-from benchspec.watch.view import RunView, assertions_view, read_gradings
+from benchspec.watch.view import Gradings, RunView, assertions_view, read_gradings
 
 LOOPBACK = "127.0.0.1"
 RETRY_MS = 5000
@@ -36,13 +36,7 @@ _STATIC = {
     "/bracket.svg": ("bracket.svg", "image/svg+xml"),
     **{
         f"/fonts/{name}": (f"fonts/{name}", "font/woff2")
-        for name in (
-            "jetbrains-mono-400.woff2",
-            "jetbrains-mono-500.woff2",
-            "jetbrains-mono-600.woff2",
-            "jetbrains-mono-700.woff2",
-            "dm-sans-opsz.woff2",
-        )
+        for name in ("jetbrains-mono-400.woff2", "jetbrains-mono-500.woff2", "dm-sans-opsz.woff2")
     },
 }
 _HEADERS = {"Content-Security-Policy": "default-src 'self'", "Cache-Control": "no-store"}
@@ -130,6 +124,9 @@ class WatchServer:
         self.now_ms = now_ms
         self.stopping = threading.Event()
         self.streams: set[threading.Thread] = set()
+        self._gradings = Gradings()
+        self._graded = 0
+        self._grading_lock = threading.Lock()
         self._httpd = ThreadingHTTPServer((LOOPBACK, port), _handler_for(self))
         self._httpd.daemon_threads = True
 
@@ -148,6 +145,19 @@ class WatchServer:
         """The page's address."""
         return f"http://{LOOPBACK}:{self.port}/"
 
+    def gradings(self, view: RunView) -> Gradings:
+        """The pooled gradings every stream shares, re-read when another sample finishes.
+
+        Raises:
+            ValueError: a `grading.json` is malformed, such as one read mid-write.
+        """
+        with self._grading_lock:
+            if view.finished_count() != self._graded:
+                self._gradings = read_gradings(self.iteration_dir, view.arms, view.baseline)
+                self._graded = view.finished_count()
+
+            return self._gradings
+
     def start(self) -> None:
         """Serve from a daemon thread, which never keeps the process alive."""
         threading.Thread(target=self.serve_forever, daemon=True).start()
@@ -159,6 +169,7 @@ class WatchServer:
     def stop(self) -> None:
         """Let every open stream send its last view, then close the socket."""
         self.stopping.set()
+
         for stream in list(self.streams):
             stream.join(DRAIN_TIMEOUT_S)
 
@@ -181,6 +192,7 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                 f"localhost:{server.port}",
             ):
                 self._send(HTTPStatus.FORBIDDEN)
+
                 return
 
             url = urlsplit(self.path)
@@ -206,8 +218,10 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
         def _send(self, status: HTTPStatus, body: bytes = b"", content_type: str = "") -> None:
             """Send one complete response."""
             self.send_response(status)
+
             for header, value in _HEADERS.items():
                 self.send_header(header, value)
+
             if content_type:
                 self.send_header("Content-Type", content_type)
 
@@ -224,6 +238,7 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                 or not parts[3].isdecimal()
             ):
                 self._send(HTTPStatus.NOT_FOUND)
+
                 return
 
             skill, eval_id, arm, sample = parts
@@ -240,6 +255,7 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                 grading = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 self._send(HTTPStatus.NOT_FOUND)
+
                 return
 
             body = json.dumps(assertions_view(grading)).encode()
@@ -248,6 +264,7 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
         def _stream(self) -> None:
             """Stream the view as Server-Sent Events until `run.end` or a disconnect."""
             self.send_response(HTTPStatus.OK)
+
             for header, value in _HEADERS.items():
                 self.send_header(header, value)
 
@@ -269,28 +286,27 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
             """Fold new events into a fresh view and send it whenever it changes."""
             tail = EventTail(server.iteration_dir)
             view = RunView(server.location)
-            finished = 0
+            graded = True
             sent = None
+
             while True:
                 last = server.stopping.is_set()
                 try:
                     events = tail.poll()
                 except UnsupportedFormatError as error:
                     self._event("error", str(error))
+
                     return
 
                 for event in events:
                     view.apply(event)
 
-                if view.finished_count() != finished:
-                    finished = view.finished_count()
-                    try:
-                        view.gradings = read_gradings(
-                            server.iteration_dir, view.arms, view.baseline
-                        )
-                    except ValueError:
-                        # A grading.json caught mid-write: retry on the next poll.
-                        finished = -1
+                try:
+                    view.gradings = server.gradings(view)
+                    graded = True
+                except ValueError:
+                    # A grading.json caught mid-write: retry on the next poll.
+                    graded = False
 
                 if server.iteration_dir.is_dir():
                     payload = json.dumps(view.to_json(server.now_ms()))
@@ -302,9 +318,11 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                     sent = payload
 
                 # An empty poll after `run.end` shows every worker's file is drained.
-                if view.ended and (last or (finished >= 0 and not events)):
+                if view.ended and (last or (graded and not events)):
                     self._event("end", "{}")
+
                     return
+
                 if last:
                     return
 

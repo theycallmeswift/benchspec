@@ -43,16 +43,20 @@ class EventTail:
             UnsupportedFormatError: an event carries another `format_version`.
         """
         events: list[dict] = []
+
         for path in event_files(self._iteration_dir):
             events.extend(self._read(path))
 
         return events
 
     def _read(self, path: Path) -> list[dict]:
-        """Read one file's new complete lines."""
-        with path.open("rb") as file:
-            file.seek(self._offsets.get(path, 0))
-            chunk = file.read()
+        """Read one file's new complete lines; a file removed since the glob has none."""
+        try:
+            with path.open("rb") as file:
+                file.seek(self._offsets.get(path, 0))
+                chunk = file.read()
+        except OSError:
+            return []
 
         complete, newline, _ = chunk.rpartition(b"\n")
         self._offsets[path] = self._offsets.get(path, 0) + len(complete) + len(newline)
