@@ -10,9 +10,9 @@ install:  ## Create the venv and install dev dependencies
 test:  ## Run the unit test suite
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
 
-# Shared by e2e and evals. Keep it a fixed, modest number rather than `auto`:
-# each e2e cell reserves a 2 GB sandbox, and binder fan-out past ~12 trips the
-# Gemini call's ~60s timeout.
+# Shared by e2e and evals. Pinned rather than `auto` so CI is reproducible
+# whatever runner it lands on; `auto` sizes from the host and caps at 12 for the
+# same reason, binder fan-out past ~12 trips the Gemini call's ~60s timeout.
 WORKERS ?= 6
 # Three samples per cell, so every delta carries a noise band; COUNT=1 for a quick pass.
 COUNT ?= 3
@@ -20,8 +20,8 @@ COUNT ?= 3
 # command proves both the default path and the single-key path. The judge stays on
 # Codex but grades on a Google slug: the arms are Anthropic and OpenAI models.
 e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter, COUNT samples per cell (default 3) on WORKERS sandboxes (default 6); EVAL_ARGS appends pytest args. Then the live artifact checks. Prerequisites: README, Development
-	uv run benchspec run --set e2e -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
-	uv run benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model google/gemini-3.5-flash --binder-provider openrouter -- --count $(COUNT) -n $(WORKERS) $(EVAL_ARGS)
+	uv run benchspec run --set e2e --workers $(WORKERS) -- --count $(COUNT) $(EVAL_ARGS)
+	uv run benchspec run --set e2e-openrouter --judge-provider openrouter --judge-model google/gemini-3.5-flash --binder-provider openrouter --workers $(WORKERS) -- --count $(COUNT) $(EVAL_ARGS)
 	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -m e2e tests/test_e2e_live.py
 
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection

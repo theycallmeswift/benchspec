@@ -54,8 +54,8 @@ nothing. Reading deltas: [results.md](results.md).
 A fixed, deliberately conservative classifier (one call to
 `gemini-3.5-flash-lite` per assertion, through Gemini's API on `GEMINI_API_KEY` or
 through OpenRouter on `OPENROUTER_API_KEY`, by `[tool.benchspec.binder]
-provider`) that decides, at grade time, whether an assertion can be checked
-mechanically. It either **binds** the line to one checker or **punts** it to the
+provider`) that decides, once per unique assertion before the run's cells start, whether an
+assertion can be checked mechanically. It either **binds** the line to one checker or **punts** it to the
 judge. Binding validates the reply against the assertion, not only against the
 checker schema: a `regex` bound from an assertion that names one must carry that
 regex verbatim, or the line punts. It never grades anything itself. Reference:

@@ -119,7 +119,10 @@ bad invocation.
 
 Each `(eval × arm × sample)` boots its own sandbox from the snapshot (2 vCPUs,
 2 GiB on either backend — `--cpus 2 --memory 2048m` for a Docker container) and
-tears it down after the turn. A cell, in order:
+tears it down after the turn. `benchspec run --workers auto` budgets that 2 GiB
+per cell against total host RAM. On macOS and Windows the Docker backend runs
+sandboxes in a VM whose memory is separate from host RAM, so `auto` can
+overestimate there: set `workers` explicitly. A cell, in order:
 
 1. Stages the project (below).
 2. Boots from the snapshot.

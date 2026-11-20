@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "pytest>=8",
+    "pytest-xdist>=3",
     "python-dotenv>=1.0",
     "pyyaml>=6",
 ]
@@ -40,7 +41,6 @@ testing = []
 dev = [
     "houserules>=0.1.1,<1.0.0",
     "pytest>=8",
-    "pytest-xdist>=3",
     "pytest-repeat>=0.9,<1",
     "ruff>=0.16",
     "microsandbox>=0.7.3,<0.8",
