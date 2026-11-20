@@ -119,6 +119,8 @@ STAND_IN_CONFTEST = textwrap.dedent(
 
     sandbox.preflight = lambda backend=None, **kwargs: None
     binder.preflight_verify_binder_key = lambda config: None
+    binder.binder_for = lambda config: lambda text: None
+    cases.grading_preflight_errors = lambda config: []
     cases.preflight_verify_judge_binary = lambda config: None
     cases.preflight_verify_judge_credential = lambda config: None
     cases.seed_room = stand_in_room

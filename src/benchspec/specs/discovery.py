@@ -14,6 +14,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from benchspec.config.options import RunOptions, option_str
 from benchspec.specs import mdformat, schema
@@ -99,6 +100,34 @@ def pyproject_table(repo_root: Path) -> dict:
     with pyproject.open("rb") as pyproject_file:
         data = tomllib.load(pyproject_file)
     return data.get("tool", {}).get("benchspec", {})
+
+
+def parse_workers(value: object, *, label: str) -> int | Literal["auto"]:
+    """Validate a worker count: a positive integer or the literal `"auto"`.
+
+    Args:
+        value: The raw value, from the CLI flag or the `[tool.benchspec]` table.
+        label: What to name in the error, such as `--workers`.
+
+    Returns:
+        The positive integer, or `"auto"`.
+
+    Raises:
+        schema.SchemaError: `value` is anything else, including booleans and zero.
+    """
+    if value == "auto":
+        return "auto"
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise schema.SchemaError(f'{label} must be a positive integer or "auto"')
+
+
+def pyproject_workers(repo_root: Path) -> int | Literal["auto"] | None:
+    """Read the project-wide `workers` default; None when the key is absent."""
+    raw = pyproject_table(repo_root).get("workers")
+    if raw is None:
+        return None
+    return parse_workers(raw, label="[tool.benchspec] workers")
 
 
 def _pyproject_eval_paths(repo_root: Path) -> list[str] | None:

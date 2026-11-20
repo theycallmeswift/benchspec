@@ -488,3 +488,18 @@ def test_main_loads_repo_dotenv_for_every_subcommand(
 
     assert exit_code == 0
     assert os.environ.get("BENCHSPEC_DOTENV_SENTINEL") == "loaded"
+
+
+def test_run_help_documents_workers(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `run --help` exits 0 and documents `--workers` without spawning a run."""
+    monkeypatch.setattr(
+        __main__.run, "run", lambda args: pytest.fail("run ran during --help")
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        __main__.main(["run", "--help"])
+
+    assert raised.value.code == 0
+    assert "--workers" in capsys.readouterr().out
