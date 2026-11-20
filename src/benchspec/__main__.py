@@ -60,6 +60,12 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     )
     run_parser.add_argument("--binder-model", help="binder model (--benchspec-binder-model)")
     run_parser.add_argument(
+        "--workers",
+        type=run.workers_value,
+        help="parallel cells: a positive integer or auto (default: [tool.benchspec] workers, "
+        "else auto); 1 runs in-process",
+    )
+    run_parser.add_argument(
         "--env",
         action="append",
         default=[],

@@ -160,7 +160,7 @@ variable the agent can read. [`sandbox.md`](docs/sandbox.md) has the tradeoff.
 `benchspec run` is pytest underneath, and everything after `--` goes to
 pytest verbatim. The normal run is `benchspec run -- --count 3`: three samples
 per cell (pytest-repeat), so every delta carries a noise band; a one-sample run
-is flagged in the report. `-n 8` fans cells across eight sandboxes to keep it
+is flagged in the report. `--workers` (default `auto`) fans cells across sandboxes to keep it
 fast, and `-k greets-by-name` (equivalently `pytest -k greets-by-name`) runs one
 eval. The repo's own `make e2e` defaults to three samples and six workers through
 the `COUNT` and `WORKERS` variables; `make e2e COUNT=1 WORKERS=1` is the quick

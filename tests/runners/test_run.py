@@ -20,6 +20,7 @@ import pytest
 from benchspec.config.options import RunOptions
 from benchspec.runners import run
 from benchspec.runners.run import PluginOptions, translate_run_flags
+from benchspec.specs.schema import SchemaError
 
 # The `test_run_subprocess_*` tests are live-in-process but NON-paid: they spawn a real
 # child pytest with `--collect-only`, so the entry-point plugin loads and resolves the set,
@@ -87,6 +88,7 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
     }
     values["env"] = []
     values["passthrough"] = []
+    values["workers"] = 1
     values.update(flags)
     return argparse.Namespace(root=root, **values)
 
@@ -480,3 +482,159 @@ def test_translates_provider_flags_for_judge_and_binder() -> None:
     assert "--benchspec-judge-provider=openrouter" in tokens
     assert "--benchspec-binder-provider=openrouter" in tokens
     assert "--benchspec-binder-model=google/gemini-3.5-flash-lite" in tokens
+
+
+GIB = 1024**3
+
+
+@pytest.mark.parametrize(
+    ("cores", "ram_bytes", "expected"),
+    [
+        (8, 7 * GIB, 3),
+        (64, 256 * GIB, 12),
+        (2, 1 * GIB, 1),
+        (8, None, 8),
+        (64, None, 12),
+    ],
+)
+def test_auto_workers_takes_the_smaller_of_cores_and_ram_clamped(
+    cores: int, ram_bytes: int | None, expected: int
+) -> None:
+    """Verify `auto` is min(cores, RAM / 2 GiB) clamped to [1, 12]."""
+    assert run.auto_workers(cores, ram_bytes) == expected
+
+
+@pytest.mark.parametrize("text", ["auto", "1", "8"])
+def test_workers_value_accepts_auto_and_positive_integers(text: str) -> None:
+    """Verify `auto` and positive integers parse."""
+    assert run.workers_value(text) == (text if text == "auto" else int(text))
+
+
+@pytest.mark.parametrize("text", ["0", "-2", "1.5", "", "true"])
+def test_workers_value_rejects_everything_else_naming_workers(text: str) -> None:
+    """Verify other values are rejected with a message naming workers."""
+    with pytest.raises(argparse.ArgumentTypeError, match="workers"):
+        run.workers_value(text)
+
+
+def _spawn(monkeypatch: pytest.MonkeyPatch, args: argparse.Namespace) -> tuple[int, _SpawnRecord]:
+    """Run `run.run` against a fake runner over one discovered eval."""
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    recorder = _SpawnRecord()
+    exit_code = run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
+    return exit_code, recorder
+
+
+def test_workers_flag_prepends_n_token_and_prints_flag_source(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `--workers 4` emits `-n=4` and prints the flag source."""
+    _, recorder = _spawn(monkeypatch, _run_namespace(Path("repo"), workers=4))
+
+    assert recorder.argv[3] == "-n=4"
+    assert "workers: 4 (flag)" in capsys.readouterr().out
+
+
+def test_one_worker_emits_no_n_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `--workers 1` stays in-process with no xdist token."""
+    _, recorder = _spawn(monkeypatch, _run_namespace(Path("repo"), workers=1))
+
+    assert not any(token.startswith("-n") for token in recorder.argv)
+
+
+def test_passthrough_n_is_left_alone_without_workers_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a passthrough `-n` is forwarded and no `-n=` token is added."""
+    args = _run_namespace(Path("repo"), workers=None, passthrough=["-n", "8"])
+
+    _, recorder = _spawn(monkeypatch, args)
+
+    assert recorder.argv[-2:] == ["-n", "8"]
+    assert "-n=" not in "".join(recorder.argv[:-2])
+
+
+@pytest.mark.parametrize("spelling", [["-n", "8"], ["-n8"], ["-n=8"], ["--numprocesses=8"]])
+def test_workers_flag_with_passthrough_n_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, spelling: list[str]
+) -> None:
+    """Verify `--workers` with any passthrough `-n` spelling exits 2 without spawning."""
+    args = _run_namespace(Path("repo"), workers=2, passthrough=spelling)
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+
+    exit_code = run.run(args, runner=_runner_that_must_not_run, preflight=_no_preflight)
+
+    assert exit_code == 2
+
+
+def test_collect_only_adds_no_n_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a collect-only run adds no `-n` token."""
+    args = _run_namespace(Path("repo"), workers=4, passthrough=["--collect-only"])
+
+    _, recorder = _spawn(monkeypatch, args)
+
+    assert not any(token.startswith("-n") for token in recorder.argv)
+
+
+def test_auto_prints_cores_and_ram_and_sizes_from_the_host(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `auto` sizes from the host and prints cores and RAM."""
+    monkeypatch.setattr(run, "host_cpu_count", lambda: 8)
+    monkeypatch.setattr(run, "host_ram_bytes", lambda: int(11.4 * GIB))
+
+    _, recorder = _spawn(monkeypatch, _run_namespace(Path("repo"), workers=None))
+
+    assert recorder.argv[3] == "-n=5"
+    assert "workers: 5 (auto: 8 cores, 11.4 GB RAM)" in capsys.readouterr().out
+
+
+def test_auto_without_ram_omits_the_ram_figure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify the start line omits RAM when the host cannot report it."""
+    monkeypatch.setattr(run, "host_cpu_count", lambda: 8)
+    monkeypatch.setattr(run, "host_ram_bytes", lambda: None)
+
+    _spawn(monkeypatch, _run_namespace(Path("repo"), workers=None))
+
+    assert "workers: 8 (auto: 8 cores)" in capsys.readouterr().out
+
+
+def test_project_default_sets_workers_and_the_flag_overrides_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `workers` in pyproject applies and `--workers` overrides it."""
+    (tmp_path / "pyproject.toml").write_text("[tool.benchspec]\nworkers = 3\n")
+
+    _, from_config = _spawn(monkeypatch, _run_namespace(tmp_path, workers=None))
+    _, from_flag = _spawn(monkeypatch, _run_namespace(tmp_path, workers=2))
+
+    assert from_config.argv[3] == "-n=3"
+    assert "workers: 3 (config)" in capsys.readouterr().out.splitlines()[0]
+    assert from_flag.argv[3] == "-n=2"
+
+
+def test_passthrough_n_beats_the_project_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a passthrough `-n` suppresses the project default."""
+    (tmp_path / "pyproject.toml").write_text("[tool.benchspec]\nworkers = 3\n")
+    args = _run_namespace(tmp_path, workers=None, passthrough=["-n", "8"])
+
+    _, recorder = _spawn(monkeypatch, args)
+
+    assert "-n=3" not in recorder.argv
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", '"4"', "true", "1.5"])
+def test_malformed_project_default_raises_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """Verify a malformed project `workers` raises SchemaError before spawning."""
+    (tmp_path / "pyproject.toml").write_text(f"[tool.benchspec]\nworkers = {raw}\n")
+    monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
+    args = _run_namespace(tmp_path, workers=None)
+
+    with pytest.raises(SchemaError, match="workers"):
+        run.run(args, runner=_runner_that_must_not_run, preflight=_no_preflight)
