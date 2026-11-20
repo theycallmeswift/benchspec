@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, TextIO
 
@@ -32,19 +32,15 @@ NULL_SINK: EventSink = _NullSink()
 class JsonlEventSink:
     """Appends each event, enveloped, as one line of this process's own file."""
 
-    def __init__(
-        self, path: Path, worker: str, *, clock: Callable[[], float] = time.time
-    ) -> None:
+    def __init__(self, path: Path, worker: str) -> None:
         """Bind to `path` without creating it.
 
         Args:
             path: The process's `events-<worker>.jsonl`.
             worker: The envelope's `worker`, matching the file suffix.
-            clock: Wall-clock seconds since the epoch, injectable for tests.
         """
         self._path = path
         self._worker = worker
-        self._clock = clock
         self._file: TextIO | None = None
 
     def emit(self, event: Mapping[str, object]) -> None:
@@ -56,7 +52,7 @@ class JsonlEventSink:
         line = {
             "format_version": FORMAT_VERSION,
             "type": event["type"],
-            "ts_ms": int(self._clock() * 1000),
+            "ts_ms": int(time.time() * 1000),
             "worker": self._worker,
             **event,
         }

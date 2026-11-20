@@ -384,10 +384,7 @@ def _emit_run_end(session: pytest.Session) -> None:
 
     repo_root = resolve_repo_root(config)
     tracker = config.stash[_CELL_TRACKER]
-    benchmarks = {
-        name: workspace.iteration_root(repo_root) / name
-        for name in ("benchmark.md", "benchmark.json")
-    }
+    iteration_root = workspace.iteration_root(repo_root)
     config.stash[cases.EVENT_SINK].emit(
         {
             "type": "run.end",
@@ -395,12 +392,8 @@ def _emit_run_end(session: pytest.Session) -> None:
             "wall_ms": int((time.monotonic() - config.stash[_RUN_STARTED]) * 1000),
             "done": tracker.done,
             "errored": tracker.errored,
-            **{
-                name.replace(".", "_"): (
-                    path.relative_to(repo_root).as_posix() if path.is_file() else None
-                )
-                for name, path in benchmarks.items()
-            },
+            "benchmark_md": _repo_relative(iteration_root / "benchmark.md", repo_root),
+            "benchmark_json": _repo_relative(iteration_root / "benchmark.json", repo_root),
         }
     )
 
@@ -469,6 +462,11 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     summary = config.stash.get(_BIND_SUMMARY, None)
 
     return [summary] if summary else []
+
+
+def _repo_relative(path: Path, repo_root: Path) -> str | None:
+    """The file's repo-relative path; None when it was not written."""
+    return path.relative_to(repo_root).as_posix() if path.is_file() else None
 
 
 class _CellTracker:

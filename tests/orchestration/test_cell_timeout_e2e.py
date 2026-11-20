@@ -7,12 +7,13 @@ factory double) and the clock behind the cell's deadline are doubles, so no test
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
 
 from benchspec.config.arms import Arm
+from benchspec.events.sink import NULL_SINK, EventSink
 from benchspec.grading.judges import JudgeConfig
 from benchspec.orchestration import execution, prebind, workspace
 from benchspec.orchestration.deadline import CellDeadline, CellTimeoutError
@@ -148,6 +149,7 @@ def _run_cell(
     *,
     assertions: list[str],
     bind: Callable[[str], dict | None] = _bind_file_exists_only,
+    events: EventSink = NULL_SINK,
 ) -> tuple[Path, dict, dict]:
     """Run sample 0 and return its run dir, grading.json, and timing.json."""
     workspace.set_current_iteration("iteration_01")
@@ -166,6 +168,7 @@ def _run_cell(
         session_factory=session,
         grade=judge,
         bind=bind,
+        events=events,
     )
 
     run_dir = workspace.arm_dir(tmp_path, "myskill", "alpha", "trial", sample=0)
@@ -283,6 +286,70 @@ def test_bind_that_spends_the_whole_cap_skips_the_sandbox(tmp_path: Path, clock:
     assert grading["errored"] is False
     assert grading["assertions"][0]["passed"] is False
     assert "bind hit the 900s cap" in grading["assertions"][0]["evidence"]
+
+
+class _RecordingSink:
+    """Keeps every event the cell emits."""
+
+    def __init__(self) -> None:
+        """Start empty."""
+        self.events: list[Mapping[str, object]] = []
+
+    def emit(self, event: Mapping[str, object]) -> None:
+        """Record the event."""
+        self.events.append(event)
+
+    def phases(self) -> list[object]:
+        """The phases the cell entered, in order."""
+        return [event["phase"] for event in self.events if event["type"] == "cell.phase"]
+
+
+@pytest.mark.parametrize("phase", ["boot", "setup"])
+def test_cap_that_fires_before_the_agent_closes_the_stream_with_a_timed_out_done(
+    tmp_path: Path, clock: _Clock, phase: str
+) -> None:
+    """A boot or setup timeout skips the agent phase and ends in `cell.done`, not an error."""
+    sink = _RecordingSink()
+
+    _, _, timing = _run_cell(
+        tmp_path,
+        _Session(boot_timeout_phase=phase),
+        _JudgeDouble(),
+        assertions=[FILE_LINE],
+        events=sink,
+    )
+
+    done = sink.events[-1]
+    assert sink.phases() == ["bind", "boot", "grade"]
+    assert done["type"] == "cell.done"
+    assert (done["timed_out"], done["timeout_phase"]) == (True, phase)
+    assert {key: done[key] for key in timing} == timing
+
+
+def test_bind_that_spends_the_cap_goes_straight_to_grade_in_the_stream(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """A cell whose binder ate the cap enters no sandbox phase and ends timed out in `bind`."""
+    sink = _RecordingSink()
+
+    def slow_bind(text: str) -> dict | None:
+        """Burn the whole cap, then punt the line."""
+        clock.now += CAP_SECONDS
+        return None
+
+    _run_cell(
+        tmp_path,
+        _Session(),
+        _JudgeDouble(),
+        assertions=[JUDGED_LINE],
+        bind=slow_bind,
+        events=sink,
+    )
+
+    done = sink.events[-1]
+    assert sink.phases() == ["bind", "grade"]
+    assert done["type"] == "cell.done"
+    assert (done["timed_out"], done["timeout_phase"]) == (True, "bind")
 
 
 def test_agent_that_spends_the_judge_budget_leaves_judge_lines_unjudged(

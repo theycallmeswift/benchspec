@@ -10,7 +10,6 @@ from benchspec.events.schema import (
     DELTA_TEXT_LIMIT,
     ERROR_MESSAGE_LIMIT,
     Timing,
-    TimingFields,
 )
 from benchspec.events.sink import EventSink
 from benchspec.orchestration.deadline import PHASE_AGENT
@@ -70,12 +69,14 @@ class CellEvents:
         self._phase = phase
         if phase == PHASE_AGENT:
             self._agent_started = self._now()
+
         self._emit("cell.phase", {"phase": phase})
 
     def delta(self, delta: StreamDelta) -> None:
         """Emit `cell.delta`, its text cut to `DELTA_TEXT_LIMIT`."""
         if self._first_delta is None:
             self._first_delta = self._now()
+
         self._emit(
             "cell.delta",
             {"kind": delta.kind, "name": delta.name, "text": delta.text[:DELTA_TEXT_LIMIT]},
@@ -101,7 +102,7 @@ class CellEvents:
         Args:
             error_kind: `agent`, `judge` or `exception`.
             message: The failure, cut to `ERROR_MESSAGE_LIMIT`.
-            timing: The sample's `timing.json`, or None when it never got that far.
+            timing: The sample's `timing.json`; None when it was never written.
         """
         self._emit(
             "cell.error",
@@ -110,7 +111,7 @@ class CellEvents:
                 "error_kind": error_kind,
                 "message": message[:ERROR_MESSAGE_LIMIT],
                 "wall_ms": self._wall_ms(),
-                **(timing or dict.fromkeys(TimingFields.__annotations__)),
+                **(timing or {}),
             },
         )
 

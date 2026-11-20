@@ -223,5 +223,5 @@ def test_a_failing_setup_script_emits_an_exception_error_and_still_raises(
         "setup",
     )
     assert error["message"] == str(raised.value)[:500]
-    assert error["duration_ms"] is None
+    assert "duration_ms" not in error
     assert [event["type"] for event in events].count("cell.error") == 1

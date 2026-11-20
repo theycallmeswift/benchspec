@@ -237,13 +237,13 @@ def _stop_rule(specs: list[dict | None]) -> StopRule | None:
     return settled_once_dispatched(spec["skill"] for spec in specs if spec is not None)
 
 
-def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
+def _usage_fields(arm_run: _ArmRun) -> Timing:
     """The token fields for timing.json.
 
     A stopped or timed-out run killed before any reported usage records null tokens, so it
     never reads as a free run.
     """
-    fields = {
+    fields: Timing = {
         "total_tokens": arm_run.total_tokens,
         "cache_read_tokens": arm_run.total_cache_read,
         "cache_creation_tokens": arm_run.total_cache_creation,
@@ -251,7 +251,14 @@ def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
         "output_tokens": arm_run.total_output_tokens,
     }
     if (arm_run.stopped or arm_run.timed_out_phase) and arm_run.total_tokens == 0:
-        return dict.fromkeys(fields)
+        return {
+            "total_tokens": None,
+            "cache_read_tokens": None,
+            "cache_creation_tokens": None,
+            "input_tokens": None,
+            "output_tokens": None,
+        }
+
     return fields
 
 
@@ -591,6 +598,7 @@ def run_eval_arm(
         harness=arm.harness,
         model=arm.model,
     )
+
     try:
         return _run_cell(
             eval_case,
@@ -726,6 +734,7 @@ def _run_cell(
                 stop=stop,
             )
         )
+
     # A cell whose cap fired before the agent returned enters grading here.
     events.phase(PHASE_GRADE)
 
@@ -817,15 +826,10 @@ def _run_cell(
     # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
     # once its verdicts were fixed, so its time and tokens never read as a full task's.
     # run_dir was created above when provenance was persisted.
-    usage = _usage_fields(arm_run)
     timing: Timing = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
-        "total_tokens": usage["total_tokens"],
-        "cache_read_tokens": usage["cache_read_tokens"],
-        "cache_creation_tokens": usage["cache_creation_tokens"],
-        "input_tokens": usage["input_tokens"],
-        "output_tokens": usage["output_tokens"],
+        **_usage_fields(arm_run),
         "first_output_ms": events.first_output_ms,
         "cost_usd": arm_run.cost_usd,
     }

@@ -118,8 +118,8 @@ def test_phases_emit_in_order_and_a_repeat_is_silent() -> None:
     assert [event["phase"] for event in sink.events[1:]] == list(PHASES)
 
 
-def test_error_names_the_running_phase_and_nulls_timing_it_never_reached() -> None:
-    """Error names the running phase and nulls timing it never reached."""
+def test_error_names_the_running_phase_and_carries_no_timing_it_never_reached() -> None:
+    """Error names the running phase and carries no timing it never reached."""
     cell, sink, clock = _started_cell()
     cell.phase("bind")
     cell.phase("boot")
@@ -133,7 +133,7 @@ def test_error_names_the_running_phase_and_nulls_timing_it_never_reached() -> No
     assert error["error_kind"] == "exception"
     assert error["wall_ms"] == 1500
     assert error["message"] == "x" * ERROR_MESSAGE_LIMIT
-    assert {key: error[key] for key in TIMING} == dict.fromkeys(TIMING)
+    assert error.keys().isdisjoint(TIMING)
 
 
 def test_error_before_any_phase_has_a_null_phase() -> None:

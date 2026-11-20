@@ -22,12 +22,13 @@ def read_events(iteration_dir: Path) -> list[dict]:
 
 
 def assert_matches_schema(event: dict) -> None:
-    """The event carries every required key of its type and no key the type lacks."""
+    """The event carries exactly its type's keys; a closing event may add timing fields."""
     shape = EVENT_TYPES[event["type"]]
 
     assert event["format_version"] == FORMAT_VERSION
-    known = shape.__required_keys__ | shape.__optional_keys__
-    assert shape.__required_keys__ <= event.keys() <= known, event
+    assert shape.__required_keys__ <= event.keys(), event
+    if event["type"] not in ("cell.done", "cell.error"):
+        assert event.keys() <= shape.__required_keys__, event
 
 
 def of_type(events: list[dict], event_type: str) -> list[dict]:

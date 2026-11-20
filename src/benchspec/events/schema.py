@@ -58,7 +58,7 @@ class RunStart(Envelope):
 
     iteration: str
     run_id: str
-    set: str | None
+    set: str
     baseline: str | None
     arms: list[ArmInfo]
     cells: list[PlannedCell]
@@ -93,11 +93,11 @@ class CellDelta(Envelope):
     text: str
 
 
-class TimingFields(TypedDict):
-    """The fields every `timing.json` carries; null where the harness reported nothing."""
+class Timing(TypedDict, total=False):
+    """A sample's `timing.json`. `stopped`, `timed_out` and `timeout_phase` appear only when set."""
 
-    duration_ms: int | None
-    judge_ms: int | None
+    duration_ms: int
+    judge_ms: int
     total_tokens: int | None
     cache_read_tokens: int | None
     cache_creation_tokens: int | None
@@ -105,27 +105,13 @@ class TimingFields(TypedDict):
     output_tokens: int | None
     first_output_ms: int | None
     cost_usd: float | None
-
-
-class CapFields(TypedDict, total=False):
-    """Present only on a sample whose cell cap fired."""
-
+    stopped: bool
     timed_out: bool
     timeout_phase: str
 
 
-class StoppedField(TypedDict, total=False):
-    """Present only on a run stopped once its verdicts were fixed."""
-
-    stopped: bool
-
-
-class Timing(TimingFields, CapFields, StoppedField):
-    """A sample's `timing.json`."""
-
-
-class CellDone(Envelope, TimingFields, CapFields):
-    """A sample finished and was graded; the timing fields copy its `timing.json`."""
+class CellDone(Envelope):
+    """A sample finished and was graded. Its `timing.json` fields ride along, unlisted here."""
 
     cell: str
     passed: int
@@ -135,8 +121,8 @@ class CellDone(Envelope, TimingFields, CapFields):
     stopped: bool
 
 
-class CellError(Envelope, TimingFields, CapFields, StoppedField):
-    """A sample ended in an infra error; timing fields are null when it never got that far."""
+class CellError(Envelope):
+    """A sample ended in an infra error. Its `timing.json` fields ride along once written."""
 
     cell: str
     phase: str | None

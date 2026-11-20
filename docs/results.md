@@ -264,8 +264,9 @@ Every run writes how it unfolded to `events-<worker>.jsonl`, one JSON object
 per line, flushed as it happens. Each process appends only to its own file:
 `main` is the controller (a serial run's only process), and `gw0`, `gw1`, …
 are xdist workers. Under `--workers N` the controller writes only `run.start`
-and `run.end`, and each worker writes its own cells' events. Read every file
-and order by `ts_ms`. `benchspec.events.schema` is the authoritative shape.
+and `run.end`, and each worker writes its own cells' events. Line order
+within a file is authoritative; `ts_ms` only merges across files.
+`benchspec.events.schema` is the authoritative shape.
 
 Every event carries the envelope:
 
@@ -281,7 +282,7 @@ artifact path does.
 
 | Type | Fields | Emitted |
 |---|---|---|
-| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (both nullable), `arms` (each `name`, `harness`, `model`, `effort`), `cells`, `cell_count` | Once, by the controller, after collection |
+| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`), `cells`, `cell_count` | Once, by the controller, after collection |
 | `cell.start` | `cell`, `skill`, `eval_id`, `arm`, `sample`, `harness`, `model` | When a sample begins |
 | `cell.phase` | `cell`, `phase` | On entering `bind`, `boot`, `setup`, `agent`, or `grade`; each at most once, in that order |
 | `cell.delta` | `cell`, `kind` (`tool_call` or `text`), `name` (the tool, else `null`), `text` | Once per tool call or assistant text block of the agent's turn |
@@ -296,17 +297,18 @@ artifact path does.
 - **Phases.** `bind` is the binder; `boot` stages the project and creates the
   sandbox; `setup` is `setup.sh`; `agent` is the turn; `grade` is everything
   after it. A [timed-out sample](#timed-out-samples) skips the phases the cap
-  cut off.
+  cut off. A first-run snapshot build sits between `cell.start` and `bind`,
+  in no phase.
 - **Deltas** carry one line of at most 160 characters: a tool call's `command`,
   `file_path`, `path`, `pattern`, or `skill` argument (else its arguments as
   JSON), or a text block's first line. Tool results are never emitted.
 - **The timing fields** are the sample's `timing.json`, verbatim, so the event
-  and the artifact cannot disagree. `cell.done` always has `stopped`.
+  and the artifact cannot disagree, and a field added there appears here.
+  `cell.done` always has `stopped`.
 - **`cell.error`** has `error_kind` `agent` (the harness crashed, exited
   non-zero, or streamed nothing before the cap), `judge` (the judge failed at
   the transport level), or `exception` (anything raised, such as a failing
-  `setup.sh`; its timing fields are `null`). `message` is at most 500
-  characters.
+  `setup.sh`; it has no timing fields). `message` is at most 500 characters.
 - **Every sample that starts ends in exactly one `cell.done` or `cell.error`**
   unless the run is killed. A sample whose fixtures fail (a preflight) never
   starts; `run.end.errored` counts it, and `done` counts the `cell.done`s.
