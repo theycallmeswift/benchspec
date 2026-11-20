@@ -57,8 +57,8 @@ def test_build_command_accepts_qualified_model() -> None:
     assert "google/gemini-3.5-flash" in cmd
 
 
-def test_build_command_shape_and_effort_mapping() -> None:
-    """Verify build command shape and effort mapping."""
+def test_build_command_shape() -> None:
+    """Verify build command shape."""
     cmd = _opencode_agent().build_command(
         "do the thing",
         plugin_dir=None,
@@ -71,48 +71,35 @@ def test_build_command_shape_and_effort_mapping() -> None:
     assert cmd[0] == "/usr/local/bin/opencode"
     assert cmd[1] == "run"
     assert cmd[cmd.index("--format") + 1] == "json"
-    assert cmd[cmd.index("--variant") + 1] == "default"  # medium → default
+    assert cmd[cmd.index("--variant") + 1] == "medium"
     assert cmd[cmd.index("-m") + 1] == "anthropic/claude-sonnet-4-6"
     # prompt is the trailing positional, not -p (that's Claude Code's shape)
     assert cmd[-1] == "do the thing"
 
 
-def test_build_command_effort_low_maps_to_fast_variant() -> None:
-    """Verify build command effort low maps to fast variant."""
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+def test_build_command_passes_effort_through_as_the_variant(effort: str) -> None:
+    """Verify the effort reaches OpenCode as `--variant` under its own name."""
     cmd = _opencode_agent().build_command(
         "question",
         plugin_dir=None,
         model="provider/model",
-        effort="low",
+        effort=effort,
         resume_session_id=None,
         detect_skill=None,
     )
 
-    assert cmd[cmd.index("--variant") + 1] == "fast"
-
-
-def test_build_command_effort_high_maps_to_thorough_variant() -> None:
-    """Verify build command effort high maps to thorough variant."""
-    cmd = _opencode_agent().build_command(
-        "question",
-        plugin_dir=None,
-        model="provider/model",
-        effort="high",
-        resume_session_id=None,
-        detect_skill=None,
-    )
-
-    assert cmd[cmd.index("--variant") + 1] == "thorough"
+    assert cmd[cmd.index("--variant") + 1] == effort
 
 
 def test_build_command_refuses_an_effort_it_cannot_map() -> None:
-    """An unmapped effort raises naming the accepted set, never the `default` variant."""
-    with pytest.raises(ValueError, match=r"cannot map effort 'xhigh'.*'high', 'low', 'medium'"):
+    """An effort that names no OpenCode variant raises naming the accepted set."""
+    with pytest.raises(ValueError, match=r"cannot map effort 'thorough'.*'high', 'low', 'max'"):
         _opencode_agent().build_command(
             "question",
             plugin_dir=None,
             model="provider/model",
-            effort="xhigh",
+            effort="thorough",
             resume_session_id=None,
             detect_skill=None,
         )

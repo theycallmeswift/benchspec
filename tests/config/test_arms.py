@@ -883,15 +883,19 @@ def _openrouter_set(arm: dict, **set_level: object) -> dict:
     ("harness", "model", "accepted"),
     [
         ("claude-code", "sonnet", ["low", "medium", "high", "xhigh", "max"]),
-        ("codex", "gpt-5.5", ["low", "medium", "high", "xhigh", "max"]),
-        ("opencode", "anthropic/claude-sonnet-4-6", ["low", "medium", "high"]),
+        ("codex", "gpt-5.5", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+        (
+            "opencode",
+            "anthropic/claude-sonnet-4-6",
+            ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        ),
     ],
 )
 def test_resolve_set_accepts_exactly_the_efforts_a_harness_declares(
     harness: str, model: str, accepted: list[str]
 ) -> None:
     """Each harness resolves every effort it declares and rejects the rest."""
-    every_effort = ["minimal", "low", "medium", "high", "xhigh", "max", "thorough", ""]
+    every_effort = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "thorough", ""]
 
     resolved = []
     for effort in every_effort:
@@ -915,14 +919,14 @@ def test_resolve_set_accepts_exactly_the_efforts_a_harness_declares(
 
 
 def test_resolve_set_rejects_unmapped_effort_naming_arm_value_and_accepted_set() -> None:
-    """An effort OpenCode cannot map fails at resolve, not as a silent `default` variant."""
+    """An effort that names no OpenCode variant fails at resolve, never silently ignored."""
     rawsets, default = parse_sets(
         _sets_table(
             {
                 "default": {
                     "harness": "opencode",
                     "model": "anthropic/claude-sonnet-4-6",
-                    "arms": [{"name": "alpha", "effort": "xhigh"}],
+                    "arms": [{"name": "alpha", "effort": "thorough"}],
                 }
             }
         )
@@ -930,8 +934,8 @@ def test_resolve_set_rejects_unmapped_effort_naming_arm_value_and_accepted_set()
 
     with pytest.raises(
         SchemaError,
-        match=r"arm `alpha`: harness `opencode` cannot map effort `xhigh` "
-        r"\(accepted: \['high', 'low', 'medium'\]\)",
+        match=r"arm `alpha`: harness `opencode` cannot map effort `thorough` "
+        r"\(accepted: \['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh'\]\)",
     ):
         resolve_set(rawsets, default, environ={})
 
@@ -944,16 +948,16 @@ def test_resolve_set_checks_an_effort_override_against_each_arm_harness() -> Non
                 "default": {
                     "model": "anthropic/claude-sonnet-4-6",
                     "arms": [
-                        {"name": "claude", "harness": "claude-code", "model": "sonnet"},
                         {"name": "open", "harness": "opencode"},
+                        {"name": "claude", "harness": "claude-code", "model": "sonnet"},
                     ],
                 }
             }
         )
     )
 
-    with pytest.raises(SchemaError, match=r"arm `open`.*cannot map effort `max`"):
-        resolve_set(rawsets, default, effort="max", environ={})
+    with pytest.raises(SchemaError, match=r"arm `claude`.*cannot map effort `minimal`"):
+        resolve_set(rawsets, default, effort="minimal", environ={})
 
 
 def test_resolve_set_carries_a_valid_routing_table() -> None:

@@ -40,7 +40,7 @@ differs. The full key set for `[tool.benchspec.sets.<name>]`:
 | `harness` | string | Default harness: `claude-code`, `codex`, or `opencode`. An arm with no harness (own or inherited) fails at config-read time. Arms may span harnesses within one set. |
 | `provider` | string | Default transport the harness reaches its model through: `default` (the vendor's own API or CLI login; the default) or `openrouter` (every request through OpenRouter on `OPENROUTER_API_KEY`). Under `openrouter` the model must be a vendor-qualified slug (`anthropic/claude-sonnet-4.6`; `openrouter/anthropic/...` for OpenCode). See [Providers](#providers). |
 | `model` | string | Default **task** model. Harness-specific: Claude Code takes aliases (`sonnet`, `opus`, `haiku`); OpenCode takes provider-qualified names (`anthropic/claude-sonnet-4-6`); Codex takes what `codex exec -m` accepts. Not validated by benchspec; a bad value fails loudly from the agent CLI. |
-| `effort` | string | Default reasoning effort (default `medium`). Checked against the arm's harness at config-read time: a value the harness cannot map is an error naming the arm and the accepted set. See [`harnesses.md`](harnesses.md) for each harness's set and how its CLI receives it. |
+| `effort` | string | Default reasoning effort (default `medium`). Checked against the arm's harness at config-read time: a value the harness cannot map is an error naming the arm and the accepted set. See [`harnesses.md`](harnesses.md) for each harness's set and how its CLI receives it; an OpenCode model without variants ignores it. |
 | `routing` | table | Default OpenRouter upstream-host routing; needs `provider = "openrouter"` and a harness that can deliver it (OpenCode only). Arm `routing` shallow-merges over it (arm keys win). See [Routing](#routing). |
 | `timeout` | integer | Default wall-clock cap on one graded agent turn, seconds (default `600`). A turn that exceeds it is recorded as an errored sample, never a failed one. Arm-level `timeout` overrides it. |
 | `env` | table of strings | Default environment injected into each cell's `setup.sh` **and** the agent invocation. Arm `env` shallow-merges over it (arm keys win). |
@@ -111,7 +111,7 @@ model   = "gpt-5.5"
 | `harness` | string | `claude-code` | `claude-code`, `codex`, or `opencode`. Validated at collection. |
 | `provider` | string | `default` | `default` (the harness vendor's own API or CLI login) or `openrouter` (grade through OpenRouter on `OPENROUTER_API_KEY`; no CLI login involved). See [Providers](#providers). |
 | `model` | string | `sonnet` | Harness-specific, like an arm's model. Structural checks at collection: an `opencode` judge needs a provider-qualified model (`anthropic/...`), and any judge under `openrouter` needs a vendor-qualified slug (`openrouter/...` for OpenCode). |
-| `effort` | string | `medium` | Checked against the judge harness and passed the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, a `--variant` mapping for OpenCode. |
+| `effort` | string | `medium` | Checked against the judge harness and passed the same way an arm's effort is: `--effort` for Claude Code, `-c model_reasoning_effort=` for Codex, `--variant` for OpenCode. |
 | `timeout` | integer | `300` | Judge subprocess timeout, seconds. |
 | `harness_args` | array of strings | `[]` | Pass-through CLI tokens; benchspec-owned flags are rejected per harness. |
 | `env` | table | `{}` | Judge-only env, `$VAR`-expanded at judge execution time by the same rule as arm env. |

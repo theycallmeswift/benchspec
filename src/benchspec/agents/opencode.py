@@ -99,24 +99,23 @@ _RESERVED_HARNESS_LONG_FLAGS = {arg for arg in _RESERVED_HARNESS_ARGS if arg.sta
 _RESERVED_HARNESS_SHORT_FLAGS = {
     arg for arg in _RESERVED_HARNESS_ARGS if arg.startswith("-") and not arg.startswith("--")
 }
-# OpenCode expresses reasoning effort as a --variant; the keys are the accepted efforts.
-_EFFORT_TO_VARIANT = {"low": "fast", "medium": "default", "high": "thorough"}
+# OpenCode expresses reasoning effort as a --variant, passed through by name. These are
+# the variant names its model catalog defines; it ignores a variant the model lacks.
+_VARIANTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 # OpenCode merges this inline JSON over its config files, so routing reaches one exec
 # without touching the snapshot's opencode.json.
 _INLINE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
 
 
 def _variant_for_effort(effort: str) -> str:
-    """Return the `--variant` for an effort tier.
+    """Return the `--variant` for an effort: the effort itself, once it names a variant.
 
     Raises:
-        ValueError: If `effort` is not one OpenCode maps; never a silent default.
+        ValueError: If `effort` is not an OpenCode variant name; never a silent default.
     """
-    if effort not in _EFFORT_TO_VARIANT:
-        raise ValueError(
-            f"OpenCode cannot map effort {effort!r} (accepted: {sorted(_EFFORT_TO_VARIANT)})"
-        )
-    return _EFFORT_TO_VARIANT[effort]
+    if effort not in _VARIANTS:
+        raise ValueError(f"OpenCode cannot map effort {effort!r} (accepted: {sorted(_VARIANTS)})")
+    return effort
 
 
 def openrouter_model_error(model: str) -> str | None:
@@ -267,7 +266,7 @@ class OpenCodeAgent(BaseAgent):
     # multi_turn: invoke() accepts resume_session_id but does not
     # honor it — each call is a fresh session.
     capabilities = AgentCapabilities(multi_turn=False, token_split=True)
-    accepted_efforts = frozenset(_EFFORT_TO_VARIANT)
+    accepted_efforts = _VARIANTS
     routing_env_var: ClassVar[str | None] = _INLINE_CONFIG_ENV
 
     @staticmethod

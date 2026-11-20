@@ -166,15 +166,15 @@ def test_run_unmapped_effort_is_a_usage_error_before_any_arm_runs(tmp_path: Path
             [tool.benchspec.sets.demo]
             harness = "opencode"
             model = "anthropic/claude-sonnet-4-6"
-            arms = [{ name = "deep", effort = "xhigh" }]
+            arms = [{ name = "deep", effort = "thorough" }]
         """)
     )
 
     result = run_benchspec("run", str(repo_root), "--", "--collect-only", "-q", cwd=tmp_path)
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "arm `deep`: harness `opencode` cannot map effort `xhigh`" in result.stdout
-    assert "accepted: ['high', 'low', 'medium']" in result.stdout
+    assert "arm `deep`: harness `opencode` cannot map effort `thorough`" in result.stdout
+    assert "accepted: ['high', 'low', 'max', 'medium', 'minimal', 'none', 'xhigh']" in result.stdout
 
 
 def test_run_undeliverable_routing_is_a_usage_error_before_any_arm_runs(tmp_path: Path) -> None:

@@ -61,16 +61,16 @@ def test_judge_wraps_final_text_events_in_result_envelope(monkeypatch: pytest.Mo
 
     assert json.loads(out)["result"] == verdict
     assert captured["command"][:2] == ["opencode", "run"]
-    assert "--variant" in captured["command"]  # high -> thorough
-    assert "thorough" in captured["command"]
+    variant_index = captured["command"].index("--variant")
+    assert captured["command"][variant_index + 1] == "high"
     assert captured["command"][-1] == "grade this"
 
 
 def test_judge_refuses_an_effort_it_cannot_map_before_spawning() -> None:
-    """An unmapped judge effort raises instead of running on the `default` variant."""
-    config = JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6", effort="xhigh")
+    """A judge effort that names no OpenCode variant raises instead of running."""
+    config = JudgeConfig(harness="opencode", model="anthropic/claude-sonnet-4-6", effort="fast")
 
-    with pytest.raises(ValueError, match=r"cannot map effort 'xhigh'"):
+    with pytest.raises(ValueError, match=r"cannot map effort 'fast'"):
         _judge(config)
 
 

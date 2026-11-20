@@ -38,8 +38,8 @@ arms = [
 |---|---|---|---|
 | CLI | Claude Code | OpenAI Codex CLI | [sst/opencode](https://github.com/sst/opencode) |
 | Model names | Aliases: `sonnet`, `opus`, `haiku` | What `codex exec -m` accepts (e.g. `gpt-5.4`) | Provider-qualified: `anthropic/claude-sonnet-4-6` |
-| How effort is passed | `--effort <value>` | `-c model_reasoning_effort=<value>` | `--variant`: `low` → `fast`, `medium` → `default`, `high` → `thorough` |
-| Accepted `effort` | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high` |
+| How effort is passed | `--effort <value>` | `-c model_reasoning_effort=<value>` | `--variant <value>`, the effort passed through as the variant name |
+| Accepted `effort` | `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | OpenRouter `routing` | rejected | rejected | delivered: the arm model's `options.provider`, set inline through `OPENCODE_CONFIG_CONTENT` |
 | Token split (input/output) | yes | yes | yes; reasoning counts as output |
 | Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
@@ -54,7 +54,11 @@ Notes that matter in practice:
   values it can map, and an arm or judge `effort` outside that set fails at
   config-read time. The Claude Code set is the one `claude --effort` lists. The
   Codex CLI forwards any string to the model, so its set is the one the CLI
-  documents; whether a given model honours `xhigh` or `max` is the model's call.
+  documents; whether a given model honours a value is the model's call. The
+  OpenCode set is every variant name its model catalog defines
+  (`opencode models --verbose`). OpenCode sends a variant as the request's
+  reasoning effort only for a model that defines it, and ignores it without an
+  error otherwise, so an `effort` on a model with no variants changes nothing.
 - **`routing` is rejected unless the harness is confirmed to deliver it.**
   OpenCode copies a model's `options.provider` into the OpenRouter request
   body, observed on OpenCode 1.19.6 against a local endpoint. It applies to
