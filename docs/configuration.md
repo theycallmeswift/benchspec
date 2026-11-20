@@ -150,7 +150,9 @@ model    = "google/gemini-3.5-flash-lite"   # optional; each provider has a defa
 
 A rejected or unfunded key stops the run outright on either provider (never a
 silent degrade to judge grading); a transient failure reroutes that assertion to
-the judge and is reported as `binder_degraded`.
+the judge and is reported as `binder_degraded`. That fallback applies to the cell
+that saw the failure only: a failed bind is never shared, so other cells bind the
+assertion themselves.
 
 ## Providers
 

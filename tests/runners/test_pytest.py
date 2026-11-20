@@ -12,6 +12,8 @@ import json
 import os
 import shutil
 import textwrap
+import threading
+import time
 import tomllib
 from pathlib import Path
 
@@ -23,7 +25,7 @@ from benchspec.grading import binder
 from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig, resolve_judge_config
 from benchspec.grading.judges.registry import run_judge
-from benchspec.orchestration import cases, workspace
+from benchspec.orchestration import cases, prebind, workspace
 from benchspec.orchestration.execution import ArmOutcome
 from benchspec.reporting import report
 from benchspec.runners import pytest as plugin
@@ -574,6 +576,19 @@ class _StubAgent:
     def version(self) -> str:
         """Return the install selector the manifest records as `requested_version`."""
         return "9.9.9"
+
+
+@pytest.fixture(autouse=True)
+def bound_texts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Pass the grading preflight and record binder calls instead of reaching the network.
+
+    Returns the texts `binder.bind` was called with, in call order.
+    """
+    bound: list[str] = []
+    monkeypatch.setattr(cases, "grading_preflight_errors", lambda config: [])
+    monkeypatch.setattr(binder, "bind", lambda text, config=None: bound.append(text) or None)
+
+    return bound
 
 
 @pytest.fixture(autouse=True)
@@ -1772,3 +1787,126 @@ def test_sessionfinish_reports_scoped_assertions_beside_the_matrix(
     eval_row = next(line for line in printed if line.startswith("archive/alpha"))
     assert eval_row.split() == ["archive/alpha", "100%", "100%"]  # the skipped line pools out
     assert any(line.startswith("All evals") for line in printed)
+
+
+def test_controller_binds_each_unique_assertion_once_before_cells(
+    pytester: pytest.Pytester, bound_texts: list[str]
+) -> None:
+    """Two arms and two samples of one eval bind its assertion once, and cells bind none."""
+    _make_project(pytester)
+    pytester.makepyfile(
+        test_cases="""
+from benchspec.orchestration.cases import BOUND_SPECS
+
+def test_eval(eval_arm, pytestconfig):
+    assert set(pytestconfig.stash[BOUND_SPECS]) == {"source note archived", "summary written"}
+"""
+    )
+
+    result = pytester.runpytest(
+        "-p",
+        "benchspec.runners.pytest",
+        "-p",
+        "pytest_repeat",
+        "--benchspec-repo-root",
+        str(pytester.path),
+        "--count",
+        "2",
+        "test_cases.py::test_eval",
+    )
+
+    result.assert_outcomes(passed=8)
+    assert sorted(bound_texts) == ["source note archived", "summary written"]
+
+
+def test_collect_only_binds_nothing(pytester: pytest.Pytester, bound_texts: list[str]) -> None:
+    """`--collect-only` pays for no binder call."""
+    _make_project(pytester)
+    pytester.makepyfile(test_cases="def test_eval(eval_arm):\n    pass\n")
+
+    pytester.runpytest(
+        "-p",
+        "benchspec.runners.pytest",
+        "--benchspec-repo-root",
+        str(pytester.path),
+        "--collect-only",
+        "test_cases.py::test_eval",
+    )
+
+    assert bound_texts == []
+
+
+def test_a_worker_config_does_not_prebind(
+    pytester: pytest.Pytester, bound_texts: list[str]
+) -> None:
+    """Only the controller binds; a worker reads the table from `workerinput`."""
+    _make_project(pytester)
+    pytester.makepyfile(test_cases="def test_eval(eval_arm):\n    pass\n")
+    config = pytester.parseconfig(
+        "-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path)
+    )
+    bound_texts.clear()
+    vars(config)["workerinput"] = {"benchspec_iteration": "iter-x"}
+
+    plugin.pytest_configure(config)
+
+    assert bound_texts == []
+
+
+def test_a_failed_bind_is_not_stored_and_a_punt_is() -> None:
+    """RuntimeError omits the text; None is stored; a hit never reaches the live binder."""
+
+    def flaky(text: str) -> dict | None:
+        if text == "boom":
+            raise RuntimeError("blip")
+        return {"kind": "x"} if text == "spec" else None
+
+    table = prebind.bind_unique(["spec", "punt", "boom"], flaky)
+
+    assert table == {"spec": {"kind": "x"}, "punt": None}
+    live: list[str] = []
+    bind = prebind.table_or_live(table, lambda text: live.append(text) or None)
+    assert bind("spec") == {"kind": "x"}
+    assert bind("punt") is None
+    bind("boom")
+    assert live == ["boom"]
+
+
+def test_bind_concurrency_is_bounded() -> None:
+    """In-flight binder calls never exceed the requested cap."""
+    lock = threading.Lock()
+    active = peak = 0
+
+    def slow(_text: str) -> None:
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+
+    prebind.bind_unique([str(index) for index in range(30)], slow, concurrency=3)
+
+    assert 1 < peak <= 3
+
+
+def test_empty_binder_key_is_a_usage_error_before_any_cell(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing grading preflight ends the run with a usage error."""
+    _make_project(pytester)
+    pytester.makepyfile(test_cases="def test_eval(eval_arm):\n    pass\n")
+    monkeypatch.setattr(
+        cases, "grading_preflight_errors", lambda config: ["GEMINI_API_KEY is empty"]
+    )
+
+    result = pytester.runpytest(
+        "-p",
+        "benchspec.runners.pytest",
+        "--benchspec-repo-root",
+        str(pytester.path),
+        "test_cases.py::test_eval",
+    )
+
+    assert "GEMINI_API_KEY is empty" in result.stderr.str()

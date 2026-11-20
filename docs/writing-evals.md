@@ -269,7 +269,9 @@ Every assertion takes one of two paths, and the split is made per line, just
 before the agent runs, by the **binder**: a conservative classifier (a fixed
 `gemini-3.5-flash-lite` call, which is why its credential, `GEMINI_API_KEY` by
 default or `OPENROUTER_API_KEY` under `[tool.benchspec.binder] provider =
-"openrouter"`, is always required).
+"openrouter"`, is always required). Each unique assertion is bound once per
+run, before the first cell starts, however many arms and samples grade it; a
+`-k`-filtered run may bind lines it does not grade.
 
 - **Bind**: the binder maps the prose to one deterministic **checker**, run on
   the host against the final workspace (or the run's process facts). Zero

@@ -24,12 +24,14 @@ from benchspec.config.sets import (
     has_configured_set,
     resolved_binder_config,
     resolved_judge_config,
+    resolved_run_set,
     run_set_when_needed,
 )
+from benchspec.grading import binder
 from benchspec.grading.binder import binder_identity
 from benchspec.grading.binder_config import BinderConfig
 from benchspec.grading.judges import JudgeConfig
-from benchspec.orchestration import cases, workspace
+from benchspec.orchestration import cases, prebind, results, workspace
 from benchspec.reporting import manifest, report
 from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_root
 
@@ -294,6 +296,37 @@ def pytest_configure(config: pytest.Config) -> None:
             timespec="seconds"
         )
         config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
+        _prebind_assertions(config)
+
+
+def _prebind_assertions(config: pytest.Config) -> None:
+    """Bind each unique active assertion once, on the controller, before any cell starts.
+
+    Skipped when nothing paid follows: `--collect-only`, no eval cases, or no set.
+
+    Raises:
+        pytest.UsageError: the grading environment (a missing or empty binder key) is unusable.
+    """
+    if config.option.collectonly:
+        return
+
+    pairs, _ = cases.eval_arm_params(config)
+    if not pairs:
+        return
+
+    errors = cases.grading_preflight_errors(config)
+    if errors:
+        raise pytest.UsageError("\n".join(errors))
+
+    table, summary = prebind.prebind(
+        pairs,
+        binder.binder_for(resolved_binder_config(config)),
+        baseline=resolved_run_set(config).baseline,
+        eval_set=option_str(config, "benchspec_set") or "",
+        today=results.utc_today(),
+    )
+    config.stash[cases.BOUND_SPECS] = table
+    print(summary)
 
 
 class _CellTracker:
@@ -324,6 +357,11 @@ class _WorkerNode(Protocol):
     """The xdist controller-side node whose `workerinput` is serialized to its worker."""
 
     @property
+    def config(self) -> pytest.Config:
+        """The controller's config."""
+        ...
+
+    @property
     def workerinput(self) -> MutableMapping[str, object]:
         """The mapping execnet ships to the worker before its `pytest_configure`."""
         ...
@@ -335,6 +373,7 @@ def pytest_configure_node(node: _WorkerNode) -> None:
     # xdist controller → worker: hand the chosen iteration name through workerinput,
     # which execnet serializes to the worker before its own pytest_configure runs.
     node.workerinput["benchspec_iteration"] = workspace.current_iteration()
+    node.workerinput[prebind.WORKERINPUT_KEY] = node.config.stash.get(cases.BOUND_SPECS, {})
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
