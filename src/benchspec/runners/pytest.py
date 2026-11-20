@@ -27,6 +27,8 @@ from benchspec.config.sets import (
     resolved_judge_config,
     resolved_run_set,
     run_set_when_needed,
+    session_run_set,
+    validate_cell_caps,
 )
 from benchspec.grading import binder
 from benchspec.grading.binder import binder_identity
@@ -299,7 +301,23 @@ def pytest_configure(config: pytest.Config) -> None:
             timespec="seconds"
         )
         config.pluginmanager.register(_CellTracker(config), "benchspec-cell-tracker")
+        _validate_cell_caps(config)
         _prebind_assertions(config)
+
+
+def _validate_cell_caps(config: pytest.Config) -> None:
+    """Refuse the run when an arm's cell cap does not exceed the judge timeout.
+
+    Runs on the controller for every run with eval cases, so each way of invoking the
+    plugin reports the one rule violation as a single usage error, before any worker or
+    cell starts.
+
+    Raises:
+        pytest.UsageError: an arm's `timeout` is at or below the judge's.
+    """
+    run_set = session_run_set(config)
+    if run_set is not None:
+        validate_cell_caps(run_set, resolved_judge_config(config))
 
 
 def _targets_cases(config: pytest.Config) -> bool:

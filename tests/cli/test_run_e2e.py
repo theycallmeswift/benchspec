@@ -54,7 +54,7 @@ def test_run_collects_one_test_per_eval_arm_pair(tmp_path: Path) -> None:
 
 
 def test_run_unknown_set_is_a_usage_error(tmp_path: Path) -> None:
-    """Verify an unknown `--set` fails at collection and maps to exit 2."""
+    """Verify an unknown `--set` is refused up front as one error line and maps to exit 2."""
     repo_root = tmp_path / "repo"
     write_eval(repo_root, ["./out.md exists"])
     (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
@@ -64,7 +64,7 @@ def test_run_unknown_set_is_a_usage_error(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "no eval set named `nope` (declared: ['demo'])" in result.stdout
+    assert "ERROR: no eval set named `nope` (declared: ['demo'])" in result.stderr
 
 
 def test_run_without_gemini_key_exits_two_before_spawning_pytest(tmp_path: Path) -> None:
@@ -152,3 +152,19 @@ def test_run_rejects_malformed_clause_at_collection(tmp_path: Path) -> None:
     assert 'if: {BENCHSPEC_ARM} == "trial"' in result.stderr
     assert "already carries a clause" in result.stderr
     assert "test session starts" not in result.stdout
+
+
+def test_run_rejects_a_cell_timeout_at_the_judge_timeout_before_spawning_pytest(
+    tmp_path: Path,
+) -> None:
+    """`--timeout 300` against the default 300 s judge is one `error:` line and exit 2."""
+    repo_root = tmp_path / "repo"
+    write_eval(repo_root, ["./out.md exists"])
+    (repo_root / "pyproject.toml").write_text(_TWO_ARM_PYPROJECT)
+
+    result = run_benchspec("run", str(repo_root), "--timeout", "300", cwd=tmp_path)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert output.count("cell timeout must exceed the judge timeout (300s)") == 1
+    assert "in validate_cell_caps" not in output

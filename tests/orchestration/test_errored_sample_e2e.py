@@ -12,6 +12,7 @@ cap must cut the turn off and record the sample as errored rather than hang or s
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -185,6 +186,7 @@ def _grade_all_pass(
     judge_config: JudgeConfig | None = None,
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
+    remaining_seconds: Callable[[], float] | None = None,
 ) -> dict:
     """Grade every assertion as passed; grading is not what these tests are about."""
     return {

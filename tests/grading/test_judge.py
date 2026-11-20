@@ -284,3 +284,81 @@ def test_grade_run_passes_process_facts_into_prompt(monkeypatch: pytest.MonkeyPa
     grade_run(["a"], "tree", {}, {}, "final", "e1", "with_skill",
               process_facts="Turn 1: Skill(writing-prompts)")
     assert "Skill(writing-prompts)" in captured["prompt"]
+
+
+class _Clock:
+    """A hand-driven count of the seconds the caller has left."""
+
+    def __init__(self, remaining: float) -> None:
+        """Start with `remaining` seconds left."""
+        self.remaining = remaining
+
+    def __call__(self) -> float:
+        """The seconds left."""
+        return self.remaining
+
+
+def _timing_out_judge(clock: _Clock, timeouts: list[int], *, spend: float) -> object:
+    """A judge that records its attempt timeout, burns `spend` seconds, and times out."""
+
+    def run_judge(prompt: str, *, config: JudgeConfig) -> NoReturn:
+        """Time out like a hung judge CLI."""
+        timeouts.append(config.timeout)
+        clock.remaining -= spend
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=config.timeout)
+
+    return run_judge
+
+
+def test_judge_attempts_run_under_what_the_caller_has_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each attempt gets the lesser of the judge timeout and the remaining budget."""
+    clock = _Clock(remaining=15)
+    timeouts: list[int] = []
+    monkeypatch.setattr(
+        "benchspec.grading.judge.run_judge", _timing_out_judge(clock, timeouts, spend=8)
+    )
+
+    grade_run(
+        ["a1"], "tree", {}, {}, "msg", "e1", "with_skill",
+        judge_config=JudgeConfig(timeout=10), remaining_seconds=clock,
+    )
+
+    assert timeouts == [10, 7]
+
+
+def test_judge_retry_is_skipped_when_the_budget_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A first attempt that spends the whole budget leaves no retry, and grades as an error."""
+    clock = _Clock(remaining=10)
+    timeouts: list[int] = []
+    monkeypatch.setattr(
+        "benchspec.grading.judge.run_judge", _timing_out_judge(clock, timeouts, spend=10)
+    )
+
+    graded = grade_run(
+        ["a1"], "tree", {}, {}, "msg", "e1", "with_skill",
+        judge_config=JudgeConfig(timeout=10), remaining_seconds=clock,
+    )
+
+    assert timeouts == [10]
+    assert graded["assertions"][0]["evidence"] == "JUDGE ERROR: unparseable output"
+
+
+def test_judge_attempts_keep_their_own_timeout_without_a_caller_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without `remaining_seconds` both attempts run under the judge's own timeout."""
+    timeouts: list[int] = []
+    monkeypatch.setattr(
+        "benchspec.grading.judge.run_judge",
+        _timing_out_judge(_Clock(0), timeouts, spend=0),
+    )
+
+    grade_run(
+        ["a1"], "tree", {}, {}, "msg", "e1", "with_skill", judge_config=JudgeConfig(timeout=10)
+    )
+
+    assert timeouts == [10, 10]

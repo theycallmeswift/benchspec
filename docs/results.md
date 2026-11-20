@@ -157,7 +157,8 @@ first-run snapshot build is not charged to a cell.
 
 The agent turn does not get the whole cap. When an eval has a judge-bound line,
 the agent gets the cap minus the judge `timeout` (default 300 s), so the judge is
-not starved by a slow agent. Whether a line is judge-bound is only known after
+not starved by a slow agent. Each judge attempt, including its one retry, runs
+under what the cap has left, and the retry is skipped once under a second remains. Whether a line is judge-bound is only known after
 binding, so every arm's cap must exceed the judge `timeout`: a run whose `timeout`
 (set, arm, or `--timeout`) is at or below it is refused at collection with an
 error naming both values. Raise `timeout`, or lower the judge `timeout`

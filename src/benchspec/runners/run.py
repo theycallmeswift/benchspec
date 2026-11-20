@@ -19,6 +19,7 @@ from typing import Literal
 
 import pytest
 
+from benchspec.config.sets import resolved_judge_config, session_run_set, validate_cell_caps
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
 from benchspec.orchestration import cases
 from benchspec.sandbox.sandbox import format_preflight_failure
@@ -115,10 +116,14 @@ def preflight_run(args: argparse.Namespace) -> None:
     Raises:
         RuntimeError: a missing credential, an absent binary, or an unready host; every
             such failure listed.
-        pytest.UsageError: a malformed or unknown set, or a malformed judge config.
+        pytest.UsageError: a malformed or unknown set, a malformed judge config, or an arm
+            whose cell `timeout` does not exceed the judge's.
         SchemaError: an unsupported sandbox backend or a malformed eval.
     """
     options = PluginOptions.from_args(args)
+    run_set = session_run_set(options)
+    if run_set is not None:
+        validate_cell_caps(run_set, resolved_judge_config(options))
 
     errors = cases.grading_preflight_errors(options) + cases.sandbox_preflight_errors(options)
     if errors:

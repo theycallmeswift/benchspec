@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -68,6 +68,7 @@ def _grade_all_pass(
     judge_config: JudgeConfig | None = None,
     original_shas: dict[str, str] | None = None,
     process_facts: str = "",
+    remaining_seconds: Callable[[], float] | None = None,
 ) -> dict:
     """Build the grade all pass test fixture."""
     return {
@@ -1743,6 +1744,7 @@ def test_process_facts_reach_the_judge(tmp_path: Path) -> None:
         judge_config: JudgeConfig | None = None,
         original_shas: dict[str, str] | None = None,
         process_facts: str = "",
+        remaining_seconds: Callable[[], float] | None = None,
     ) -> dict:
         """Grade."""
         seen_process_facts.append(process_facts)

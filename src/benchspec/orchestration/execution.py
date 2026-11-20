@@ -19,7 +19,7 @@ import os
 import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from benchspec.agents import CodingAgent, make_agent
@@ -146,9 +146,13 @@ def _grade_via_judge(
     eval_id: str,
     arm_name: str,
     pre_run_shas: dict[str, str],
+    remaining_seconds: Callable[[], float],
     process_facts: str = "",
 ) -> tuple[dict, int, bool]:
-    """Judge-grade assertions; return (graded, judge_ms, judge_errored)."""
+    """Judge-grade assertions; return (graded, judge_ms, judge_errored).
+
+    Every judge attempt runs under `remaining_seconds`, the cell's remaining budget.
+    """
     t0 = time.perf_counter()
     judge_errored = False
     try:
@@ -163,6 +167,7 @@ def _grade_via_judge(
             judge_config=judge_config,
             original_shas=pre_run_shas,
             process_facts=process_facts,
+            remaining_seconds=remaining_seconds,
         )
     except RuntimeError as error:
         # The judge CLI failed at the infra level (auth, rate limit, missing binary);
@@ -256,7 +261,7 @@ def _grade_mixed(
     eval_id: str,
     arm_name: str,
     pre_run_shas: dict[str, str],
-    judge_budget: float,
+    remaining_seconds: Callable[[], float],
     unjudged_phase: str | None,
     cap_seconds: int,
     process_facts: str = "",
@@ -266,7 +271,8 @@ def _grade_mixed(
     `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Checkers run
     locally whatever the clock says. With an `unjudged_phase`, the cap left the judge no
     time: the judge-bound lines are recorded failed with that timeout as evidence, never
-    judged and never errored. Otherwise the judge runs under `judge_budget` seconds.
+    judged and never errored. Otherwise the judge runs under `remaining_seconds`, the cell's
+    remaining budget, on every attempt.
 
     Returns:
         (results, judge_ms, judge_errored).
@@ -302,7 +308,8 @@ def _grade_mixed(
         shas=shas,
         result_text=result_text,
         grade=grade,
-        judge_config=replace(judge_config, timeout=int(judge_budget)),
+        judge_config=judge_config,
+        remaining_seconds=remaining_seconds,
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
@@ -684,9 +691,7 @@ def run_eval_arm(
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
-        judge_budget=max(
-            MINIMUM_PHASE_SECONDS, min(judge_config.timeout, deadline.remaining())
-        ),
+        remaining_seconds=deadline.remaining,
         unjudged_phase=unjudged_phase,
         cap_seconds=deadline.cap_seconds,
         process_facts=render_process_facts([arm_run.trajectory]),

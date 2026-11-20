@@ -107,7 +107,7 @@ class _Session:
 
 
 class _JudgeDouble:
-    """A judge that passes every line it is given and records the timeout it was handed."""
+    """A judge that passes every line it is given and records the budget it was handed."""
 
     def __init__(self) -> None:
         """Start with no calls."""
@@ -117,7 +117,9 @@ class _JudgeDouble:
         """Pass every line, noting the judge timeout."""
         judge_config = kwargs["judge_config"]
         assert isinstance(judge_config, JudgeConfig)
-        self.timeouts.append(judge_config.timeout)
+        remaining_seconds = kwargs["remaining_seconds"]
+        assert isinstance(remaining_seconds, Callable)
+        self.timeouts.append(min(judge_config.timeout, int(float(remaining_seconds()))))
         return {
             "assertions": [{"text": text, "passed": True, "evidence": "ok"} for text in assertions]
         }
