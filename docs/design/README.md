@@ -211,6 +211,7 @@ and `✗` assertion verdicts, `›` disclosures, `‹ ›` sample navigation, `�
 [TopBar](components/top-bar.md), [Tabs](components/tabs.md),
 [Leaderboard](components/leaderboard.md), [HoverCard](components/hover-card.md),
 [Drawer](components/drawer.md), [Controls](components/controls.md),
-[PageState](components/page-state.md). Every class is in
+[PageState](components/page-state.md). Approved `benchspec watch` frames:
+[Mockups](mockups/README.md). Every class is in
 [`components/bundle.css`](components/bundle.css) (prefix `bs-`), which reads
 tokens only: no px literal except 0, 1px hairlines and the one breakpoint.
