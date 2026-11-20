@@ -1,9 +1,7 @@
 """The `cells` progress format: one plain line per finished sample.
 
-A worker records a cell's identity and result on its pytest report as JSON strings; the
-process that prints parses them back and renders one line with `format_cell_line`.
-Everything here is pure, so the same line is produced under a serial run, under xdist,
-and in the docs.
+A worker records a sample's identity and result on its pytest report as JSON strings;
+the printing process parses them and renders the line. Everything here is pure.
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ from dataclasses import asdict, dataclass
 
 from benchspec.reporting import ansi
 
-# The `user_properties` keys a cell's report carries its identity and its result under.
+# The `user_properties` keys a sample's report carries its identity and result under.
 CELL_PROPERTY = "benchspec_cell"
 RESULT_PROPERTY = "benchspec_cell_result"
 
@@ -38,7 +36,7 @@ Timing = dict[str, int | float | bool | str | None]
 
 @dataclass(frozen=True)
 class CellIdentity:
-    """Which sample a line is about: the eval, the arm, and the sample number."""
+    """Which sample a line is about."""
 
     skill: str
     eval_id: str
@@ -47,7 +45,7 @@ class CellIdentity:
 
     @property
     def label(self) -> str:
-        """The `<skill>/eval-<eval_id>` name the artifact tree files the eval under."""
+        """The eval's folder in the artifact tree."""
         return f"{self.skill}/eval-{self.eval_id}"
 
     def to_json(self) -> str:
@@ -62,7 +60,7 @@ class CellIdentity:
 
 @dataclass(frozen=True)
 class CellResult:
-    """What a finished sample measured: its assertion counts and its `timing.json` mapping."""
+    """A finished sample's assertion counts and `timing.json` mapping."""
 
     passed: int
     total: int
@@ -71,12 +69,12 @@ class CellResult:
 
     @property
     def timed_out(self) -> bool:
-        """Whether the cell hit its wall-clock cap."""
+        """Whether the sample hit its cell cap."""
         return self.timing.get("timed_out") is True
 
     @property
     def not_applicable(self) -> bool:
-        """Whether every assertion was scoped off this arm, leaving nothing to report."""
+        """Whether every assertion was scoped off this arm."""
         return self.total == 0 and not self.errored
 
     def to_json(self) -> str:
@@ -90,7 +88,7 @@ class CellResult:
 
 
 def assertion_counts(assertions: list[dict]) -> tuple[int, int]:
-    """Count a `grading.json` assertion list as `(passed, total)`, leaving out scoped-off lines."""
+    """Count graded assertions as `(passed, total)`, leaving out scoped-off lines."""
     graded = [assertion for assertion in assertions if not assertion.get("skipped")]
 
     return sum(1 for assertion in graded if assertion.get("passed")), len(graded)
@@ -99,25 +97,21 @@ def assertion_counts(assertions: list[dict]) -> tuple[int, int]:
 def cell_state(
     *, passed: int, total: int, errored: bool, timed_out: bool, failed_report: bool
 ) -> str:
-    """Name a finished sample's state: `ERROR`, `TIMEOUT`, `FAIL` or `PASS`.
+    """Name a finished sample's state, the first that applies of ERROR, TIMEOUT, FAIL, PASS.
 
     Args:
         passed: Assertions that held.
         total: Assertions graded.
-        errored: The cell recorded an infra error.
-        timed_out: The cell hit its wall-clock cap.
-        failed_report: The pytest report failed, as it does for an errored cell or one
-            that never produced a result.
-
-    Returns:
-        `ERROR` for an infra error or a failed report, which outranks every other
-        state; otherwise `TIMEOUT`, then `FAIL` when an assertion did not hold, then
-        `PASS`.
+        errored: The sample recorded an infra error.
+        timed_out: The sample hit its cell cap.
+        failed_report: The pytest report failed: an errored sample, or one with no result.
     """
     if errored or failed_report:
         return "ERROR"
+
     if timed_out:
         return "TIMEOUT"
+
     if passed < total:
         return "FAIL"
 
@@ -125,7 +119,7 @@ def cell_state(
 
 
 def _seconds(milliseconds: object) -> str | None:
-    """Render a millisecond reading as `2.1s`; None when it was not reported."""
+    """Render milliseconds as `2.1s`; None when not reported."""
     if isinstance(milliseconds, bool) or not isinstance(milliseconds, int | float):
         return None
 
@@ -133,7 +127,7 @@ def _seconds(milliseconds: object) -> str | None:
 
 
 def _cost(dollars: object) -> str:
-    """Render a provider-reported cost as `$0.031`, or the not-reported dash."""
+    """Render a cost as `$0.031`, or the not-reported dash."""
     if isinstance(dollars, bool) or not isinstance(dollars, int | float):
         return NOT_REPORTED
 
@@ -156,11 +150,11 @@ def format_cell_line(
     """Render one finished sample as a single plain line.
 
     Args:
-        index: How many samples have finished, this one included.
-        total: How many samples the run will finish; None prints `?`.
+        index: Samples finished, this one included.
+        total: Samples the run will finish; None prints `?`.
         cell: The sample's identity.
-        result: Its counts and timing; None when the cell ended without recording one.
-        wall_seconds: Wall time of the cell's test call.
+        result: Its counts and timing; None when it recorded none.
+        wall_seconds: Wall time of the sample.
         failed_report: Whether the pytest report failed.
         message: The failure text; its first line, cut to 120 characters, ends an
             `ERROR` line.
@@ -169,8 +163,8 @@ def format_cell_line(
         color: Wrap the state word in its ANSI color.
 
     Returns:
-        `[n/N] STATE  <skill>/eval-<id>  <arm>  s<sample>  passed/total  time  first
-        <time>  cost`, with a dash for anything not reported.
+        `[n/N] STATE  eval  arm  sample  passed/total  time  first-output  cost`, with a
+        dash for anything not reported.
     """
     state = cell_state(
         passed=result.passed if result else 0,
@@ -198,6 +192,7 @@ def format_cell_line(
         f"first {first_output}".ljust(_FIRST_OUTPUT_WIDTH),
         _cost(timing.get("cost_usd")),
     ]
+
     first_line = message.strip().partition("\n")[0][:_MESSAGE_LIMIT]
     if state == "ERROR" and first_line:
         fields.append(first_line)

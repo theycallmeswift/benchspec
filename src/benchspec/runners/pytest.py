@@ -245,9 +245,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--benchspec-progress",
         default=None,
         metavar="{cells,dots}",
-        help="live progress format: `cells` prints one line per finished sample, `dots` "
-        "keeps pytest's own progress line (default: cells, or [tool.benchspec] "
-        "progress). Must default to None so an unset flag never shadows the config key.",
+        help="live progress: `cells` prints one line per finished sample, `dots` keeps "
+        "pytest's progress line (default: cells, or [tool.benchspec] progress). "
+        "Defaults to None so an unset flag never shadows the config key.",
     )
     group.addoption(
         "--benchspec-fail-under",
@@ -281,15 +281,15 @@ def _repeat_step(params: dict[str, object]) -> int:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """Record an eval sample's identity on its reports before any fixture runs.
+    """Record an eval sample's identity on its reports, under `cells` only.
 
-    Ahead of setup, so a sample whose fixture fails or whose arm raises still names itself
-    in the progress line. A JSON string, because xdist ships properties through execnet.
-    Only under the `cells` format: `dots` reports carry nothing extra.
+    Ahead of setup, so a sample whose fixture fails or whose arm raises still names
+    itself. A JSON string, because xdist ships properties through execnet.
     """
     params = _callspec_params(item)
     if "eval_arm" not in params or item.get_closest_marker("benchspec") is None:
         return
+
     if item.config.stash[PROGRESS_STYLE] != "cells":
         return
 
@@ -446,22 +446,21 @@ _ITEM_PHASES = frozenset({"setup", "call", "teardown"})
 
 
 def _param_id(nodeid: str) -> str:
-    """The bracketed parameter id at the end of a node id; empty for an unparametrized one."""
+    """The bracketed parameter id ending a node id; empty when unparametrized."""
     _path, bracket, tail = nodeid.rpartition("[")
 
     return tail.removesuffix("]") if bracket and tail.endswith("]") else ""
 
 
 class _CellProgress:
-    """Prints one line per finished sample on the process that owns the terminal.
+    """Prints one line per finished sample, on the controller or the serial process.
 
-    Registered on the controller (or the serial process) when the progress format is
-    `cells`. A worker's report carries the sample's identity and result as properties,
-    so a serial run and an xdist run share this one path.
+    A worker's report carries the sample's identity and result as properties, so serial
+    and xdist runs share one path.
     """
 
     def __init__(self, config: pytest.Config) -> None:
-        """Bind to the config whose terminal reporter the lines go through."""
+        """Bind to the config whose terminal reporter prints the lines."""
         self._config = config
         self._finished = 0
         self._collected_ids: list[str] | None = None
@@ -472,36 +471,38 @@ class _CellProgress:
         self._being_logged: pytest.TestReport | None = None
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
-        """Remember a serial run's collected eval cells, the counter's denominator."""
+        """Remember a serial run's collected eval samples, for the counter's total."""
         if self._collected_ids is not None:
             return
 
         self._collected_ids = [
             item.nodeid for item in session.items if item.get_closest_marker("benchspec")
         ]
+
         reporter = self._reporter()
         if self._collected_ids and reporter is not None:
-            # The cell lines name each sample, so pytest's per-file path would only
-            # split them up. xdist turns it off the same way.
+            # Each line names its sample, so pytest's per-file path would only split
+            # the lines up. xdist turns it off the same way.
             reporter.showfspath = False
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_xdist_node_collection_finished(self, node: object, ids: Sequence[str]) -> None:
-        """Remember the node ids every xdist worker collected, the counter's denominator."""
+        """Remember the node ids the xdist workers collected, for the counter's total."""
         self._collected_ids = list(ids)
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_report_teststatus(self, report: pytest.TestReport) -> tuple[str, str, str] | None:
-        """Drop pytest's progress letter for an eval sample, keeping its count in the footer.
+        """Drop pytest's progress letter for an eval sample, keeping its footer count.
 
-        Every phase, so a failing teardown leaves no stray letter either. Only while the
-        report is being logged: the summaries pytest prints at session end ask for the
-        status again and still get `FAILED` and `ERROR`.
+        Every phase, so a failing teardown leaves no stray letter. Only while the report
+        is logged, so pytest's end-of-session summaries still say `FAILED` and `ERROR`.
         """
         if report is not self._being_logged or report.skipped:
             return None
+
         if self._identity(report) is None:
             return None
+
         if report.passed and report.when != "call":
             return None
 
@@ -511,8 +512,9 @@ class _CellProgress:
 
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> Generator[None, None, None]:
-        """Print the line for a sample that just finished, once pytest has logged its report."""
+        """Print a finished sample's line, once pytest has logged its report."""
         self._being_logged = report
+
         try:
             yield
         finally:
@@ -521,7 +523,7 @@ class _CellProgress:
         self._print_line(report)
 
     def _print_line(self, report: pytest.TestReport) -> None:
-        """Print one line for a report that finishes an applicable sample."""
+        """Print the line for a report that finishes an applicable sample."""
         reporter = self._reporter()
         cell = self._identity(report)
         if reporter is None or cell is None or not _ends_sample(report):
@@ -547,30 +549,32 @@ class _CellProgress:
             color=self._config.get_terminal_writer().hasmarkup,
         )
 
-        # Under -v pytest has already written the item's own line and left it open.
+        # Under -v pytest has written the item's own line and left it open.
         if self._config.get_terminal_writer().width_of_current_line:
             reporter.line("")
+
         reporter.line(line)
 
     def _reporter(self) -> pytest.TerminalReporter | None:
-        """The terminal reporter the lines print through; None when it is disabled."""
+        """The terminal reporter; None when it is disabled."""
         reporter = self._config.pluginmanager.get_plugin("terminalreporter")
 
         return reporter if isinstance(reporter, pytest.TerminalReporter) else None
 
     def _identity(self, report: pytest.TestReport) -> CellIdentity | None:
-        """Which eval sample a report belongs to; None when it is not one."""
+        """The eval sample a report belongs to; None when it is not one."""
         recorded = dict(report.user_properties).get(CELL_PROPERTY)
         if recorded:
             return CellIdentity.from_json(str(recorded))
+
         if report.when in _ITEM_PHASES:
             return None
 
-        # xdist reports a sample whose worker died with no properties, only its node id.
+        # xdist reports a sample whose worker died with only its node id.
         return self._planned_identity(report.nodeid)
 
     def _planned_identity(self, nodeid: str) -> CellIdentity | None:
-        """Name the planned sample a node id stands for; None when it is not an eval sample."""
+        """The planned sample behind a node id; None when it is not an eval sample."""
         if self._collected_ids is None or nodeid not in self._collected_ids:
             return None
 
@@ -578,9 +582,11 @@ class _CellProgress:
         planned = self._plan()
         repeat = _REPEAT_ID_SUFFIX.search(param_id)
         sample = 0
+
         if param_id not in planned and repeat:
             param_id = param_id[: repeat.start()]
             sample = int(repeat.group(1)) - 1
+
         if param_id not in planned:
             return None
 
@@ -591,7 +597,7 @@ class _CellProgress:
     def _plan(self) -> dict[str, tuple[EvalCase, Arm]]:
         """Work out the planned cells, the counter's total and the column widths, once.
 
-        Deferred to the first finished sample so a session that runs no eval cells never
+        Deferred to the first finished sample, so a session with no eval cells never
         resolves an eval set.
         """
         if self._planned is not None:
@@ -617,11 +623,10 @@ class _CellProgress:
 
 
 def _ends_sample(report: pytest.TestReport) -> bool:
-    """Whether a report is the one that finishes an eval sample.
+    """Whether a report finishes an eval sample.
 
-    A sample ends on its call report, on a failed setup report (a fixture error ends it
-    with no call phase), or on the report xdist writes for a worker that died. A skipped
-    report is left to pytest, and a failing teardown follows a call that already ended it.
+    That is its call report, a failed setup report, or xdist's report for a dead worker.
+    A skipped report is pytest's, and a teardown follows a call that already ended it.
     """
     if report.skipped or report.when == "teardown":
         return False

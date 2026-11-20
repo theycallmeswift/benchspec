@@ -49,9 +49,8 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument(
         "--progress",
         choices=PROGRESS_STYLES,
-        help="live progress format: cells prints one line per finished sample, dots keeps "
-        "pytest's progress line (default: cells, or [tool.benchspec] progress) "
-        "(--benchspec-progress)",
+        help="live progress: one line per finished sample, or pytest's dots "
+        "(default: cells, or [tool.benchspec] progress) (--benchspec-progress)",
     )
     run_parser.add_argument(
         "--judge-harness", help="judge harness (--benchspec-judge-harness)"

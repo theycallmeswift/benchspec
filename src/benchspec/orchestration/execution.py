@@ -81,7 +81,7 @@ class ArmOutcome:
     errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
-    # The mapping written to timing.json, as written.
+    # The mapping written to timing.json.
     timing: dict[str, int | float | bool | str | None] = field(default_factory=dict)
 
 

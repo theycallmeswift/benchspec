@@ -7,31 +7,29 @@ import pytest
 PROGRESS_STYLES = ("cells", "dots")
 DEFAULT_PROGRESS_STYLE = "cells"
 
-# The resolved format, stashed on the pytest config of every process in the run.
+# The resolved format, on the pytest config of every process in the run.
 PROGRESS_STYLE = pytest.StashKey[str]()
 
 
 def resolve_progress_style(flag: str | None, configured: object) -> str:
-    """The progress format for this run: --benchspec-progress > [tool.benchspec] progress > cells.
+    """Resolve the progress format: the flag, then the config key, then `cells`.
 
     Args:
-        flag: The `--benchspec-progress` value, None when the flag was not given.
-        configured: The raw `[tool.benchspec] progress` value, None when the key is absent.
-
-    Returns:
-        `cells` or `dots`.
+        flag: The `--benchspec-progress` value; None when not given.
+        configured: The raw `[tool.benchspec] progress` value; None when absent.
 
     Raises:
-        pytest.UsageError: an unknown value, naming the source it came from and the
-            allowed values.
+        pytest.UsageError: an unknown value, naming its source and the allowed values.
     """
     sources = (
         ("--benchspec-progress", flag),
         ("[tool.benchspec] progress", configured),
     )
+
     for source_name, value in sources:
         if value is None:
             continue
+
         if not isinstance(value, str) or value not in PROGRESS_STYLES:
             allowed = ", ".join(PROGRESS_STYLES)
             raise pytest.UsageError(

@@ -1,4 +1,4 @@
-"""The ANSI escapes the terminal report colors with, one place for every terminal line."""
+"""The ANSI escapes the terminal report colors with."""
 
 from __future__ import annotations
 

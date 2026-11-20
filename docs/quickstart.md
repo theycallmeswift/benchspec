@@ -206,10 +206,9 @@ vs baseline                     +100pp
 Report: tmp/evals/iteration_01/benchmark.md
 ```
 
-Each line is a sample: its state, eval, arm, sample number, assertions passed
-and wall time ([the terminal summary](results.md#the-terminal-summary)). On a
-color terminal, rates are color-coded by band (green from 80%, yellow from
-50%, red below) and the `vs baseline` delta by sign.
+[The terminal summary](results.md#the-terminal-summary) explains each sample
+line. On a color terminal, rates are color-coded by band (green from 80%,
+yellow from 50%, red below) and the `vs baseline` delta by sign.
 
 Your numbers will differ: the baseline arm may guess the right shape, the trial
 arm may miss an assertion. What matters is that both arms ran and the table

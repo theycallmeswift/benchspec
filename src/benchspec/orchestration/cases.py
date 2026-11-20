@@ -109,10 +109,8 @@ def not_applicable_param_ids(
 ) -> frozenset[str]:
     """The `eval_arm` parameter ids whose every assertion is scoped off their arm.
 
-    Such a sample grades nothing, so progress output leaves it out of its counts.
-
     Args:
-        config: The run's options, for the baseline arm and the set name clauses read.
+        config: The run's options, for the baseline arm and set name that clauses read.
         pairs: The `(case, arm)` pairs from `eval_arm_params`.
         ids: Their parameter ids, in the same order.
     """
@@ -345,10 +343,9 @@ def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
 
 @pytest.fixture
 def record_cell_result(request: pytest.FixtureRequest) -> Callable[[ArmOutcome], None]:
-    """Return the recorder that puts a sample's result on its report for the `cells` format.
+    """Return the recorder that puts a sample's result on its report, under `cells` only.
 
-    A JSON string, because xdist ships properties through execnet. Under `dots` the
-    recorder does nothing, so those reports carry nothing extra.
+    A JSON string, because xdist ships properties through execnet.
     """
 
     def record(outcome: ArmOutcome) -> None:
