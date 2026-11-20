@@ -18,6 +18,7 @@ tmp/evals/iteration_01/
 ├── index.jsonl       # one row per (eval × arm × sample) — the aggregator's entry point
 ├── benchmark.json    # the run-level report, machine-readable
 ├── benchmark.md      # the same, rendered
+├── events-main.jsonl # the run's event stream, one events-<worker>.jsonl per process
 └── skills/
     └── hello/                      # the eval's group
         └── eval-greets-by-name/    # eval-<eval_id>
@@ -176,10 +177,10 @@ judge failure.
 While cells run, the run prints one line per finished sample, in finish order:
 
 ```text
-[1/4] PASS     hello/eval-greets-by-name             baseline  s0   2/2   31.4s  first —     —
-[2/4] FAIL     hello/eval-greets-by-name             trial     s0   1/2   38.2s  first —     —
-[3/4] PASS     hello-file/eval-writes-greeting-file  baseline  s0   3/3   44.0s  first —     —
-[4/4] ERROR    hello-file/eval-writes-greeting-file  trial     s0   0/3    9.7s  first —     —  AssertionError: trial run errored (see the arm's grading.json)
+[1/4] PASS     hello/eval-greets-by-name             baseline  s0   2/2   31.4s  first   2.4s  $0.060
+[2/4] FAIL     hello/eval-greets-by-name             trial     s0   1/2   38.2s  first   3.1s  $0.071
+[3/4] PASS     hello-file/eval-writes-greeting-file  baseline  s0   3/3   44.0s  first   2.8s  $0.083
+[4/4] ERROR    hello-file/eval-writes-greeting-file  trial     s0   0/3    9.7s  first      —  —  AssertionError: trial run errored (see the arm's grading.json)
 ```
 
 | Field | Meaning |
@@ -264,9 +265,9 @@ group, then `kind`, `eval_id`, `arm`, `sample`), the arm's three core axes
 (`harness`, `model`, `effort`) denormalized onto the row so no join with
 `meta.json` is needed, `errored`, `passed`/`total`/`scoped`/`skipped` assertion
 counts (`total` excludes skipped lines), and the timing and token figures from
-the sample's `timing.json`, including `stopped` and `timed_out` (`false` when
-absent). Derivable from the tree; persisted so tools never hardcode the
-layout.
+the sample's `timing.json`, including `first_output_ms`, `cost_usd`, and
+`stopped` and `timed_out` (`false` when absent). Derivable from the tree;
+persisted so tools never hardcode the layout.
 
 ### `benchmark.json`
 
@@ -283,6 +284,61 @@ with their own `stopped_samples` and `timed_out_samples`), the `scoped` rows
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
 `arms` here is *result stats*; `planned_arms` is configuration.
 
+### The event stream
+
+Every run writes how it unfolded to `events-<worker>.jsonl`, one JSON object
+per line, flushed as it happens. Each process appends only to its own file:
+`main` is the controller (a serial run's only process), and `gw0`, `gw1`, …
+are xdist workers. Under `--workers N` the controller writes only `run.start`
+and `run.end`, and each worker writes its own cells' events. Line order
+within a file is authoritative; `ts_ms` only merges across files.
+`benchspec.events.schema` is the authoritative shape.
+
+Every event carries the envelope:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `format_version` | int | `1`. Bumped on any breaking change; reject other versions. |
+| `type` | str | One of the event types below. |
+| `ts_ms` | int | Host wall clock, Unix epoch milliseconds. |
+| `worker` | str | `main` or `gwN`, matching the file suffix. |
+
+A `cell` is `<skill>/<eval_id>/<arm>/<sample>`, naming one sample the way its
+artifact path does.
+
+| Type | Fields | Emitted |
+|---|---|---|
+| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`), `cells`, `cell_count` | Once, by the controller, after collection |
+| `cell.start` | `cell`, `skill`, `eval_id`, `arm`, `sample`, `harness`, `model` | When a sample begins |
+| `cell.phase` | `cell`, `phase` | On entering `bind`, `boot`, `setup`, `agent`, or `grade`; each at most once, in that order |
+| `cell.delta` | `cell`, `kind` (`tool_call` or `text`), `name` (the tool, else `null`), `text` | Once per tool call or assistant text block of the agent's turn |
+| `cell.done` | `cell`, `passed`, `total`, `pass_rate` (`null` when `total` is 0), `wall_ms`, `stopped`, then the timing fields | After the sample's artifacts are written |
+| `cell.error` | `cell`, `phase` (the one running; `null` before `bind`), `error_kind`, `message`, `wall_ms`, then the timing fields | When the sample errored |
+| `run.end` | `exit_status`, `wall_ms`, `done`, `errored`, `benchmark_md`, `benchmark_json` (repo-relative; `null` when not written) | Once, by the controller, after the reports; on Ctrl-C too |
+
+- **`run.start.cells`** lists every planned sample, honoring `-k` and
+  `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, and `applies`, one
+  flag per assertion line, true where the line is graded in that arm. A sample
+  with no true flag grades nothing.
+- **Phases.** `bind` is the binder; `boot` stages the project and creates the
+  sandbox; `setup` is `setup.sh`; `agent` is the turn; `grade` is everything
+  after it. A [timed-out sample](#timed-out-samples) skips the phases the cap
+  cut off. A first-run snapshot build sits between `cell.start` and `bind`,
+  in no phase, so a `cell.error` raised there has a `null` `phase`.
+- **Deltas** carry one line of at most 160 characters: a tool call's `command`,
+  `file_path`, `path`, `pattern`, or `skill` argument (else its arguments as
+  JSON), or a text block's first line. Tool results are never emitted.
+- **The timing fields** are the sample's `timing.json`, verbatim, so the event
+  and the artifact cannot disagree, and a field added there appears here.
+  `cell.done` always has `stopped`.
+- **`cell.error`** has `error_kind` `agent` (the harness crashed, exited
+  non-zero, or streamed nothing before the cap), `judge` (the judge failed at
+  the transport level), or `exception` (anything raised, such as a failing
+  `setup.sh`; it has no timing fields). `message` is at most 500 characters.
+- **Every sample that starts ends in exactly one `cell.done` or `cell.error`**
+  unless the run is killed. A sample whose fixtures fail (a preflight) never
+  starts; `run.end.errored` counts it, and `done` counts the `cell.done`s.
+
 ### Per-sample files
 
 - `grading.json`: the verdict. One entry per assertion with its text, `passed`,
@@ -291,9 +347,13 @@ with their own `stopped_samples` and `timed_out_samples`), the `scoped` rows
   [timed-out sample](#timed-out-samples), `"timed_out": true`. A
   clause-bearing entry adds `scoped: true`; a skipped one is `{"text",
   "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.
-- `timing.json`: `duration_ms`, `judge_ms`, and the token split
+- `timing.json`: `duration_ms`, `judge_ms`, the token split
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
-  `cache_creation_tokens`; zero where the harness does not report them). A run
+  `cache_creation_tokens`; zero where the harness does not report them),
+  `first_output_ms` (agent start to its first tool call or text; `null` when
+  it produced neither), and `cost_usd` (what the
+  [harness reported](harnesses.md#the-in-tree-harnesses), never computed;
+  `null` when it reported nothing). A run
   that [stopped early](writing-evals.md#runs-that-stop-early) adds
   `"stopped": true`; a [timed-out sample](#timed-out-samples) adds
   `"timed_out": true` and `"timeout_phase"` (both absent otherwise). A stopped

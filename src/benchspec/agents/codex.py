@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
@@ -24,6 +24,7 @@ from benchspec.agents.base import (
     AgentCapabilities,
     BaseAgent,
     Credential,
+    StreamDelta,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
 from benchspec.grading.trigger import StopRule
@@ -352,6 +353,20 @@ class CodexAgent(BaseAgent):
         """
         return _codex_trajectory(list(iter_events(line)))
 
+    def stream_text(self, line: str) -> list[str]:
+        """Return the text of each completed `agent_message` item the line carries."""
+        items = [
+            _event_item(event)
+            for event in iter_events(line)
+            if event.get("type") == "item.completed"
+        ]
+
+        return [
+            item["text"]
+            for item in items
+            if item.get("type") == "agent_message" and isinstance(item.get("text"), str)
+        ]
+
     async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
         """Stage Codex auth JSON into the guest home when needed."""
         if not self._auth_json_path:
@@ -392,6 +407,7 @@ class CodexAgent(BaseAgent):
         extra_env: dict[str, str] | None = None,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
+        on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
         cmd = self.build_command(
@@ -421,6 +437,7 @@ class CodexAgent(BaseAgent):
             sandbox,
             cmd,
             stop=stop,
+            on_delta=on_delta,
             parse=lambda stdout: parse_codex_jsonl(stdout, eval_id, config, detect_skill),
             cwd=workdir,
             env=env,

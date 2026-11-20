@@ -12,6 +12,8 @@ import pytest
 
 from benchspec.agents import DEFAULT_CELL_TIMEOUT
 from benchspec.agents.claude import ClaudeCodeAgent
+from benchspec.events.cell import CellEvents
+from benchspec.events.sink import NULL_SINK
 from benchspec.orchestration.deadline import CellDeadline
 from benchspec.sandbox import project, registry, sandbox
 from benchspec.testing import FakeSandbox
@@ -196,6 +198,7 @@ def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
         """Open a session and report what was mounted while it was live."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -240,6 +243,7 @@ def test_arm_session_removes_the_stage_when_boot_fails(
         """Open a session that fails to boot."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",

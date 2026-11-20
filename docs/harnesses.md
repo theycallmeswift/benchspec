@@ -42,6 +42,7 @@ arms = [
 | Accepted `effort` | `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | OpenRouter `routing` | rejected | rejected | delivered: the arm model's `options.provider`, set inline through `OPENCODE_CONFIG_CONTENT` |
 | Token split (input/output) | yes | yes | yes; reasoning counts as output |
+| Cost reported (`cost_usd`) | `total_cost_usd` on the closing `result` event | none | `cost` summed over finished steps |
 | Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
 | `provider = "openrouter"` | `OPENROUTER_API_KEY`, injected as `ANTHROPIC_AUTH_TOKEN` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and an empty `ANTHROPIC_API_KEY`; model is a vendor slug (`anthropic/claude-sonnet-4.6`) | `OPENROUTER_API_KEY`, with benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*` overrides on every invocation; model is a vendor slug (`openai/gpt-5.5`) | `OPENROUTER_API_KEY` only; model is `openrouter/<vendor>/<model>` |
 | Version pin | `BENCHSPEC_CLAUDE_VERSION` | `BENCHSPEC_CODEX_VERSION` | `BENCHSPEC_OPENCODE_VERSION`, then `[tool.benchspec] opencode_version` |
@@ -157,7 +158,9 @@ integration surface. An adapter declares:
   `timed_out=True`, or `is_error=True` if nothing streamed.
 - **Detection**: `stream_tool_calls`, the tool calls one raw output line
   carries, exactly as the adapter's parser records them for the whole stream,
-  so an early stop and the grade agree on whether a skill fired. A
+  so an early stop and the grade agree on whether a skill fired. Beside it,
+  `stream_text` returns the line's assistant text blocks; the two feed the
+  [event stream](results.md#the-event-stream)'s `cell.delta`. A
   dispatch is whatever the CLI observably does to load a skill: its native
   skill event where it has one, otherwise a read of
   `<skill_load_dir>/<name>/SKILL.md` (the Codex adapter works this way).

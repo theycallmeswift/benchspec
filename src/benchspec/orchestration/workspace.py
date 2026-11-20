@@ -67,6 +67,16 @@ def current_iteration_or_none() -> str | None:
     return os.environ.get(_ENV_ITERATION)
 
 
+def worker_tag() -> str:
+    """This process's name in the run: its xdist worker id, or `main` when it is not one."""
+    return os.environ.get("PYTEST_XDIST_WORKER", "main")
+
+
+def events_path(repo_root: Path, worker: str) -> Path:
+    """The event stream file `worker` appends to in the current iteration."""
+    return iteration_root(repo_root) / f"events-{worker}.jsonl"
+
+
 def iteration_root(repo_root: Path) -> Path:
     """The shared dir for the current iteration: `tmp/evals/iteration_NN/`."""
     return evals_root(repo_root) / current_iteration()

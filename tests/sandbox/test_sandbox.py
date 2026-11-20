@@ -16,6 +16,8 @@ from benchspec.agents import DEFAULT_CELL_TIMEOUT, CodingAgent
 from benchspec.agents.base import FIXED_SKILLS_HOME
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
+from benchspec.events.cell import CellEvents
+from benchspec.events.sink import NULL_SINK
 from benchspec.orchestration import deadline as deadline_mod
 from benchspec.orchestration.deadline import CellDeadline, CellTimeoutError
 from benchspec.orchestration.results import RunResult
@@ -572,6 +574,7 @@ def test_arm_session_runs_turn_and_tears_down(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -628,6 +631,7 @@ def _session_with_a_nearly_spent_deadline(
         backend=microsandbox_backend,
         setup_reldir=setup_reldir,
         deadline=CellDeadline(1, clock=_NearlyExpiredClock()),
+        events=CellEvents(NULL_SINK, "cell"),
     )
 
 
@@ -727,6 +731,7 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
             effort="medium",
             backend=microsandbox_backend,
             deadline=CellDeadline(0),
+            events=CellEvents(NULL_SINK, "cell"),
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill=None)
 
@@ -752,6 +757,7 @@ def test_arm_session_propagates_create_failure(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -900,6 +906,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -969,6 +976,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1175,6 +1183,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1233,6 +1242,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1281,6 +1291,7 @@ def test_arm_session_passes_explicit_harness_args(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1331,6 +1342,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1370,6 +1382,7 @@ def test_arm_session_setup_sh_failure_stops_vm(
         """Drive."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+            events=CellEvents(NULL_SINK, "cell"),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
