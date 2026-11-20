@@ -207,6 +207,7 @@ the judge, and every arm. Cross-family judging still applies: this repo's
 | `judge` | table | The run's judge (above). |
 | `binder` | table | The run's binder (above). |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
+| `workers` | `"auto"` or positive integer | Parallel cells for `benchspec run` (default `"auto"`). `auto` is `min(cores, total RAM / 2 GB)`, clamped to 1–12. `1` runs in-process with no xdist. Not a set key: it describes the machine, not the experiment, and is not part of `config_hash`. Overridden by `--workers` or a passthrough `-n`. |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
 | `opencode_version` | string | Default OpenCode version pin when `BENCHSPEC_OPENCODE_VERSION` is unset. |
@@ -248,25 +249,37 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
 | `--effort E` | `--benchspec-effort` | Override the set's `effort` default. |
 | `--timeout S` | `--benchspec-timeout` | Override the set's `timeout` default (seconds). Arms that declared their own keep it. |
+| `--workers N\|auto` | none (resolved by `run`) | Parallel cells: a positive integer or `auto`. Beats `[tool.benchspec] workers`. `auto` sizes from CPU cores and total RAM at 2 GB per cell, capped at 12; `1` runs in-process. Combining it with a passthrough `-n` exits `2`. |
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` | `--benchspec-judge-*` | Per-run judge overrides. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
+`run` prints its worker count once at start: `workers: 5 (auto: 8 cores, 11.4 GB RAM)`,
+`workers: 4 (flag)`, or `workers: 3 (config)`. Resolution order is `--workers`, then
+a passthrough `-n` / `--numprocesses` (pytest-xdist, which still works and wins over the
+project default), then `[tool.benchspec] workers`, then `auto`. `--collect-only` adds no
+workers.
+
+```bash
+benchspec run                          # workers = auto
+benchspec run --workers 8              # fan cells across 8 sandboxes
+benchspec run --workers 1              # sequential, in-process
+```
+
 Everything after a standalone `--` passes to pytest verbatim:
 
 ```bash
 benchspec run -- --count 3             # 3 samples per cell (pytest-repeat) so deltas carry a noise band
-benchspec run -- -n 8                  # fan cells across 8 sandboxes (pytest-xdist)
 benchspec run -- -k greets-by-name     # one eval (substring match on the test id)
 benchspec run -- --collect-only -q     # list the cells without running
 ```
 
-The in-repo `make e2e` target passes `--count $(COUNT)` (default 3) and, like
-`make evals`, `-n $(WORKERS)` (default 6; each e2e worker reserves a 2 GB
-sandbox); `EVAL_ARGS` appends further pytest arguments after them, so
-`make e2e WORKERS=1` or `EVAL_ARGS="-n 1"` restores a sequential run.
+The in-repo `make e2e` target passes `--count $(COUNT)` (default 3) and
+`--workers $(WORKERS)` (default 6, pinned so CI does not depend on the runner);
+`make evals` passes `-n $(WORKERS)` to pytest directly. `EVAL_ARGS` appends further
+pytest arguments, so `make e2e WORKERS=1` restores a sequential run.
 
 A few plugin options have no curated `run` flag and are reached the same way:
 `--benchspec-judge-timeout`, `--benchspec-judge-env K=V`,
@@ -283,7 +296,7 @@ away by another group's win. `--fail-under 0` means "every arm must at least
 match baseline in every group":
 
 ```bash
-benchspec run --fail-under 0 -- --count 3 -n 6
+benchspec run --fail-under 0 --workers 6 -- --count 3
 ```
 
 The gate uses the raw delta, and a banded (multi-sample) run is the
