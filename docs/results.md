@@ -173,12 +173,38 @@ judge failure.
 
 ## The terminal summary
 
-While cells run, pytest's progress line names the authored eval file each cell
-came from — `evals/e2e/hello/evals/hello/greets-by-name.eval.md ...` — rather
-than the internal test module, and each cell's id keeps its
-`test_eval[<group>-<eval_id>-<arm>]` tail for `-k` and `-v`. When the session
-ends, the run prints the same rows and rates `benchmark.md` holds, as a width-aligned
-plain-text table under a `benchspec benchmark` banner:
+While cells run, the run prints one line per finished sample, in finish order:
+
+```text
+[1/4] PASS     hello/eval-greets-by-name             baseline  s0   2/2   31.4s  first —     —
+[2/4] FAIL     hello/eval-greets-by-name             trial     s0   1/2   38.2s  first —     —
+[3/4] PASS     hello-file/eval-writes-greeting-file  baseline  s0   3/3   44.0s  first —     —
+[4/4] ERROR    hello-file/eval-writes-greeting-file  trial     s0   0/3    9.7s  first —     —  AssertionError: trial run errored (see the arm's grading.json)
+```
+
+| Field | Meaning |
+| --- | --- |
+| `[n/N]` | Samples finished, over samples collected. `?` when the total is unknown. |
+| State | `PASS`: every assertion held. `FAIL`: one did not. `TIMEOUT`: a [timed-out sample](#timed-out-samples). `ERROR`: the sample errored, a fixture failed, or its xdist worker died; the failure's first line (120 characters) ends the line. |
+| `<skill>/eval-<id>`, arm, `s<n>` | The sample's folder: `skills/<skill>/eval-<id>/<arm>/sample-<n>/`. |
+| `passed/total` | Graded assertions that held. |
+| Time | Wall time of the sample. |
+| `first <time>` | `first_output_ms` in `timing.json`. |
+| Cost | `cost_usd` in `timing.json`. |
+
+A `—` means the run did not report that value. An n/a sample (every assertion
+scoped off its arm) prints no line and counts in neither number. Lines are
+plain and append-only; only the state word is colored, on a color terminal.
+Under `-v`, pytest's own line for each sample prints above it.
+
+`--progress dots` (or `progress = "dots"` in `[tool.benchspec]`) keeps pytest's
+progress line, which names each cell's authored eval file:
+`evals/e2e/hello/evals/hello/greets-by-name.eval.md ...`. In both formats each
+cell's id keeps its `test_eval[<group>-<eval_id>-<arm>]` tail for `-k` and
+`-v`.
+
+When the session ends, the run prints the same rows and rates `benchmark.md`
+holds, as a width-aligned plain-text table under a `benchspec benchmark` banner:
 
 ```
 ============================ benchspec benchmark ============================

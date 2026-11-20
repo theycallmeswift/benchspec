@@ -2008,7 +2008,7 @@ def test_timing_json_contains_token_split(tmp_path: Path) -> None:
         tmp_path, {"id": "alpha", "prompt": "perform the task", "assertions": ["a"]}
     )
 
-    run_eval_arm(
+    outcome = run_eval_arm(
         eval_case,
         TRIAL,
         workdir,
@@ -2039,6 +2039,7 @@ def test_timing_json_contains_token_split(tmp_path: Path) -> None:
     timing = json.loads((run_dir / "timing.json").read_text())
     assert timing["input_tokens"] == 120
     assert timing["output_tokens"] == 40
+    assert outcome.timing == timing
 
 
 def test_grading_is_self_describing(tmp_path: Path) -> None:

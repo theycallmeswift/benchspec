@@ -107,6 +107,41 @@ def test_run_command_parses_timeout_as_seconds(monkeypatch: pytest.MonkeyPatch) 
     assert seen["timeout"] == 5
 
 
+def test_run_command_parses_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify run command parses progress."""
+    captured: list[argparse.Namespace] = []
+    monkeypatch.setattr(__main__.run, "run", lambda args: captured.append(args) or 0)
+
+    __main__.main(["run", "--progress", "dots"])
+    __main__.main(["run"])
+
+    assert [args.progress for args in captured] == ["dots", None]
+
+
+def test_run_command_rejects_an_unknown_progress_format(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify run command rejects an unknown progress format."""
+    with pytest.raises(SystemExit) as raised:
+        __main__.main(["run", "--progress", "spinner"])
+
+    assert raised.value.code == 2
+    assert "invalid choice: 'spinner'" in capsys.readouterr().err
+
+
+def test_run_help_documents_the_progress_formats_and_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify run help documents the progress formats and default."""
+    with pytest.raises(SystemExit) as raised:
+        __main__.main(["run", "--help"])
+
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert raised.value.code == 0
+    assert "--progress {cells,dots}" in help_text
+    assert "default: cells, or [tool.benchspec] progress" in help_text
+
+
 def test_run_command_dispatches_to_run_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `benchspec run` routes to run.run and returns its exit code."""
     monkeypatch.setattr(__main__.run, "run", lambda args: 7)

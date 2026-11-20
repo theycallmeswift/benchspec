@@ -38,6 +38,7 @@ _SCALAR_OPTIONS = {
     "timeout": "--benchspec-timeout",
     "eval_paths": "--benchspec-eval-paths",
     "fail_under": "--benchspec-fail-under",
+    "progress": "--benchspec-progress",
     "judge_harness": "--benchspec-judge-harness",
     "judge_provider": "--benchspec-judge-provider",
     "judge_model": "--benchspec-judge-model",
