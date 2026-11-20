@@ -15,6 +15,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -22,6 +23,7 @@ from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
 from benchspec.orchestration import cases
 from benchspec.sandbox.sandbox import format_preflight_failure
 from benchspec.specs import discovery
+from benchspec.specs.schema import SchemaError
 
 # Curated flag (argparse dest) -> the plugin option it forwards to. Each emits a single
 # `option=value` token so a value that starts with `-` is never mistaken for a flag.
@@ -51,6 +53,12 @@ _APPEND_OPTIONS = {
 # pytest spellings of "collect, don't run": nothing paid happens, so the environment
 # preflight is skipped exactly as the plugin skips it (fixtures never set up).
 _COLLECT_ONLY_FLAGS = frozenset({"--collect-only", "--co"})
+
+# Each local cell reserves a 2 GB sandbox, so `auto` sizes against total RAM.
+GIB_PER_CELL = 2
+
+# Binder fan-out past about 12 workers trips the Gemini call's 60 s timeout.
+MAX_AUTO_WORKERS = 12
 
 
 @dataclass(frozen=True)
@@ -147,6 +155,104 @@ def translate_run_flags(args: argparse.Namespace) -> list[str]:
     return tokens
 
 
+def workers_value(text: str) -> int | Literal["auto"]:
+    """Parse the `--workers` flag value for argparse.
+
+    Raises:
+        argparse.ArgumentTypeError: `text` is not a positive integer or `auto`.
+    """
+    try:
+        value = int(text) if text.isdecimal() else text
+        return discovery.parse_workers(value, label="--workers")
+    except SchemaError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def auto_workers(cpu_count: int, total_ram_bytes: int | None) -> int:
+    """Size `auto`: min(cores, RAM at `GIB_PER_CELL`), clamped to `[1, MAX_AUTO_WORKERS]`.
+
+    Args:
+        cpu_count: Usable CPU cores.
+        total_ram_bytes: Total physical memory, or None when the host cannot report it,
+            in which case only cores count.
+    """
+    limit = cpu_count
+    if total_ram_bytes is not None:
+        limit = min(limit, total_ram_bytes // (GIB_PER_CELL * 1024**3))
+
+    return max(1, min(limit, MAX_AUTO_WORKERS))
+
+
+def host_cpu_count() -> int:
+    """Return the cores this process may use (3.13's `process_cpu_count`, else `cpu_count`)."""
+    process_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+    return process_cpu_count() or 1
+
+
+def host_ram_bytes() -> int | None:
+    """Return total physical memory in bytes, or None where `os.sysconf` cannot report it."""
+    try:
+        total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        return None
+
+    return total if total > 0 else None
+
+
+@dataclass(frozen=True)
+class Workers:
+    """A resolved worker count and where it came from, for the run start line."""
+
+    count: int
+    source: str
+
+    def describe(self) -> str:
+        """Return the run start line, such as `workers: 4 (flag)`."""
+        return f"workers: {self.count} ({self.source})"
+
+
+def _auto_plan() -> Workers:
+    """Resolve `auto` against this host."""
+    cores = host_cpu_count()
+    ram_bytes = host_ram_bytes()
+
+    source = f"auto: {cores} cores"
+    if ram_bytes is not None:
+        source += f", {ram_bytes / 1024**3:.1f} GB RAM"
+
+    return Workers(count=auto_workers(cores, ram_bytes), source=source)
+
+
+def _passthrough_sets_workers(passthrough: list[str]) -> bool:
+    """Return whether pytest args already carry xdist's `-n` or `--numprocesses`."""
+    for token in passthrough:
+        if token.startswith("--numprocesses") or (
+            token.startswith("-n") and not token.startswith("--")
+        ):
+            return True
+
+    return False
+
+
+def resolve_workers(args: argparse.Namespace) -> Workers:
+    """Resolve the worker count: `--workers`, then `[tool.benchspec] workers`, then `auto`.
+
+    Raises:
+        SchemaError: the project `workers` value is malformed.
+    """
+    flag = args.workers
+    if flag is not None and flag != "auto":
+        return Workers(count=flag, source="flag")
+    if flag == "auto":
+        return _auto_plan()
+
+    configured = discovery.pyproject_workers(args.root.resolve())
+    if configured is None or configured == "auto":
+        return _auto_plan()
+
+    return Workers(count=configured, source="config")
+
+
 def run(
     args: argparse.Namespace,
     *,
@@ -168,15 +274,16 @@ def run(
 
     Args:
         args: The parsed `run` namespace — `root` (a `Path`), the curated `--benchspec-*`
-            flags, and `passthrough` (verbatim pytest args after `--`).
+            flags, `workers` (an int, `auto`, or None), and `passthrough` (verbatim pytest
+            args after `--`).
         runner: Injectable process launcher with `subprocess.run`'s contract; called as
             `runner(argv, env=child_env)` and expected to expose `.returncode`.
         preflight: Injectable preflight with `preflight_run`'s contract.
 
     Returns:
         `ExitCode.NOTHING_TO_DO` when no evals are discovered, `ExitCode.USAGE` on a
-        preflight failure, otherwise the child pytest status mapped through
-        `exit_code_for_pytest_status`.
+        preflight failure or `--workers` given with a passthrough `-n`, otherwise the
+        child pytest status mapped through `exit_code_for_pytest_status`.
     """
     root = args.root.resolve()
 
@@ -187,7 +294,15 @@ def run(
         print(f"no evals discovered under {root}")
         return ExitCode.NOTHING_TO_DO
 
-    if not _COLLECT_ONLY_FLAGS.intersection(args.passthrough):
+    passthrough_sets_workers = _passthrough_sets_workers(args.passthrough)
+    if args.workers is not None and passthrough_sets_workers:
+        print("error: --workers conflicts with -n/--numprocesses; pass one", file=sys.stderr)
+        return ExitCode.USAGE
+
+    workers = resolve_workers(args)
+    collect_only = bool(_COLLECT_ONLY_FLAGS.intersection(args.passthrough))
+
+    if not collect_only:
         try:
             preflight(args)
         except (RuntimeError, pytest.UsageError) as error:
@@ -197,6 +312,19 @@ def run(
     child_env = {**os.environ}
     child_env.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)
 
-    argv = [sys.executable, "-m", "pytest", *translate_run_flags(args), *args.passthrough]
+    worker_tokens: list[str] = []
+    if not collect_only and not passthrough_sets_workers:
+        print(workers.describe(), flush=True)
+        if workers.count > 1:
+            worker_tokens = [f"-n={workers.count}"]
+
+    argv = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *worker_tokens,
+        *translate_run_flags(args),
+        *args.passthrough,
+    ]
     completed = runner(argv, env=child_env)
     return exit_code_for_pytest_status(int(completed.returncode))
