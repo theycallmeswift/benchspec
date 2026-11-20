@@ -38,7 +38,9 @@ class _Session:
         return None
 
     async def _run(self, prompt, *, resume_session_id, detect_skill):
-        return RunResult("eval", "arm", "agent crashed", 10, 5, is_error=self._errors)
+        return RunResult(
+            "eval", "arm", "agent crashed", 10, 5, is_error=self._errors, cost_usd=0.031
+        )
 
 
 def _grade(assertions, *args, **kwargs):
@@ -190,13 +192,13 @@ def test_collect_only_creates_no_events_file(
     assert list(pytester.path.rglob("events-*.jsonl")) == []
 
 
-def test_terminal_names_the_eval_files_and_prints_no_event(
+def test_terminal_prints_sample_lines_with_the_reported_cost_and_no_event(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Terminal names the eval files and prints no event."""
+    """Terminal prints sample lines with the reported cost and no event."""
     result = _run(pytester, monkeypatch, "-k", "alpha")
 
     output = result.stdout.str()
-    assert "skills/myskill/evals/myskill/alpha.eval.md" in output
+    assert "PASS     myskill/eval-alpha  baseline  s0   1/1    0.0s  first —     $0.031" in output
     assert "format_version" not in output
     assert "cell.start" not in output

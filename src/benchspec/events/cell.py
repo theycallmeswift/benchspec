@@ -9,7 +9,6 @@ from benchspec.agents.base import StreamDelta
 from benchspec.events.schema import (
     DELTA_TEXT_LIMIT,
     ERROR_MESSAGE_LIMIT,
-    Timing,
 )
 from benchspec.events.sink import EventSink
 from benchspec.orchestration.deadline import PHASE_AGENT
@@ -82,7 +81,7 @@ class CellEvents:
             {"kind": delta.kind, "name": delta.name, "text": delta.text[:DELTA_TEXT_LIMIT]},
         )
 
-    def done(self, *, passed: int, total: int, timing: Timing) -> None:
+    def done(self, *, passed: int, total: int, timing: Mapping[str, object]) -> None:
         """Emit `cell.done` for a graded sample, copying its `timing.json`."""
         self._emit(
             "cell.done",
@@ -96,7 +95,9 @@ class CellEvents:
             },
         )
 
-    def error(self, *, error_kind: str, message: str, timing: Timing | None) -> None:
+    def error(
+        self, *, error_kind: str, message: str, timing: Mapping[str, object] | None
+    ) -> None:
         """Emit `cell.error`, naming the phase that was running.
 
         Args:

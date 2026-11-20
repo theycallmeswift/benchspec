@@ -78,6 +78,7 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
             "timeout",
             "eval_paths",
             "fail_under",
+            "progress",
             "judge_harness",
             "judge_provider",
             "judge_model",
@@ -177,6 +178,15 @@ def test_translates_models_and_eval_paths_and_fail_under() -> None:
     assert "--benchspec-models=opus,sonnet" in tokens
     assert "--benchspec-eval-paths=skills,evals" in tokens
     assert "--benchspec-fail-under=0.8" in tokens
+
+
+def test_translates_progress_to_benchspec_progress() -> None:
+    """Verify translates progress to benchspec progress."""
+    args = _run_namespace(Path("repo"), progress="dots")
+
+    tokens = translate_run_flags(args)
+
+    assert "--benchspec-progress=dots" in tokens
 
 
 def test_translates_common_judge_flags() -> None:

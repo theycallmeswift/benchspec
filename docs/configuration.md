@@ -255,6 +255,7 @@ sample's `provenance.json` records the arm's resolved `effort`, `provider`, and
 | `judge` | table | The run's judge (above). |
 | `binder` | table | The run's binder (above). |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
+| `progress` | string | Live progress: `cells` (default) or `dots`. `--progress` wins. See [`results.md`](results.md#the-terminal-summary). |
 | `workers` | `"auto"` or positive integer | Parallel cells for `benchspec run` (default `"auto"`). `auto` is `min(cores, total RAM / 2 GB)`, clamped to 1–12. `1` runs in-process with no xdist. Not a set key: it describes the machine, not the experiment, and is not part of `config_hash`. Overridden by `--workers` or a passthrough `-n`. |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
@@ -301,6 +302,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
+| `--progress {cells,dots}` | `--benchspec-progress` | Live progress: one line per finished sample, or pytest's dots. See [`results.md`](results.md#the-terminal-summary). |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is in seconds and must stay below every arm's `--timeout`. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 

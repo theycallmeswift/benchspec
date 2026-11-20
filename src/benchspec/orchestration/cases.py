@@ -15,7 +15,7 @@ recorded measurement, not a gate.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import cast
 
@@ -23,6 +23,7 @@ import pytest
 
 from benchspec.config.arms import Arm
 from benchspec.config.options import RunOptions, option_str
+from benchspec.config.progress import PROGRESS_STYLE
 from benchspec.config.sets import (
     resolved_binder_config,
     resolved_judge_config,
@@ -42,6 +43,11 @@ from benchspec.grading.judges.registry import (
 from benchspec.orchestration import prebind, results
 from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
+from benchspec.reporting.cells import (
+    RESULT_PROPERTY,
+    CellResult,
+    assertion_counts,
+)
 from benchspec.sandbox import sandbox
 from benchspec.sandbox.backend import SandboxBackend
 from benchspec.sandbox.registry import resolve_sandbox
@@ -155,6 +161,29 @@ def _resolve_scope_clauses(
             scope.applicable(case, arm, baseline=baseline, eval_set=eval_set)
         except scope.ScopeError as error:
             raise pytest.UsageError(str(error)) from error
+
+
+def not_applicable_param_ids(
+    config: RunOptions, pairs: list[tuple[EvalCase, Arm]], ids: list[str]
+) -> frozenset[str]:
+    """The `eval_arm` parameter ids whose every assertion is scoped off their arm.
+
+    Args:
+        config: The run's options, for the baseline arm and set name that clauses read.
+        pairs: The `(case, arm)` pairs from `eval_arm_params`.
+        ids: Their parameter ids, in the same order.
+    """
+    if not pairs:
+        return frozenset()
+
+    baseline = resolved_run_set(config).baseline
+    eval_set = _eval_set_name(config)
+
+    return frozenset(
+        param_id
+        for (case, arm), param_id in zip(pairs, ids, strict=True)
+        if not any(scope.applicable(case, arm, baseline=baseline, eval_set=eval_set))
+    )
 
 
 def _eval_set_name(config: RunOptions) -> str:
@@ -377,6 +406,27 @@ def event_sink(request: pytest.FixtureRequest) -> EventSink:
     return request.config.stash.get(EVENT_SINK, NULL_SINK)
 
 
+@pytest.fixture
+def record_cell_result(request: pytest.FixtureRequest) -> Callable[[ArmOutcome], None]:
+    """Return the recorder that puts a sample's result on its report, under `cells` only.
+
+    A JSON string, because xdist ships properties through execnet.
+    """
+
+    def record(outcome: ArmOutcome) -> None:
+        """Record the sample's assertion counts and timing."""
+        if request.config.stash[PROGRESS_STYLE] != "cells":
+            return
+
+        passed, total = assertion_counts(outcome.grading.get("assertions", []))
+        result = CellResult(
+            passed=passed, total=total, errored=outcome.errored, timing=outcome.timing
+        )
+        request.node.user_properties.append((RESULT_PROPERTY, result.to_json()))
+
+    return record
+
+
 def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
@@ -411,6 +461,7 @@ def test_eval(
     baseline_arm: str | None,
     bound_specs: prebind.BoundSpecs,
     event_sink: EventSink,
+    record_cell_result: Callable[[ArmOutcome], None],
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -437,6 +488,8 @@ def test_eval(
         baseline=baseline_arm,
         events=event_sink,
     )
+
+    record_cell_result(outcome)
 
     # Both arms grade identically and symmetrically. A failed assertion (including a
     # baseline that legitimately doesn't fire the skill) is the recorded measurement, not a

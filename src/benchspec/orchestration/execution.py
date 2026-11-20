@@ -26,7 +26,7 @@ from benchspec.agents import CodingAgent, make_agent
 from benchspec.agents.base import probe_guest_version
 from benchspec.config.arms import Arm, expand_env
 from benchspec.events.cell import CellEvents
-from benchspec.events.schema import Timing, cell_key
+from benchspec.events.schema import cell_key
 from benchspec.events.sink import NULL_SINK, EventSink
 from benchspec.grading import binder, checkers
 from benchspec.grading.judge import grade_run
@@ -47,11 +47,11 @@ from benchspec.orchestration.deadline import (
 )
 from benchspec.orchestration.results import (
     RunResult,
-    graded_counts,
     substitute_assertions,
     substitute_prompt,
 )
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
+from benchspec.reporting.cells import assertion_counts
 from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
 from benchspec.sandbox.provenance import RuntimeProvenance, SandboxProvenance
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, resolve_sandbox
@@ -89,6 +89,8 @@ class ArmOutcome:
     errored: bool  # the agent run errored
     duration_ms: int
     total_tokens: int
+    # The mapping written to timing.json.
+    timing: dict[str, int | float | bool | str | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -237,13 +239,13 @@ def _stop_rule(specs: list[dict | None]) -> StopRule | None:
     return settled_once_dispatched(spec["skill"] for spec in specs if spec is not None)
 
 
-def _usage_fields(arm_run: _ArmRun) -> Timing:
+def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
     """The token fields for timing.json.
 
     A stopped or timed-out run killed before any reported usage records null tokens, so it
     never reads as a free run.
     """
-    fields: Timing = {
+    fields = {
         "total_tokens": arm_run.total_tokens,
         "cache_read_tokens": arm_run.total_cache_read,
         "cache_creation_tokens": arm_run.total_cache_creation,
@@ -251,14 +253,7 @@ def _usage_fields(arm_run: _ArmRun) -> Timing:
         "output_tokens": arm_run.total_output_tokens,
     }
     if (arm_run.stopped or arm_run.timed_out_phase) and arm_run.total_tokens == 0:
-        return {
-            "total_tokens": None,
-            "cache_read_tokens": None,
-            "cache_creation_tokens": None,
-            "input_tokens": None,
-            "output_tokens": None,
-        }
-
+        return dict.fromkeys(fields)
     return fields
 
 
@@ -826,7 +821,7 @@ def _run_cell(
     # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
     # once its verdicts were fixed, so its time and tokens never read as a full task's.
     # run_dir was created above when provenance was persisted.
-    timing: Timing = {
+    timing: dict[str, int | float | bool | str | None] = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
         **_usage_fields(arm_run),
@@ -855,7 +850,7 @@ def _run_cell(
             timing=timing,
         )
     else:
-        passed, total = graded_counts(merged)
+        passed, total = assertion_counts(merged)
         events.done(passed=passed, total=total, timing=timing)
 
     return ArmOutcome(
@@ -863,4 +858,5 @@ def _run_cell(
         errored,
         arm_run.total_duration_ms,
         arm_run.total_tokens,
+        timing,
     )

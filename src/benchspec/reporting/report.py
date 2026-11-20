@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from benchspec.agents import make_agent
-from benchspec.orchestration.results import graded_counts
+from benchspec.reporting import ansi
+from benchspec.reporting.cells import assertion_counts
 
 if TYPE_CHECKING:
     from benchspec.config.arms import Set as EvalSet
@@ -363,7 +364,7 @@ def index_rows(
                     continue
                 timing = _load_json(sample_dir / "timing.json") or {}
                 assertions = grading.get("assertions", [])
-                passed, total = graded_counts(assertions)
+                passed, total = assertion_counts(assertions)
                 # Core axes sit right after `arm` so the row reads config-first, then
                 # results. Omitted entirely for an unrecognized arm, never faked as null.
                 core_axes = (
@@ -624,8 +625,6 @@ def _scoped_table(benchmark: dict) -> list[str]:
     return lines
 
 
-_GREEN, _YELLOW, _RED, _RESET = "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[0m"
-
 _TOKEN_RE = re.compile(r"(?:(?P<rate>\d+%)|(?P<pp>[+-]\d+)pp)$")
 
 
@@ -634,10 +633,10 @@ def _rate_ansi(rate_token: str) -> str:
     rate = int(rate_token.rstrip("%"))
 
     if rate >= 80:
-        return _GREEN
+        return ansi.GREEN
     if rate >= 50:
-        return _YELLOW
-    return _RED
+        return ansi.YELLOW
+    return ansi.RED
 
 
 def _delta_ansi(pp_token: str) -> str:
@@ -645,10 +644,10 @@ def _delta_ansi(pp_token: str) -> str:
     delta = int(pp_token)
 
     if delta > 0:
-        return _GREEN
+        return ansi.GREEN
     if delta < 0:
-        return _RED
-    return _YELLOW
+        return ansi.RED
+    return ansi.YELLOW
 
 
 def _colorize_cell(padded_cell: str) -> str:
@@ -664,7 +663,7 @@ def _colorize_cell(padded_cell: str) -> str:
     token = match.group(0)
     color = _rate_ansi(match["rate"]) if match["rate"] else _delta_ansi(match["pp"])
 
-    return padded_cell[: match.start()] + color + token + _RESET
+    return padded_cell[: match.start()] + color + token + ansi.RESET
 
 
 def _split_cell(cell: str) -> tuple[str, str]:

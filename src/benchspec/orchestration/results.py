@@ -159,14 +159,6 @@ def parse_run_json(raw: str, eval_id: str, config: str) -> RunResult:
     )
 
 
-def graded_counts(assertions: Sequence[dict]) -> tuple[int, int]:
-    """Count a sample's `grading.json` entries as (passed, graded); skipped lines are neither."""
-    passed = sum(1 for assertion in assertions if assertion.get("passed"))
-    graded = sum(1 for assertion in assertions if not assertion.get("skipped"))
-
-    return passed, graded
-
-
 def mark_errored_by_nonzero_exit(result: RunResult, stderr: str) -> RunResult:
     """Mark a parsed run errored because its harness exited non-zero.
 
