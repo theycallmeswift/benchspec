@@ -13,6 +13,7 @@ from benchspec.agents.base import Credential
 from benchspec.agents.codex import CodexAgent, _skill_dispatch_name, parse_codex_jsonl
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
+from benchspec.testing import FakeExecStream
 from tests.agents.doubles import SLOW_EXEC_SECONDS, SlowSandbox, exec_call, shell_call
 from tests.support import FakeExecOutput, FakeSandbox
 
@@ -892,7 +893,7 @@ def test_invoke_nonzero_exit_keeps_the_stream_and_headlines_stderr() -> None:
     parsed = parse_codex_jsonl(stream, "e1", "trial", None)
     assert res.is_error is True
     assert res.result_text == "segfault at exit"
-    assert res.raw == stream
+    assert res.raw == stream.rstrip("\n")
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
 
@@ -922,7 +923,7 @@ def test_invoke_nonzero_exit_with_blank_stderr_keeps_the_parsed_text() -> None:
     parsed = parse_codex_jsonl(stream, "e1", "trial", None)
     assert res.is_error is True
     assert res.result_text == parsed.result_text
-    assert res.raw == stream
+    assert res.raw == stream.rstrip("\n")
     assert res.trajectory
     assert res.total_tokens == parsed.total_tokens
 
@@ -933,16 +934,15 @@ def test_invoke_records_sandbox_error_as_an_infra_failure() -> None:
     class DyingSandbox(FakeSandbox):
         """A sandbox whose exec fails the way a torn-down VM does."""
 
-        async def exec(
+        async def exec_stream(
             self,
             cmd: str,
             args: list[str] | None = None,
             *,
             cwd: str | None = None,
             env: Mapping[str, str] | None = None,
-            timeout: float | None = None,
             stdin: bytes | None = None,
-        ) -> FakeExecOutput:
+        ) -> FakeExecStream:
             """Fail like a torn-down VM."""
             raise SandboxError("container gone")
 

@@ -27,6 +27,16 @@ class FakeExecOutput:
         """Whether the fake command exited zero."""
         return self.exit_code == 0
 
+    def as_stream_events(self) -> list[FakeExecEvent]:
+        """This output as the events a streamed exec would deliver: stdout, stderr, exit."""
+        events = []
+        if self.stdout_text:
+            events.append(FakeExecEvent("stdout", data=self.stdout_text.encode()))
+        if self.stderr_text:
+            events.append(FakeExecEvent("stderr", data=self.stderr_text.encode()))
+        events.append(FakeExecEvent("exited", code=self.exit_code))
+        return events
+
 
 @dataclass
 class FakeExecEvent:
@@ -70,7 +80,8 @@ class FakeSandbox:
     """Records calls; returns canned outputs.
 
     `exec_outputs` is consumed in order, one per exec call, falling back to `default_exec`
-    when exhausted. `stream_events` feeds every `exec_stream` call, and `stream_stalls`
+    when exhausted; a streamed exec with no `stream_events` replays the next one as its
+    stdout, stderr, and exit. `stream_events` feeds every `exec_stream` call, and `stream_stalls`
     leaves each stream hanging after them; `streams` keeps every handle handed out. Each
     recorded call is a `(kind, ...)` tuple: `("shell", script, kwargs)`,
     `("exec", cmd, args, kwargs)`, or `("exec_stream", cmd, args, kwargs)`.
@@ -125,7 +136,10 @@ class FakeSandbox:
     ) -> FakeExecStream:
         """Record a fake streaming exec and return a stream over the canned events."""
         self.calls.append(("exec_stream", cmd, args, {"cwd": cwd, "env": env, "stdin": stdin}))
-        stream = FakeExecStream(events=list(self.stream_events), stalls=self.stream_stalls)
+        events = list(self.stream_events)
+        if not events and self.exec_outputs:
+            events = self.exec_outputs.pop(0).as_stream_events()
+        stream = FakeExecStream(events=events, stalls=self.stream_stalls)
         self.streams.append(stream)
         return stream
 

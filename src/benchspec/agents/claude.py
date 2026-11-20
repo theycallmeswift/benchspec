@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
-    DEFAULT_AGENT_TIMEOUT,
+    DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
@@ -28,13 +28,11 @@ from benchspec.agents.base import (
 )
 from benchspec.grading.trajectory import extract_trajectory
 from benchspec.grading.trigger import StopRule
-from benchspec.orchestration.environments import ExecutionEnv, GuestSandbox, Host
+from benchspec.orchestration.environments import ExecutionEnv, Host
 from benchspec.orchestration.results import (
     RunResult,
-    mark_errored_by_nonzero_exit,
     parse_stream_run,
 )
-from benchspec.sandbox.errors import SandboxError
 
 if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
@@ -373,7 +371,7 @@ class ClaudeCodeAgent(BaseAgent):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
-        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
     ) -> RunResult:
         """Run one prompt through the agent inside the guest."""
@@ -389,34 +387,14 @@ class ClaudeCodeAgent(BaseAgent):
         # Per-arm extra_env (e.g. a leaky OpenRouter base URL) merges over guest_env(),
         # arm env winning.
         env = {**self.guest_env(), **(extra_env or {})}
-        if stop is not None:
-            return await self.invoke_watched(
-                sandbox,
-                cmd,
-                stop=stop,
-                parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
-                cwd=workdir,
-                env=env,
-                timeout=timeout,
-                eval_id=eval_id,
-                config=config,
-            )
-
-        try:
-            res = await GuestSandbox(sandbox).exec(
-                cmd,
-                cwd=workdir,
-                env=env,
-                timeout=timeout,
-                stdin=b"",
-            )
-        except (TimeoutError, SandboxError, OSError) as error:
-            # A sandbox-boundary failure (VM/exec/timeout) is an infra error for this arm,
-            # not a graded miss — record it so the benchmark excludes it. A programming
-            # error is not caught here: let it surface.
-            message = f"<sandbox-error> {error}"[-2000:]
-            return RunResult(eval_id, config, message, 0, 0, is_error=True)
-        result = parse_stream_run(res.stdout, eval_id, config, detect_skill)
-        if res.exit_code != 0:
-            return mark_errored_by_nonzero_exit(result, res.stderr)
-        return result
+        return await self.invoke_streamed(
+            sandbox,
+            cmd,
+            stop=stop,
+            parse=lambda stdout: parse_stream_run(stdout, eval_id, config, detect_skill),
+            cwd=workdir,
+            env=env,
+            timeout=timeout,
+            eval_id=eval_id,
+            config=config,
+        )

@@ -135,9 +135,11 @@ integration surface. An adapter declares:
 - **Invocation**: `build_command(...)` (validate `harness_args` against your
   reserved flags here) and `invoke(...)`, which parses the CLI's stream into a
   `RunResult`, surfacing agent failures as `is_error=True`, not exceptions.
-  With a `stop` rule, `invoke` hands the command and parser to
-  `BaseAgent.invoke_watched`, which streams the run and ends it once every
-  graded verdict is fixed.
+  `invoke` hands the command and parser to `BaseAgent.invoke_streamed`, which
+  streams every turn. With a `stop` rule it ends the run once every graded
+  verdict is fixed. At `timeout` it kills the process and parses the partial
+  stream into a `RunResult` with `timed_out=True`, unless nothing streamed, which
+  is an infra error (`is_error=True`).
 - **Detection**: `stream_tool_calls`, the tool calls one raw output line
   carries, exactly as the adapter's parser records them for the whole stream,
   so an early stop and the grade agree on whether a skill fired. A

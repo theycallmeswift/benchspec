@@ -71,11 +71,13 @@ samples otherwise, `—` for an arm with no graded sample:
 If every line of an eval is scoped out of an arm, that matrix cell is `—`, like
 an all-errored one.
 
-**Per-arm sections.** One per arm: pass rate, harness, model and turn timeout,
+**Per-arm sections.** One per arm: pass rate, harness, model and cell timeout,
 pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
 `PASSWORD`, or `AUTH` have their values masked), time per sample (task + judge),
 tokens per sample, an errored-sample count, and a per-eval table with sample
-counts and flakiness (the stdev across samples). An arm with samples that
+counts and flakiness (the stdev across samples). An arm with
+[timed-out samples](#timed-out-samples) adds a `Timed out` line, and each
+affected eval row notes `N timed out`. An arm with samples that
 [stopped early](writing-evals.md#runs-that-stop-early) adds a `Stopped early`
 line, and each affected eval row notes `N stopped early`: those samples' time
 and tokens are the cost of a routing decision, not of the full task.
@@ -134,12 +136,29 @@ bands were lost to errored samples, which prints neither text marker.
 
 > **Key concept: errored is not failed.** A *failed* assertion is a measurement:
 > the agent ran and the claim did not hold. An *errored* sample is
-> infrastructure: the agent CLI crashed or timed out, `setup.sh` exited
+> infrastructure: the agent CLI crashed or never started, `setup.sh` exited
 > non-zero, a harness ended the turn on a rejected permission prompt, the judge
 > failed at the transport level. Errored samples are
 > excluded from pass rates, but counted and surfaced in the report and in
 > `grading.json`'s `errored` flag, so a half-crashed run cannot read like a
 > clean one.
+
+### Timed-out samples
+
+A cell's `timeout` caps the whole cell: binder, sandbox boot and `setup.sh`, the
+agent turn, and the judge. When it fires, the agent's partial output is kept and
+the sample is graded from `/workspace` as the agent left it. Checkers run
+locally; a judge-bound line is judged only when the cap leaves the judge time,
+and otherwise fails with `CELL TIMEOUT: <phase> hit the <N>s cap before this
+line was judged`.
+
+A timed-out sample is a result, not an infra error: `errored` is `false`, so it
+counts in the pass rate, which is how a slow arm's rate reflects its slowness.
+It carries `"timed_out": true` in `grading.json`, and `"timed_out": true` plus
+`"timeout_phase"` (`bind`, `boot`, `setup`, `agent`, or `grade`) in
+`timing.json`; both are absent otherwise. The exception is a turn that
+streamed no output at all before the cap, a stalled launch, which is an errored
+sample.
 
 ## The terminal summary
 
@@ -208,8 +227,8 @@ group, then `kind`, `eval_id`, `arm`, `sample`), the arm's three core axes
 (`harness`, `model`, `effort`) denormalized onto the row so no join with
 `meta.json` is needed, `errored`, `passed`/`total`/`scoped`/`skipped` assertion
 counts (`total` excludes skipped lines), and the timing and token figures from
-the sample's `timing.json`, including `stopped` (`false` for a run that ended
-on its own). Derivable from the tree; persisted so tools never hardcode the
+the sample's `timing.json`, including `stopped` and `timed_out` (`false` for a
+run that ended on its own). Derivable from the tree; persisted so tools never hardcode the
 layout.
 
 ### `benchmark.json`
@@ -220,8 +239,8 @@ The matrix, machine-readable (`format_version: 3`, versioned independently of
 against it, and no arm's `delta_noise_pp` could be computed; `false` otherwise),
 the eval `roster`, per-arm stats under `arms`
 (pass rate, stdev, `delta_pp`, `delta_noise_pp`, `delta_noise_evals`, `delta_noise_capped_cells`, errored and
-binder-degraded and `stopped_samples` counts, per-eval rows with their own
-`stopped_samples` count), the `scoped` rows (`group`, `eval_id`,
+binder-degraded, `stopped_samples`, and `timed_out_samples` counts, per-eval rows
+with their own `stopped_samples` and `timed_out_samples` counts), the `scoped` rows (`group`, `eval_id`,
 `index`, `text`, a `{passed, total}` / `"skipped"` / `null` cell per arm), the
 `runner` and `binder` identity, and the same
 `planned_arms`/`observed_arms` provenance pair as `meta.json`. Note the naming:
@@ -231,14 +250,17 @@ binder-degraded and `stopped_samples` counts, per-eval rows with their own
 
 - `grading.json`: the verdict. One entry per assertion with its text, `passed`,
   `evidence`, and `type` (`deterministic` for a checker, `semantic` for the
-  judge), plus the sample's `errored` flag and a `binder_degraded` count. A
+  judge), plus the sample's `errored` flag, a `binder_degraded` count, and, for a
+  [timed-out sample](#timed-out-samples), `"timed_out": true`. A
   clause-bearing entry adds `scoped: true`; a skipped one is `{"text",
   "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.
 - `timing.json`: `duration_ms`, `judge_ms`, and the token split
   (`total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`,
   `cache_creation_tokens`; zero where the harness does not report them). A run
   that [stopped early](writing-evals.md#runs-that-stop-early) adds
-  `"stopped": true` (absent for a run that ended on its own). A stopped run's
+  `"stopped": true` (absent for a run that ended on its own); a
+  [timed-out sample](#timed-out-samples) adds `"timed_out": true` and
+  `"timeout_phase"`. A stopped run's
   `duration_ms` is the process wall time up to the stop, CLI startup included,
   and its tokens are only what the harness reported before it: Claude Code's
   per-message usage, OpenCode's finished steps, and nothing from Codex, which

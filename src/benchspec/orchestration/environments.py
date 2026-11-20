@@ -59,8 +59,9 @@ class ProcResult:
 class WatchedProc:
     """The outcome of a harness process streamed past a line watcher.
 
-    Either the watcher stopped it (`stopped`, and `exit_code` is None) or it exited on its
-    own. A process that outlives its timeout raises instead, as a buffered exec does.
+    It ended one of three ways: the watcher stopped it (`stopped`), it outlived its timeout
+    and was killed (`timed_out`), or it exited on its own. `exit_code` is None unless it
+    exited. A stopped or timed-out process keeps every line it streamed before the end.
     """
 
     command: list[str]
@@ -69,6 +70,7 @@ class WatchedProc:
     duration_ms: int
     exit_code: int | None = None
     stopped: bool = False
+    timed_out: bool = False
 
 
 @runtime_checkable
@@ -142,24 +144,6 @@ class GuestSandbox:
         """Wrap a live sandbox session's exec surface."""
         self._sandbox = sandbox
 
-    async def exec(
-        self,
-        command: list[str],
-        *,
-        env: Mapping[str, str],
-        timeout: int,
-        cwd: str | None = None,
-        stdin: bytes | None = None,
-    ) -> ProcResult:
-        """Run `command` inside the guest via the sandbox's exec primitive."""
-        started = time.monotonic()
-        res = await self._sandbox.exec(
-            command[0], command[1:], cwd=cwd, env=env, timeout=timeout, stdin=stdin,
-        )
-        return ProcResult(
-            command, res.exit_code, res.stdout_text, res.stderr_text, _elapsed_ms(started)
-        )
-
     async def exec_watched(
         self,
         command: list[str],
@@ -172,9 +156,11 @@ class GuestSandbox:
     ) -> WatchedProc:
         """Stream `command` inside the guest, feeding each stdout line to `watch`.
 
-        The process is killed the moment `watch` returns True, keeping the lines streamed
-        so far. Chunks are reassembled into whole lines first, since a stream chunk can
-        split a JSONL record (or a multibyte character) anywhere.
+        The process is killed the moment `watch` returns True, or when it outlives
+        `timeout`, keeping the lines streamed so far. Chunks are reassembled into whole
+        lines first, since a stream chunk can split a JSONL record (or a multibyte
+        character) anywhere. A timeout keeps the unfinished final line too, so a consumer
+        must tolerate a truncated record.
 
         Args:
             command: The harness argv.
@@ -186,9 +172,6 @@ class GuestSandbox:
 
         Returns:
             The streamed output and how the process ended.
-
-        Raises:
-            TimeoutError: After killing the process, when it outlives `timeout`.
         """
         started = time.monotonic()
         handle = await self._sandbox.exec_stream(
@@ -198,13 +181,14 @@ class GuestSandbox:
         stderr_parts: list[str] = []
         exit_code: int | None = None
         stopped = False
+        timed_out = False
+        pending = ""
 
         async def drain() -> None:
             """Collect stdout lines until the watcher stops the process or it exits."""
-            nonlocal exit_code, stopped
+            nonlocal exit_code, stopped, pending
             stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             stderr_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-            pending = ""
 
             async for event in handle:
                 if event.event_type == "stdout":
@@ -224,14 +208,14 @@ class GuestSandbox:
                     # A failure event may carry no code; a real exit code 0 is preserved.
                     exit_code = event.code if event.code is not None else 1
 
-            if pending.strip():
-                lines.append(pending)
-
         try:
             await asyncio.wait_for(drain(), timeout=timeout)
-        except TimeoutError as error:
+        except TimeoutError:
+            timed_out = True
             await _kill_quietly(handle)
-            raise TimeoutError(f"{command[0]} timed out after {timeout}s") from error
+
+        if pending.strip():
+            lines.append(pending)
 
         return WatchedProc(
             command=command,
@@ -240,6 +224,7 @@ class GuestSandbox:
             duration_ms=_elapsed_ms(started),
             exit_code=exit_code,
             stopped=stopped,
+            timed_out=timed_out,
         )
 
 

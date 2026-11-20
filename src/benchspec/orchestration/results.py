@@ -55,6 +55,9 @@ class RunResult:
     # True when the run was stopped once every graded verdict was fixed, rather than
     # ending on its own. A stopped run's usage covers only what streamed before the stop.
     stopped: bool = False
+    # True when the turn outlived its cap and was killed after streaming output; the run
+    # is parsed from the partial stream. A timeout with no output is an `is_error` run.
+    timed_out: bool = False
 
 
 def utc_today(now: datetime.datetime | None = None) -> str:

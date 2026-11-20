@@ -186,13 +186,16 @@ def test_exec_watched_keeps_a_trailing_line_without_a_newline() -> None:
     assert proc.stdout == "one\ntail"
 
 
-def test_exec_watched_kills_and_raises_on_timeout() -> None:
-    """A process that outlives its timeout is killed and raises, as a buffered exec does."""
-    guest = FakeSandbox(stream_events=_stdout_events(b"working\n"), stream_stalls=True)
+def test_exec_watched_kills_on_timeout_and_keeps_what_streamed() -> None:
+    """A process that outlives its timeout is killed, and the lines it wrote survive."""
+    guest = FakeSandbox(stream_events=_stdout_events(b"working\nhalf a li"), stream_stalls=True)
 
-    with pytest.raises(TimeoutError, match="claude timed out after 0.05s"):
-        _exec_watched(guest, _watch_for("absent"), timeout=0.05)
+    proc = _exec_watched(guest, _watch_for("absent"), timeout=0.05)
 
+    assert proc.timed_out is True
+    assert proc.stopped is False
+    assert proc.exit_code is None
+    assert proc.stdout == "working\nhalf a li"
     assert guest.streams[0].killed is True
 
 

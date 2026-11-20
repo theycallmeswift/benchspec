@@ -27,7 +27,7 @@ index, or come back when a term in another page is unfamiliar.
 ## Arm
 
 One column of the benchmark: a named configuration of harness, model, effort,
-agent-turn timeout, environment variables, and pass-through CLI arguments. A set
+whole-cell timeout, environment variables, and pass-through CLI arguments. A set
 takes any number of them. Arms differ from each other only in that configuration
 and in what their `setup.sh` branch installs.
 Example: `{ name = "trial", model = "opus", effort = "high" }`. Reference:
@@ -87,10 +87,12 @@ agent in a directory containing exactly `request.md`.
 ## Errored versus failed
 
 A **failed** assertion is a measurement: the agent ran and the claim did not
-hold. An **errored** sample is infrastructure: the CLI crashed or timed out,
+hold. An **errored** sample is infrastructure: the CLI crashed or never started,
 `setup.sh` exited non-zero, or the judge failed at the transport level. Errored
 samples are excluded from pass rates but counted in the report, so a
-half-crashed run cannot read like a clean one. See
+half-crashed run cannot read like a clean one. A cell that hits its wall-clock
+cap is neither: it is a **timed-out** sample, graded on the work finished and
+counted in the rate, because a slow agent is a measurement of that arm. See
 [results.md](results.md#noise-samples-and-flakiness).
 
 ## Eval

@@ -117,7 +117,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=int,
         default=None,
         help="scalar override of the selected set's `timeout` default: the wall-clock cap "
-        "on one agent turn, seconds (default: 600, or the set/arm `timeout`)",
+        "on one whole cell (bind, boot, agent, judge), seconds (default: 900, or the "
+        "set/arm `timeout`)",
     )
     group.addoption(
         "--benchspec-env",

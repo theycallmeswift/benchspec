@@ -19,10 +19,10 @@ import os
 import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from benchspec.agents import DEFAULT_AGENT_TIMEOUT, CodingAgent, make_agent
+from benchspec.agents import CodingAgent, make_agent
 from benchspec.agents.base import probe_guest_version
 from benchspec.config.arms import Arm, expand_env
 from benchspec.grading import binder, checkers
@@ -31,6 +31,15 @@ from benchspec.grading.judges import JudgeConfig
 from benchspec.grading.trajectory import TURN_DELIM, render_process_facts, skills_dispatched
 from benchspec.grading.trigger import StopRule, settled_once_dispatched
 from benchspec.orchestration import workspace
+from benchspec.orchestration.deadline import (
+    MINIMUM_PHASE_SECONDS,
+    PHASE_AGENT,
+    PHASE_BIND,
+    PHASE_GRADE,
+    CellDeadline,
+    CellTimeoutError,
+    unjudged_evidence,
+)
 from benchspec.orchestration.results import RunResult, substitute_assertions, substitute_prompt
 from benchspec.orchestration.room import gather_facts, merge_facts, render_history
 from benchspec.sandbox.backend import LiveSandbox, SandboxBackend
@@ -91,6 +100,8 @@ class _ArmRun:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     stopped: bool = False
+    # The phase the cell's cap fired in, or None when it did not fire.
+    timed_out_phase: str | None = None
     # Guest task-harness version probed inside the live snapshot. The default is the
     # not-probed sentinel: version None + a non-empty reason, which the available/
     # unavailable contract accepts as an explained-unavailable field.
@@ -213,8 +224,8 @@ def _stop_rule(specs: list[dict | None]) -> StopRule | None:
 def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
     """The token fields for timing.json.
 
-    A stopped run killed before its harness reported any usage records null tokens,
-    so it can never read as a free run.
+    A stopped or timed-out run killed before its harness reported any usage records null
+    tokens, so it can never read as a free run.
     """
     fields = {
         "total_tokens": arm_run.total_tokens,
@@ -223,7 +234,7 @@ def _usage_fields(arm_run: _ArmRun) -> dict[str, int | None]:
         "input_tokens": arm_run.total_input_tokens,
         "output_tokens": arm_run.total_output_tokens,
     }
-    if arm_run.stopped and arm_run.total_tokens == 0:
+    if (arm_run.stopped or arm_run.timed_out_phase) and arm_run.total_tokens == 0:
         return dict.fromkeys(fields)
     return fields
 
@@ -243,12 +254,20 @@ def _grade_mixed(
     eval_id: str,
     arm_name: str,
     pre_run_shas: dict[str, str],
+    deadline: CellDeadline,
+    fired_phase: str | None,
     process_facts: str = "",
-) -> tuple[list[dict], int, bool]:
+) -> tuple[list[dict], int, bool, str | None]:
     """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
-    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Returns
-    (results, judge_ms, judge_errored).
+    `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Checkers run
+    locally whatever the clock says. The judge gets what the cell's cap has left; when the
+    cap already fired before boot finished, or no budget is left, the judge-bound lines
+    are recorded failed with the timeout as evidence, never judged and never errored.
+
+    Returns:
+        (results, judge_ms, judge_errored, timed_out_phase): the phase the cap fired in,
+        which is `fired_phase`, or `grade` when the judge budget ran out here.
     """
     results: list[dict] = [{} for _ in assertions]
     judge_idx: list[int] = []
@@ -260,9 +279,23 @@ def _grade_mixed(
         else:
             judge_idx.append(assertion_index)
     if not judge_idx:
-        return results, 0, False
+        return results, 0, False, fired_phase
 
     texts = [assertions[assertion_index] for assertion_index in judge_idx]
+    pre_agent_timeout = fired_phase is not None and fired_phase != PHASE_AGENT
+    if pre_agent_timeout or deadline.remaining() < MINIMUM_PHASE_SECONDS:
+        timed_out_phase = fired_phase or PHASE_GRADE
+        evidence = unjudged_evidence(timed_out_phase, deadline.cap_seconds)
+        for assertion_index, text in zip(judge_idx, texts, strict=True):
+            results[assertion_index] = {
+                "text": text,
+                "passed": False,
+                "evidence": evidence,
+                "type": "semantic",
+            }
+        return results, 0, False, timed_out_phase
+
+    judge_budget = max(MINIMUM_PHASE_SECONDS, min(judge_config.timeout, deadline.remaining()))
     graded, judge_ms, judge_errored = _grade_via_judge(
         assertions=texts,
         tree=tree,
@@ -270,7 +303,7 @@ def _grade_mixed(
         shas=shas,
         result_text=result_text,
         grade=grade,
-        judge_config=judge_config,
+        judge_config=replace(judge_config, timeout=int(judge_budget)),
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
@@ -279,7 +312,7 @@ def _grade_mixed(
     for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[assertion_index] = entry
-    return results, judge_ms, judge_errored
+    return results, judge_ms, judge_errored, fired_phase
 
 
 async def _run_arm_turns(
@@ -301,77 +334,98 @@ async def _run_arm_turns(
     eval_set: str = "",
     baseline: str = "",
     harness_args: list[str] | None = None,
-    timeout: int = DEFAULT_AGENT_TIMEOUT,
+    deadline: CellDeadline,
+    judge_reserve: float = 0.0,
     stop: StopRule | None = None,
 ) -> _ArmRun:
-    """Execute every prompt turn for one eval arm."""
+    """Execute every prompt turn for one eval arm.
+
+    A cap that fires while the sandbox boots ends the cell with no agent run; one that
+    fires during the agent turn keeps the turn's partial output. Either way the workspace
+    as it stands is gathered for grading.
+    """
     # The whole sandbox lifecycle (boot → run → teardown) runs in ONE asyncio.run: the
     # guest is bound to the loop it was created in. Grading runs afterward, on the host.
     run_acc = _ArmRun()
 
-    async with session_factory(
-        agent=agent,
-        snapshot=snapshot,
-        eval_id=eval_id,
-        config=arm_name,
-        host_workdir=workdir,
-        host_repo_root=project,
-        model=model,
-        effort=effort,
-        setup_reldir=setup_reldir,
-        arm=arm_name,
-        project_marker=project_marker,
-        arm_env=arm_env,
-        eval_set=eval_set,
-        baseline=baseline,
-        harness_args=harness_args,
-        timeout=timeout,
-        stop=stop,
-        backend=backend,
-    ) as run:
-        # Probe the task-harness binary INSIDE the live snapshot before the task runs, so
-        # provenance records the version actually installed (never the host binding or the
-        # `latest` selector). `run` is the session's bound `_run` method, so `run.__self__`
-        # is the session and `._sandbox` the live guest; a plain-closure fake `run` (unit
-        # tests) has no `__self__`, so the probe is skipped rather than crashing.
-        live_sandbox = getattr(getattr(run, "__self__", None), "_sandbox", None)
-        if isinstance(live_sandbox, LiveSandbox) and agent is not None:
-            version, version_error = await probe_guest_version(backend, live_sandbox, agent)
-            run_acc.guest_version = version
-            run_acc.guest_version_error = version_error
+    try:
+        async with session_factory(
+            agent=agent,
+            snapshot=snapshot,
+            eval_id=eval_id,
+            config=arm_name,
+            host_workdir=workdir,
+            host_repo_root=project,
+            model=model,
+            effort=effort,
+            setup_reldir=setup_reldir,
+            arm=arm_name,
+            project_marker=project_marker,
+            arm_env=arm_env,
+            eval_set=eval_set,
+            baseline=baseline,
+            harness_args=harness_args,
+            deadline=deadline,
+            judge_reserve=judge_reserve,
+            stop=stop,
+            backend=backend,
+        ) as run:
+            # Probe the task-harness binary INSIDE the live snapshot before the task runs, so
+            # provenance records the version actually installed (never the host binding or the
+            # `latest` selector). `run` is the session's bound `_run` method, so `run.__self__`
+            # is the session and `._sandbox` the live guest; a plain-closure fake `run` (unit
+            # tests) has no `__self__`, so the probe is skipped rather than crashing.
+            live_sandbox = getattr(getattr(run, "__self__", None), "_sandbox", None)
+            if isinstance(live_sandbox, LiveSandbox) and agent is not None:
+                version, version_error = await probe_guest_version(backend, live_sandbox, agent)
+                run_acc.guest_version = version
+                run_acc.guest_version_error = version_error
 
-        # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
-        # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
-        # host side of the same mount.
-        # Ordinary execution never feeds a group-derived skill name to detection; the
-        # adapter keeps the parameter for the __route__/runner paths but receives None here.
-        result = await run(
-            prompt,
-            resume_session_id=None,
-            detect_skill=None,
-        )
+            # Prompts use cwd-relative `./` paths: the agent runs with cwd = the workdir
+            # mount (GUEST_WORKDIR), so `./x` resolves there, and gather_facts reads the
+            # host side of the same mount.
+            # Ordinary execution never feeds a group-derived skill name to detection; the
+            # adapter keeps the parameter for the __route__/runner paths but receives None here.
+            result = await run(
+                prompt,
+                resume_session_id=None,
+                detect_skill=None,
+            )
 
-        run_acc.total_duration_ms += result.duration_ms
-        run_acc.total_tokens += result.total_tokens
-        run_acc.total_cache_read += result.cache_read_tokens
-        run_acc.total_cache_creation += result.cache_creation_tokens
-        run_acc.total_input_tokens += result.input_tokens
-        run_acc.total_output_tokens += result.output_tokens
-        run_acc.errored = result.is_error
-        run_acc.stopped = result.stopped
+            run_acc.total_duration_ms += result.duration_ms
+            run_acc.total_tokens += result.total_tokens
+            run_acc.total_cache_read += result.cache_read_tokens
+            run_acc.total_cache_creation += result.cache_creation_tokens
+            run_acc.total_input_tokens += result.input_tokens
+            run_acc.total_output_tokens += result.output_tokens
+            run_acc.errored = result.is_error
+            if result.timed_out:
+                run_acc.timed_out_phase = PHASE_AGENT
+            run_acc.stopped = result.stopped
 
-        tree, contents, shas = gather_facts(workdir)
-        # Fold in skill artifacts the agent wrote outside the workdir mount (its
-        # ~/.claude/skills dir, etc.) so the judge grades them alongside the workdir.
-        if result.artifacts:
-            tree, contents, shas = merge_facts(tree, contents, shas, result.artifacts)
-        run_acc.tree, run_acc.contents, run_acc.shas = tree, contents, shas
-        run_acc.result_text = result.result_text
-        run_acc.trajectory = result.trajectory
-        run_acc.transcript.append(_turn_transcript(prompt=prompt, result=result, tree=tree))
-        run_acc.raw = result.raw
+            tree, contents, shas = gather_facts(workdir)
+            # Fold in skill artifacts the agent wrote outside the workdir mount (its
+            # ~/.claude/skills dir, etc.) so the judge grades them alongside the workdir.
+            if result.artifacts:
+                tree, contents, shas = merge_facts(tree, contents, shas, result.artifacts)
+            run_acc.tree, run_acc.contents, run_acc.shas = tree, contents, shas
+            run_acc.result_text = result.result_text
+            run_acc.trajectory = result.trajectory
+            run_acc.transcript.append(_turn_transcript(prompt=prompt, result=result, tree=tree))
+            run_acc.raw = result.raw
+    except CellTimeoutError as error:
+        run_acc.timed_out_phase = error.phase
+        run_acc.tree, run_acc.contents, run_acc.shas = gather_facts(workdir)
 
     return run_acc
+
+
+def _no_time_left_run(workdir: Path) -> _ArmRun:
+    """The run of a cell whose cap fired during bind: no sandbox, the workspace as it stands."""
+    tree, contents, shas = gather_facts(workdir)
+    return _ArmRun(
+        tree=tree, contents=contents, shas=shas, timed_out_phase=PHASE_BIND
+    )
 
 
 def _capture_sandbox_provenance(
@@ -535,35 +589,45 @@ def run_eval_arm(
     # assertions are activation checks (no separate recognizer), and the stop rule needs
     # that before the sandbox starts. Binding is a pure function of the assertion text, so
     # its place in the order changes no verdict. A BinderAuthError propagates here, before
-    # the sandbox spends anything.
+    # the sandbox spends anything. The cell's cap starts here, with the first phase that is
+    # the cell's own work; a snapshot build above is shared setup, not a cost any one cell
+    # should be capped on.
+    deadline = CellDeadline(arm.timeout)
     specs, binder_degraded = _bind_all(active_assertions, bind)
     stop = _stop_rule(specs) if eval_case.stop_early else None
+    # The judge only runs when a line was punted to it, and only then does the agent turn
+    # leave it a share of the cap.
+    judge_reserve = judge_config.timeout if any(spec is None for spec in specs) else 0
 
-    arm_run = asyncio.run(
-        _run_arm_turns(
-            session_factory,
-            agent=agent,
-            snapshot=snapshot,
-            eval_id=eval_id,
-            arm_name=arm_name,
-            workdir=workdir,
-            project=project,
-            model=arm.model,
-            effort=arm.effort,
-            prompt=prompt,
-            project_marker=project_marker,
-            setup_reldir=setup_reldir,
-            backend=backend,
-            # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
-            # actually runs, never at collection (a deselected arm's secret is never read).
-            arm_env=expand_env(arm.env, os.environ),
-            eval_set=eval_set,
-            baseline=baseline or "",
-            harness_args=arm.harness_args,
-            timeout=arm.timeout,
-            stop=stop,
+    if deadline.expired():
+        arm_run = _no_time_left_run(workdir)
+    else:
+        arm_run = asyncio.run(
+            _run_arm_turns(
+                session_factory,
+                agent=agent,
+                snapshot=snapshot,
+                eval_id=eval_id,
+                arm_name=arm_name,
+                workdir=workdir,
+                project=project,
+                model=arm.model,
+                effort=arm.effort,
+                prompt=prompt,
+                project_marker=project_marker,
+                setup_reldir=setup_reldir,
+                backend=backend,
+                # Lazy $VAR expansion: an unset referenced var raises here, at the arm that
+                # actually runs, never at collection (a deselected arm's secret is never read).
+                arm_env=expand_env(arm.env, os.environ),
+                eval_set=eval_set,
+                baseline=baseline or "",
+                harness_args=arm.harness_args,
+                deadline=deadline,
+                judge_reserve=judge_reserve,
+                stop=stop,
+            )
         )
-    )
 
     # Persist runtime provenance now — the sandbox has run, and grading below can abort.
     # An arm whose sandbox actually ran must stay observed rather than vanish from
@@ -596,7 +660,7 @@ def run_eval_arm(
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    graded, judge_ms, judge_errored = _grade_mixed(
+    graded, judge_ms, judge_errored, timed_out_phase = _grade_mixed(
         assertions=active_assertions,
         specs=specs,
         tree=arm_run.tree,
@@ -610,6 +674,8 @@ def run_eval_arm(
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
+        deadline=deadline,
+        fired_phase=arm_run.timed_out_phase,
         process_facts=render_process_facts([arm_run.trajectory]),
     )
 
@@ -623,6 +689,8 @@ def run_eval_arm(
     # `errored` lets the report tell an infra failure (excluded from the benchmark) apart
     # from an honest measurement; a failed assertion is an honest result, not an error.
     errored = arm_run.errored or judge_errored
+    # An infra failure is excluded from rates whole; it is never also a measured timeout.
+    timed_out_phase = None if errored else timed_out_phase
     grading = {
         "eval_id": eval_id,
         "skill": eval_case.skill,
@@ -632,17 +700,22 @@ def run_eval_arm(
         "binder_degraded": binder_degraded,
         "assertions": merged,
     }
+    if timed_out_phase:
+        grading["timed_out"] = True
     # duration_ms = task time; judge_ms = grading time — separate so the benchmark can
     # decompose where the wall-clock goes (task vs judge). `stopped` marks a run cut short
     # once its verdicts were fixed, so its time and tokens never read as a full task's.
     # run_dir was created above when provenance was persisted.
-    timing: dict[str, int | bool | None] = {
+    timing: dict[str, int | bool | str | None] = {
         "duration_ms": arm_run.total_duration_ms,
         "judge_ms": judge_ms,
         **_usage_fields(arm_run),
     }
     if arm_run.stopped:
         timing["stopped"] = True
+    if timed_out_phase:
+        timing["timed_out"] = True
+        timing["timeout_phase"] = timed_out_phase
     (run_dir / "timing.json").write_text(json.dumps(timing) + "\n")
     (run_dir / "grading.json").write_text(json.dumps(grading, indent=2) + "\n")
     (run_dir / "transcript.json").write_text(json.dumps(arm_run.transcript, indent=2) + "\n")

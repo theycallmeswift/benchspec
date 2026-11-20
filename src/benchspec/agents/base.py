@@ -56,10 +56,11 @@ _VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)+")
 # an explained-unavailable result like any other probe failure.
 GUEST_VERSION_PROBE_TIMEOUT_SECONDS = 30.0
 
-# The wall-clock cap on one graded agent turn, seconds. The built-in default every arm
-# inherits when neither the set, the arm, nor `--benchspec-timeout` says otherwise; the
-# adapters' `invoke` defaults to it so a direct call and a configured arm agree.
-DEFAULT_AGENT_TIMEOUT = 600
+# The wall-clock cap on one whole cell (bind, boot, agent, judge), seconds. The built-in
+# default every arm inherits when neither the set, the arm, nor `--benchspec-timeout` says
+# otherwise; sized so a typical bind, boot, and judge leave the agent about 600 s. The
+# adapters' `invoke` defaults to it as its own turn cap for a direct call.
+DEFAULT_CELL_TIMEOUT = 900
 
 
 def unqualified_openrouter_model_error(model: str) -> str | None:
@@ -221,45 +222,53 @@ class BaseAgent(ABC):
         stream, so an early stop and the grade read a dispatch identically.
         """
 
-    async def invoke_watched(
+    async def invoke_streamed(
         self,
         sandbox: LiveSandbox,
         command: list[str],
         *,
-        stop: StopRule,
+        stop: StopRule | None,
         parse: Callable[[str], RunResult],
         cwd: str,
         env: dict[str, str],
-        timeout: int,
+        timeout: float,
         eval_id: str,
         config: str,
+        process_duration: bool = False,
     ) -> RunResult:
-        """Stream one turn, stopping it once `stop` says every verdict is fixed.
+        """Stream one turn, ending it on a stop, the timeout, or its own exit.
 
-        A stop is ours, not a crash: the killed process's exit is ignored and the run is
-        graded from the stream so far. Everything else ends as a buffered run does: a
-        timeout or a sandbox failure is an infra error, a nonzero exit is marked errored.
-        The run's duration is the harness's own when its parser reports one (Claude
-        Code's closing `result`), else the process wall time.
+        A stop is ours, not a crash: with a `stop` rule the turn is killed once every
+        verdict is fixed, its exit is ignored, and the run is graded from the stream so
+        far. A timeout that streamed output is a slow agent, not a broken host: the run is
+        parsed from the partial stream and marked `timed_out`. A timeout with no output
+        is a stalled launch, and like a sandbox failure it is an infra error. A nonzero
+        exit is marked errored. The run's duration is the harness's own when its parser
+        reports one (Claude Code's closing `result`), else the process wall time.
 
         Args:
             sandbox: The live guest.
             command: The harness argv.
-            stop: The run's stop rule, over the trajectory streamed so far.
+            stop: The run's stop rule over the trajectory streamed so far, or None to
+                run to the turn's own end.
             parse: The adapter's stream parser, bound to this turn.
             cwd: Working directory inside the guest.
             env: The process environment.
-            timeout: Wall-clock cap, seconds.
+            timeout: Wall-clock cap on the turn, seconds.
             eval_id: The eval the turn belongs to.
             config: The arm name.
+            process_duration: Take the process wall time over the parser's duration, for
+                harnesses whose events do not span the whole process.
 
         Returns:
-            The parsed run, with `stopped` set when it was cut short.
+            The parsed run, with `stopped` or `timed_out` set when it was cut short.
         """
         trajectory: list[dict] = []
 
         def watch(line: str) -> bool:
             """Whether the tool calls this line adds settle every verdict."""
+            if stop is None:
+                return False
             calls = self.stream_tool_calls(line)
             trajectory.extend(calls)
             return bool(calls) and stop(trajectory)
@@ -274,14 +283,21 @@ class BaseAgent(ABC):
                 # Force EOF on stdin so the harness cannot block on an open pipe.
                 stdin=b"",
             )
-        except (TimeoutError, SandboxError, OSError) as error:
+        except (SandboxError, OSError) as error:
             message = f"<sandbox-error> {error}"[-2000:]
             return RunResult(eval_id, config, message, 0, 0, is_error=True)
 
+        if proc.timed_out and not proc.stdout.strip():
+            message = f"<sandbox-error> {command[0]} streamed nothing in {timeout:.0f}s"
+            return RunResult(eval_id, config, message, 0, 0, is_error=True)
+
         parsed = parse(proc.stdout)
-        result = replace(parsed, duration_ms=parsed.duration_ms or proc.duration_ms)
+        duration_ms = proc.duration_ms if process_duration else parsed.duration_ms
+        result = replace(parsed, duration_ms=duration_ms or proc.duration_ms)
         if proc.stopped:
             return replace(result, is_error=False, stopped=True)
+        if proc.timed_out:
+            return replace(result, is_error=False, timed_out=True)
         if proc.exit_code != 0:
             return mark_errored_by_nonzero_exit(result, proc.stderr)
         return result
@@ -459,13 +475,14 @@ class CodingAgent(Protocol):
         detect_skill: str | None,
         harness_args: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
-        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
         stop: StopRule | None = None,
     ) -> RunResult:
-        """Run one prompt through the agent inside the guest.
+        """Run one prompt through the agent inside the guest, streamed.
 
-        With a `stop` rule the turn streams and ends once every graded verdict is fixed
-        (`BaseAgent.invoke_watched`). Without one, it runs to its own end.
+        The turn ends at its own exit, at `timeout` (a partial run marked `timed_out`), or,
+        with a `stop` rule, once every graded verdict is fixed
+        (`BaseAgent.invoke_streamed`).
         """
         ...
 
