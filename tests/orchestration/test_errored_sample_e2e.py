@@ -22,6 +22,7 @@ from benchspec.agents.codex import CodexAgent
 from benchspec.agents.opencode import OpenCodeAgent
 from benchspec.config.arms import Arm
 from benchspec.grading.judges import JudgeConfig
+from benchspec.orchestration import deadline as deadline_mod
 from benchspec.orchestration import workspace
 from benchspec.orchestration.deadline import CellDeadline
 from benchspec.orchestration.execution import run_eval_arm
@@ -337,9 +338,15 @@ def test_errored_sample_headlines_stderr_but_keeps_the_stream(
     ],
 )
 def test_stalled_launch_is_recorded_as_errored(
-    tmp_path: Path, harness: str, agent: CodingAgent
+    tmp_path: Path, harness: str, agent: CodingAgent, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A turn that outlives the cap without a byte of output is an infra error, not a timeout."""
+    monkeypatch.setattr(deadline_mod, "MINIMUM_PHASE_SECONDS", 0.01)
+    readings = iter([0.0])
+    monkeypatch.setattr(
+        "benchspec.orchestration.execution.CellDeadline",
+        lambda cap_seconds: CellDeadline(cap_seconds, clock=lambda: next(readings, 0.95)),
+    )
     workspace.set_current_iteration("iteration_01")
     workdir = tmp_path / "wd"
     workdir.mkdir()

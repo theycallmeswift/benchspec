@@ -90,7 +90,7 @@ class _Session:
         if self._boot_timeout_phase is not None:
             deadline = self.opened_with["deadline"]
             assert isinstance(deadline, CellDeadline)
-            raise deadline.error(self._boot_timeout_phase)
+            raise CellTimeoutError(self._boot_timeout_phase, deadline.cap_seconds)
         return self._run
 
     async def __aexit__(self, *exc: object) -> None:

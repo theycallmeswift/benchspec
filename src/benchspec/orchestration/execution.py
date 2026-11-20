@@ -35,7 +35,9 @@ from benchspec.orchestration.deadline import (
     MINIMUM_PHASE_SECONDS,
     PHASE_AGENT,
     PHASE_BIND,
+    PHASE_BOOT,
     PHASE_GRADE,
+    PHASE_SETUP,
     CellDeadline,
     CellTimeoutError,
     unjudged_evidence,
@@ -254,20 +256,20 @@ def _grade_mixed(
     eval_id: str,
     arm_name: str,
     pre_run_shas: dict[str, str],
-    deadline: CellDeadline,
-    fired_phase: str | None,
+    judge_budget: float,
+    unjudged_phase: str | None,
+    cap_seconds: int,
     process_facts: str = "",
-) -> tuple[list[dict], int, bool, str | None]:
+) -> tuple[list[dict], int, bool]:
     """Grade pre-bound assertions locally and punt the unbound rest to the judge.
 
     `specs[i]` is the binder's spec for `assertions[i]`, or None to punt. Checkers run
-    locally whatever the clock says. The judge gets what the cell's cap has left; when the
-    cap already fired before boot finished, or no budget is left, the judge-bound lines
-    are recorded failed with the timeout as evidence, never judged and never errored.
+    locally whatever the clock says. With an `unjudged_phase`, the cap left the judge no
+    time: the judge-bound lines are recorded failed with that timeout as evidence, never
+    judged and never errored. Otherwise the judge runs under `judge_budget` seconds.
 
     Returns:
-        (results, judge_ms, judge_errored, timed_out_phase): the phase the cap fired in,
-        which is `fired_phase`, or `grade` when the judge budget ran out here.
+        (results, judge_ms, judge_errored).
     """
     results: list[dict] = [{} for _ in assertions]
     judge_idx: list[int] = []
@@ -279,13 +281,11 @@ def _grade_mixed(
         else:
             judge_idx.append(assertion_index)
     if not judge_idx:
-        return results, 0, False, fired_phase
+        return results, 0, False
 
     texts = [assertions[assertion_index] for assertion_index in judge_idx]
-    pre_agent_timeout = fired_phase is not None and fired_phase != PHASE_AGENT
-    if pre_agent_timeout or deadline.remaining() < MINIMUM_PHASE_SECONDS:
-        timed_out_phase = fired_phase or PHASE_GRADE
-        evidence = unjudged_evidence(timed_out_phase, deadline.cap_seconds)
+    if unjudged_phase is not None:
+        evidence = unjudged_evidence(unjudged_phase, cap_seconds)
         for assertion_index, text in zip(judge_idx, texts, strict=True):
             results[assertion_index] = {
                 "text": text,
@@ -293,9 +293,8 @@ def _grade_mixed(
                 "evidence": evidence,
                 "type": "semantic",
             }
-        return results, 0, False, timed_out_phase
+        return results, 0, False
 
-    judge_budget = max(MINIMUM_PHASE_SECONDS, min(judge_config.timeout, deadline.remaining()))
     graded, judge_ms, judge_errored = _grade_via_judge(
         assertions=texts,
         tree=tree,
@@ -312,7 +311,7 @@ def _grade_mixed(
     for assertion_index, entry in zip(judge_idx, graded["assertions"], strict=False):
         entry["type"] = "semantic"
         results[assertion_index] = entry
-    return results, judge_ms, judge_errored, fired_phase
+    return results, judge_ms, judge_errored
 
 
 async def _run_arm_turns(
@@ -599,7 +598,7 @@ def run_eval_arm(
     # leave it a share of the cap.
     judge_reserve = judge_config.timeout if any(spec is None for spec in specs) else 0
 
-    if deadline.expired():
+    if deadline.remaining() == 0:
         arm_run = _no_time_left_run(workdir)
     else:
         arm_run = asyncio.run(
@@ -660,7 +659,18 @@ def run_eval_arm(
 
     # {TODAY} resolves in the prompt, history, and workspace; the assertions were substituted
     # pre-run (above) so a date-bearing path checker grades against the real date.
-    graded, judge_ms, judge_errored, timed_out_phase = _grade_mixed(
+    fired_phase = arm_run.timed_out_phase
+    judge_bound = judge_reserve > 0
+    # A judge-bound line goes unjudged once the cap fired before the agent ran, or when
+    # what the cap has left is less than a judge can usefully be given.
+    unjudged_phase = None
+    if judge_bound and (
+        fired_phase in (PHASE_BIND, PHASE_BOOT, PHASE_SETUP)
+        or deadline.remaining() < MINIMUM_PHASE_SECONDS
+    ):
+        unjudged_phase = fired_phase or PHASE_GRADE
+    timed_out_phase = fired_phase or unjudged_phase
+    graded, judge_ms, judge_errored = _grade_mixed(
         assertions=active_assertions,
         specs=specs,
         tree=arm_run.tree,
@@ -674,8 +684,11 @@ def run_eval_arm(
         eval_id=eval_id,
         arm_name=arm_name,
         pre_run_shas=pre_run_shas,
-        deadline=deadline,
-        fired_phase=arm_run.timed_out_phase,
+        judge_budget=max(
+            MINIMUM_PHASE_SECONDS, min(judge_config.timeout, deadline.remaining())
+        ),
+        unjudged_phase=unjudged_phase,
+        cap_seconds=deadline.cap_seconds,
         process_facts=render_process_facts([arm_run.trajectory]),
     )
 

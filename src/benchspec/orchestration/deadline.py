@@ -50,20 +50,12 @@ class CellDeadline:
         """Seconds left in the budget, never negative."""
         return max(0.0, self._expires_at - self._clock())
 
-    def expired(self) -> bool:
-        """Whether no budget is left."""
-        return self.remaining() == 0.0
-
     def phase_budget(self, *, reserve: float = 0.0) -> float:
         """Seconds a running phase may use, keeping `reserve` for the phases after it.
 
         Floored at `MINIMUM_PHASE_SECONDS` so the phase always gets a usable timeout.
         """
         return max(MINIMUM_PHASE_SECONDS, self.remaining() - reserve)
-
-    def error(self, phase: str) -> CellTimeoutError:
-        """The timeout for `phase` ending at this deadline's cap."""
-        return CellTimeoutError(phase, self.cap_seconds)
 
 
 def unjudged_evidence(phase: str, cap_seconds: int) -> str:

@@ -196,7 +196,7 @@ def test_invoke_that_outlives_its_timeout_keeps_its_partial_run(harness_name: st
         stream_events=_stream(harness.startup, harness.plain_tool_call), stream_stalls=True
     )
 
-    result = _invoke(harness, guest, None, timeout=0.05)
+    result = _invoke(harness, guest, None, timeout=0.01)
 
     assert result.timed_out is True
     assert result.is_error is False
@@ -213,7 +213,7 @@ def test_timed_out_claude_run_reads_usage_from_the_partial_stream() -> None:
         stream_events=_stream(harness.startup, harness.plain_tool_call), stream_stalls=True
     )
 
-    result = _invoke(harness, guest, None, timeout=0.05)
+    result = _invoke(harness, guest, None, timeout=0.01)
 
     assert (result.input_tokens, result.cache_read_tokens, result.output_tokens) == (10, 90, 5)
 
@@ -229,7 +229,7 @@ def test_invoke_cut_off_mid_record_still_parses_the_lines_before_it(harness_name
         stream_stalls=True,
     )
 
-    result = _invoke(harness, guest, None, timeout=0.05)
+    result = _invoke(harness, guest, None, timeout=0.01)
 
     assert result.timed_out is True
     assert len(result.trajectory) == 1
@@ -243,7 +243,7 @@ def test_invoke_that_streams_nothing_before_its_timeout_is_an_infra_error(
     harness = HARNESSES[harness_name]
     guest = FakeSandbox(stream_stalls=True)
 
-    result = _invoke(harness, guest, None, timeout=0.05)
+    result = _invoke(harness, guest, None, timeout=0.01)
 
     assert result.is_error is True
     assert result.timed_out is False

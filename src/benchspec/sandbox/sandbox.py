@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Protocol, TypeVar
 
 from benchspec.agents import (
-    DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     CodingAgent,
     credential_preflight_error,
@@ -24,7 +23,12 @@ from benchspec.agents import (
 from benchspec.config.arms import parse_sets, resolve_set
 from benchspec.grading.trigger import StopRule
 from benchspec.orchestration import workspace
-from benchspec.orchestration.deadline import PHASE_BOOT, PHASE_SETUP, CellDeadline
+from benchspec.orchestration.deadline import (
+    PHASE_BOOT,
+    PHASE_SETUP,
+    CellDeadline,
+    CellTimeoutError,
+)
 from benchspec.orchestration.results import RunResult
 from benchspec.orchestration.room import (
     changed_paths,
@@ -288,7 +292,7 @@ class SandboxSession:
         baseline: str = "",
         project_marker: str = DEFAULT_PROJECT_MARKER,
         harness_args: list[str] | None = None,
-        deadline: CellDeadline | None = None,
+        deadline: CellDeadline,
         judge_reserve: float = 0.0,
         stop: StopRule | None = None,
     ) -> None:
@@ -309,7 +313,7 @@ class SandboxSession:
         self._harness_args = harness_args
         # Boot, setup, and the agent turn draw from the cell's deadline; the turn leaves
         # `judge_reserve` seconds of it for the judge that grades after.
-        self._deadline = deadline or CellDeadline(DEFAULT_CELL_TIMEOUT)
+        self._deadline = deadline
         self._judge_reserve = judge_reserve
         self._stop = stop
         # The eval folder's path relative to the mount; None skips per-cell setup.
@@ -328,19 +332,23 @@ class SandboxSession:
         self._staged_project = (
             stage_project(self._host_repo_root) if self._host_repo_root is not None else None
         )
+        run_name = _sandbox_run_name(self._eval_id, self._config)
         try:
             self._sandbox = await self._within_deadline(
                 PHASE_BOOT,
                 self._backend.create_sandbox(
                     agent=self._agent,
                     snapshot=self._snapshot,
-                    name=_sandbox_run_name(self._eval_id, self._config),
+                    name=run_name,
                     host_workdir=self._host_workdir,
                     host_repo_root=self._staged_project,
                     extra_volumes=_agent_extra_volumes,
                 ),
             )
-        except BaseException:
+        except BaseException as error:
+            if isinstance(error, CellTimeoutError):
+                # The cancelled boot returned no handle to stop, so remove it by name.
+                await self._backend.discard_quietly(run_name)
             discard_stage(self._staged_project)
             raise
         # Install before the artifact baseline so only later agent-authored files surface.
@@ -381,7 +389,7 @@ class SandboxSession:
                 return await pending
         except TimeoutError as error:
             if budget.expired():
-                raise self._deadline.error(phase) from error
+                raise CellTimeoutError(phase, self._deadline.cap_seconds) from error
             raise
 
     def _live(self) -> LiveSandbox:
@@ -443,7 +451,7 @@ def arm_session(
     baseline: str = "",
     project_marker: str = DEFAULT_PROJECT_MARKER,
     harness_args: list[str] | None = None,
-    deadline: CellDeadline | None = None,
+    deadline: CellDeadline,
     judge_reserve: float = 0.0,
     stop: StopRule | None = None,
 ) -> SandboxSession:

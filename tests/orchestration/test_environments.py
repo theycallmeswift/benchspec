@@ -190,7 +190,7 @@ def test_exec_watched_kills_on_timeout_and_keeps_what_streamed() -> None:
     """A process that outlives its timeout is killed, and the lines it wrote survive."""
     guest = FakeSandbox(stream_events=_stdout_events(b"working\nhalf a li"), stream_stalls=True)
 
-    proc = _exec_watched(guest, _watch_for("absent"), timeout=0.05)
+    proc = _exec_watched(guest, _watch_for("absent"), timeout=0.01)
 
     assert proc.timed_out is True
     assert proc.stopped is False

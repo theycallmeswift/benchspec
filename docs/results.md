@@ -152,6 +152,11 @@ locally; a judge-bound line is judged only when the cap leaves the judge time,
 and otherwise fails with `CELL TIMEOUT: <phase> hit the <N>s cap before this
 line was judged`.
 
+The agent turn does not get the whole cap. When an eval has a judge-bound line,
+the agent gets the cap minus the judge `timeout` (default 300 s), floored at 1
+second, so the judge is not starved by a slow agent. A cap at or below the judge
+timeout leaves the agent about a second.
+
 A timed-out sample is a result, not an infra error: `errored` is `false`, so it
 counts in the pass rate, which is how a slow arm's rate reflects its slowness.
 It carries `"timed_out": true` in `grading.json`, and `"timed_out": true` plus

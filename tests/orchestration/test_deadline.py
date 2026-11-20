@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from benchspec.orchestration.deadline import (
     MINIMUM_PHASE_SECONDS,
-    PHASE_BOOT,
     CellDeadline,
     unjudged_evidence,
 )
@@ -32,7 +31,6 @@ def test_remaining_counts_down_and_never_goes_negative() -> None:
 
     clock.now = 250
     assert deadline.remaining() == 0
-    assert deadline.expired() is True
 
 
 def test_a_phase_that_overruns_leaves_the_next_phase_no_budget() -> None:
@@ -43,7 +41,6 @@ def test_a_phase_that_overruns_leaves_the_next_phase_no_budget() -> None:
     clock.now = 75
 
     assert deadline.remaining() == 0
-    assert deadline.expired() is True
 
 
 def test_phase_budget_keeps_the_reserve_for_later_phases() -> None:
@@ -65,14 +62,6 @@ def test_phase_budget_is_floored_so_a_phase_always_gets_a_usable_timeout() -> No
     clock.now = 90
 
     assert deadline.phase_budget(reserve=300) == MINIMUM_PHASE_SECONDS
-
-
-def test_error_names_the_phase_and_the_cap() -> None:
-    """The timeout a phase raises says which phase hit which cap."""
-    error = CellDeadline(900).error(PHASE_BOOT)
-
-    assert error.phase == "boot"
-    assert str(error) == "boot hit the 900s cell cap"
 
 
 def test_unjudged_evidence_names_the_phase_and_the_cap() -> None:

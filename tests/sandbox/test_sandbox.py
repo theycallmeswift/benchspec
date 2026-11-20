@@ -12,10 +12,11 @@ from typing import NoReturn
 
 import pytest
 
-from benchspec.agents import CodingAgent
+from benchspec.agents import DEFAULT_CELL_TIMEOUT, CodingAgent
 from benchspec.agents.base import FIXED_SKILLS_HOME
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
+from benchspec.orchestration import deadline as deadline_mod
 from benchspec.orchestration.deadline import CellDeadline, CellTimeoutError
 from benchspec.orchestration.results import RunResult
 from benchspec.sandbox import backend as backend_mod
@@ -570,6 +571,7 @@ def test_arm_session_runs_turn_and_tears_down(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -609,6 +611,7 @@ def _session_with_a_nearly_spent_deadline(
     *,
     setup_reldir: str | None,
     create_sandbox: object,
+    host_repo_root: Path | None = None,
 ) -> sandbox.SandboxSession:
     """An arm session whose cell cap has 0.05 s left, booting through `create_sandbox`."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
@@ -619,7 +622,7 @@ def _session_with_a_nearly_spent_deadline(
         eval_id="e1",
         config="with_skill",
         host_workdir=tmp_path / "wd",
-        host_repo_root=None,
+        host_repo_root=host_repo_root,
         model="sonnet",
         effort="medium",
         backend=microsandbox_backend,
@@ -631,22 +634,40 @@ def _session_with_a_nearly_spent_deadline(
 def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A sandbox that never boots is cut off at the cap and reported as a boot timeout."""
+    """A sandbox that never boots is cut off, removed by name, and its stage discarded."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "pyproject.toml").write_text("")
+    discarded: list[str] = []
+    destroyed: list[str] = []
 
     async def never_boots(**kwargs: object) -> FakeSandbox:
         """Hang like a VM that never comes up."""
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
+    async def record_destroy(name: str) -> None:
+        """Record the best-effort removal by name."""
+        destroyed.append(name)
+
+    monkeypatch.setattr(sandbox, "discard_stage", lambda staged: discarded.append(str(staged)))
     session = _session_with_a_nearly_spent_deadline(
-        monkeypatch, tmp_path, setup_reldir=None, create_sandbox=never_boots
+        monkeypatch,
+        tmp_path,
+        setup_reldir=None,
+        create_sandbox=never_boots,
+        host_repo_root=project_root,
     )
+    monkeypatch.setattr(session._backend, "discard_quietly", record_destroy)
 
     with pytest.raises(CellTimeoutError) as raised:
         asyncio.run(session.__aenter__())
 
     assert raised.value.phase == "boot"
     assert raised.value.cap_seconds == 1
+    assert len(destroyed) == 1
+    assert destroyed[0].startswith(f"{backend_mod.NAME_PREFIX}eval-e1-with_skill")
+    assert len(discarded) == 1
 
 
 def test_arm_session_setup_that_outlives_the_cell_cap_stops_the_guest(
@@ -679,6 +700,7 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A turn still streaming when the cell's deadline passes ends partial, not errored."""
+    monkeypatch.setattr(deadline_mod, "MINIMUM_PHASE_SECONDS", 0.01)
     fake = FakeSandbox(
         stream_events=[FakeExecEvent("stdout", data=b'{"type":"system","subtype":"init"}\n')],
         stream_stalls=True,
@@ -704,7 +726,7 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
-            deadline=CellDeadline(1),
+            deadline=CellDeadline(0),
         ) as run:
             return await run("prompt", resume_session_id=None, detect_skill=None)
 
@@ -729,6 +751,7 @@ def test_arm_session_propagates_create_failure(
     async def drive() -> None:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -876,6 +899,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -944,6 +968,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1149,6 +1174,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1206,6 +1232,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1253,6 +1280,7 @@ def test_arm_session_passes_explicit_harness_args(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1302,6 +1330,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(
     async def drive() -> RunResult:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
@@ -1340,6 +1369,7 @@ def test_arm_session_setup_sh_failure_stops_vm(
     async def drive() -> None:
         """Drive."""
         async with sandbox.arm_session(
+            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             agent=agent,
             snapshot="snap",
             eval_id="e1",
