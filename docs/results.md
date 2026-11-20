@@ -324,7 +324,7 @@ artifact path does.
   sandbox; `setup` is `setup.sh`; `agent` is the turn; `grade` is everything
   after it. A [timed-out sample](#timed-out-samples) skips the phases the cap
   cut off. A first-run snapshot build sits between `cell.start` and `bind`,
-  in no phase.
+  in no phase, so a `cell.error` raised there has a `null` `phase`.
 - **Deltas** carry one line of at most 160 characters: a tool call's `command`,
   `file_path`, `path`, `pattern`, or `skill` argument (else its arguments as
   JSON), or a text block's first line. Tool results are never emitted.
