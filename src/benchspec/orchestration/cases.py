@@ -17,6 +17,7 @@ from __future__ import annotations
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -36,7 +37,7 @@ from benchspec.grading.judges.registry import (
     preflight_verify_judge_binary,
     preflight_verify_judge_credential,
 )
-from benchspec.orchestration import results
+from benchspec.orchestration import prebind, results
 from benchspec.orchestration.execution import ArmOutcome, run_eval_arm
 from benchspec.orchestration.room import seed_room
 from benchspec.sandbox import sandbox
@@ -49,6 +50,8 @@ from benchspec.specs.discovery import (
     resolve_eval_paths,
     resolve_repo_root,
 )
+
+BOUND_SPECS = pytest.StashKey[prebind.BoundSpecs]()
 
 
 def eval_arm_params(config: RunOptions) -> tuple[list[tuple[EvalCase, Arm]], list[str]]:
@@ -299,6 +302,16 @@ def baseline_arm(request: pytest.FixtureRequest) -> str | None:
     return resolved_run_set(request.config).baseline
 
 
+@pytest.fixture
+def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
+    """The specs the controller bound before any cell started; empty when none were."""
+    from_controller = prebind.workerinput(request.config)
+    if from_controller is not None:
+        return cast(prebind.BoundSpecs, from_controller.get(prebind.WORKERINPUT_KEY, {}))
+
+    return request.config.stash.get(BOUND_SPECS, {})
+
+
 def _errored_message(arm_name: str, outcome: ArmOutcome) -> str:
     """Build an assertion message that names the infra failure instead of just pointing away.
 
@@ -331,6 +344,7 @@ def test_eval(
     sample_index: int,
     eval_sandbox: str,
     baseline_arm: str | None,
+    bound_specs: prebind.BoundSpecs,
 ) -> None:
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
@@ -353,7 +367,7 @@ def test_eval(
         project_marker=project_marker,
         judge_config=judge_config,
         sandbox_name=eval_sandbox,
-        bind=binder.binder_for(binder_config),
+        bind=prebind.table_or_live(bound_specs, binder.binder_for(binder_config)),
         baseline=baseline_arm,
     )
 
