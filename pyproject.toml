@@ -36,9 +36,7 @@ codex = []
 opencode = []
 microsandbox = ["microsandbox>=0.7.3,<0.8"]
 testing = []
-e2b = [
-    "e2b>=2.64,<3",
-]
+e2b = ["e2b>=2.64,<3"]
 
 [dependency-groups]
 dev = [
