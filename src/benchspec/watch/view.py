@@ -472,10 +472,12 @@ class RunView:
             else max(expected_ms - (now_ms - sample.started_ms), 0)
             for sample in unfinished
         )
-        if work_ms < 1000:
+        if not unfinished:
             return None
 
-        return work_ms / min(max(len(self._workers), 1), len(unfinished))
+        left_ms = work_ms / min(max(len(self._workers), 1), len(unfinished))
+
+        return left_ms if left_ms >= 1000 else None
 
     def _matrix(self, planned: list[Sample], state: str, now_ms: int) -> dict:
         """The matrix: one group per skill, one row per eval, one cell per arm."""
