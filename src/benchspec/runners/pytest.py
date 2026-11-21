@@ -48,6 +48,7 @@ from benchspec.reporting.cells import (
     CellResult,
     format_cell_line,
 )
+from benchspec.sandbox.project import discard_stage, stage_project
 from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_root
 
 _CASES = Path(cases.__file__)
@@ -370,6 +371,7 @@ def pytest_configure(config: pytest.Config) -> None:
             config.pluginmanager.register(_CellProgress(config), "benchspec-cell-progress")
         _validate_cell_caps(config)
         _prebind_assertions(config)
+        _stage_project(config, repo_root)
 
     worker = workspace.worker_tag()
     sink = JsonlEventSink(workspace.events_path(repo_root, worker), worker)
@@ -396,10 +398,12 @@ def _iteration_name(config: pytest.Config, repo_root: Path) -> str:
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
-    """Close this process's event file."""
+    """Close this process's event file and, on the controller, remove the project stage."""
     sink = config.stash.get(cases.EVENT_SINK, None)
     if sink is not None:
         sink.close()
+
+    discard_stage(config.stash.get(cases.STAGED_PROJECT, None))
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
@@ -535,6 +539,23 @@ def _prebind_assertions(config: pytest.Config) -> None:
         f"benchspec: bound {len(table)} of {len(texts)} unique assertions "
         f"in {time.perf_counter() - started:.1f} s"
     )
+
+
+def _stage_project(config: pytest.Config, repo_root: Path) -> None:
+    """Stage the project once, on the controller, for every cell's `/project` mount.
+
+    Skipped when no `test_eval` cell follows, as the pre-bind is.
+
+    Raises:
+        pytest.UsageError: a dotenv file would be visible in the stage.
+    """
+    if config.option.collectonly or not _targets_cases(config):
+        return
+
+    try:
+        config.stash[cases.STAGED_PROJECT] = stage_project(repo_root)
+    except RuntimeError as error:
+        raise pytest.UsageError(str(error)) from None
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
@@ -807,6 +828,9 @@ def pytest_configure_node(node: _WorkerNode) -> None:
     # which execnet serializes to the worker before its own pytest_configure runs.
     node.workerinput["benchspec_iteration"] = workspace.current_iteration()
     node.workerinput[prebind.WORKERINPUT_KEY] = node.config.stash.get(cases.BOUND_SPECS, {})
+    staged = node.config.stash.get(cases.STAGED_PROJECT, None)
+    if staged is not None:
+        node.workerinput[cases.STAGED_PROJECT_WORKERINPUT_KEY] = str(staged)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

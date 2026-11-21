@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import tarfile
 from pathlib import Path
 from typing import NoReturn
 
@@ -176,90 +177,103 @@ def test_discard_stage_tolerates_none_and_missing_dirs(tmp_path: Path) -> None:
     assert not staged.exists()
 
 
-def test_arm_session_mounts_a_staged_copy_and_removes_it_after(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Verify the backend mounts a stage without .env, never the checkout, then removes it."""
-    repo_root = tmp_path / "repo"
-    _git_repo_with_secrets(repo_root)
-    fake = FakeSandbox()
-    create_kwargs: dict[str, object] = {}
+def _stage_with_a_link(tmp_path: Path) -> Path:
+    """A stage holding a nested file and a symlink."""
+    staged = tmp_path / "stage"
+    _write(staged / "skills" / "hello" / "SKILL.md", "# hello\n")
+    (staged / "CLAUDE.md").symlink_to("skills/hello/SKILL.md")
 
-    async def fake_create(**kwargs: object) -> FakeSandbox:
-        """Record the mount the backend was asked for."""
-        create_kwargs.update(kwargs)
-        return fake
+    return staged
 
+
+def test_stage_archive_packs_the_stage_next_to_it(tmp_path: Path) -> None:
+    """The archive sits beside the stage and holds its layout, links kept as links."""
+    staged = _stage_with_a_link(tmp_path)
+
+    archive = project.stage_archive(staged)
+
+    assert archive.parent == staged.parent
+    with tarfile.open(archive, "r:gz") as tar:
+        members = {member.name: member for member in tar.getmembers()}
+    assert members["skills/hello/SKILL.md"].isfile()
+    assert members["CLAUDE.md"].issym()
+    assert members["CLAUDE.md"].linkname == "skills/hello/SKILL.md"
+
+
+def test_stage_archive_is_built_once(tmp_path: Path) -> None:
+    """Later calls return the first archive without packing again."""
+    staged = _stage_with_a_link(tmp_path)
+    project.stage_archive(staged).write_bytes(b"first build")
+
+    assert project.stage_archive(staged).read_bytes() == b"first build"
+
+
+def test_discard_stage_removes_the_archive(tmp_path: Path) -> None:
+    """Discarding a packed stage leaves neither the stage nor its archive."""
+    staged = _stage_with_a_link(tmp_path)
+    archive = project.stage_archive(staged)
+
+    project.discard_stage(staged)
+
+    assert not staged.exists()
+    assert not archive.exists()
+
+
+def _open_session(create_sandbox: object, monkeypatch: pytest.MonkeyPatch, stage: Path) -> None:
+    """Open and close an arm session over `stage` with the backend's create replaced."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
-
-    async def drive() -> Path:
-        """Open a session and report what was mounted while it was live."""
-        async with sandbox.arm_session(
-            deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
-            events=CellEvents(NULL_SINK, "cell"),
-            agent=agent,
-            snapshot="snap",
-            eval_id="e1",
-            config="trial",
-            host_workdir=tmp_path / "wd",
-            host_repo_root=repo_root,
-            model="sonnet",
-            effort="medium",
-            backend=microsandbox_backend,
-        ):
-            mounted = create_kwargs["host_repo_root"]
-            assert isinstance(mounted, Path)
-            assert mounted != repo_root
-            assert (mounted / "skills" / "hello" / "SKILL.md").is_file()
-            assert not (mounted / ".env").exists()
-            assert not (mounted / "tmp").exists()
-            return mounted
-
-    mounted = asyncio.run(drive())
-
-    assert not mounted.exists()
-
-
-def test_arm_session_removes_the_stage_when_boot_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Verify a create failure does not leave a staged copy behind."""
-    repo_root = tmp_path / "repo"
-    _git_repo_with_secrets(repo_root)
-    create_kwargs: dict[str, object] = {}
-
-    async def boom(**kwargs: object) -> NoReturn:
-        """Fail the boot after recording the mount."""
-        create_kwargs.update(kwargs)
-        raise RuntimeError("boot failed")
-
-    microsandbox_backend = registry.resolve_sandbox("microsandbox")
-    monkeypatch.setattr(microsandbox_backend, "create_sandbox", boom)
-    agent = ClaudeCodeAgent(auth_value="test-token", version="v")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", create_sandbox)
 
     async def drive() -> None:
-        """Open a session that fails to boot."""
+        """Enter and leave the session."""
         async with sandbox.arm_session(
             deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
             events=CellEvents(NULL_SINK, "cell"),
-            agent=agent,
+            agent=ClaudeCodeAgent(auth_value="test-token", version="v"),
             snapshot="snap",
             eval_id="e1",
             config="trial",
-            host_workdir=tmp_path / "wd",
-            host_repo_root=repo_root,
+            host_workdir=stage.parent / "wd",
+            host_repo_root=stage,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
         ):
             pass
 
+    asyncio.run(drive())
+
+
+def test_arm_session_mounts_the_stage_it_is_given_and_leaves_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The backend mounts the run's stage as is, and the session does not remove it."""
+    stage = _stage_with_a_link(tmp_path)
+    create_kwargs: dict[str, object] = {}
+
+    async def fake_create(**kwargs: object) -> FakeSandbox:
+        """Record the mount the backend was asked for."""
+        create_kwargs.update(kwargs)
+
+        return FakeSandbox()
+
+    _open_session(fake_create, monkeypatch, stage)
+
+    assert create_kwargs["host_repo_root"] == stage
+    assert stage.is_dir()
+
+
+def test_arm_session_leaves_the_stage_when_boot_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A create failure leaves the shared stage for the run's other cells."""
+    stage = _stage_with_a_link(tmp_path)
+
+    async def boom(**kwargs: object) -> NoReturn:
+        """Fail the boot."""
+        raise RuntimeError("boot failed")
+
     with pytest.raises(RuntimeError, match="boot failed"):
-        asyncio.run(drive())
+        _open_session(boom, monkeypatch, stage)
 
-    mounted = create_kwargs["host_repo_root"]
-    assert isinstance(mounted, Path)
-    assert not mounted.exists()
-
+    assert stage.is_dir()

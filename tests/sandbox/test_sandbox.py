@@ -638,11 +638,10 @@ def _session_with_a_nearly_spent_deadline(
 def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A sandbox that never boots is cut off, removed by name, and its stage discarded."""
+    """A sandbox that never boots is cut off and removed by name."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "pyproject.toml").write_text("")
-    discarded: list[str] = []
     destroyed: list[str] = []
 
     async def never_boots(**kwargs: object) -> FakeSandbox:
@@ -654,7 +653,6 @@ def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
         """Record the best-effort removal by name."""
         destroyed.append(name)
 
-    monkeypatch.setattr(sandbox, "discard_stage", lambda staged: discarded.append(str(staged)))
     session = _session_with_a_nearly_spent_deadline(
         monkeypatch,
         tmp_path,
@@ -671,7 +669,6 @@ def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
     assert raised.value.cap_seconds == 1
     assert len(destroyed) == 1
     assert destroyed[0].startswith(f"{backend_mod.NAME_PREFIX}eval-e1-with_skill")
-    assert len(discarded) == 1
 
 
 def test_arm_session_setup_that_outlives_the_cell_cap_stops_the_guest(

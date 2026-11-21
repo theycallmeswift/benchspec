@@ -904,10 +904,11 @@ def test_run_eval_arm_threads_arm_effort_and_expanded_env(
     assert call_kwargs["eval_set"] == "trial-set"
 
 
-def test_run_eval_arm_threads_setup_reldir(tmp_path: Path) -> None:
-    """Verify run_eval_arm passes the eval-dir-relative path as setup_reldir."""
-    # setup.sh lives in the eval folder; the sandbox locates it by its path relative to
-    # the mounted project root (here, repo_root == project == tmp_path).
+def test_run_eval_arm_mounts_the_stage_and_locates_setup_by_the_repo_layout(
+    tmp_path: Path,
+) -> None:
+    """The session mounts the given stage; setup_reldir is the eval dir's repo-relative path."""
+    stage = tmp_path / "stage"
     workspace.set_current_iteration("iteration_01")
 
     workdir = tmp_path / "wd"
@@ -925,7 +926,7 @@ def test_run_eval_arm_threads_setup_reldir(tmp_path: Path) -> None:
         TRIAL,
         workdir,
         {},
-        tmp_path,
+        stage,
         today="2099-01-01",
         repo_root=tmp_path,
         sample=0,
@@ -934,6 +935,7 @@ def test_run_eval_arm_threads_setup_reldir(tmp_path: Path) -> None:
         bind=_punt_all,
     )
 
+    assert session_factory.calls[0]["host_repo_root"] == stage
     assert session_factory.calls[0]["setup_reldir"] == "skills/myskill/evals/alpha"
 
 

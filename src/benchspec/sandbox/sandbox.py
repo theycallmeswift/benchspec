@@ -49,7 +49,6 @@ from benchspec.sandbox.backend import (
     VolumeBinder,
     host_mount_path,
 )
-from benchspec.sandbox.project import discard_stage, stage_project
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, registered_backends, resolve_sandbox
 from benchspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from benchspec.specs.schema import SchemaError
@@ -265,7 +264,7 @@ class SandboxSession:
     """Async context manager holding one guest open across an arm's turns.
 
     `__aenter__` boots the guest and returns a per-turn async `run`; `__aexit__` tears it
-    down.
+    down. `host_repo_root` is the run's shared project stage, mounted and never removed here.
 
     The whole lifecycle (create → turns → stop) runs inside a single `asyncio.run`.
     """
@@ -319,17 +318,11 @@ class SandboxSession:
         self._arm = arm if arm is not None else config
         self._project_marker = project_marker
         # Populated by __aenter__; None until the VM is booted.
-        self._staged_project: Path | None = None
         self._sandbox: LiveSandbox | None = None
         self._artifact_base: dict[str, str] | None = None
 
     async def __aenter__(self) -> TurnRunner:
         """Enter the arm session and capture baseline artifact state."""
-        # The guest gets a staged copy of the project, never the checkout: the copy has
-        # the same layout minus `.env`, `.git`, and prior-run artifacts.
-        self._staged_project = (
-            stage_project(self._host_repo_root) if self._host_repo_root is not None else None
-        )
         run_name = _sandbox_run_name(self._eval_id, self._config)
         try:
             self._sandbox = await self._within_deadline(
@@ -339,7 +332,7 @@ class SandboxSession:
                     snapshot=self._snapshot,
                     name=run_name,
                     host_workdir=self._host_workdir,
-                    host_repo_root=self._staged_project,
+                    host_repo_root=self._host_repo_root,
                     extra_volumes=_agent_extra_volumes,
                 ),
             )
@@ -347,7 +340,6 @@ class SandboxSession:
             if isinstance(error, CellTimeoutError):
                 # A cancelled boot returns no handle, so remove the sandbox by name.
                 await self._backend.discard_quietly(run_name)
-            discard_stage(self._staged_project)
             raise
         self._events.phase(PHASE_SETUP)
         # Install before the artifact baseline so only later agent-authored files surface.
@@ -368,7 +360,6 @@ class SandboxSession:
                 )
             except BaseException:
                 await self._backend.stop_quietly(self._sandbox)
-                discard_stage(self._staged_project)
                 raise
         self._artifact_base = await _snapshot_artifact_shas(
             self._sandbox, self._agent, self._backend
@@ -429,10 +420,7 @@ class SandboxSession:
 
     async def __aexit__(self, *exc: object) -> None:
         """Close the arm session and release sandbox resources."""
-        try:
-            await self._live().stop()
-        finally:
-            discard_stage(self._staged_project)
+        await self._live().stop()
 
 
 def arm_session(

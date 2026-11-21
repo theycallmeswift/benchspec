@@ -6,13 +6,16 @@ itself: a bind mount of the repo root exposes `.env` (every host credential — 
 which the guest needs, since its own credential arrives as a host-scoped secret), the
 `.git` history, and `tmp/` (prior runs' transcripts and grades). `stage_project` copies
 what a clone would contain — tracked files plus untracked files git does not ignore —
-into a fresh directory, and the session mounts that copy instead.
+into a fresh directory, and every cell of the run mounts that one copy.
 """
 
 from __future__ import annotations
 
+import fcntl
+import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -102,7 +105,7 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
         staging_parent: Directory to create the stage under (default: the OS temp root).
 
     Returns:
-        The staged directory. The caller removes it once the sandbox is gone.
+        The staged directory. The caller removes it once the run is over.
 
     Raises:
         RuntimeError: if a dotenv file would still be visible in the stage.
@@ -132,7 +135,37 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
     return staged
 
 
+def _archive_path(staged: Path) -> Path:
+    """Where the stage's gzipped tar lives: next to the stage."""
+    return staged.with_name(f"{staged.name}.tar.gz")
+
+
+def stage_archive(staged: Path) -> Path:
+    """Return the stage's gzipped tar, building it on the first call of the run.
+
+    Members are relative to the stage root. A lock on the stage directory makes
+    concurrent workers wait for one build rather than each packing their own.
+    """
+    archive = _archive_path(staged)
+    lock = os.open(staged, os.O_RDONLY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not archive.exists():
+            # Renamed into place so a killed build never leaves a truncated archive.
+            partial = archive.with_name(f"{archive.name}.partial")
+            with tarfile.open(partial, "w:gz") as tar:
+                for entry in sorted(staged.iterdir()):
+                    tar.add(entry, arcname=entry.name)
+
+            partial.replace(archive)
+    finally:
+        os.close(lock)
+
+    return archive
+
+
 def discard_stage(staged: Path | None) -> None:
-    """Remove a staged project directory; a missing or partly removed stage is fine."""
+    """Remove a staged project and its archive; a missing or partly removed one is fine."""
     if staged is not None:
         shutil.rmtree(staged, ignore_errors=True)
+        _archive_path(staged).unlink(missing_ok=True)
