@@ -495,12 +495,14 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
 .bs-lb caption, .bs-lgbtn.bs-dismissed + .bs-tip { display: none; }
 .bs-how { font: var(--type-help); color: var(--muted); }
 .bs-how p { margin: var(--space-8) 0 0; max-width: 70ch; }
-/* Room beside the matrix for the hover card, so it never covers a cell. */
+/* Below four arms, room beside the matrix for the hover card, so it never covers a cell. */
 @media (min-width: 1280px) {
-  #matrix, .bs-mxcap, .bs-legend { margin-right: calc(var(--size-hovercard) + var(--space-16)); }
+  #panel-matrix:not(:has(.bs-mrow > :nth-child(5))) :is(#matrix, .bs-mxcap, .bs-legend) { margin-right: calc(var(--size-hovercard) + var(--space-16)); }
 }
 @media (min-width: 640px) {
-  .bs-mhead b + span { display: block; white-space: normal; overflow-wrap: anywhere; }
+  .bs-mhead { align-items: start; }
+  .bs-mhead b + span { display: block; white-space: normal; }
+  .bs-mhead b + span > span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 }
 @media (max-width: 639px) {
   .bs-wide { display: none; }

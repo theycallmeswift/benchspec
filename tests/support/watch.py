@@ -540,7 +540,11 @@ def uneven_run(root: Path, *, workers: int = 6, snapshot_s: float = 150) -> Reco
 
 
 def four_arm_live(root: Path) -> Recording:
-    """A live four-arm run with long model names and eval ids: one cell booting, one running."""
+    """A live four-arm run with long model names and eval ids.
+
+    One cell is booting and one running; `pi` finished a mid-table eval and `claude-code`
+    the last one.
+    """
     elapsed_s = 95
     arms = [
         arm("claude-code", "claude-code", "anthropic/claude-haiku-4.5"),
@@ -548,6 +552,14 @@ def four_arm_live(root: Path) -> Recording:
         arm("opencode", "opencode", "google/gemini-2.5-flash"),
         arm("pi", "pi", "moonshotai/kimi-k2"),
     ]
+    evals = (
+        "allows-filesystem-traversal",
+        "blocks-network-egress",
+        "keeps-secrets-out",
+        "limits-memory",
+        "mounts-read-only",
+        "greets",
+    )
     run = Recording(
         iteration(root),
         arms=arms,
@@ -555,13 +567,14 @@ def four_arm_live(root: Path) -> Recording:
         start_ms=int(time.time() * 1000) - elapsed_s * 1000,
     )
 
-    for eval_id in ("allows-filesystem-traversal", "blocks-network-egress", "greets"):
+    for eval_id in evals:
         run.plan("sandbox", eval_id, count=3)
 
     run.begin()
 
     for sample in range(3):
         run.done(f"sandbox/greets/claude-code/{sample}", 70 + sample, wall_s=40)
+        run.done(f"sandbox/keeps-secrets-out/pi/{sample}", 75 + sample, passed=2, wall_s=40)
 
     run.start("sandbox/allows-filesystem-traversal/claude-code/0", elapsed_s - 12)
     run.play("sandbox/allows-filesystem-traversal/codex/0", elapsed_s - 31, worker="gw1")

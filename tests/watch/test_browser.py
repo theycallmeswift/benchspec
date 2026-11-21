@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import FloatRect, Locator, Page, expect
 
-from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, Pages, watching
+from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, WIDE, Pages, watching
 from tests.support.cli import run_benchspec
 from tests.support.watch import (
     Recording,
@@ -226,28 +226,71 @@ def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages:
         assert page.evaluate("document.documentElement.scrollWidth") == 768
 
 
-def test_a_wide_desktop_keeps_room_for_the_hover_card_beside_four_arms(
+def _fits(locator: Locator) -> bool:
+    """Whether every matched element shows its whole text."""
+    return locator.evaluate_all(
+        "nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)"
+    )
+
+
+def _hover_card(page: Page, cell: Locator) -> tuple[FloatRect, FloatRect]:
+    """Hover a cell and return its box and the hover card's."""
+    cell.hover()
+    expect(cell).to_have_attribute("aria-describedby", "hovercard")
+
+    return _rect(cell), _rect(page.locator("#hovercard"))
+
+
+def test_four_arms_span_a_wide_desktop_with_the_hover_card_under_its_cell(
     tmp_path: Path, pages: Pages
 ) -> None:
-    """A wide desktop keeps room for the hover card beside four arms."""
+    """Four arms span a wide desktop, with the hover card under its cell."""
     four_arm_live(tmp_path)
 
     with watching(tmp_path) as served:
-        page = pages.open(served, {"width": 1440, "height": 900})
+        page = pages.open(served, WIDE)
+        booting = page.locator(
+            "button.bs-cell[aria-label^='allows-filesystem-traversal on claude-code'] .bs-t"
+        )
+
+        for part in ("#matrix", "#caption", ".bs-legend"):
+            edges = _rect(page.locator(part))
+            assert (edges["x"], edges["width"]) == (32, WIDE["width"] - 64)
+
+        expect(booting).to_have_text(re.compile(r"^0/3 · booting \d+s$"), use_inner_text=True)
+        assert _fits(booting)
+        assert _fits(page.locator(".bs-eval"))
+        assert _fits(page.locator(".bs-mhead > span"))
+        tops = {_rect(header)["y"] for header in page.locator(".bs-mhead b").all()}
+        assert len(tops) == 1
+
+        for label in ("allows-filesystem-traversal on claude-code", "keeps-secrets-out on pi"):
+            cell, card = _hover_card(page, page.locator(f"button.bs-cell[aria-label^='{label}']"))
+            assert card["y"] == cell["y"] + cell["height"] + 4
+            assert card["x"] == min(cell["x"], WIDE["width"] - 16 - card["width"])
+
+        last_row, above = _hover_card(
+            page, page.locator("button.bs-cell[aria-label^='greets on claude-code']")
+        )
+        assert above["x"] == last_row["x"]
+        assert above["y"] + above["height"] + 4 == pytest.approx(last_row["y"], abs=1)
+        assert page.evaluate("document.documentElement.scrollWidth") == WIDE["width"]
+
+
+def test_two_arms_keep_room_for_the_hover_card_beside_the_row(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """Two arms keep room for the hover card beside the row."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, WIDE)
         matrix = _rect(page.locator("#matrix"))
-        headers = page.locator(".bs-mhead > span")
+        cell, card = _hover_card(page, page.locator(LOGGED_OUT))
 
         assert (matrix["x"], matrix["width"]) == (32, 1080)
-        expect(headers.nth(1)).to_have_text("claude-codeclaude-code · anthropic/claude-haiku-4.5")
-        assert headers.evaluate_all(
-            "nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)"
-        )
-        page.locator("button.bs-cell[aria-label^='greets on claude-code']").hover()
-        expect(page.locator("#hovercard")).to_be_visible()
-        card = _rect(page.locator("#hovercard"))
         assert card["x"] == matrix["x"] + matrix["width"] + 16
-        assert card["x"] + card["width"] <= 1440 - 32
-        assert page.evaluate("document.documentElement.scrollWidth") == 1440
+        assert card["y"] == cell["y"]
 
 
 def test_a_run_that_planned_nothing_says_so(tmp_path: Path, pages: Pages) -> None:

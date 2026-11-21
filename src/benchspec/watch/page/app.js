@@ -5,6 +5,8 @@ const phone = matchMedia("(max-width: 639px)");
 const canHover = matchMedia("(hover: hover)");
 const ANNOUNCE_EVERY_MS = 10000;
 const SWIPE_CLOSE_PX = 60;
+// From this many arms the matrix takes the full width and the hover card sits under its cell; app.css counts the same.
+const MANY_ARMS = 4;
 
 let view = null;
 let ended = false;
@@ -326,7 +328,7 @@ function buildMatrix(matrix, scrolls) {
   grid.style.setProperty("--bs-arms", matrix.arms.length);
   cells = new Map();
   groups = new Map();
-  const small = matrix.arms.length >= 4 || phone.matches;
+  const small = matrix.arms.length >= MANY_ARMS || phone.matches;
 
   const head = el(
     "div",
@@ -338,7 +340,7 @@ function buildMatrix(matrix, scrolls) {
       el("span", { class: "bs-narrow", text: "eval" }),
     ),
     matrix.arms.map((arm) =>
-      el("span", { role: "columnheader" }, el("b", { text: arm.name }), el("span", { text: arm.detail })),
+      el("span", { role: "columnheader" }, el("b", { text: arm.name }), el("span", {}, unbroken(arm.detail))),
     ),
   );
   const body = [];
@@ -410,6 +412,15 @@ function keepACellReachable() {
   if (current) current.tabIndex = -1;
 
   visible.tabIndex = 0;
+}
+
+// Spans a line may break between, never inside while one fits: after " · " and after "/".
+function unbroken(text) {
+  return text.split(/(?<= · )|(?<=\/)/).flatMap((part) => {
+    const piece = el("span", { text: part.trimEnd() });
+
+    return part.endsWith(" ") ? [piece, " "] : [piece];
+  });
 }
 
 function keyOf(group, row, column) {
@@ -544,6 +555,8 @@ function showHover(key) {
   if (!canHover.matches) return;
   clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => {
+    if (hovered !== key) dismissHover();
+
     hovered = key;
     renderHoverCard();
   }, tokenPx("--dur-hover-delay"));
@@ -606,12 +619,32 @@ function renderHoverCard() {
   if (!card.hidden) return;
 
   card.hidden = false;
-  const row = ref.button.closest(".bs-mrow").getBoundingClientRect();
+  const place = view.matrix.arms.length >= MANY_ARMS ? underCell : besideRow;
+  const { left, top } = place(card, ref.button);
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
+}
+
+function besideRow(card, button) {
+  const row = button.closest(".bs-mrow").getBoundingClientRect();
   const gap = tokenPx("--space-16");
   const beside = row.right + gap + card.offsetWidth <= innerWidth;
   const top = row.top + card.offsetHeight > innerHeight ? row.bottom - card.offsetHeight : row.top;
-  card.style.left = `${beside ? row.right + gap : row.left}px`;
-  card.style.top = `${Math.max(gap, top)}px`;
+
+  return { left: beside ? row.right + gap : row.left, top: Math.max(gap, top) };
+}
+
+function underCell(card, button) {
+  const cell = button.getBoundingClientRect();
+  const gap = tokenPx("--space-4");
+  const edge = tokenPx("--space-16");
+  const below = cell.bottom + gap;
+  const fits = below + card.offsetHeight <= innerHeight;
+
+  return {
+    left: Math.max(edge, Math.min(cell.left, innerWidth - edge - card.offsetWidth)),
+    top: fits ? below : cell.top - gap - card.offsetHeight,
+  };
 }
 
 function firstToShow(samples) {
