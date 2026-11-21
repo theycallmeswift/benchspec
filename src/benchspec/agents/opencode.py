@@ -246,6 +246,8 @@ _BOOTSTRAP_PACKAGE_JSON = json.dumps(
     {"name": "benchspec-bootstrap", "version": "0.0.0", "type": "module", "main": "index.js"},
     separators=_COMPACT_SEPARATORS,
 )
+# Where OpenCode installs the dependency every instance start needs.
+_PLUGIN_DEPENDENCY_DIR = "/root/.config/opencode/node_modules/@opencode-ai/plugin"
 # Headless `opencode run` cannot answer permission prompts; the sandbox is the boundary.
 _OPENCODE_CONFIG_JSON = json.dumps(
     {
@@ -313,7 +315,7 @@ class OpenCodeAgent(BaseAgent):
         """Install the instance's pinned OpenCode version and bake the bootstrap plugin in."""
         return (
             dedent("""\
-            apt-get update && apt-get install -y curl ca-certificates nodejs npm &&
+            apt-get update && apt-get install -y curl ca-certificates nodejs npm ripgrep &&
             """)
             + f'npm i -g "opencode-ai@{self._version}" && '
             # Bake the benchspec bootstrap plugin into the snapshot, plus a global
@@ -332,7 +334,11 @@ class OpenCodeAgent(BaseAgent):
             # Warm OpenCode's one-time SQLite migration at snapshot-build time.
             + "/usr/local/bin/opencode auth list > /dev/null 2>&1 && "
             # Fail provisioning loudly if the migration did not bake the DB into the snapshot.
-            + "test -f /root/.local/share/opencode/opencode.db"
+            + "test -f /root/.local/share/opencode/opencode.db && "
+            # Starting an instance installs the config directory's plugin dependency; a
+            # guest without the npm registry would retry that install on every start.
+            + "{ /usr/local/bin/opencode models > /dev/null 2>&1 || true; } && "
+            + f"test -d {_PLUGIN_DEPENDENCY_DIR}"
         )
 
     def __init__(
@@ -438,6 +444,9 @@ class OpenCodeAgent(BaseAgent):
             "HOME": self.guest_home,
             "TZ": "UTC",
             "BENCHSPEC_OPENCODE_VERSION": self._version,
+            # The bundled model catalog serves; a guest limited to its provider host
+            # cannot reach the catalog's.
+            "OPENCODE_DISABLE_MODELS_FETCH": "1",
         }
 
     def secrets(self) -> list[Credential]:

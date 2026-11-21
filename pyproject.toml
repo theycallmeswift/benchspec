@@ -7,7 +7,7 @@ name = "benchspec"
 dynamic = ["version"]
 description = "benchspec is a framework for evaluating AI agents with repeatable, isolated benchmarks. Write evals as Markdown, run each eval across named benchmark arms, and compare how agent behavior changes by harness, model, effort, and environment."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 license = { text = "MIT" }
 authors = [{ name = "Swift", email = "swift@majorleaguehacking.com" }]
 classifiers = [
@@ -36,6 +36,7 @@ codex = []
 opencode = []
 microsandbox = ["microsandbox>=0.7.3,<0.8"]
 testing = []
+e2b = ["e2b>=2.64,<3"]
 
 [dependency-groups]
 dev = [
@@ -46,6 +47,7 @@ dev = [
     "microsandbox>=0.7.3,<0.8",
     "ty>=0.0.79,<0.1",
     "playwright>=1.63",
+    "e2b>=2.64,<3",
 ]
 
 [project.urls]

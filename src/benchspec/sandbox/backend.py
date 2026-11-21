@@ -14,11 +14,12 @@ Docker container, the microsandbox guest, and a recording fake
 (`benchspec.testing.FakeSandbox`) all drive the same code paths.
 
 This module is runtime-free: it holds the protocols, the shared constants, the
-fingerprint helper, and the build steps whose bodies are runtime-independent. The two
+fingerprint helper, and the build steps whose bodies are runtime-independent. The
 implementations live beside it — `benchspec.sandbox.docker` (the default, a container
-per arm) and `benchspec.sandbox.microsandbox` (the microVM opt-in) — and
-`benchspec.sandbox.registry` is the only module that maps a `sandbox` value to one of
-them. Adding a third is additive: implement the protocol and register it there.
+per arm), `benchspec.sandbox.microsandbox` (the microVM opt-in) and
+`benchspec.sandbox.e2b` (remote microVMs) — and `benchspec.sandbox.registry` is the
+only module that maps a `sandbox` value to one of them. Adding another is additive:
+implement the protocol and register it there.
 """
 
 from __future__ import annotations
@@ -241,8 +242,16 @@ class SandboxBackend(Protocol):
         host_workdir: Path,
         staged_project: Path | None,
         extra_volumes: ExtraVolumes,
+        cap_seconds: int,
     ) -> LiveSandbox:
-        """Create a runtime instance from a snapshot for an arm session."""
+        """Create a runtime instance from a snapshot for an arm session.
+
+        `cap_seconds` is the cell's cap, for a backend that bounds a guest's lifetime.
+        """
+        ...
+
+    async def sync_out(self, sandbox: LiveSandbox, host_workdir: Path) -> None:
+        """Bring the guest's `/workspace` back to `host_workdir` before the host grades it."""
         ...
 
     async def guest_shell(
@@ -356,6 +365,9 @@ class SharedBackendBehavior:
     backend exposes and the neutral `SandboxError` every backend raises, so both
     implementations inherit one copy instead of keeping byte-identical twins in step.
     """
+
+    async def sync_out(self, sandbox: LiveSandbox, host_workdir: Path) -> None:
+        """Do nothing: a bind-mounted `/workspace` is already on the host."""
 
     async def guest_shell(
         self, sandbox: LiveSandbox, agent: CodingAgent, script: str

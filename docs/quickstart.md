@@ -27,7 +27,7 @@ cat tmp/evals/iteration_01/benchmark.md
 - **A running Docker daemon.** Any host works as long as `docker info` succeeds.
   (For stronger isolation, an Apple Silicon Mac or Linux with `/dev/kvm` can opt
   into microsandbox microVMs — see [`sandbox.md`](sandbox.md).)
-- **Python 3.11+.**
+- **Python 3.11.4+.**
 - **Claude Code on `$PATH`** with a credential: run `claude setup-token` (sets
   `CLAUDE_CODE_OAUTH_TOKEN`) or export `ANTHROPIC_API_KEY`. This walkthrough
   uses Claude Code for both the arms and the judge.

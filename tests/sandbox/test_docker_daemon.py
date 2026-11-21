@@ -185,6 +185,7 @@ async def _drive_cell(
         host_workdir=room,
         staged_project=stage,
         extra_volumes=_agent_extra_volumes,
+        cap_seconds=900,
     )
 
     copied = await sandbox.shell("cat /provisioned && cat /project/marker.txt > /workspace/out.txt")

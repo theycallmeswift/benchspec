@@ -31,7 +31,7 @@ I'm Swift. I value directness, bias to action, and learning by doing. Lead with 
 
 ## Environment
 
-- Needs Python 3.11 or newer and uv; run `make install` when `uv.lock`
+- Needs Python 3.11.4 or newer and uv; run `make install` when `uv.lock`
   changes.
 - `make test` needs no credentials. Its `tests/watch/` browser tests need
   Chromium (`uv run playwright install chromium`) and skip without it,

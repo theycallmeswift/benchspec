@@ -478,7 +478,7 @@ class DockerSandbox:
     """A live container, exposing the guest surface every benchspec caller drives.
 
     Mirrors `MicrosandboxGuest` method for method — `shell`, `exec`, `exec_stream`,
-    `stop` — so agents and sessions work against either backend unchanged.
+    `stop` — so agents and sessions work against any backend unchanged.
     """
 
     def __init__(self, name: str, *, binary: Path) -> None:
@@ -707,6 +707,7 @@ class DockerBackend(SharedBackendBehavior):
         host_workdir: Path,
         staged_project: Path | None,
         extra_volumes: ExtraVolumes,
+        cap_seconds: int,
     ) -> DockerSandbox:
         """Create a container from a snapshot image for an arm session."""
         mounts = {GUEST_WORKDIR: DockerVolume.bind(host_mount_path(host_workdir))}

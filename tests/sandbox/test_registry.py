@@ -20,6 +20,12 @@ def test_resolve_sandbox_returns_docker_backend() -> None:
     assert resolved.id == "docker"
 
 
+def test_resolve_sandbox_returns_e2b_backend() -> None:
+    """`e2b` resolves to a backend whose id is `e2b`."""
+    resolved = registry.resolve_sandbox("e2b")
+    assert resolved.id == "e2b"
+
+
 def test_resolve_sandbox_unknown_fails_listing_both_backends() -> None:
     """An unknown backend name fails fast listing every supported value."""
     with pytest.raises(SchemaError, match=r"unsupported sandbox `qemu`") as exc_info:

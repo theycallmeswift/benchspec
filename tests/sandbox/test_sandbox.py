@@ -697,6 +697,38 @@ def test_arm_session_setup_that_outlives_the_cell_cap_stops_the_guest(
     assert guest.stopped is True
 
 
+def test_arm_session_syncs_the_workspace_out_before_stopping_a_guest_capped_in_setup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A cell capped in setup.sh is synced out while its guest is still up."""
+    guest = FakeSandbox()
+    stopped_at_sync: list[bool] = []
+
+    async def boots(**kwargs: object) -> FakeSandbox:
+        """Boot the fake guest at once."""
+        return guest
+
+    async def never_finishes(*args: object, **kwargs: object) -> None:
+        """Hang like an install that never ends."""
+        await asyncio.Event().wait()
+
+    async def record_sync(synced: FakeSandbox, host_workdir: Path) -> None:
+        """Record whether the guest was still up when it was synced."""
+        stopped_at_sync.append(synced.stopped)
+
+    monkeypatch.setattr(sandbox, "run_setup_sh", never_finishes)
+    session = _session_with_a_nearly_spent_deadline(
+        monkeypatch, tmp_path, setup_reldir="evals/x", create_sandbox=boots
+    )
+    monkeypatch.setattr(session._backend, "sync_out", record_sync)
+
+    with pytest.raises(CellTimeoutError):
+        asyncio.run(session.__aenter__())
+
+    assert stopped_at_sync == [False]
+    assert guest.stopped is True
+
+
 def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -711,8 +743,15 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
         """Fake create."""
         return fake
 
+    synced: list[tuple[FakeSandbox, Path]] = []
+
+    async def record_sync(guest: FakeSandbox, host_workdir: Path) -> None:
+        """Record the sync that must follow a capped turn."""
+        synced.append((guest, host_workdir))
+
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
     monkeypatch.setattr(microsandbox_backend, "create_sandbox", fake_create)
+    monkeypatch.setattr(microsandbox_backend, "sync_out", record_sync)
     agent = ClaudeCodeAgent(auth_value="test-token", version="v")
 
     async def drive() -> RunResult:
@@ -737,6 +776,7 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
     assert result.timed_out is True
     assert result.is_error is False
     assert fake.streams[0].killed is True
+    assert synced == [(fake, tmp_path / "wd")]
 def test_arm_session_propagates_create_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

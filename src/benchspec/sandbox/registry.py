@@ -3,7 +3,7 @@
 `registered_backends()` maps a set's `sandbox` value to its implementation and
 `resolve_sandbox()` turns that value into a fresh backend instance. Nothing else in
 benchspec names a runtime: `sandbox.py`, `execution.py`, and `cases.py` drive whatever
-this module hands back. Adding a third backend is additive — implement the
+this module hands back. Adding a backend is additive — implement the
 `SandboxBackend` protocol in its own module and register it here.
 """
 
@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from benchspec.sandbox.backend import SandboxBackend
 from benchspec.sandbox.docker import DockerBackend
+from benchspec.sandbox.e2b import E2BBackend
 from benchspec.sandbox.microsandbox import MicrosandboxBackend
 from benchspec.specs.schema import SchemaError
 
@@ -23,7 +24,7 @@ DEFAULT_SANDBOX = "docker"
 
 def registered_backends() -> dict[str, Callable[[], SandboxBackend]]:
     """Return every implemented backend as a fresh-instance factory, keyed by `sandbox` value."""
-    return {"microsandbox": MicrosandboxBackend, "docker": DockerBackend}
+    return {"microsandbox": MicrosandboxBackend, "docker": DockerBackend, "e2b": E2BBackend}
 
 
 def resolve_sandbox(name: str) -> SandboxBackend:
