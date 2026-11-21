@@ -7,6 +7,7 @@ page shows. Screenshots land in `tmp/watch-screenshots/`.
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -420,6 +421,28 @@ def test_a_phone_shows_boxes_short_rates_and_a_bottom_sheet(tmp_path: Path, page
         expect(sheet).to_be_hidden()
 
 
+def test_a_run_gone_silent_reads_stale_at_every_width(tmp_path: Path, pages: Pages) -> None:
+    """A run gone silent reads stale at every width."""
+    run = Recording(iteration(tmp_path), start_ms=int(time.time() * 1000) - 2_000_000)
+    run.plan("hello", "greets")
+    run.begin()
+    run.play("hello/greets/trial/0", 0)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        phone = pages.open(served, PHONE)
+
+        state = page.locator("#run-state")
+        expect(state).to_have_text(re.compile(r"^stale · no events for 33m \d\ds$"))
+        expect(state).to_have_class("bs-stale")
+        expect(page.locator("#headline .bs-el")).to_have_text("elapsed 4s")
+        expect(page.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
+        pulse = "node => getComputedStyle(node, '::after').animationName"
+        assert page.locator("#matrix .bs-b-running").first.evaluate(pulse) == "none"
+        expect(phone.locator("#run-state")).to_have_text("stale", use_inner_text=True)
+        _shoot(page, "stale-dark", full_page=False)
+
+
 def test_a_phone_scrolls_four_arms_under_a_pinned_eval_column(tmp_path: Path, pages: Pages) -> None:
     """A phone scrolls four arms under a pinned eval column."""
     finished_run(tmp_path)
@@ -485,11 +508,11 @@ def test_watch_refuses_events_in_another_format(tmp_path: Path) -> None:
     """Watch refuses events in another format."""
     events = iteration(tmp_path) / "events-main.jsonl"
     events.parent.mkdir(parents=True)
-    events.write_text('{"format_version": 2, "type": "run.start"}\n', encoding="utf-8")
+    events.write_text('{"format_version": 3, "type": "run.start"}\n', encoding="utf-8")
 
     result = run_benchspec("watch", str(tmp_path), cwd=tmp_path)
 
     assert result.returncode == 2
     assert result.stderr.strip() == (
-        "error: events format_version 2 is not supported by this benchspec"
+        "error: events format_version 3 is not supported by this benchspec"
     )

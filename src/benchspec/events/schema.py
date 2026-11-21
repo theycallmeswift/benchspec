@@ -16,7 +16,7 @@ from benchspec.orchestration.deadline import (
     PHASE_SETUP,
 )
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 PHASES = (PHASE_BIND, PHASE_BOOT, PHASE_SETUP, PHASE_AGENT, PHASE_GRADE)
 
@@ -40,6 +40,7 @@ class ArmInfo(TypedDict):
     harness: str
     model: str
     effort: str
+    timeout: int
 
 
 class PlannedCell(TypedDict):
