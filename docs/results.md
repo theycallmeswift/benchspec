@@ -58,6 +58,10 @@ assertion pass rate; every other cell shows its rate *and* delta:
 
 The `All evals` footer is each arm's pooled rate across every eval in the run.
 
+**Percentages.** Every rate rounds to a whole percent, a half to even: 12.5%
+reads `12%`. `100%` means every check passed and `0%` means none did; a rate
+that would round to either reads `99%` or `1%`.
+
 **Scoped assertions.** Present only when some line's `if:` / `unless:` clause
 did not hold in some arm. Such a line is pooled in *no* arm — the rates, deltas,
 and noise bands above cover only lines graded in every arm — and is reported

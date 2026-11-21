@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from benchspec.reporting import report
-from benchspec.watch.view import STALE_MARGIN_S, assertions_view, fail_step, rate_text
+from benchspec.watch.view import STALE_MARGIN_S, assertions_view, fail_step
 from tests.support.watch import (
     CELL_CAP_S,
     Recording,
@@ -106,23 +106,6 @@ def test_quiet_counts_from_the_agent_phase_without_a_delta_and_a_delta_clears_it
 def test_a_fail_is_shaded_by_its_share_of_checks_passed(passed: int, total: int, step: int) -> None:
     """A fail is shaded by its share of checks passed."""
     assert fail_step(passed, total) == step
-
-
-@pytest.mark.parametrize(
-    ("passed", "total", "text"),
-    [(9, 9, "100%"), (199, 200, "99%"), (1, 300, "1%"), (0, 9, "0%"), (5, 9, "56%")],
-)
-def test_a_rate_reads_100_only_when_all_passed_and_0_only_when_none_did(
-    passed: int, total: int, text: str
-) -> None:
-    """A rate reads 100 only when all passed and 0 only when none did."""
-    assert rate_text(passed, total) == text
-
-
-@pytest.mark.parametrize(("passed", "text"), [(1, "12%"), (3, "38%"), (5, "62%")])
-def test_a_cell_rate_ending_in_a_half_rounds_as_the_report_does(passed: int, text: str) -> None:
-    """A cell rate ending in a half rounds as the report does."""
-    assert rate_text(passed, 8) == text
 
 
 def test_finished_states_are_error_then_timeout_then_fail_then_pass(tmp_path: Path) -> None:
@@ -619,7 +602,7 @@ def test_the_leaderboard_pass_rate_pools_like_benchmark_json(tmp_path: Path) -> 
     cells = _row(fold(run, at=0), "Pass rate")
 
     assert [cell["value"] for cell in cells] == [
-        f"{benchmark['arms'][each['name']]['pass_rate']:.0%}" for each in run.arms
+        report.percent(benchmark["arms"][each["name"]]["pass_rate"]) for each in run.arms
     ]
     assert [cell.get("delta") for cell in cells] == [None, "+30pp", "+40pp", "+28pp"]
     assert [cell.get("best", False) for cell in cells] == [False, False, True, False]
@@ -638,6 +621,26 @@ def test_a_pass_rate_ending_in_a_half_reads_the_same_as_benchmark_md(tmp_path: P
 
     assert [cell["value"] for cell in cells] == ["12%", "100%"]
     assert "| All evals | 12% | 100% (+88pp) |" in report._format_markdown(benchmark)
+
+
+def test_a_rate_with_one_check_off_reads_the_same_everywhere(tmp_path: Path) -> None:
+    """A rate with one check off reads the same in cells, groups, the leaderboard and the report."""
+    run = _one_cell(tmp_path, checks=200)
+    run.done("hello/greets/baseline/0", 70, passed=1)
+    run.done("hello/greets/trial/0", 80, passed=199)
+    benchmark = report.build_benchmark(
+        report.discover_eval_dirs(run.iteration_dir / "skills"), "run", baseline="baseline"
+    )
+
+    view = fold(run, at=90)
+
+    assert [cell["value"] for cell in _row(view, "Pass rate")] == ["1%", "99%"]
+    assert [cell_of(view, "greets", name)["label"] for name in ("baseline", "trial")] == [
+        "1%",
+        "99%",
+    ]
+    assert [each["text"] for each in view["matrix"]["groups"][0]["summaries"]] == ["1%", "99%"]
+    assert "| All evals | 1% | 99% (+99pp) |" in report._format_markdown(benchmark)
 
 
 def test_a_check_scoped_off_one_arm_counts_in_cells_but_not_in_the_pass_rate(

@@ -203,19 +203,6 @@ def measured_duration(milliseconds: float) -> str:
     return live_duration(int(milliseconds))
 
 
-def rate_text(passed: int, total: int) -> str:
-    """The report's percent, but `100%` only when all passed and `0%` only when none did."""
-    text = report.percent(passed / total)
-
-    if text == "100%" and passed < total:
-        return "99%"
-
-    if text == "0%" and passed > 0:
-        return "1%"
-
-    return text
-
-
 def fail_step(passed: int, total: int) -> int:
     """A failed sample's shade: 1 for most checks passed, 3 for fewest."""
     percent = math.floor(100 * passed / total + 0.5)
@@ -590,7 +577,7 @@ class RunView:
         passed = sum(sample.checks()[0] for sample in samples)
         checks = sum(sample.checks()[1] for sample in samples)
         graded = any(state in GRADED for state in states)
-        rate = rate_text(passed, checks) if graded and checks else "—"
+        rate = report.percent(passed / checks) if graded and checks else "—"
 
         kind, muted, short, count, progress = "run", False, "", None, None
         if done == len(samples):
@@ -769,7 +756,7 @@ class RunView:
             cells = [
                 {
                     "value": f"{activation[arm][0]}/{activation[arm][1]}",
-                    "sub": rate_text(*activation[arm]),
+                    "sub": report.percent(activation[arm][0] / activation[arm][1]),
                     "fraction": fractions[arm],
                 }
                 if activation[arm][1]
@@ -1082,7 +1069,7 @@ def _group_summary(samples: list[Sample], now_ms: int, *, live: bool) -> dict:
     done = sum(1 for state in counted if state in FINISHED)
     passed = sum(sample.checks()[0] for sample in samples)
     checks = sum(sample.checks()[1] for sample in samples)
-    rate = rate_text(passed, checks) if checks else None
+    rate = report.percent(passed / checks) if checks else None
     count = f"{done}/{len(counted)}"
 
     if done == len(counted):
