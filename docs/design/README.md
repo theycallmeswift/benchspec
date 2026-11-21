@@ -54,8 +54,7 @@ token in its `usage` ([`tokens.json`](foundations/tokens.json)); ratios in
 ## Logo
 
 Files: [`docs/assets/`](../assets/), listed in [Logos](brand/logos.md).
-`scripts/render_assets.py` generates them; the dark mark and outlined wordmarks
-arrive with [#184](https://github.com/theycallmeswift/benchspec/issues/184).
+`scripts/render_assets.py` generates them (`make assets`).
 
 ### Construction
 
@@ -136,10 +135,7 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
   wordmark only. No others.
 - **Loading:** self-hosted from `fonts/` (`type.fonts`; `tokens.css` writes
   `@font-face`). Never from a third-party origin; family stacks only cover
-  missing files. The woff2 files aren't committed yet: they ship with the watch
-  implementation
-  ([#180](https://github.com/theycallmeswift/benchspec/issues/180)) and
-  [#184](https://github.com/theycallmeswift/benchspec/issues/184).
+  missing files. Brand art renders from the TTFs in `scripts/fonts/`.
 - **Ligatures:** `font-variant-ligatures: none` on `.bs-app` and `.bs-brand`, so
   `--count`, `->` and `>=` render as typed.
 - **Swapping a family:** new woff2 files in `fonts/`, its `type.fonts` entries,

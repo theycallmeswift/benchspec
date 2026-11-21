@@ -27,8 +27,8 @@ e2e:  ## Run the in-repo hello suite end to end, natively and through OpenRouter
 evals:  ## Run the binder corpus (binder quality, not framework function) on WORKERS workers (default 6); EVAL_ARGS="--collect-only -q" dry-runs collection
 	uv run pytest -m binder_corpus -n $(WORKERS) evals/binder $(EVAL_ARGS)
 
-assets:  ## Re-render the raster brand assets in docs/assets (terminal mock PNG/GIF, social card)
-	uv run scripts/render_assets.py
+assets:  ## Re-render the brand assets in docs/assets (logo SVGs, terminal mock PNG/GIF, social card)
+	uv run python scripts/render_assets.py
 
 lint:  ## Lint with Ruff, type-check with ty, then houserules
 	$(MAKE) lint:ruff
