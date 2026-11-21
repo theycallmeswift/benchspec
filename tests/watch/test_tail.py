@@ -13,7 +13,7 @@ from benchspec.watch.tail import EventTail, UnsupportedFormatError, check_format
 
 def _line(event_type: str = "cell.delta", **fields: object) -> bytes:
     """One enveloped event line."""
-    event = {"format_version": 1, "type": event_type, "ts_ms": 1, "worker": "gw0", **fields}
+    event = {"format_version": 2, "type": event_type, "ts_ms": 1, "worker": "gw0", **fields}
 
     return json.dumps(event, ensure_ascii=False).encode() + b"\n"
 
@@ -93,9 +93,9 @@ def test_skips_a_file_removed_since_it_was_listed(
 
 def test_refuses_another_format_version(tmp_path: Path) -> None:
     """Refuses another format version."""
-    newer = _line().replace(b'"format_version": 1', b'"format_version": 2')
+    newer = _line().replace(b'"format_version": 2', b'"format_version": 3')
     _append(tmp_path / "events-main.jsonl", newer)
-    message = "events format_version 2 is not supported by this benchspec"
+    message = "events format_version 3 is not supported by this benchspec"
 
     with pytest.raises(UnsupportedFormatError, match=message):
         EventTail(tmp_path).poll()

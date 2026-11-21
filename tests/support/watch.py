@@ -13,12 +13,19 @@ from benchspec.watch.tail import EventTail
 from benchspec.watch.view import RunView, read_gradings
 
 T0_MS = 1_800_000_000_000
+CELL_CAP_S = 900
 PHASE_OFFSETS_S = {"bind": 0, "boot": 1, "setup": 3, "agent": 4}
 
 
 def arm(name: str, harness: str = "claude-code", model: str = "sonnet") -> dict:
     """One arm as `run.start` lists it."""
-    return {"name": name, "harness": harness, "model": model, "effort": "medium"}
+    return {
+        "name": name,
+        "harness": harness,
+        "model": model,
+        "effort": "medium",
+        "timeout": CELL_CAP_S,
+    }
 
 
 @dataclass

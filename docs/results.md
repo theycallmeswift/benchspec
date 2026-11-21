@@ -299,7 +299,7 @@ Every event carries the envelope:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `format_version` | int | `1`. Bumped on any breaking change; reject other versions. |
+| `format_version` | int | `2`. Bumped on any breaking change; reject other versions. |
 | `type` | str | One of the event types below. |
 | `ts_ms` | int | Host wall clock, Unix epoch milliseconds. |
 | `worker` | str | `main` or `gwN`, matching the file suffix. |
@@ -309,7 +309,7 @@ artifact path does.
 
 | Type | Fields | Emitted |
 |---|---|---|
-| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`), `cells`, `cell_count` | Once, by the controller, after collection |
+| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`, `timeout`), `cells`, `cell_count` | Once, by the controller, after collection |
 | `cell.start` | `cell`, `skill`, `eval_id`, `arm`, `sample`, `harness`, `model` | When a sample begins |
 | `cell.phase` | `cell`, `phase` | On entering `bind`, `boot`, `setup`, `agent`, or `grade`; each at most once, in that order |
 | `cell.delta` | `cell`, `kind` (`tool_call` or `text`), `name` (the tool, else `null`), `text` | Once per tool call or assistant text block of the agent's turn |
