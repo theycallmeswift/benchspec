@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -153,12 +154,23 @@ class Recording:
             "cell.delta", at, worker=worker, cell=cell, kind="tool_call", name=name, text=text
         )
 
-    def play(self, cell: str, at: float, *, through: str = "agent", worker: str = "gw0") -> None:
-        """Emit `cell.start` and each phase up to `through`, at the usual offsets."""
+    def play(
+        self,
+        cell: str,
+        at: float,
+        *,
+        through: str = "agent",
+        held_s: float = 0,
+        worker: str = "gw0",
+    ) -> None:
+        """Emit `cell.start`, then each phase up to `through` at the usual offsets.
+
+        `held_s` is how long a snapshot build holds the sample before `bind`.
+        """
         self.start(cell, at, worker=worker)
 
         for phase, offset in PHASE_OFFSETS_S.items():
-            self.phase(cell, phase, at + offset, worker=worker)
+            self.phase(cell, phase, at + held_s + offset, worker=worker)
             if phase == through:
                 return
 
@@ -169,20 +181,24 @@ class Recording:
         *,
         passed: int | None = None,
         wall_s: float = 60,
+        held_s: float = 0,
         timed_out: bool = False,
         first_output_ms: int | None = 2400,
         cost_usd: float | None = 0.06,
         output: tuple[tuple[str, str], ...] = (("Bash", "ls"),),
         worker: str = "gw0",
     ) -> None:
-        """Run a sample start to `cell.done` at `at`, and write its grading and timing."""
+        """Run a sample start to `cell.done` at `at`, and write its grading and timing.
+
+        `wall_s` includes `held_s`, the wait for a snapshot build before `bind`.
+        """
         planned = next(each for each in self.planned if each["cell"] == cell)
         total = sum(planned["applies"])
         passed = total if passed is None else passed
 
-        self.play(cell, at - wall_s, worker=worker)
+        self.play(cell, at - wall_s, held_s=held_s, worker=worker)
         for index, (name, text) in enumerate(output):
-            self.delta(cell, at - wall_s + 6 + 9 * index, text, name=name, worker=worker)
+            self.delta(cell, at - wall_s + held_s + 6 + 9 * index, text, name=name, worker=worker)
 
         self.phase(cell, "grade", at - 5, worker=worker)
         timing: dict[str, object] = {
@@ -478,6 +494,58 @@ def finished_run(root: Path) -> Recording:
     run.end(at + 20, exit_status=1)
 
     return run
+
+
+def uneven_run(root: Path) -> Recording:
+    """A finished 72-sample run on six workers, four arms, three samples a cell.
+
+    `codex` runs several times slower than the rest, a snapshot build holds the
+    `opencode` samples started in the first 150 seconds, and the last `codex` sample
+    outruns every other and ends the run alone.
+    """
+    work_s = {"bare": 16, "claude-code": 20, "codex": 62, "opencode": 24}
+    eval_pace = {
+        "greets": 1.0,
+        "fixes-typo": 0.8,
+        "adds-test": 1.25,
+        "renames-symbol": 0.9,
+        "writes-docs": 1.1,
+        "reads-config": 1.0,
+    }
+    sample_pace = (0.9, 1.0, 1.15)
+    run = Recording(iteration(root), arms=[arm(name) for name in work_s], baseline="bare")
+
+    for eval_id in eval_pace:
+        run.plan("e2e", eval_id, count=3)
+
+    run.begin()
+    free_at = {f"gw{number}": 0.0 for number in range(6)}
+
+    for planned in run.planned:
+        worker = min(free_at, key=lambda name: free_at[name])
+        started = free_at[worker]
+        held_s = max(150 - started, 0) if planned["arm"] == "opencode" else 0
+        pace = eval_pace[planned["eval_id"]] * sample_pace[planned["sample"]]
+        wall_s = held_s + work_s[planned["arm"]] * pace
+        if planned["cell"] == "e2e/reads-config/codex/2":
+            wall_s = 110
+
+        free_at[worker] = started + wall_s
+        run.done(planned["cell"], free_at[worker], wall_s=wall_s, held_s=held_s, worker=worker)
+
+    run.end(max(free_at.values()))
+
+    return run
+
+
+def replay(run: Recording) -> Iterator[tuple[dict, RunView]]:
+    """Each event of a recording in time order, with the view folded up to it."""
+    view = RunView("tmp/evals/iteration_12")
+
+    for event in sorted(EventTail(run.iteration_dir).poll(), key=lambda event: event["ts_ms"]):
+        view.apply(event)
+
+        yield event, view
 
 
 def fold(run: Recording, *, at: float) -> dict:

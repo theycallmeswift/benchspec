@@ -87,10 +87,13 @@ longest arm's cell `timeout`, and returns to live if events resume.
 - **The leaderboard pass rate** pools only checks every arm runs, exactly as
   [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so it
   can differ from the cell rates. Its other rows cover graded samples.
-- **Time left.** Each unfinished sample is expected to take the mean time of
-  the finished ones, less the time it has run. Their sum is divided by the
-  worker count, or by the samples left when fewer. Nothing shows until a
-  sample finishes, or while every running sample is past the mean.
+- **Time left.** The rest of the run played forward: each waiting sample, in
+  plan order, goes to the worker that frees first. A sample is expected to take
+  the mean of its arm's finished samples, or of every arm's until one of its
+  own finishes; a running sample, the mean of what those that ran longer still
+  had left. Time before the agent starts is counted apart, at its median, so a
+  snapshot build does not pass for work. Nothing shows until a sample finishes,
+  or while every running sample has outrun the finished ones.
 - **Cost** is what the harness reported, never estimated: `not reported`
   otherwise.
 
