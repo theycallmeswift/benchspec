@@ -83,7 +83,9 @@ benchspec builds one **snapshot** per configuration and boots every cell from it
 1. **Base image**: `ubuntu:latest`, or `[tool.benchspec] base_image`.
 2. **Agent provision**: the harness adapter installs its CLI (Claude Code,
    `curl -fsSL https://claude.ai/install.sh | bash`; Codex and OpenCode, an npm
-   install of the pinned version).
+   install of the pinned version). OpenCode's snapshot also carries `ripgrep`
+   and its plugin dependency, and its cells skip the model-catalog fetch, so a
+   cell needs no host beyond the provider's.
 3. **Skills-home bridge**: the agent's skill directory is symlinked to the fixed
    `/home/benchspec/skills`, so one `setup.sh` path works for every harness.
 4. **Environment script**: `[tool.benchspec] environment_script`, if declared,

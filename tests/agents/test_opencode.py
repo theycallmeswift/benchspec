@@ -666,6 +666,8 @@ def test_guest_env_carries_home_tz_and_pinned_version() -> None:
     # exporting the pinned version lets the provision script's npm install pick it
     # up from the same env when the snapshot is built.
     assert env["BENCHSPEC_OPENCODE_VERSION"] == "0.4.2"
+    # a guest limited to its provider host cannot reach the model catalog's
+    assert env["OPENCODE_DISABLE_MODELS_FETCH"] == "1"
 
 
 def test_from_env_env_var_beats_pyproject(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -738,6 +740,25 @@ def test_provision_script_verifies_warmed_db() -> None:
     assert "opencode.db" in script
     # the warm step must be followed by an existence check, not just fire-and-forget
     assert "test -f /root/.local/share/opencode/opencode.db" in script
+
+
+def test_provision_script_installs_ripgrep() -> None:
+    """The snapshot carries `rg`, which OpenCode otherwise downloads at first use."""
+    script = OpenCodeAgent().provision_script()
+
+    install_line = next(line for line in script.splitlines() if "apt-get install" in line)
+
+    assert "ripgrep" in install_line.split()
+
+
+def test_provision_script_verifies_warmed_plugin_dependency() -> None:
+    """An instance start at build time installs the dependency a cell cannot fetch."""
+    script = OpenCodeAgent().provision_script()
+
+    warm, _, check = script.rpartition("/usr/local/bin/opencode models > /dev/null 2>&1; ")
+
+    assert warm
+    assert check == "test -d /root/.config/opencode/node_modules/@opencode-ai/plugin"
 
 
 def test_provision_script_pre_approves_every_permission() -> None:
