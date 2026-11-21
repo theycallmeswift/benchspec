@@ -48,6 +48,8 @@ dev = [
     "ty>=0.0.79,<0.1",
     "playwright>=1.63",
     "e2b>=2.64,<3",
+    "fonttools>=4.60,<5",
+    "pillow>=12,<13",
 ]
 
 [project.urls]
@@ -85,6 +87,8 @@ include = [
     "LICENSE",
     "pyproject.toml",
 ]
+# These cover scripts/, which stays in the repository.
+exclude = ["tests/scripts"]
 
 [tool.uv]
 package = true
@@ -112,11 +116,6 @@ select = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.ty.src]
-# The brand-asset script declares its own PEP 723 dependencies (pillow), which never
-# install into the project venv; ty checks it only when it is named on the command line.
-exclude-scripts = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "evals"]

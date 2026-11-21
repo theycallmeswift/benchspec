@@ -1,72 +1,87 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pillow>=11,<13"]
-# ///
-"""Render the raster brand assets under ``docs/assets`` from one source of truth.
+"""Render the brand assets under ``docs/assets`` from one source of truth.
 
-Run with ``uv run scripts/render_assets.py`` (or ``make assets``). It rewrites:
+Run with ``make assets``. It rewrites:
 
-- ``benchmark-terminal.png`` — the terminal mock of ``benchspec run`` and its matrix.
-- ``benchmark-terminal.gif`` — the same mock, animated: the command is typed, the
+- ``benchspec-mark.svg`` and ``benchspec-mark-dark.svg``: the mark for light and
+  dark grounds.
+- ``benchspec-wordmark-light.svg`` and ``benchspec-wordmark-dark.svg``: the mark
+  plus the name, outlined to paths.
+- ``benchmark-terminal.png``: the terminal mock of ``benchspec run`` and its matrix.
+- ``benchmark-terminal.gif``: the same mock, animated: the command is typed, the
   progress line lands, then the report is revealed one line at a time.
-- ``social-preview.png`` — the 1280x640 GitHub social card.
+- ``social-preview.png``: the 1280x640 GitHub social card.
 
-The mark geometry mirrors ``benchspec-mark.svg``; the terminal colors mirror the ANSI
-bands ``benchspec.reporting.report.terminal_matrix`` uses (rates green ≥80%, yellow
+All text is set in the JetBrains Mono files under ``scripts/fonts``, so the output
+is the same on every machine. The terminal colors mirror the ANSI bands
+``benchspec.reporting.report.terminal_matrix`` uses (rates green ≥80%, yellow
 ≥50%, red below; deltas green up, red down, yellow zero).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from pathlib import Path
 
+from fontTools.pens.svgPathPen import SVGPathPen
+from fontTools.pens.transformPen import TransformPen
+from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 PROJECT_NAME = "benchspec"
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "docs" / "assets"
+FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 
 NAVY = "#1B1F3B"
 ORANGE = "#E85D2F"
 SALMON = "#F2A48C"
 GRAY = "#A5ACBE"
+DARK_GROUND_GRAY = "#6E7891"
+
+TERMINAL_TEXT = "#E8ECF1"
+TERMINAL_MUTED = "#8B93A7"
+TERMINAL_PROMPT = "#F0764B"
+TERMINAL_GREEN = "#3FBF7F"
+TERMINAL_YELLOW = "#E3BF5F"
+TERMINAL_RED = "#E25E59"
 
 # Shapes are drawn this many times larger, then downsampled, because Pillow's
 # primitives are not anti-aliased. Text is anti-aliased natively and drawn at 1x.
 SUPERSAMPLE = 4
 
-# Menlo is Apple's DejaVu Sans Mono derivative, so the Linux fallback renders the
-# same glyphs at the same advance width.
-MONOSPACE_FONTS = [
-    ("/System/Library/Fonts/Menlo.ttc", 0, "/System/Library/Fonts/Menlo.ttc", 1),
-    (
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        0,
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-        0,
-    ),
-]
+
+class FontWeight(StrEnum):
+    """The bundled JetBrains Mono weights, valued by their file name suffix."""
+
+    REGULAR = "Regular"
+    SEMIBOLD = "SemiBold"
+    BOLD = "Bold"
 
 
-def load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """Load the first available monospace font at ``size``.
-
-    Args:
-        size: Font size in pixels.
-        bold: Load the bold face instead of regular.
-
-    Returns:
-        The loaded font.
+def font_path(weight: FontWeight) -> Path:
+    """Return the bundled font file for ``weight``.
 
     Raises:
-        FileNotFoundError: if none of ``MONOSPACE_FONTS`` exists on this machine.
+        FileNotFoundError: if the file is missing from ``FONTS_DIR``.
     """
-    for regular_path, regular_index, bold_path, bold_index in MONOSPACE_FONTS:
-        path, index = (bold_path, bold_index) if bold else (regular_path, regular_index)
-        if Path(path).exists():
-            return ImageFont.truetype(path, size, index=index)
+    path = FONTS_DIR / f"JetBrainsMono-{weight}.ttf"
 
-    raise FileNotFoundError(f"no monospace font found; looked for {MONOSPACE_FONTS}")
+    # Pillow searches the system font folders for a file it can't open.
+    if not path.is_file():
+        raise FileNotFoundError(f"bundled font missing: {path}")
+
+    return path
+
+
+def load_font(size: int, weight: FontWeight = FontWeight.REGULAR) -> ImageFont.FreeTypeFont:
+    """Load the bundled font at ``size`` pixels.
+
+    Raises:
+        FileNotFoundError: if the font file is missing from ``FONTS_DIR``.
+    """
+    # Basic layout applies no ligatures, so `--count` renders as typed; Raqm,
+    # where Pillow has it, would join the dashes.
+    return ImageFont.truetype(font_path(weight), size, layout_engine=ImageFont.Layout.BASIC)
 
 
 def supersampled_canvas(width: int, height: int, background: str) -> Image.Image:
@@ -145,7 +160,7 @@ class BracketMatrix:
         )
 
 
-# The 64x64 mark, matching benchspec-mark.svg unit for unit.
+MARK_SIZE = 64
 MARK = BracketMatrix(
     column_xs=[19, 35],
     row_ys=[14, 27, 40],
@@ -155,6 +170,16 @@ MARK = BracketMatrix(
     left_bracket=[(14, 8), (6, 8), (6, 56), (14, 56)],
     right_bracket=[(50, 8), (58, 8), (58, 56), (50, 56)],
     square_colors=[[GRAY, ORANGE], [GRAY, SALMON], [GRAY, ORANGE]],
+)
+
+
+DARK_MARK = replace(
+    MARK,
+    square_colors=[
+        [DARK_GROUND_GRAY, TERMINAL_PROMPT],
+        [DARK_GROUND_GRAY, SALMON],
+        [DARK_GROUND_GRAY, TERMINAL_PROMPT],
+    ],
 )
 
 
@@ -177,6 +202,99 @@ def draw_bracket_matrix(
                 radius=geometry.corner_radius,
                 color=color,
             )
+
+
+WORDMARK_WIDTH = 250
+WORDMARK_FONT_SIZE = 30
+WORDMARK_LEFT = 72
+WORDMARK_BASELINE = 43
+WORDMARK_LETTER_SPACING_EM = -0.01
+
+
+def svg_number(value: float) -> str:
+    """Format a coordinate with at most two decimals and no negative zero."""
+    return f"{round(value, 2) + 0:g}"
+
+
+def wordmark_outline() -> str:
+    """Return the SVG path data of the name, outlined from the bundled SemiBold.
+
+    Raises:
+        ValueError: if the font has no Unicode character map.
+    """
+    font = TTFont(font_path(FontWeight.SEMIBOLD))
+    glyphs = font.getGlyphSet()
+    glyph_names = font.getBestCmap()
+    # fontTools sets table fields while parsing, where the type checker can't see them.
+    units_per_em = int(vars(font["head"])["unitsPerEm"])
+
+    if glyph_names is None:
+        raise ValueError("the bundled SemiBold has no Unicode character map")
+
+    scale = WORDMARK_FONT_SIZE / units_per_em
+    pen = SVGPathPen(glyphs, ntos=svg_number)
+
+    glyph_left = float(WORDMARK_LEFT)
+    for character in PROJECT_NAME:
+        glyph = glyphs[glyph_names[ord(character)]]
+        glyph.draw(TransformPen(pen, (scale, 0, 0, -scale, glyph_left, WORDMARK_BASELINE)))
+        glyph_left += (glyph.width + WORDMARK_LETTER_SPACING_EM * units_per_em) * scale
+
+    return pen.getCommands()
+
+
+def bracket_svg(bracket: list[tuple[float, float]], *, color: str, stroke: float) -> str:
+    """Return one bracket as a round-capped SVG path."""
+    start, *rest = (f"{svg_number(x)} {svg_number(y)}" for x, y in bracket)
+    path_data = f"M{start} " + " ".join(f"L{point}" for point in rest)
+
+    return (
+        f'<path d="{path_data}" fill="none" stroke="{color}" '
+        f'stroke-width="{svg_number(stroke)}" stroke-linecap="round"/>'
+    )
+
+
+def logo_svg(mark: BracketMatrix, *, ink: str, with_wordmark: bool) -> str:
+    """Return a logo file: the mark, then the outlined name when ``with_wordmark``.
+
+    Args:
+        mark: Geometry and square colors of the 64x64 mark.
+        ink: Fill of the brackets and the name.
+        with_wordmark: Widen the canvas and add the name to the right of the mark.
+
+    Returns:
+        The SVG document.
+    """
+    width = WORDMARK_WIDTH if with_wordmark else MARK_SIZE
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{MARK_SIZE}" '
+        f'viewBox="0 0 {width} {MARK_SIZE}" role="img" aria-label="{PROJECT_NAME}">',
+        bracket_svg(mark.left_bracket, color=ink, stroke=mark.bracket_stroke),
+        bracket_svg(mark.right_bracket, color=ink, stroke=mark.bracket_stroke),
+    ]
+
+    size, radius = svg_number(mark.square_size), svg_number(mark.corner_radius)
+    for row_y, row_colors in zip(mark.row_ys, mark.square_colors, strict=True):
+        for column_x, color in zip(mark.column_xs, row_colors, strict=True):
+            lines.append(
+                f'<rect x="{svg_number(column_x)}" y="{svg_number(row_y)}" '
+                f'width="{size}" height="{size}" rx="{radius}" fill="{color}"/>'
+            )
+
+    if with_wordmark:
+        lines.append(f'<path d="{wordmark_outline()}" fill="{ink}"/>')
+
+    return "\n".join([*lines, "</svg>", ""])
+
+
+def logo_svgs() -> dict[str, str]:
+    """Return every logo file's content by file name."""
+    return {
+        "benchspec-mark.svg": logo_svg(MARK, ink=NAVY, with_wordmark=False),
+        "benchspec-mark-dark.svg": logo_svg(DARK_MARK, ink=TERMINAL_TEXT, with_wordmark=False),
+        "benchspec-wordmark-light.svg": logo_svg(MARK, ink=NAVY, with_wordmark=True),
+        "benchspec-wordmark-dark.svg": logo_svg(DARK_MARK, ink=TERMINAL_TEXT, with_wordmark=True),
+    }
 
 
 SOCIAL_SIZE = (1280, 640)
@@ -206,7 +324,7 @@ def render_social_preview() -> Image.Image:
     card = downsample(canvas)
 
     text = ImageDraw.Draw(card)
-    wordmark_font = load_font(64, bold=True)
+    wordmark_font = load_font(64, FontWeight.BOLD)
     wordmark_left_bearing = wordmark_font.getbbox(PROJECT_NAME)[0]
     text.text(
         (221 - wordmark_left_bearing, 245), PROJECT_NAME, font=wordmark_font, fill=NAVY, anchor="la"
@@ -231,15 +349,8 @@ TERMINAL_BODY = "#14172E"
 TERMINAL_TITLE_BAR = "#1F2440"
 TERMINAL_TITLE_BAR_HEIGHT = 41
 TERMINAL_CORNER_RADIUS = 10
-TERMINAL_DOTS = [(24, "#F0764B"), (44, SALMON), (64, GRAY)]
+TERMINAL_DOTS = [(24, TERMINAL_PROMPT), (44, SALMON), (64, GRAY)]
 TERMINAL_DOT_RADIUS = 6.5
-
-TERMINAL_TEXT = "#E8ECF1"
-TERMINAL_MUTED = "#8B93A7"
-TERMINAL_PROMPT = "#F0764B"
-TERMINAL_GREEN = "#3FBF7F"
-TERMINAL_YELLOW = "#E3BF5F"
-TERMINAL_RED = "#E25E59"
 
 TERMINAL_FONT_SIZE = 15
 TERMINAL_TEXT_LEFT = 25
@@ -259,7 +370,6 @@ class Span:
 
     text: str
     color: str = TERMINAL_TEXT
-    bold: bool = False
 
 
 @dataclass(frozen=True)
@@ -288,9 +398,9 @@ def delta_color(delta_pp: int) -> str:
     return TERMINAL_YELLOW
 
 
-def rate_cell(rate: int, delta_pp: int | None = None, *, bold_rate: bool = False) -> list[Span]:
+def rate_cell(rate: int, delta_pp: int | None = None) -> list[Span]:
     """Render one matrix cell: a bare rate for the baseline arm, else ``rate (+Npp)``."""
-    spans = [Span(f"{rate}%", color=rate_color(rate), bold=bold_rate)]
+    spans = [Span(f"{rate}%", color=rate_color(rate))]
     if delta_pp is not None:
         spans.append(Span(f" ({delta_pp:+d}pp)", color=delta_color(delta_pp)))
     return spans
@@ -327,9 +437,7 @@ def progress_line(dots: int, *, complete: bool) -> TerminalLine:
 def report_lines() -> list[TerminalLine]:
     """Render the end-of-run report block, one entry per revealed line."""
     rule = f" {PROJECT_NAME} benchmark ".center(RULE_WIDTH, "=")
-    header = matrix_line(
-        Span("Eval", bold=True), [[Span("baseline", bold=True)], [Span("trial", bold=True)]]
-    )
+    header = matrix_line(Span("Eval"), [[Span("baseline")], [Span("trial")]])
     return [
         TerminalLine([Span(rule, color=TERMINAL_MUTED)], gap_before=REPORT_GAP),
         header,
@@ -339,9 +447,7 @@ def report_lines() -> list[TerminalLine]:
             Span("hello-outside/allows-filesystem-traversal"), [rate_cell(0), rate_cell(100, 100)]
         ),
         TerminalLine([Span("-" * TERMINAL_COLUMNS, color=TERMINAL_MUTED)]),
-        matrix_line(
-            Span("All evals", bold=True), [rate_cell(17), rate_cell(100, 83, bold_rate=True)]
-        ),
+        matrix_line(Span("All evals"), [rate_cell(17), rate_cell(100, 83)]),
         TerminalLine([Span("Report: tmp/evals/iteration_01/benchmark.md", color=TERMINAL_MUTED)]),
     ]
 
@@ -381,15 +487,13 @@ def render_terminal_frame(chrome: Image.Image, lines: list[TerminalLine]) -> Ima
     """Type ``lines`` onto a copy of the terminal chrome."""
     frame = chrome.copy()
     draw = ImageDraw.Draw(frame)
-    regular = load_font(TERMINAL_FONT_SIZE)
-    bold = load_font(TERMINAL_FONT_SIZE, bold=True)
+    font = load_font(TERMINAL_FONT_SIZE)
 
     line_top = TERMINAL_FIRST_LINE_TOP
     for line in lines:
         line_top += line.gap_before
         cursor_x = TERMINAL_TEXT_LEFT
         for span in line.spans:
-            font = bold if span.bold else regular
             draw.text((cursor_x, line_top), span.text, font=font, fill=span.color, anchor="la")
             cursor_x += font.getlength(span.text)
         line_top += TERMINAL_LINE_PITCH
@@ -455,15 +559,30 @@ def write_gif(path: Path, frames: list[Image.Image], durations: list[int]) -> No
     )
 
 
-def main() -> None:
-    """Render every raster asset into ``ASSETS_DIR``."""
-    frames, durations = render_terminal_frames()
-    frames[-1].save(ASSETS_DIR / "benchmark-terminal.png", optimize=True)
-    write_gif(ASSETS_DIR / "benchmark-terminal.gif", frames, durations)
-    render_social_preview().save(ASSETS_DIR / "social-preview.png", optimize=True)
+def render_assets(assets_dir: Path) -> list[Path]:
+    """Render every brand asset into ``assets_dir`` and return the files written."""
+    written = []
+    for name, svg in logo_svgs().items():
+        (assets_dir / name).write_text(svg, encoding="utf-8", newline="\n")
+        written.append(assets_dir / name)
 
-    for name in ("benchmark-terminal.png", "benchmark-terminal.gif", "social-preview.png"):
-        print(f"wrote {ASSETS_DIR / name}")
+    frames, durations = render_terminal_frames()
+    frames[-1].save(assets_dir / "benchmark-terminal.png", optimize=True)
+    write_gif(assets_dir / "benchmark-terminal.gif", frames, durations)
+    render_social_preview().save(assets_dir / "social-preview.png", optimize=True)
+
+    return [
+        *written,
+        assets_dir / "benchmark-terminal.png",
+        assets_dir / "benchmark-terminal.gif",
+        assets_dir / "social-preview.png",
+    ]
+
+
+def main() -> None:
+    """Render every brand asset into ``ASSETS_DIR``."""
+    for path in render_assets(ASSETS_DIR):
+        print(f"wrote {path}")
 
 
 if __name__ == "__main__":
