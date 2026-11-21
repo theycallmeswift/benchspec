@@ -935,7 +935,7 @@ def test_run_eval_arm_mounts_the_stage_and_locates_setup_by_the_repo_layout(
         bind=_punt_all,
     )
 
-    assert session_factory.calls[0]["host_repo_root"] == stage
+    assert session_factory.calls[0]["staged_project"] == stage
     assert session_factory.calls[0]["setup_reldir"] == "skills/myskill/evals/alpha"
 
 

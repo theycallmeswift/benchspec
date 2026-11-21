@@ -448,13 +448,13 @@ def test_build_snapshot_removes_the_build_container_when_provisioning_fails(
 def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credential(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Verify an arm container binds the room rw, the project ro, and carries the credential."""
+    """An arm container binds the room rw and the stage ro, unpacked, with the credential."""
     command_log = tmp_path / "commands.log"
     monkeypatch.setenv("BENCHSPEC_DOCKER_COMMAND_LOG", str(command_log))
     room = tmp_path / "room"
     room.mkdir()
-    stage = tmp_path / "stage"
-    stage.mkdir()
+    stage = tmp_path / "run" / "project"
+    stage.mkdir(parents=True)
     backend = _docker_backend(tmp_path, monkeypatch)
 
     created = asyncio.run(
@@ -463,7 +463,7 @@ def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credent
             snapshot="snap",
             name="benchspec-eval-hello-trial-main",
             host_workdir=room,
-            host_repo_root=stage,
+            staged_project=stage,
             extra_volumes=_agent_extra_volumes,
         )
     )
@@ -475,6 +475,7 @@ def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credent
         f"-v {room.resolve()}:/workspace -v {stage.resolve()}:/project:ro "
         "-e ANTHROPIC_API_KEY=test-token benchspec-snapshot:snap sleep infinity",
     ]
+    assert list(stage.parent.iterdir()) == [stage]
 
 
 def test_ps_argv_filters_by_name_prefix_and_prints_names() -> None:

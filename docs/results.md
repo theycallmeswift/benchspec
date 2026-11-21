@@ -321,11 +321,11 @@ artifact path does.
   `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, and `applies`, one
   flag per assertion line, true where the line is graded in that arm. A sample
   with no true flag grades nothing.
-- **Phases.** `bind` is the binder; `boot` stages the project and creates the
-  sandbox; `setup` is `setup.sh`; `agent` is the turn; `grade` is everything
-  after it. A [timed-out sample](#timed-out-samples) skips the phases the cap
-  cut off. A first-run snapshot build sits between `cell.start` and `bind`,
-  in no phase, so a `cell.error` raised there has a `null` `phase`.
+- **Phases.** `bind` is the binder; `boot` creates the sandbox; `setup` is
+  `setup.sh`; `agent` is the turn; `grade` is everything after it. A
+  [timed-out sample](#timed-out-samples) skips the phases the cap cut off. A
+  first-run snapshot build sits between `cell.start` and `bind`, in no phase,
+  so a `cell.error` raised there has a `null` `phase`.
 - **Deltas** carry one line of at most 160 characters: a tool call's `command`,
   `file_path`, `path`, `pattern`, or `skill` argument (else its arguments as
   JSON), or a text block's first line. Tool results are never emitted.

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import os
+import stat
 import subprocess
 import tarfile
+import time
 from pathlib import Path
-from typing import NoReturn
+from typing import Literal, NoReturn
+from unittest import mock
 
 import pytest
 
@@ -165,34 +169,48 @@ def test_stage_project_refuses_a_stage_that_still_holds_a_dotenv_file(
     assert list(tmp_path.glob("benchspec-project-*")) == []
 
 
-def test_discard_stage_tolerates_none_and_missing_dirs(tmp_path: Path) -> None:
-    """Verify discard is a no-op for None and for a stage already gone."""
-    project.discard_stage(None)
-    project.discard_stage(tmp_path / "never-created")
+def test_stage_project_stages_into_a_private_run_directory(tmp_path: Path) -> None:
+    """The stage's parent is a fresh directory only the owner can enter."""
+    repo_root = tmp_path / "repo"
+    _git_repo_with_secrets(repo_root)
 
-    staged = tmp_path / "stage"
-    staged.mkdir()
-    project.discard_stage(staged)
+    staged = project.stage_project(repo_root, staging_parent=tmp_path)
 
-    assert not staged.exists()
+    assert staged.parent.parent == tmp_path
+    assert stat.S_IMODE(staged.parent.stat().st_mode) == 0o700
+    assert list(staged.parent.iterdir()) == [staged]
 
 
 def _stage_with_a_link(tmp_path: Path) -> Path:
-    """A stage holding a nested file and a symlink."""
-    staged = tmp_path / "stage"
+    """A stage in its run directory, holding a nested file and a symlink."""
+    staged = tmp_path / "run" / "project"
     _write(staged / "skills" / "hello" / "SKILL.md", "# hello\n")
     (staged / "CLAUDE.md").symlink_to("skills/hello/SKILL.md")
 
     return staged
 
 
-def test_stage_archive_packs_the_stage_next_to_it(tmp_path: Path) -> None:
+def test_discard_stage_removes_the_run_directory_and_tolerates_none_and_missing(
+    tmp_path: Path,
+) -> None:
+    """Discard takes the stage, its archive and their directory; None and a gone stage pass."""
+    project.discard_stage(None)
+    project.discard_stage(tmp_path / "never-created" / "project")
+    staged = _stage_with_a_link(tmp_path)
+    project.stage_archive(staged)
+
+    project.discard_stage(staged)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_stage_archive_packs_the_stage_into_its_run_directory(tmp_path: Path) -> None:
     """The archive sits beside the stage and holds its layout, links kept as links."""
     staged = _stage_with_a_link(tmp_path)
 
     archive = project.stage_archive(staged)
 
-    assert archive.parent == staged.parent
+    assert archive == staged.parent / "project.tar.gz"
     with tarfile.open(archive, "r:gz") as tar:
         members = {member.name: member for member in tar.getmembers()}
     assert members["skills/hello/SKILL.md"].isfile()
@@ -200,23 +218,43 @@ def test_stage_archive_packs_the_stage_next_to_it(tmp_path: Path) -> None:
     assert members["CLAUDE.md"].linkname == "skills/hello/SKILL.md"
 
 
-def test_stage_archive_is_built_once(tmp_path: Path) -> None:
-    """Later calls return the first archive without packing again."""
+def _pack_logging_each_build(staged: Path, builds: Path) -> None:
+    """In a racing process: ask for the archive, logging any build this process does."""
+    real_open = tarfile.open
+
+    def slow_logged_open(name: Path, mode: Literal["w:gz"]) -> tarfile.TarFile:
+        """Log the build, then hold the lock long enough for the others to queue."""
+        with builds.open("a") as log:
+            log.write("build\n")
+        time.sleep(0.2)
+
+        return real_open(name, mode)
+
+    with mock.patch.object(project.tarfile, "open", slow_logged_open):
+        project.stage_archive(staged)
+
+
+def test_stage_archive_is_built_once_across_processes(tmp_path: Path) -> None:
+    """Processes racing for the archive share one build and leave nothing else behind."""
     staged = _stage_with_a_link(tmp_path)
-    project.stage_archive(staged).write_bytes(b"first build")
+    builds = tmp_path / "builds.log"
+    spawned = multiprocessing.get_context("spawn")
+    racers = [
+        spawned.Process(target=_pack_logging_each_build, args=(staged, builds)) for _ in range(4)
+    ]
 
-    assert project.stage_archive(staged).read_bytes() == b"first build"
+    for racer in racers:
+        racer.start()
 
+    for racer in racers:
+        racer.join()
 
-def test_discard_stage_removes_the_archive(tmp_path: Path) -> None:
-    """Discarding a packed stage leaves neither the stage nor its archive."""
-    staged = _stage_with_a_link(tmp_path)
-    archive = project.stage_archive(staged)
-
-    project.discard_stage(staged)
-
-    assert not staged.exists()
-    assert not archive.exists()
+    assert [racer.exitcode for racer in racers] == [0] * 4
+    assert builds.read_text().splitlines() == ["build"]
+    assert sorted(entry.name for entry in staged.parent.iterdir()) == [
+        "project",
+        "project.tar.gz",
+    ]
 
 
 def _open_session(create_sandbox: object, monkeypatch: pytest.MonkeyPatch, stage: Path) -> None:
@@ -234,7 +272,7 @@ def _open_session(create_sandbox: object, monkeypatch: pytest.MonkeyPatch, stage
             eval_id="e1",
             config="trial",
             host_workdir=stage.parent / "wd",
-            host_repo_root=stage,
+            staged_project=stage,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -259,7 +297,7 @@ def test_arm_session_mounts_the_stage_it_is_given_and_leaves_it(
 
     _open_session(fake_create, monkeypatch, stage)
 
-    assert create_kwargs["host_repo_root"] == stage
+    assert create_kwargs["staged_project"] == stage
     assert stage.is_dir()
 
 

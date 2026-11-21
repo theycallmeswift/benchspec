@@ -404,12 +404,21 @@ def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
 
 @pytest.fixture(scope="session")
 def staged_project(request: pytest.FixtureRequest) -> Path:
-    """The project copy the controller staged before any cell started, shared by all."""
-    from_controller = prebind.workerinput(request.config)
-    if from_controller is not None:
-        return Path(str(from_controller[STAGED_PROJECT_WORKERINPUT_KEY]))
+    """The project copy the controller staged before any cell started, shared by all.
 
-    return request.config.stash[STAGED_PROJECT]
+    Raises:
+        RuntimeError: the stage is gone, so a cell would mount an empty `/project`.
+    """
+    from_controller = prebind.workerinput(request.config)
+    staged = (
+        Path(str(from_controller[STAGED_PROJECT_WORKERINPUT_KEY]))
+        if from_controller is not None
+        else request.config.stash[STAGED_PROJECT]
+    )
+    if not staged.is_dir():
+        raise RuntimeError(f"the project stage is missing: {staged}")
+
+    return staged
 
 
 @pytest.fixture(scope="session")

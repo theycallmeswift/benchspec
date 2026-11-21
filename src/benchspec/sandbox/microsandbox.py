@@ -363,7 +363,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         snapshot: str,
         name: str,
         host_workdir: Path,
-        host_repo_root: Path | None,
+        staged_project: Path | None,
         extra_volumes: ExtraVolumes,
     ) -> MicrosandboxGuest:
         """Create a microsandbox instance from a snapshot for an arm session."""
@@ -372,10 +372,10 @@ class MicrosandboxBackend(SharedBackendBehavior):
 
         volume_cls = microsandbox.Volume
         volumes = {GUEST_WORKDIR: volume_cls.bind(host_mount_path(host_workdir), readonly=False)}
-        if host_repo_root is not None:
+        if staged_project is not None:
             # The project mounts read-only so a per-eval setup.sh can install the
             # suite-specific skill without risking a write back into the host checkout.
-            volumes[PROJECT_MOUNT] = volume_cls.bind(host_mount_path(host_repo_root), readonly=True)
+            volumes[PROJECT_MOUNT] = volume_cls.bind(host_mount_path(staged_project), readonly=True)
         volumes.update(extra_volumes(agent, volume_cls))
         return await self._restore(agent=agent, snapshot=snapshot, name=name, volumes=volumes)
 

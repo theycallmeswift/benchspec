@@ -146,10 +146,10 @@ The guest sees three paths:
 
 ### What `/project` contains
 
-`/project` is never a bind mount of your checkout. The run stages one copy
-before any cell starts, every cell mounts it, and the run removes it at the end,
-on failure and interrupt too. A backend that uploads instead of mounting gets
-the stage as one gzipped tar, packed on first request:
+`/project` is never your checkout. The run stages one copy before any cell
+starts, every cell mounts it, and the run removes it when it ends, however it
+ends. A backend that uploads instead gets one gzipped tar, packed on first
+request:
 
 - **In**: what a `git clone` would contain — tracked files plus untracked files
   `.gitignore` does not ignore — layout preserved, so `setup.sh` paths, a

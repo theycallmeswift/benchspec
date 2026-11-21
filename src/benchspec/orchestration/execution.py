@@ -367,7 +367,7 @@ async def _run_arm_turns(
             eval_id=eval_id,
             config=arm_name,
             host_workdir=workdir,
-            host_repo_root=staged_project,
+            staged_project=staged_project,
             model=model,
             effort=effort,
             setup_reldir=setup_reldir,

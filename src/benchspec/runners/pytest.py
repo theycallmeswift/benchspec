@@ -370,8 +370,8 @@ def pytest_configure(config: pytest.Config) -> None:
         if config.stash[PROGRESS_STYLE] == "cells":
             config.pluginmanager.register(_CellProgress(config), "benchspec-cell-progress")
         _validate_cell_caps(config)
-        _prebind_assertions(config)
         _stage_project(config, repo_root)
+        _prebind_assertions(config)
 
     worker = workspace.worker_tag()
     sink = JsonlEventSink(workspace.events_path(repo_root, worker), worker)
@@ -829,6 +829,7 @@ def pytest_configure_node(node: _WorkerNode) -> None:
     node.workerinput["benchspec_iteration"] = workspace.current_iteration()
     node.workerinput[prebind.WORKERINPUT_KEY] = node.config.stash.get(cases.BOUND_SPECS, {})
     staged = node.config.stash.get(cases.STAGED_PROJECT, None)
+
     if staged is not None:
         node.workerinput[cases.STAGED_PROJECT_WORKERINPUT_KEY] = str(staged)
 

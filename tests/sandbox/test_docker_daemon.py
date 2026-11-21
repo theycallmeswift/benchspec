@@ -183,7 +183,7 @@ async def _drive_cell(
         snapshot=snapshot,
         name=cell,
         host_workdir=room,
-        host_repo_root=stage,
+        staged_project=stage,
         extra_volumes=_agent_extra_volumes,
     )
 

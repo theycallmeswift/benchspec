@@ -264,7 +264,7 @@ class SandboxSession:
     """Async context manager holding one guest open across an arm's turns.
 
     `__aenter__` boots the guest and returns a per-turn async `run`; `__aexit__` tears it
-    down. `host_repo_root` is the run's shared project stage, mounted and never removed here.
+    down. It mounts the run's shared `staged_project` and never removes it.
 
     The whole lifecycle (create → turns → stop) runs inside a single `asyncio.run`.
     """
@@ -277,7 +277,7 @@ class SandboxSession:
         eval_id: str,
         config: str,
         host_workdir: Path,
-        host_repo_root: Path | None,
+        staged_project: Path | None,
         model: str,
         effort: str,
         backend: SandboxBackend,
@@ -299,7 +299,7 @@ class SandboxSession:
         self._eval_id = eval_id
         self._config = config
         self._host_workdir = host_workdir
-        self._host_repo_root = host_repo_root
+        self._staged_project = staged_project
         self._model = model
         self._effort = effort
         self._backend = backend
@@ -332,7 +332,7 @@ class SandboxSession:
                     snapshot=self._snapshot,
                     name=run_name,
                     host_workdir=self._host_workdir,
-                    host_repo_root=self._host_repo_root,
+                    staged_project=self._staged_project,
                     extra_volumes=_agent_extra_volumes,
                 ),
             )
@@ -430,7 +430,7 @@ def arm_session(
     eval_id: str,
     config: str,
     host_workdir: Path,
-    host_repo_root: Path | None,
+    staged_project: Path | None,
     model: str,
     effort: str,
     backend: SandboxBackend,
@@ -453,7 +453,7 @@ def arm_session(
         eval_id=eval_id,
         config=config,
         host_workdir=host_workdir,
-        host_repo_root=host_repo_root,
+        staged_project=staged_project,
         model=model,
         effort=effort,
         backend=backend,
