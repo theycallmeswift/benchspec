@@ -422,11 +422,17 @@ class RunView:
         elif state == "stopped":
             buckets["unfinished"] = states.count("unfinished")
 
+        reason = (
+            _run_reason(self._end["exit_status"], buckets["errored"])
+            if self._end is not None
+            else None
+        )
         finished_line = f"{done} of {total} samples finished"
         line = f"Run stopped · {done} of {total} finished" if state == "stopped" else finished_line
         announce = {
             "empty": "No cells in this run.",
-            "finished": f"Run finished · {done} of {total} samples",
+            "finished": f"Run finished · {done} of {total} samples"
+            + (f" · {reason}" if reason else ""),
             "stopped": f"Run stopped · {done} of {total} samples",
             "stale": f"Run stale · {done} of {total} samples finished",
         }.get(state, finished_line)
@@ -439,6 +445,7 @@ class RunView:
             "line": line,
             "progress": finished_line,
             "announce": announce,
+            "reason": reason,
             "clock_word": "elapsed" if self._end is None else "took",
             "clock": (
                 live_duration(self._end["wall_ms"])
@@ -892,6 +899,19 @@ def _coarse_duration(milliseconds: float) -> str:
         return f"{round(seconds / 60)}m"
 
     return live_duration(seconds * 1000)
+
+
+def _run_reason(exit_status: int, errored: int) -> str | None:
+    """Why an ended run is not clean: a non-zero exit and its errored samples, or None."""
+    parts = []
+
+    if exit_status != 0:
+        parts.append(f"exit {exit_status}")
+
+    if errored:
+        parts.append(f"{errored} errored")
+
+    return " · ".join(parts) or None
 
 
 def _box_class(sample: Sample, now_ms: int) -> str:
