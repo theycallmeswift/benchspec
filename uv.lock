@@ -31,7 +31,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "microsandbox", marker = "extra == 'microsandbox'", specifier = ">=0.7.3,<0.8" },
-    { name = "pytest", specifier = ">=8" },
+    { name = "pytest", specifier = ">=9.2" },
     { name = "pytest-xdist", specifier = ">=3" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6" },
@@ -43,7 +43,7 @@ dev = [
     { name = "houserules", specifier = ">=0.1.1,<1.0.0" },
     { name = "microsandbox", specifier = ">=0.7.3,<0.8" },
     { name = "playwright", specifier = ">=1.63" },
-    { name = "pytest", specifier = ">=8" },
+    { name = "pytest", specifier = ">=9.2" },
     { name = "pytest-repeat", specifier = ">=0.9,<1" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "ty", specifier = ">=0.0.79,<0.1" },
