@@ -15,7 +15,14 @@ from playwright.sync_api import FloatRect, Locator, Page, expect
 
 from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, Pages, watching
 from tests.support.cli import run_benchspec
-from tests.support.watch import Recording, finished_frame, finished_run, iteration, mid_run
+from tests.support.watch import (
+    Recording,
+    finished_frame,
+    finished_run,
+    four_arm_live,
+    iteration,
+    mid_run,
+)
 
 LOGGED_OUT = "button.bs-cell[aria-label^='codex-logged-out on baseline']"
 IMPLEMENT = "button.bs-cell[aria-label^='plan-implement-task on baseline']"
@@ -217,6 +224,30 @@ def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages:
         expect(label).to_have_text(re.compile(r"^agent 2m \d\ds$"), use_inner_text=True)
         assert label.evaluate("node => node.scrollWidth <= node.clientWidth")
         assert page.evaluate("document.documentElement.scrollWidth") == 768
+
+
+def test_a_wide_desktop_keeps_room_for_the_hover_card_beside_four_arms(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """A wide desktop keeps room for the hover card beside four arms."""
+    four_arm_live(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, {"width": 1440, "height": 900})
+        matrix = _rect(page.locator("#matrix"))
+        headers = page.locator(".bs-mhead > span")
+
+        assert (matrix["x"], matrix["width"]) == (32, 1080)
+        expect(headers.nth(1)).to_have_text("claude-codeclaude-code · anthropic/claude-haiku-4.5")
+        assert headers.evaluate_all(
+            "nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)"
+        )
+        page.locator("button.bs-cell[aria-label^='greets on claude-code']").hover()
+        expect(page.locator("#hovercard")).to_be_visible()
+        card = _rect(page.locator("#hovercard"))
+        assert card["x"] == matrix["x"] + matrix["width"] + 16
+        assert card["x"] + card["width"] <= 1440 - 32
+        assert page.evaluate("document.documentElement.scrollWidth") == 1440
 
 
 def test_a_run_that_planned_nothing_says_so(tmp_path: Path, pages: Pages) -> None:

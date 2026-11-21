@@ -499,6 +499,9 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
 @media (min-width: 1280px) {
   #matrix, .bs-mxcap, .bs-legend { margin-right: calc(var(--size-hovercard) + var(--space-16)); }
 }
+@media (min-width: 640px) {
+  .bs-mhead b + span { display: block; white-space: normal; overflow-wrap: anywhere; }
+}
 @media (max-width: 639px) {
   .bs-wide { display: none; }
   .bs-narrow { display: inline; }
