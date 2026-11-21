@@ -19,5 +19,5 @@ it.
 ## In this repository
 
 - `make lint` doesn't run markdownlint here. Check a file you changed with
-  `npx --yes markdownlint-cli2 <file>`.
+  `npx --yes markdownlint-cli2 <file>`; `.markdownlint.jsonc` configures it.
 - Plans are dated snapshots too, in `docs/plans/`.
