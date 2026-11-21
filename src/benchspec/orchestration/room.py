@@ -98,16 +98,26 @@ Facts = tuple[str, dict[str, str], dict[str, str]]
 
 
 def gather_facts(workdir: Path, max_bytes: int = 20000) -> Facts:
-    """Collect clean-room file facts for grading evidence."""
+    """Collect clean-room file facts for grading evidence.
+
+    The tree lists every path; only regular files get contents and a SHA.
+    """
     tree_lines: list[str] = []
     contents: dict[str, str] = {}
     shas: dict[str, str] = {}
+
     for path in sorted(workdir.rglob("*")):
         relative_path = str(path.relative_to(workdir))
+
         if path.is_dir():
             tree_lines.append(relative_path + "/")
             continue
+
         tree_lines.append(relative_path)
+
+        if not path.is_file():
+            continue
+
         shas[relative_path] = _sha256(path)
         try:
             data = path.read_text(encoding="utf-8")
@@ -116,6 +126,7 @@ def gather_facts(workdir: Path, max_bytes: int = 20000) -> Facts:
             )
         except UnicodeDecodeError:
             contents[relative_path] = "<binary>"
+
     return "\n".join(tree_lines), contents, shas
 
 
