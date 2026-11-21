@@ -206,6 +206,7 @@ def measured_duration(milliseconds: float) -> str:
 def rate_text(passed: int, total: int) -> str:
     """The report's percent, but `100%` only when all passed and `0%` only when none did."""
     text = report.percent(passed / total)
+
     if text == "100%" and passed < total:
         return "99%"
 
