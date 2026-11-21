@@ -707,6 +707,7 @@ class DockerBackend(SharedBackendBehavior):
         host_workdir: Path,
         staged_project: Path | None,
         extra_volumes: ExtraVolumes,
+        cap_seconds: int,
     ) -> DockerSandbox:
         """Create a container from a snapshot image for an arm session."""
         mounts = {GUEST_WORKDIR: DockerVolume.bind(host_mount_path(host_workdir))}

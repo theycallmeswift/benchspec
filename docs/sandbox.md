@@ -10,8 +10,9 @@ credentials, or earlier runs' artifacts. The sandbox, not any harness's own
 permission prompts, is the containment boundary: every harness runs with its
 approvals bypassed inside the guest. A set picks its backend with the
 `sandbox` key: `docker` (the default), where each cell is a container driven
-through the `docker` CLI, or `microsandbox`, where each cell boots its own
-**microVM** — its own kernel, booted in about a second.
+through the `docker` CLI, `microsandbox`, where each cell boots its own
+**microVM** — its own kernel, booted in about a second — or `e2b`, where each
+cell is a remote microVM on [E2B](#e2b).
 
 ## Docker
 
@@ -33,6 +34,28 @@ that gap matters.
 > Windows is untested entirely; the `docker` invocations and mount-path handling
 > assume a POSIX host.
 
+## E2B
+
+A cell runs in an E2B cloud microVM, so the run's width is not bound by host RAM.
+The guest shares no filesystem with the host:
+
+- **In**: `/workspace` and `/project` are uploaded as one tar archive each when
+  the cell boots.
+- **Out**: `/workspace` is downloaded after the agent turn, and after a cap
+  that fires in the turn or in `setup.sh`, and replaces the host clean room
+  before grading. The guest is untrusted, so absolute and escaping symlinks and
+  device nodes are dropped and setuid bits cleared.
+- **Egress**: the guest reaches only the provider hosts its credential names.
+  Other hosts, by name or by IP, and all DNS (8.8.8.8 included) are blocked;
+  the provider hosts are pinned in `/etc/hosts`. A `setup.sh` that downloads
+  fails: put installs in `environment_script`, which runs at snapshot build
+  with open egress. QUIC (UDP 443) is untested.
+- **Lifetime**: E2B kills a sandbox 120 s after its cell's cap, so one whose
+  controller died stops costing money.
+
+Not supported: Codex subscription auth (`CODEX_AUTH_JSON_PATH`), which names no
+provider host to allow. Keep timing comparisons on one backend.
+
 ## Host requirements and preflight
 
 benchspec preflights the host — sandbox runtime, agent credential — and fails
@@ -43,6 +66,7 @@ made.
 |---|---|---|
 | Docker | Any host with a running daemon; no platform gate | `docker` on `PATH` (or at `BENCHSPEC_DOCKER_PATH`, the way `MSB_PATH` overrides microsandbox's `msb`), and `docker info` succeeding |
 | microsandbox | An Apple Silicon Mac, or Linux with `/dev/kvm`, plus the extra (`pip install "benchspec[microsandbox]"`) | That platform, plus the runtime installed |
+| E2B | Any host, plus the extra (`pip install "benchspec[e2b]"`) and an E2B account | The SDK installed and `E2B_API_KEY` set |
 
 Docker failures produce one of:
 
@@ -63,13 +87,15 @@ benchspec builds one **snapshot** per configuration and boots every cell from it
 4. **Environment script**: `[tool.benchspec] environment_script`, if declared,
    runs under `set -e`; a failing command aborts the build loudly.
 5. **Seal**: the guest stops and the snapshot is recorded (a `docker commit` for
-   Docker, a sealed microVM snapshot for microsandbox).
+   Docker, a sealed microVM snapshot for microsandbox, a filesystem snapshot
+   for E2B).
 
 Snapshots cache as `benchspec-<backend>-<harness>-<harness-version>-<fingerprint>`
 — for Docker an image tag
 (`benchspec-snapshot:benchspec-docker-<harness>-<version>-<fingerprint>`, listed
 by `docker images benchspec-snapshot`), for microsandbox a snapshot group under
-`~/.microsandbox/snapshots/`. The 8-character fingerprint hashes four
+`~/.microsandbox/snapshots/`, for E2B a snapshot in the E2B project, with no
+image digest to record. The 8-character fingerprint hashes four
 ingredients:
 
 - the backend id,
@@ -106,11 +132,14 @@ hold, on whichever backend created them:
 | Removes | |
 |---|---|
 | Sandboxes | every `benchspec-*` guest: leaked `benchspec-eval-*` cells, `benchspec-trigger-*` probes, `benchspec-build-*` build sandboxes |
-| Snapshots | `benchspec-snapshot:benchspec-*` Docker images, microsandbox's `benchspec-*` entries |
+| Snapshots | `benchspec-snapshot:benchspec-*` Docker images, microsandbox's `benchspec-*` entries, E2B's `benchspec-*` snapshots and templates |
 | Locks | the repo's `tmp/.benchspec-snapshot-*.lock` files |
 
 Anything without the prefix is left alone (untagged Docker images, other
-`~/.microsandbox` entries). It stops *running* sandboxes too, so do not run it
+`~/.microsandbox` entries). On E2B, which it touches only when `E2B_API_KEY` is
+set, sandboxes are selected by benchspec's own metadata tag, so the project's
+other sandboxes and templates stay; benchspec runs from other machines on the
+same project do not. It stops *running* sandboxes too, so do not run it
 during a live `benchspec run`; snapshots rebuild on the next run, or via
 `sandbox:build`. It always exits `0` (nothing to prune is success); `2` only on a
 bad invocation.
@@ -118,7 +147,7 @@ bad invocation.
 ## Inside a running cell
 
 Each `(eval × arm × sample)` boots its own sandbox from the snapshot (2 vCPUs,
-2 GiB on either backend — `--cpus 2 --memory 2048m` for a Docker container) and
+2 GiB on every backend — `--cpus 2 --memory 2048m` for a Docker container) and
 tears it down after the turn. `benchspec run --workers auto` budgets that 2 GiB
 per cell against total host RAM. On macOS and Windows the Docker backend runs
 sandboxes in a VM whose memory is separate from host RAM, so `auto` can
@@ -135,13 +164,14 @@ overestimate there: set `workers` explicitly. A cell, in order:
 Under Docker, a guest command that times out or is killed ends the `docker exec`
 client on the host, not the process it started inside the container: that process
 runs until the container is removed at teardown, which is what reclaims it.
+E2B kills the guest process itself.
 
 The guest sees three paths:
 
 | Path | Mount | Contents |
 |---|---|---|
 | `/workspace` | read-write | The clean room: a fresh host temp dir seeded from the eval's `workspace/`. The agent's working directory; the host grades it afterward. |
-| `/project` | read-only | A staged copy of your repo (below), so the eval's `setup.sh` can copy the skill under test in. Nothing in the guest can write back to your checkout. |
+| `/project` | read-only (a writable upload on E2B, never synced back) | A staged copy of your repo (below), so the eval's `setup.sh` can copy the skill under test in. Nothing in the guest can write back to your checkout. |
 | `/home/benchspec/skills` | in-guest | The fixed skills home from the bridge step; what `setup.sh` installs here is what the agent's skill loader sees. |
 
 ### What `/project` contains
@@ -172,8 +202,9 @@ Each harness declares its credential once; the backends expose it differently:
 |---|---|
 | microsandbox | A scoped **secret**, injected at the network boundary and usable only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward `api.anthropic.com`; under `provider = "openrouter"` the key works only toward `openrouter.ai`). Not readable by the agent or by `setup.sh`. |
 | Docker | A plain container environment variable (`-e ANTHROPIC_API_KEY=...`), readable by the agent and by `setup.sh`. No per-credential host scoping. |
+| E2B | A plain environment variable in a third-party VM, readable by the agent and by `setup.sh`. The guest's egress is limited to the provider hosts, so it can be sent nowhere else. |
 
-The one file-shaped exception, on both backends: Codex subscription auth,
+The one file-shaped exception, on Docker and microsandbox: Codex subscription auth,
 `CODEX_AUTH_JSON_PATH`, is mounted read-only and copied to
 `/root/.codex/auth.json` inside the guest. Per-harness details are in
 [`harnesses.md`](harnesses.md).
@@ -241,8 +272,8 @@ OpenRouter run needs `openrouter.ai`; the Trusted default list includes neither.
 
 The authoritative modules are `benchspec.sandbox.backend` (the seam: the
 protocol, the shared constants, the fingerprint, the shared build steps),
-`benchspec.sandbox.docker` and `benchspec.sandbox.microsandbox` (the two backend
-implementations), `benchspec.sandbox.registry` (backend selection),
+`benchspec.sandbox.docker`, `benchspec.sandbox.microsandbox` and
+`benchspec.sandbox.e2b` (the backend implementations), `benchspec.sandbox.registry` (backend selection),
 `benchspec.sandbox.sandbox` (the cell lifecycle), and `benchspec.sandbox.project`
 (the `/project` stage). If this page and those modules ever disagree, the modules
 are right.

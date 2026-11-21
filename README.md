@@ -39,7 +39,7 @@ off — in percentage points — how good each one actually is at accomplishing 
 
 | | |
 |---|---|
-| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in. Python 3.11+. |
+| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in; an E2B account for the E2B opt-in. Python 3.11+. |
 | Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
 | Binder credential | The binder is a fixed model call that classifies each assertion, required for every `analyze` and `run`: `GEMINI_API_KEY` by default, or `OPENROUTER_API_KEY` with `[tool.benchspec.binder] provider = "openrouter"`. |
 | Judge credential | The judge runs on the host through an agent CLI, using either its env credential or the CLI's own login (`claude login`, `codex login`); the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |
@@ -58,10 +58,12 @@ lists every missing piece and exits before anything is spent.
 pip install benchspec
 ```
 
-For the microsandbox isolation opt-in, add its extra:
+For the microsandbox isolation opt-in, or E2B's remote sandboxes, add the
+extra:
 
 ```bash
 pip install "benchspec[microsandbox]"
+pip install "benchspec[e2b]"
 ```
 
 > **Pre-1.0.** The eval format and the artifact schemas are the surfaces most
@@ -134,8 +136,8 @@ flowchart LR
 
 Each `(eval × arm)` pair is one parametrized pytest test. A cell:
 
-1. **Boots a sandbox** — a Docker container by default, or a microsandbox
-   microVM for the opt-in — from a cached snapshot with the agent CLI already
+1. **Boots a sandbox** — a Docker container by default, or a microsandbox or
+   E2B microVM for the opt-ins — from a cached snapshot with the agent CLI already
    installed. The first run builds the snapshot (about a minute); later runs
    reuse it. `benchspec sandbox:build` pays that cost up front,
    `benchspec sandbox:clean` reclaims the disk.
@@ -150,8 +152,8 @@ Each `(eval × arm)` pair is one parametrized pytest test. A cell:
    it can do so without risk; the judge grades everything else from the
    collected evidence alone.
 
-On either backend, nothing in the guest can write back to your checkout:
-`setup.sh` reaches the skill under test through a read-only staged copy of your
+On every backend, nothing in the guest can write back to your checkout:
+`setup.sh` reaches the skill under test through a staged copy of your
 repo at `/project` (what a `git clone` would contain — never `.env`, `.git`, or
 earlier runs' artifacts). Credential exposure differs — microsandbox injects each
 credential at the network boundary, Docker as a plain container environment

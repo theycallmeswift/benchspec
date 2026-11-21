@@ -465,6 +465,7 @@ def test_create_sandbox_runs_the_snapshot_image_with_both_mounts_and_the_credent
             host_workdir=room,
             staged_project=stage,
             extra_volumes=_agent_extra_volumes,
+            cap_seconds=900,
         )
     )
 

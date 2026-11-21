@@ -334,6 +334,7 @@ class SandboxSession:
                     host_workdir=self._host_workdir,
                     staged_project=self._staged_project,
                     extra_volumes=_agent_extra_volumes,
+                    cap_seconds=self._deadline.cap_seconds,
                 ),
             )
         except BaseException as error:
@@ -358,8 +359,13 @@ class SandboxSession:
                         arm_env=self._arm_env,
                     ),
                 )
-            except BaseException:
-                await self._backend.stop_quietly(self._sandbox)
+            except BaseException as error:
+                try:
+                    # A cell capped in setup is still graded from its workspace.
+                    if isinstance(error, CellTimeoutError):
+                        await self._backend.sync_out(self._sandbox, self._host_workdir)
+                finally:
+                    await self._backend.stop_quietly(self._sandbox)
                 raise
         self._artifact_base = await _snapshot_artifact_shas(
             self._sandbox, self._agent, self._backend
@@ -412,6 +418,8 @@ class SandboxSession:
             on_delta=self._events.delta,
         )
         self._events.phase(PHASE_GRADE)
+        # Not bounded by the deadline: a turn that hit the cap is still graded.
+        await self._backend.sync_out(sandbox, self._host_workdir)
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
         if authored:
@@ -577,8 +585,9 @@ def cli_clean(repo_root: Path) -> None:
 
     Each backend owns its own resources: microsandbox prunes sandboxes and snapshots
     under `~/.microsandbox`; Docker prunes `benchspec-*` containers and
-    `benchspec-snapshot` images. A backend with no runtime installed tolerates that and
-    prunes nothing. Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
+    `benchspec-snapshot` images; E2B prunes its tagged sandboxes and `benchspec-*`
+    snapshots when `E2B_API_KEY` is set. A backend with no runtime installed tolerates
+    that and prunes nothing. Also removes the per-repo snapshot lock files under `<repo_root>/tmp/`.
 
     Tolerates 'none found'. Snapshots are regenerable via `benchspec sandbox:build`.
     """

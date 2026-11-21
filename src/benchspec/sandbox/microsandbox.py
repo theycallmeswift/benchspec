@@ -365,6 +365,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
         host_workdir: Path,
         staged_project: Path | None,
         extra_volumes: ExtraVolumes,
+        cap_seconds: int,
     ) -> MicrosandboxGuest:
         """Create a microsandbox instance from a snapshot for an arm session."""
         if microsandbox is None:

@@ -36,6 +36,9 @@ codex = []
 opencode = []
 microsandbox = ["microsandbox>=0.7.3,<0.8"]
 testing = []
+e2b = [
+    "e2b>=2.64,<3",
+]
 
 [dependency-groups]
 dev = [
@@ -46,6 +49,7 @@ dev = [
     "microsandbox>=0.7.3,<0.8",
     "ty>=0.0.79,<0.1",
     "playwright>=1.63",
+    "e2b>=2.64,<3",
 ]
 
 [project.urls]

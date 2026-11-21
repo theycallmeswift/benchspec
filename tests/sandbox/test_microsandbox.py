@@ -342,6 +342,7 @@ def test_create_sandbox_replaces_leftover_then_attaches_scoped_secrets_with_a_re
             host_workdir=tmp_path,
             staged_project=None,
             extra_volumes=_agent_extra_volumes,
+            cap_seconds=900,
         )
     )
 
@@ -374,6 +375,7 @@ def test_create_sandbox_stops_the_guest_when_secrets_fail_to_attach(
                 host_workdir=tmp_path,
                 staged_project=None,
                 extra_volumes=_agent_extra_volumes,
+                cap_seconds=900,
             )
         )
 
