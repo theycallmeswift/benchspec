@@ -6,13 +6,16 @@ itself: a bind mount of the repo root exposes `.env` (every host credential — 
 which the guest needs, since its own credential arrives as a host-scoped secret), the
 `.git` history, and `tmp/` (prior runs' transcripts and grades). `stage_project` copies
 what a clone would contain — tracked files plus untracked files git does not ignore —
-into a fresh directory, and the session mounts that copy instead.
+into a fresh directory, and every cell of the run mounts that one copy.
 """
 
 from __future__ import annotations
 
+import fcntl
+import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -99,16 +102,19 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
 
     Args:
         repo_root: The host repository root to stage.
-        staging_parent: Directory to create the stage under (default: the OS temp root).
+        staging_parent: Directory to create the run directory under (default: the OS
+            temp root).
 
     Returns:
-        The staged directory. The caller removes it once the sandbox is gone.
+        The stage, inside a private run directory that also holds its archive.
+        `discard_stage` removes both once the run is over.
 
     Raises:
         RuntimeError: if a dotenv file would still be visible in the stage.
     """
     repo_root = Path(repo_root)
-    staged = Path(tempfile.mkdtemp(prefix="benchspec-project-", dir=staging_parent))
+    staged = Path(tempfile.mkdtemp(prefix="benchspec-project-", dir=staging_parent)) / "project"
+    staged.mkdir()
 
     listed = _git_listed_files(repo_root)
     files = listed if listed is not None else _walked_files(repo_root)
@@ -124,7 +130,7 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
 
     leaked = _env_files_under(staged)
     if leaked:
-        shutil.rmtree(staged, ignore_errors=True)
+        discard_stage(staged)
         raise RuntimeError(
             "refusing to mount the project: dotenv file(s) would be visible in the guest: "
             + ", ".join(leaked)
@@ -132,7 +138,32 @@ def stage_project(repo_root: Path, staging_parent: Path | None = None) -> Path:
     return staged
 
 
+def stage_archive(staged: Path) -> Path:
+    """Return the stage's gzipped tar, built in its run directory on the first call.
+
+    Members are relative to the stage root. A lock on the stage makes concurrent
+    workers wait for one build.
+    """
+    archive = staged.with_name(f"{staged.name}.tar.gz")
+    lock = os.open(staged, os.O_RDONLY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+
+        if not archive.exists():
+            # Renamed into place so a killed build never leaves a truncated archive.
+            partial = archive.with_name(f"{archive.name}.partial")
+            with tarfile.open(partial, "w:gz") as tar:
+                for entry in sorted(staged.iterdir()):
+                    tar.add(entry, arcname=entry.name)
+
+            partial.replace(archive)
+    finally:
+        os.close(lock)
+
+    return archive
+
+
 def discard_stage(staged: Path | None) -> None:
-    """Remove a staged project directory; a missing or partly removed stage is fine."""
+    """Remove a stage's run directory, archive included; one already gone is fine."""
     if staged is not None:
-        shutil.rmtree(staged, ignore_errors=True)
+        shutil.rmtree(staged.parent, ignore_errors=True)

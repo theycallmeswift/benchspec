@@ -1904,6 +1904,15 @@ def _plugin_args(pytester: pytest.Pytester, *extra: str) -> list[str]:
     return ["-p", "benchspec.runners.pytest", "--benchspec-repo-root", str(pytester.path), *extra]
 
 
+def _stub_cell_preflights(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pass every host preflight and skip room seeding, so an in-process cell reaches its arm."""
+    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
+    monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
+    monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
+    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
+
+
 def _run_stub_cells(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> pytest.RunResult:
@@ -1921,11 +1930,7 @@ def _run_stub_cells(
             bind(text)
         return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
 
-    monkeypatch.setattr(sandbox, "preflight", lambda backend=None, **kwargs: None)
-    monkeypatch.setattr(cases, "preflight_verify_judge_binary", lambda config: None)
-    monkeypatch.setattr(cases, "preflight_verify_judge_credential", lambda config: None)
-    monkeypatch.setattr(cases, "seed_room", lambda *args, **kwargs: {})
-    monkeypatch.setattr(binder, "preflight_verify_binder_key", lambda config: None)
+    _stub_cell_preflights(monkeypatch)
     monkeypatch.setattr(cases, "run_eval_arm", bind_each)
 
     return pytester.runpytest(*_plugin_args(pytester, *extra))
@@ -1995,6 +2000,7 @@ def test_only_the_controller_prebinds(
     assert bound_texts == []
 
     plugin.pytest_configure(controller_config)
+    plugin.pytest_unconfigure(controller_config)
     assert sorted(bound_texts) == ["source note archived", "summary written"]
 
 
@@ -2034,6 +2040,139 @@ def pytest_runtest_setup(item):
     tables = [json.loads(path.read_text()) for path in tmp_path.glob("gw*")]
     assert tables
     assert all(table == {"source note archived": {"kind": "regex"}} for table in tables)
+
+
+def _record_stages(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *, cell_raises: bool = False
+) -> tuple[list[Path], list[Path]]:
+    """Run every cell in-process; return the stages made and the stage each cell received."""
+    made: list[Path] = []
+    received: list[Path] = []
+    real_stage = plugin.stage_project
+
+    def record_stage(repo_root: Path) -> Path:
+        """Stage for real and record the result."""
+        made.append(real_stage(repo_root))
+
+        return made[-1]
+
+    def record_cell(*args: object, staged_project: Path, **kwargs: object) -> ArmOutcome:
+        """Stand in for the sandbox run, recording the stage it would mount."""
+        assert staged_project.is_dir()
+        received.append(staged_project)
+        if cell_raises:
+            raise RuntimeError("cell blew up")
+
+        return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
+
+    monkeypatch.setattr(plugin, "stage_project", record_stage)
+    _stub_cell_preflights(monkeypatch)
+    monkeypatch.setattr(cases, "run_eval_arm", record_cell)
+    _make_project(pytester)
+
+    pytester.runpytest(*_plugin_args(pytester))
+
+    return made, received
+
+
+def test_a_run_stages_the_project_once_and_removes_it_after(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Four cells mount one stage, gone once the run ends."""
+    made, received = _record_stages(pytester, monkeypatch)
+
+    assert len(made) == 1
+    assert received == made * 4
+    assert not made[0].parent.exists()
+
+
+def test_the_stage_is_removed_after_a_run_whose_cells_raise(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raising cell leaves the stage for the next cell, and none after the run."""
+    made, received = _record_stages(pytester, monkeypatch, cell_raises=True)
+
+    assert len(made) == 1
+    assert received == made * 4
+    assert not made[0].parent.exists()
+
+
+def test_collect_only_stages_nothing(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--collect-only` copies no project."""
+    monkeypatch.setattr(plugin, "stage_project", lambda repo_root: pytest.fail("staged"))
+    _make_project(pytester)
+
+    result = pytester.runpytest(*_plugin_args(pytester, "--collect-only"))
+
+    assert result.ret == pytest.ExitCode.OK
+
+
+def test_a_dotenv_file_that_would_be_staged_is_a_usage_error(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stage refused for a visible dotenv file ends the run cleanly before any cell."""
+
+    def refuse(repo_root: Path) -> Path:
+        raise RuntimeError("refusing to mount the project: dotenv file(s)")
+
+    monkeypatch.setattr(plugin, "stage_project", refuse)
+    _make_project(pytester)
+
+    result = pytester.runpytest(*_plugin_args(pytester))
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "refusing to mount the project" in result.stderr.str()
+
+
+def test_a_missing_stage_fails_the_cell_before_it_runs(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stage that is gone errors the cell rather than mounting an empty `/project`."""
+    monkeypatch.setattr(plugin, "stage_project", lambda repo_root: repo_root / "gone" / "project")
+    monkeypatch.setattr(cases, "run_eval_arm", lambda *args, **kwargs: pytest.fail("cell ran"))
+    _stub_cell_preflights(monkeypatch)
+    _make_project(pytester)
+
+    result = pytester.runpytest(*_plugin_args(pytester))
+
+    result.assert_outcomes(errors=4)
+    result.stdout.fnmatch_lines(["*RuntimeError: the project stage is missing: *"])
+
+
+def test_workers_receive_the_controllers_stage_through_workerinput(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Under xdist every worker's fixture yields the controller's one stage, removed after."""
+    _make_project(pytester)
+    pytester.makepyfile(
+        stage_plugin=f"""
+import pathlib
+import pytest
+from benchspec.sandbox import sandbox
+
+def pytest_configure(config):
+    if hasattr(config, "workerinput"):
+        sandbox.preflight = lambda backend=None, **kwargs: None
+
+@pytest.fixture(autouse=True)
+def record_stage(staged_project, worker_id):
+    pathlib.Path(r"{tmp_path}", worker_id).write_text(str(staged_project))
+    pytest.skip("stage recorded")
+"""
+    )
+    monkeypatch.setenv("PYTHONPATH", str(pytester.path))
+
+    pytester.syspathinsert()
+
+    pytester.runpytest(
+        *_plugin_args(pytester, "-p", "xdist.plugin", "-p", "stage_plugin", "-n", "2")
+    )
+
+    stages = {Path(path.read_text()) for path in tmp_path.glob("gw*")}
+    assert len(stages) == 1
+    assert not stages.pop().parent.exists()
 
 
 def test_a_rejected_binder_key_is_a_usage_error(

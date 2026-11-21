@@ -705,16 +705,16 @@ class DockerBackend(SharedBackendBehavior):
         snapshot: str,
         name: str,
         host_workdir: Path,
-        host_repo_root: Path | None,
+        staged_project: Path | None,
         extra_volumes: ExtraVolumes,
     ) -> DockerSandbox:
         """Create a container from a snapshot image for an arm session."""
         mounts = {GUEST_WORKDIR: DockerVolume.bind(host_mount_path(host_workdir))}
-        if host_repo_root is not None:
+        if staged_project is not None:
             # The project mounts read-only so a per-eval setup.sh can install the
             # suite-specific skill without risking a write back into the host checkout.
             mounts[PROJECT_MOUNT] = DockerVolume.bind(
-                host_mount_path(host_repo_root), readonly=True
+                host_mount_path(staged_project), readonly=True
             )
         mounts.update(extra_volumes(agent, DockerVolume))
 

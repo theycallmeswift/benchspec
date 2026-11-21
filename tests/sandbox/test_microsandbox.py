@@ -340,7 +340,7 @@ def test_create_sandbox_replaces_leftover_then_attaches_scoped_secrets_with_a_re
             snapshot="benchspec-snap",
             name="benchspec-eval-hello-trial-gw0",
             host_workdir=tmp_path,
-            host_repo_root=None,
+            staged_project=None,
             extra_volumes=_agent_extra_volumes,
         )
     )
@@ -372,7 +372,7 @@ def test_create_sandbox_stops_the_guest_when_secrets_fail_to_attach(
                 snapshot="benchspec-snap",
                 name="benchspec-eval-hello-trial-gw0",
                 host_workdir=tmp_path,
-                host_repo_root=None,
+                staged_project=None,
                 extra_volumes=_agent_extra_volumes,
             )
         )

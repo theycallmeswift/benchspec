@@ -580,7 +580,7 @@ def test_arm_session_runs_turn_and_tears_down(
             eval_id="e1",
             config="with_skill",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -614,7 +614,7 @@ def _session_with_a_nearly_spent_deadline(
     *,
     setup_reldir: str | None,
     create_sandbox: object,
-    host_repo_root: Path | None = None,
+    staged_project: Path | None = None,
 ) -> sandbox.SandboxSession:
     """An arm session whose cell cap has 0.05 s left, booting through `create_sandbox`."""
     microsandbox_backend = registry.resolve_sandbox("microsandbox")
@@ -625,7 +625,7 @@ def _session_with_a_nearly_spent_deadline(
         eval_id="e1",
         config="with_skill",
         host_workdir=tmp_path / "wd",
-        host_repo_root=host_repo_root,
+        staged_project=staged_project,
         model="sonnet",
         effort="medium",
         backend=microsandbox_backend,
@@ -638,11 +638,10 @@ def _session_with_a_nearly_spent_deadline(
 def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A sandbox that never boots is cut off, removed by name, and its stage discarded."""
+    """A sandbox that never boots is cut off and removed by name."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "pyproject.toml").write_text("")
-    discarded: list[str] = []
     destroyed: list[str] = []
 
     async def never_boots(**kwargs: object) -> FakeSandbox:
@@ -654,13 +653,12 @@ def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
         """Record the best-effort removal by name."""
         destroyed.append(name)
 
-    monkeypatch.setattr(sandbox, "discard_stage", lambda staged: discarded.append(str(staged)))
     session = _session_with_a_nearly_spent_deadline(
         monkeypatch,
         tmp_path,
         setup_reldir=None,
         create_sandbox=never_boots,
-        host_repo_root=project_root,
+        staged_project=project_root,
     )
     monkeypatch.setattr(session._backend, "discard_quietly", record_destroy)
 
@@ -671,7 +669,6 @@ def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
     assert raised.value.cap_seconds == 1
     assert len(destroyed) == 1
     assert destroyed[0].startswith(f"{backend_mod.NAME_PREFIX}eval-e1-with_skill")
-    assert len(discarded) == 1
 
 
 def test_arm_session_setup_that_outlives_the_cell_cap_stops_the_guest(
@@ -726,7 +723,7 @@ def test_arm_session_caps_the_agent_turn_at_the_cell_deadline(
             eval_id="e1",
             config="with_skill",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -763,7 +760,7 @@ def test_arm_session_propagates_create_failure(
             eval_id="e1",
             config="without_skill",
             host_workdir=tmp_path / "wd",
-            host_repo_root=None,
+            staged_project=None,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -912,7 +909,7 @@ def test_arm_session_captures_authored_skill_excluding_staged_baseline(
             eval_id="e1",
             config="with_skill",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -982,7 +979,7 @@ def test_baseline_snapshot_failure_captures_no_artifacts(
             eval_id="e1",
             config="with_skill",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="sonnet",
             effort="medium",
             backend=microsandbox_backend,
@@ -1189,7 +1186,7 @@ def test_arm_session_runs_setup_sh_when_reldir_set(
             eval_id="e1",
             config="trial",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="opus",
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
@@ -1248,7 +1245,7 @@ def test_arm_session_does_not_implicitly_pass_plugin_dir(
             eval_id="e1",
             config="trial",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="opus",
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
@@ -1297,7 +1294,7 @@ def test_arm_session_passes_explicit_harness_args(
             eval_id="e1",
             config="trial",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="opus",
             effort="medium",
             setup_reldir="skills/ingest/evals/x",
@@ -1348,7 +1345,7 @@ def test_arm_session_skips_setup_sh_when_no_skill(
             eval_id="e1",
             config="baseline",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="opus",
             effort="medium",
             backend=microsandbox_backend,
@@ -1388,7 +1385,7 @@ def test_arm_session_setup_sh_failure_stops_vm(
             eval_id="e1",
             config="trial",
             host_workdir=tmp_path / "wd",
-            host_repo_root=tmp_path,
+            staged_project=tmp_path,
             model="opus",
             effort="medium",
             setup_reldir="skills/ingest/evals/x",

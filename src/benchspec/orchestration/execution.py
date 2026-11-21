@@ -335,7 +335,7 @@ async def _run_arm_turns(
     eval_id: str,
     arm_name: str,
     workdir: Path,
-    project: Path | None,
+    staged_project: Path | None,
     model: str,
     effort: str,
     prompt: str,
@@ -367,7 +367,7 @@ async def _run_arm_turns(
             eval_id=eval_id,
             config=arm_name,
             host_workdir=workdir,
-            host_repo_root=project,
+            staged_project=staged_project,
             model=model,
             effort=effort,
             setup_reldir=setup_reldir,
@@ -558,7 +558,7 @@ def run_eval_arm(
     arm: Arm,
     workdir: Path,
     pre_run_shas: dict[str, str],
-    project: Path | None,
+    staged_project: Path | None,
     *,
     today: str,
     repo_root: Path,
@@ -597,7 +597,7 @@ def run_eval_arm(
             arm,
             workdir,
             pre_run_shas,
-            project,
+            staged_project,
             today=today,
             repo_root=repo_root,
             sample=sample,
@@ -621,7 +621,7 @@ def _run_cell(
     arm: Arm,
     workdir: Path,
     pre_run_shas: dict[str, str],
-    project: Path | None,
+    staged_project: Path | None,
     *,
     today: str,
     repo_root: Path,
@@ -643,10 +643,11 @@ def _run_cell(
     # the session config). Bind it once; never let an Arm(...) repr leak into a path.
     arm_name = arm.name
     # setup.sh lives in the eval folder, located by its path relative to the mount. The
-    # guest mounts a staged copy of `project` that preserves its layout, so a path relative
-    # to the host root resolves identically under /project. Assumes `project` is an
-    # ancestor of `eval_case.eval_dir` — guaranteed because cases.py passes project=repo_root.
-    setup_reldir = str(eval_case.eval_dir.relative_to(project)) if project is not None else None
+    # guest mounts `staged_project`, a copy of `repo_root` that preserves its layout, so a
+    # path relative to the host root resolves identically under /project.
+    setup_reldir = (
+        str(eval_case.eval_dir.relative_to(repo_root)) if staged_project is not None else None
+    )
 
     # Resolve the agent + backend + snapshot BEFORE the per-arm asyncio.run: building a
     # missing snapshot itself calls asyncio.run, which can't nest inside a running loop.
@@ -707,7 +708,7 @@ def _run_cell(
                 eval_id=eval_id,
                 arm_name=arm_name,
                 workdir=workdir,
-                project=project,
+                staged_project=staged_project,
                 model=arm.model,
                 effort=arm.effort,
                 prompt=prompt,

@@ -60,6 +60,8 @@ from benchspec.specs.discovery import (
 )
 
 BOUND_SPECS = pytest.StashKey[prebind.BoundSpecs]()
+STAGED_PROJECT = pytest.StashKey[Path]()
+STAGED_PROJECT_WORKERINPUT_KEY = "benchspec_staged_project"
 EVENT_SINK = pytest.StashKey[JsonlEventSink]()
 
 
@@ -401,6 +403,25 @@ def bound_specs(request: pytest.FixtureRequest) -> prebind.BoundSpecs:
 
 
 @pytest.fixture(scope="session")
+def staged_project(request: pytest.FixtureRequest) -> Path:
+    """The project copy the controller staged before any cell started, shared by all.
+
+    Raises:
+        RuntimeError: the stage is gone, so a cell would mount an empty `/project`.
+    """
+    from_controller = prebind.workerinput(request.config)
+    staged = (
+        Path(str(from_controller[STAGED_PROJECT_WORKERINPUT_KEY]))
+        if from_controller is not None
+        else request.config.stash[STAGED_PROJECT]
+    )
+    if not staged.is_dir():
+        raise RuntimeError(f"the project stage is missing: {staged}")
+
+    return staged
+
+
+@pytest.fixture(scope="session")
 def event_sink(request: pytest.FixtureRequest) -> EventSink:
     """This process's run event sink; a sink that drops events outside a benchspec run."""
     return request.config.stash.get(EVENT_SINK, NULL_SINK)
@@ -451,6 +472,7 @@ def test_eval(
     eval_arm: tuple[EvalCase, Arm],
     seeded_workdir: tuple[Path, dict[str, str]],
     repo_root: Path,
+    staged_project: Path,
     today: str,
     eval_set_name: str,
     project_marker: str,
@@ -466,7 +488,7 @@ def test_eval(
     """Run one output eval case through its selected arm."""
     # The project mounts for both arms (per-cell setup.sh needs the suite under either
     # eval root — /project/skills/<skill> or /project/.claude/skills/<skill>), so the
-    # same repo_root is passed regardless of arm — no asymmetry here.
+    # same stage is passed regardless of arm — no asymmetry here.
     eval_case, arm = eval_arm
     workdir, pre_run_shas = seeded_workdir
 
@@ -476,7 +498,7 @@ def test_eval(
         arm,
         workdir,
         pre_run_shas,
-        project=repo_root,
+        staged_project=staged_project,
         today=today,
         repo_root=repo_root,
         sample=sample_index,

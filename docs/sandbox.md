@@ -124,14 +124,13 @@ per cell against total host RAM. On macOS and Windows the Docker backend runs
 sandboxes in a VM whose memory is separate from host RAM, so `auto` can
 overestimate there: set `workers` explicitly. A cell, in order:
 
-1. Stages the project (below).
-2. Boots from the snapshot.
-3. Runs `setup.sh` if present, with the `BENCHSPEC_*` cell variables and the
+1. Boots from the snapshot, mounting the run's project stage (below).
+2. Runs `setup.sh` if present, with the `BENCHSPEC_*` cell variables and the
    arm's `env`.
-4. Invokes the agent with its working directory at `/workspace`.
-5. Gathers facts: file tree, contents, SHA-256s, the final message, the
+3. Invokes the agent with its working directory at `/workspace`.
+4. Gathers facts: file tree, contents, SHA-256s, the final message, the
    tool-call stream.
-6. Tears down and removes the stage.
+5. Tears down.
 
 Under Docker, a guest command that times out or is killed ends the `docker exec`
 client on the host, not the process it started inside the container: that process
@@ -147,7 +146,10 @@ The guest sees three paths:
 
 ### What `/project` contains
 
-`/project` is never a bind mount; each cell stages a fresh copy and mounts that:
+`/project` is never your checkout. The run stages one copy before any cell
+starts, every cell mounts it, and the run removes it when it ends, however it
+ends. A backend that uploads instead gets one gzipped tar, packed on first
+request:
 
 - **In**: what a `git clone` would contain — tracked files plus untracked files
   `.gitignore` does not ignore — layout preserved, so `setup.sh` paths, a
@@ -159,8 +161,8 @@ The guest sees three paths:
 - **Without git** (or outside a checkout): a plain walk that skips `.venv`,
   `node_modules`, `__pycache__`, and `.worktrees` by name; `.gitignore` is not
   honored on that path.
-- **Fail-closed**: if a dotenv file would still land in the stage, the cell
-  refuses to boot rather than mount it.
+- **Fail-closed**: if a dotenv file would still land in the stage, the run
+  stops before any cell rather than mount it.
 
 ## Credentials
 

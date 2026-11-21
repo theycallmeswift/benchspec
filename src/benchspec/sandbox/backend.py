@@ -239,7 +239,7 @@ class SandboxBackend(Protocol):
         snapshot: str,
         name: str,
         host_workdir: Path,
-        host_repo_root: Path | None,
+        staged_project: Path | None,
         extra_volumes: ExtraVolumes,
     ) -> LiveSandbox:
         """Create a runtime instance from a snapshot for an arm session."""
