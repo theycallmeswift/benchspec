@@ -381,10 +381,38 @@ def test_the_counter_stops_at_run_end(tmp_path: Path) -> None:
 
     assert view["state"] == "finished"
     assert view["top"]["status"] == "ended · exit 1"
+    assert view["counter"]["problem"] == "exit 1 · 3 errored"
+    assert view["counter"]["announce"] == "Run finished · 117 of 117 samples · exit 1 · 3 errored"
     assert view["counter"]["clock"] == "14m 29s"
     assert view["counter"]["left"] is None
     assert view["report"] == "tmp/evals/iteration_12/benchmark.md"
     assert view["reopen"] == "benchspec watch --iteration iteration_12"
+
+
+@pytest.mark.parametrize(
+    ("exit_status", "baseline_passed", "problem"),
+    [
+        (0, 3, None),
+        (0, 1, None),
+        (1, 1, "exit 1"),
+        (0, None, "1 errored"),
+        (1, None, "exit 1 · 1 errored"),
+    ],
+)
+def test_an_ended_run_names_a_non_zero_exit_and_its_errored_samples(
+    tmp_path: Path, exit_status: int, baseline_passed: int | None, problem: str | None
+) -> None:
+    """An ended run names a non zero exit and its errored samples."""
+    run = _one_cell(tmp_path)
+    run.done(CELL, 70)
+    if baseline_passed is None:
+        run.error("hello/greets/baseline/0", 70)
+    else:
+        run.done("hello/greets/baseline/0", 70, passed=baseline_passed)
+
+    run.end(80, exit_status=exit_status)
+
+    assert fold(run, at=90)["counter"]["problem"] == problem
 
 
 def test_no_estimate_shows_before_a_sample_finishes(tmp_path: Path) -> None:

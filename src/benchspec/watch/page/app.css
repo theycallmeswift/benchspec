@@ -318,11 +318,14 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: var(--type-body
 .bs-counter .bs-n.bs-fin { font: var(--type-counter-finished); }
 .bs-counter .bs-n.bs-fin .bs-pct { font-size: var(--text-18); }
 .bs-counter .bs-n.bs-fin .bs-ok { color: var(--success); font: var(--type-title); }
+.bs-counter .bs-n.bs-fin .bs-bad { color: var(--danger); font: var(--type-title); }
+.bs-counter .bs-n.bs-fin .bs-att { color: var(--danger); }
 .bs-counter .bs-n.bs-fin .bs-dot { color: var(--muted); }
 .bs-progbx { position: relative; display: flex; align-items: center; height: var(--size-bracket-cap); padding: 0 var(--space-8); }
 .bs-prog { flex: 1; height: var(--size-progress); background: var(--line); border-radius: var(--radius-2); overflow: hidden; }
 .bs-prog i { display: block; height: 100%; background: var(--accent); }
 .bs-prog.bs-done i { background: var(--success); }
+.bs-prog.bs-bad i { background: var(--danger); }
 .bs-tally { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-24); color: var(--muted); font: var(--type-body-mono); margin: 0; padding: 0; list-style: none; }
 .bs-tally .bs-att { color: var(--danger); }
 .bs-tally .bs-warn { color: var(--warn); }

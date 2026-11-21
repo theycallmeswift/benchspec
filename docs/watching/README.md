@@ -66,6 +66,11 @@ Deltas carry agent output, so the page is reachable only from this computer:
 | n/a | Every assertion is scoped off this arm. |
 | unfinished | Never closed before the run ended; drawn as queued. |
 
+A run that ends with every sample closed reads `✓ Finished` in green only when
+it exited 0 and no sample errored. Otherwise it reads `✗ Finished` in red with
+the reason beside it, such as `exit 1 · 1 errored`. Failed samples alone keep
+it green: a fail is a graded result, not a broken run.
+
 Once the run ends, a sample that never closed (its fixtures failed, or its
 worker was killed) reads `unfinished`, and the run as
 `Run stopped · N of M finished`.

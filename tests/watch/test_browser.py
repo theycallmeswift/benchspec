@@ -272,7 +272,11 @@ def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -
         page = pages.open(served)
 
         expect(page.locator("#tab-leaderboard")).to_have_attribute("aria-selected", "true")
-        expect(page.locator("#headline .bs-ok")).to_have_text("✓ Finished")
+        expect(page.locator("#headline .bs-bad")).to_have_text("✗ Finished")
+        expect(page.locator("#headline .bs-att")).to_have_text("exit 1 · 3 errored")
+        expect(page.locator("#status")).to_have_text(
+            "Run finished · 117 of 117 samples · exit 1 · 3 errored"
+        )
         expect(page.locator("#headline .bs-num")).to_have_text("100%")
         expect(page.locator("#headline")).to_contain_text("117 of 117")
         expect(page.locator("#headline .bs-el")).to_have_text("took 14m 29s")
@@ -306,6 +310,56 @@ def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -
             "error · sample 1 sandbox failed to boot"
         )
         _shoot(page, "e")
+
+
+def _color(page: Page, selector: str, token: str | None = None) -> str:
+    """An element's computed colour, or with `token` what that design token computes to."""
+    declared = f"node.style.color = 'var(--{token})'; " if token else ""
+
+    return page.locator(selector).evaluate(
+        f"node => {{ {declared}return getComputedStyle(node).color; }}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("exit_status", "baseline", "mark", "token", "reason"),
+    [
+        (0, "pass", "✓ Finished", "success", None),
+        (1, "error", "✗ Finished", "danger", "exit 1 · 1 errored"),
+        (0, "fail", "✓ Finished", "success", None),
+    ],
+)
+def test_the_ended_headline_follows_the_runs_outcome(
+    tmp_path: Path,
+    pages: Pages,
+    *,
+    exit_status: int,
+    baseline: str,
+    mark: str,
+    token: str,
+    reason: str | None,
+) -> None:
+    """The ended headline follows the runs outcome."""
+    run = Recording(iteration(tmp_path))
+    run.plan("hello", "greets")
+    run.begin()
+    run.done("hello/greets/trial/0", 70)
+    if baseline == "error":
+        run.error("hello/greets/baseline/0", 70)
+    else:
+        run.done("hello/greets/baseline/0", 70, passed=3 if baseline == "pass" else 1)
+
+    run.end(80, exit_status=exit_status)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+
+        expect(page.locator("#headline > span").first).to_have_text(mark)
+        expect(page.locator("#headline .bs-att")).to_have_text([reason] if reason else [])
+        headline = _color(page, "#headline > span >> nth=0")
+        bar = page.locator("#progress i").evaluate("node => getComputedStyle(node).backgroundColor")
+        assert headline == bar == _color(page, "#status", token)
+        _shoot(page, f"ended-{baseline}")
 
 
 def test_a_finished_two_arm_run_reads_like_the_mockups(tmp_path: Path, pages: Pages) -> None:
