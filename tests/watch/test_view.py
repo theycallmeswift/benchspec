@@ -413,11 +413,9 @@ def test_the_estimate_counts_down_between_events_and_never_goes_negative(tmp_pat
     assert estimates == ["~40s left", "~20s left", None]
 
 
-def test_the_estimate_hides_while_every_running_sample_has_outrun_the_finished_ones(
-    tmp_path: Path,
-) -> None:
-    """The estimate hides while every running sample has outrun the finished ones."""
-    run = _one_cell(tmp_path, count=3)
+def test_the_estimate_hides_once_the_last_running_samples_outrun_the_mean(tmp_path: Path) -> None:
+    """The estimate hides once the last running samples outrun the mean."""
+    run = _one_cell(tmp_path, count=2)
     run.done(CELL, 60, wall_s=60)
     run.done("hello/greets/baseline/0", 60, wall_s=60, worker="gw1")
     run.play("hello/greets/trial/1", 60)
@@ -425,7 +423,18 @@ def test_the_estimate_hides_while_every_running_sample_has_outrun_the_finished_o
 
     estimates = [fold(run, at=at)["counter"]["left"] for at in (119, 120, 500)]
 
-    assert estimates == ["~1m left", None, None]
+    assert estimates == ["~1s left", None, None]
+
+
+def test_the_estimate_stays_while_samples_are_queued(tmp_path: Path) -> None:
+    """The estimate stays while samples are queued, though the running one outran the mean."""
+    run = _one_cell(tmp_path, count=2)
+    run.done(CELL, 60, wall_s=60)
+    run.play("hello/greets/trial/1", 60)
+
+    view = fold(run, at=500)
+
+    assert view["counter"]["left"] == "~2m left"
 
 
 def test_a_sample_is_estimated_from_finished_samples_of_its_own_arm(tmp_path: Path) -> None:
@@ -451,9 +460,14 @@ def test_a_snapshot_build_does_not_pass_for_work(tmp_path: Path) -> None:
     assert held == "~2m left"
 
 
-def test_the_estimate_tracks_an_uneven_run(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "shape",
+    [{}, {"snapshot_s": 300}, {"workers": 1}],
+    ids=["as recorded", "longer snapshot build", "one worker"],
+)
+def test_the_estimate_tracks_an_uneven_run(tmp_path: Path, shape: dict) -> None:
     """The estimate tracks a run with a slow arm, a late-booting arm and a straggler."""
-    run = uneven_run(tmp_path)
+    run = uneven_run(tmp_path, **shape)
     took_ms = max(event["ts_ms"] for event, _ in replay(run))
     quarter = len(run.planned) // 4
 

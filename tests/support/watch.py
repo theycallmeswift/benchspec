@@ -496,12 +496,12 @@ def finished_run(root: Path) -> Recording:
     return run
 
 
-def uneven_run(root: Path) -> Recording:
-    """A finished 72-sample run on six workers, four arms, three samples a cell.
+def uneven_run(root: Path, *, workers: int = 6, snapshot_s: float = 150) -> Recording:
+    """A finished 72-sample run on four arms, three samples a cell.
 
     `codex` runs several times slower than the rest, a snapshot build holds the
-    `opencode` samples started in the first 150 seconds, and the last `codex` sample
-    outruns every other and ends the run alone.
+    `opencode` samples started in the first `snapshot_s` seconds, and the last `codex`
+    sample outruns every other and ends the run alone.
     """
     work_s = {"bare": 16, "claude-code": 20, "codex": 62, "opencode": 24}
     eval_pace = {
@@ -519,14 +519,15 @@ def uneven_run(root: Path) -> Recording:
         run.plan("e2e", eval_id, count=3)
 
     run.begin()
-    free_at = {f"gw{number}": 0.0 for number in range(6)}
+    free_at = {f"gw{number}": 0.0 for number in range(workers)}
 
     for planned in run.planned:
         worker = min(free_at, key=lambda name: free_at[name])
         started = free_at[worker]
-        held_s = max(150 - started, 0) if planned["arm"] == "opencode" else 0
+        held_s = max(snapshot_s - started, 0) if planned["arm"] == "opencode" else 0
         pace = eval_pace[planned["eval_id"]] * sample_pace[planned["sample"]]
         wall_s = held_s + work_s[planned["arm"]] * pace
+
         if planned["cell"] == "e2e/reads-config/codex/2":
             wall_s = 110
 
