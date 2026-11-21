@@ -10,6 +10,8 @@ still running; per eval, its id relative to the group.
 | Part | Spec |
 | --- | --- |
 | matrix caption | one right-aligned `bs-mxcap` above the matrix: `[ 13 evals × 2 arms · live ]`, `bs-type-section-label`, `fg-tertiary` |
+| width | under four arms, at 1280px and up, the matrix, caption and legend stop `size-hovercard` + `space-16` short of the right edge, leaving room for the HoverCard; from four arms they span the content width |
+| arm header | arm name over `harness · model`, `bs-type-meta`, top-aligned; above `breakpoint-phone` the second line wraps after ` · ` and `/`, elsewhere only when a part doesn't fit |
 | group label, line 1 | folder name, `bs-type-group-name`, `fg` |
 | group label, line 2 | always present: `5 evals · [trial-only]`, `bs-type-meta`, `fg-tertiary`, `space-4` below; scope note as bracket text in its own `<span>`, which never breaks; wraps on phone. `[trial-only]` only when every check in the group skips the other arm(s); otherwise `[1 check trial-only]`, `[1 check skips bare]`; `1 eval`, never `1 evals` |
 | group row | min-height `size-cell` + `space-24`; `space-16` above and below |

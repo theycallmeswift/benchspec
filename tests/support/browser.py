@@ -18,6 +18,7 @@ from playwright.sync_api import Browser, Error, Page, ViewportSize, expect, sync
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCREENSHOTS = REPO_ROOT / "tmp" / "watch-screenshots"
 DESKTOP: ViewportSize = {"width": 1308, "height": 1100}
+WIDE: ViewportSize = {"width": 1440, "height": 900}
 PHONE: ViewportSize = {"width": 390, "height": 844}
 
 

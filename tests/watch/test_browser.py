@@ -13,9 +13,16 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import FloatRect, Locator, Page, expect
 
-from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, Pages, watching
+from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, WIDE, Pages, watching
 from tests.support.cli import run_benchspec
-from tests.support.watch import Recording, finished_frame, finished_run, iteration, mid_run
+from tests.support.watch import (
+    Recording,
+    finished_frame,
+    finished_run,
+    iteration,
+    long_label_live,
+    mid_run,
+)
 
 LOGGED_OUT = "button.bs-cell[aria-label^='codex-logged-out on baseline']"
 IMPLEMENT = "button.bs-cell[aria-label^='plan-implement-task on baseline']"
@@ -217,6 +224,143 @@ def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages:
         expect(label).to_have_text(re.compile(r"^agent 2m \d\ds$"), use_inner_text=True)
         assert label.evaluate("node => node.scrollWidth <= node.clientWidth")
         assert page.evaluate("document.documentElement.scrollWidth") == 768
+
+
+def _fits(locator: Locator) -> bool:
+    """Whether every matched element shows its whole text."""
+    return locator.evaluate_all(
+        "nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)"
+    )
+
+
+def _cell(page: Page, eval_id: str, arm_name: str = "claude-code") -> Locator:
+    """The matrix cell of an eval on an arm."""
+    return page.locator(f"button.bs-cell[aria-label^='{eval_id} on {arm_name}']")
+
+
+def _hover_card(page: Page, cell: Locator) -> tuple[FloatRect, FloatRect]:
+    """Glide the pointer to a cell and return its box and its hover card's, inside the viewport."""
+    box = _rect(cell)
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=8)
+    expect(cell).to_have_attribute("aria-describedby", "hovercard")
+    card = _rect(page.locator("#hovercard"))
+    viewport = page.viewport_size
+    assert viewport is not None
+    assert card["y"] >= 0
+    assert card["x"] + card["width"] <= viewport["width"]
+    assert card["y"] + card["height"] <= viewport["height"]
+
+    return box, card
+
+
+def _under(cell: FloatRect) -> float:
+    """Where a card under a cell starts."""
+    return cell["y"] + cell["height"] + 4
+
+
+def test_four_arms_span_a_wide_desktop_with_the_hover_card_under_its_cell(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """Four arms span a wide desktop, with the hover card under its cell."""
+    long_label_live(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, WIDE)
+        booting = _cell(page, "allows-filesystem-traversal").locator(".bs-t")
+
+        for part in ("#matrix", "#caption", ".bs-legend"):
+            edges = _rect(page.locator(part))
+            assert (edges["x"], edges["width"]) == (32, WIDE["width"] - 64)
+
+        expect(booting).to_have_text(re.compile(r"^0/3 · booting 2m \d\ds$"), use_inner_text=True)
+        assert booting.evaluate("node => node.clientWidth - node.scrollWidth") >= 0
+        assert _fits(page.locator(".bs-eval"))
+        assert _fits(page.locator(".bs-mhead > span"))
+        tops = {_rect(header)["y"] for header in page.locator(".bs-mhead b").all()}
+        assert len(tops) == 1
+
+        first_arm = _cell(page, "allows-filesystem-traversal")
+        last_arm = _cell(page, "keeps-secrets-out", "pi")
+
+        for cell in (first_arm, last_arm):
+            box, card = _hover_card(page, cell)
+            inside = WIDE["width"] - 16 - card["width"]
+            assert card["y"] == _under(box)
+            assert card["x"] == pytest.approx(min(box["x"], inside), abs=1)
+
+        last_row, above = _hover_card(page, _cell(page, "greets"))
+        assert above["x"] == last_row["x"]
+        assert above["y"] + above["height"] + 4 == pytest.approx(last_row["y"], abs=1)
+        assert page.evaluate("document.documentElement.scrollWidth") == WIDE["width"]
+
+
+def test_the_hover_card_follows_the_pointer_down_and_up_a_column(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """The hover card follows the pointer down and up a column."""
+    long_label_live(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, WIDE)
+        upper = _cell(page, "allows-filesystem-traversal")
+        lower = _cell(page, "blocks-network-egress")
+        _hover_card(page, upper)
+
+        box, card = _hover_card(page, lower)
+        assert card["y"] == _under(box)
+        expect(upper).not_to_have_attribute("aria-describedby", "hovercard")
+
+        box, card = _hover_card(page, upper)
+        assert card["y"] == _under(box)
+        expect(lower).not_to_have_attribute("aria-describedby", "hovercard")
+
+
+def test_a_hover_card_with_no_room_above_or_below_stays_below(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """A hover card with no room above or below stays below."""
+    long_label_live(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, {"width": 1440, "height": 400})
+        cell = _cell(page, "blocks-network-egress")
+        cell.evaluate("node => scrollBy(0, node.getBoundingClientRect().top - 180)")
+
+        cell.hover()
+        expect(cell).to_have_attribute("aria-describedby", "hovercard")
+
+        assert _rect(page.locator("#hovercard"))["y"] == _under(_rect(cell))
+
+
+def test_four_arms_span_the_narrowest_wide_desktop(tmp_path: Path, pages: Pages) -> None:
+    """Four arms span the narrowest wide desktop."""
+    long_label_live(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, {"width": 1280, "height": 800})
+        matrix = _rect(page.locator("#matrix"))
+        box, card = _hover_card(page, _cell(page, "keeps-secrets-out", "pi"))
+
+        assert (matrix["x"], matrix["width"]) == (32, 1216)
+        assert card["y"] + card["height"] + 4 == pytest.approx(box["y"], abs=1)
+        assert card["x"] == pytest.approx(1280 - 16 - card["width"], abs=1)
+
+
+@pytest.mark.parametrize("arms", [2, 3])
+def test_under_four_arms_the_hover_card_keeps_its_room_beside_the_row(
+    arms: int, tmp_path: Path, pages: Pages
+) -> None:
+    """Under four arms the hover card keeps its room beside the row."""
+    long_label_live(tmp_path, arms=arms)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, WIDE)
+        matrix = _rect(page.locator("#matrix"))
+        box, card = _hover_card(page, _cell(page, "blocks-network-egress"))
+
+        assert (matrix["x"], matrix["width"]) == (32, 1080)
+        assert card["x"] == matrix["x"] + matrix["width"] + 16
+        assert card["y"] == box["y"]
 
 
 def test_a_run_that_planned_nothing_says_so(tmp_path: Path, pages: Pages) -> None:

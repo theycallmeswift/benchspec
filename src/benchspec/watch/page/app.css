@@ -398,7 +398,7 @@ button.bs-lbh { appearance: none; padding: 0; border: 0; background: none; curso
 .bs-lbl .bs-err { font: var(--type-body-mono); color: var(--danger); }
 
 /* HoverCard and Drawer: floating panels with a hairline edge. */
-.bs-hc { max-width: var(--size-hovercard); display: grid; gap: var(--space-8); padding: var(--space-12); background: var(--popover); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); box-shadow: var(--shadow-hovercard); font: var(--type-body-mono); color: var(--fg); }
+.bs-hc { max-width: var(--size-hovercard); display: grid; gap: var(--space-8); padding: var(--space-12); background: var(--popover); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); box-shadow: var(--shadow-hovercard); font: var(--type-body-mono); color: var(--fg); pointer-events: none; }
 .bs-hc .bs-hh { display: flex; align-items: baseline; gap: var(--space-8); }
 .bs-hc .bs-hh b { font: var(--type-metric); }
 .bs-hc .bs-hr { display: grid; grid-template-columns: 1fr auto auto; gap: var(--space-12); }
@@ -495,9 +495,15 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
 .bs-lb caption, .bs-lgbtn.bs-dismissed + .bs-tip { display: none; }
 .bs-how { font: var(--type-help); color: var(--muted); }
 .bs-how p { margin: var(--space-8) 0 0; max-width: 70ch; }
-/* Room beside the matrix for the hover card, so it never covers a cell. */
+/* Below four arms, room beside the matrix for the hover card, so it never covers a cell. */
 @media (min-width: 1280px) {
-  #matrix, .bs-mxcap, .bs-legend { margin-right: calc(var(--size-hovercard) + var(--space-16)); }
+  #panel-matrix:not(:has(.bs-mrow > :nth-child(5))) :is(#matrix, .bs-mxcap, .bs-legend) { margin-right: calc(var(--size-hovercard) + var(--space-16)); }
+}
+@media (min-width: 640px) {
+  .bs-mhead { align-items: start; }
+  .bs-mhead b + span { display: block; white-space: normal; }
+  .bs-mhead b + span > span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+  #matrix:has(.bs-sm) :is(.bs-cell, .bs-gs, .bs-mhead > :not(:first-child)) { padding-inline: var(--space-8); }
 }
 @media (max-width: 639px) {
   .bs-wide { display: none; }

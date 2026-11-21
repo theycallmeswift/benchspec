@@ -539,6 +539,52 @@ def uneven_run(root: Path, *, workers: int = 6, snapshot_s: float = 150) -> Reco
     return run
 
 
+def long_label_live(root: Path, *, arms: int = 4) -> Recording:
+    """A live run on up to four arms with long model names and eval ids.
+
+    The first arm has a cell booting for over two minutes and finished the second and last
+    evals;
+    the second has a cell running; the last finished a mid-table eval.
+    """
+    elapsed_s = 200
+    models = {
+        "claude-code": "anthropic/claude-haiku-4.5",
+        "codex": "openai/gpt-5.1-codex-mini",
+        "opencode": "google/gemini-2.5-flash",
+        "pi": "moonshotai/kimi-k2",
+    }
+    names = list(models)[:arms]
+    evals = (
+        "allows-filesystem-traversal",
+        "blocks-network-egress",
+        "keeps-secrets-out",
+        "limits-memory",
+        "mounts-read-only",
+        "greets",
+    )
+    run = Recording(
+        iteration(root),
+        arms=[arm(name, name, models[name]) for name in names],
+        baseline=None,
+        start_ms=int(time.time() * 1000) - elapsed_s * 1000,
+    )
+
+    for eval_id in evals:
+        run.plan("sandbox", eval_id, count=3)
+
+    run.begin()
+
+    for sample in range(3):
+        run.done(f"sandbox/greets/{names[0]}/{sample}", 70 + sample, wall_s=40)
+        run.done(f"sandbox/blocks-network-egress/{names[0]}/{sample}", 80 + sample, wall_s=40)
+        run.done(f"sandbox/keeps-secrets-out/{names[-1]}/{sample}", 75 + sample, passed=2)
+
+    run.start(f"sandbox/allows-filesystem-traversal/{names[0]}/0", elapsed_s - 144)
+    run.play(f"sandbox/allows-filesystem-traversal/{names[1]}/0", elapsed_s - 31, worker="gw1")
+
+    return run
+
+
 def replay(run: Recording) -> Iterator[tuple[dict, RunView]]:
     """Each event of a recording in time order, with the view folded up to it."""
     view = RunView("tmp/evals/iteration_12")
