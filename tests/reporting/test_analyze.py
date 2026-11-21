@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
 from textwrap import dedent
 
@@ -182,7 +182,7 @@ def _fake_session_factory(result: RunResult) -> SessionFactory:
     """Single-turn session factory yielding one fixed RunResult for the arm's run."""
 
     @contextlib.asynccontextmanager
-    async def factory(**_kwargs: object) -> AsyncIterator[TurnRunner]:
+    async def factory(**_kwargs: object) -> AsyncGenerator[TurnRunner]:
         """Yield a run callable returning the pre-baked result."""
 
         async def run(

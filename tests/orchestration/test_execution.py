@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -110,7 +110,7 @@ class _RecordedSession:
         self.detects: list[str | None] = []
 
     @contextlib.asynccontextmanager
-    async def __call__(self, **kwargs: object) -> AsyncIterator[TurnRunner]:
+    async def __call__(self, **kwargs: object) -> AsyncGenerator[TurnRunner]:
         """Open the fake session, recording its kwargs and yielding the per-turn runner."""
         self.calls.append(kwargs)
         yield self._run
@@ -744,7 +744,7 @@ def _record_session_model(seen: dict[str, object], name: str) -> SessionFactory:
     """Build a session factory that records the model it was opened with under `name`."""
 
     @contextlib.asynccontextmanager
-    async def factory(**kwargs: object) -> AsyncIterator[TurnRunner]:
+    async def factory(**kwargs: object) -> AsyncGenerator[TurnRunner]:
         """Factory."""
         seen[name] = kwargs["model"]
 
