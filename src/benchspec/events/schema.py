@@ -62,7 +62,6 @@ class RunStart(Envelope):
     set: str
     baseline: str | None
     arms: list[ArmInfo]
-    judge_timeout: int
     cells: list[PlannedCell]
     cell_count: int
 

@@ -141,7 +141,8 @@ function renderTop() {
   );
   const state = byId("run-state");
   document.querySelector(".bs-top").classList.toggle("bs-live-run", top.live);
-  setClass(state, top.stale ? "bs-stale" : top.live && connected ? "bs-live" : "");
+  byId("run").classList.toggle("bs-stale-run", view.state === "stale");
+  setClass(state, view.state === "stale" ? "bs-stale" : top.live && connected ? "bs-live" : "");
   fill(state, top.status, top.detail ? el("span", { class: "bs-wide", text: ` · ${top.detail}` }) : "");
 }
 

@@ -11,7 +11,7 @@ since the last event, stale, or `ended · exit N`) and current theme.
 | run id | `<b>`, `fg`, weight 500 |
 | suite | `muted` |
 | live | `bs-live`: a `size-live-dot` `accent` dot, then `live · last event 2s ago` |
-| stale | `bs-stale`: `stale · no events for 21m 04s` in `warn`, no dot; phone keeps `stale` |
+| stale | `bs-stale`: `stale · no events for 21m 04s` in `warn`, no dot; phone keeps `stale`; `bs-stale-run` on the page stops the running pulse |
 | ended | `ended · exit 1`, no dot |
 | disconnected | remove the dot and show the PageState banner; never keep the dot when no events arrive |
 | theme toggle | `<button class="bs-toggle" aria-pressed>` (Controls); label names the theme it switches to (`Light theme`) |

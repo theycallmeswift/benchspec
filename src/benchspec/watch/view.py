@@ -340,10 +340,10 @@ class RunView:
             sample.closed_ms = ts_ms
 
     def _stale_after_ms(self) -> int:
-        """A silence no live run can produce: its longest cell cap, the judge timeout, a margin."""
+        """The silence that marks a run stale: its longest cell cap plus a margin."""
         longest_cap = max((arm["timeout"] for arm in self._plan["arms"]), default=0)
 
-        return (longest_cap + self._plan["judge_timeout"] + STALE_MARGIN_S) * 1000
+        return (longest_cap + STALE_MARGIN_S) * 1000
 
     def to_json(self, now_ms: int) -> dict:
         """Everything the page draws at `now_ms`.
@@ -355,6 +355,7 @@ class RunView:
 
         silent_ms = now_ms - self._last_event_ms
         stale = self._end is None and silent_ms > self._stale_after_ms()
+
         if self._end is not None:
             now_ms = self._end["ts_ms"]
         elif stale:
@@ -399,7 +400,6 @@ class RunView:
             "suite": " · ".join([self._plan["set"], *(skills if len(skills) == 1 else [])]),
             "count": f"--count {count}" if count > 1 else None,
             "live": self._end is None,
-            "stale": state == "stale",
             "status": status,
             "detail": detail,
         }
@@ -454,27 +454,30 @@ class RunView:
         """The time left: each unfinished sample's expected remainder, shared by the workers.
 
         A sample is expected to take the mean of the finished ones. None until one has
-        finished, and when less than a second is expected.
+        finished, while every running sample is past that mean, and under a second.
         """
         durations = [
             sample.closed_ms - sample.started_ms
             for sample in counted
             if sample.closed_ms is not None and sample.started_ms is not None
         ]
+
         if not durations:
             return None
 
-        expected_ms = statistics.mean(durations)
         unfinished = [sample for sample in counted if sample.closed_ms is None]
-        work_ms = sum(
-            expected_ms
-            if sample.started_ms is None
-            else max(expected_ms - (now_ms - sample.started_ms), 0)
-            for sample in unfinished
-        )
         if not unfinished:
             return None
 
+        expected_ms = statistics.mean(durations)
+        running_ms = [
+            now_ms - sample.started_ms for sample in unfinished if sample.started_ms is not None
+        ]
+        if running_ms and min(running_ms) >= expected_ms:
+            return None
+
+        queued = len(unfinished) - len(running_ms)
+        work_ms = queued * expected_ms + sum(max(expected_ms - ran_ms, 0) for ran_ms in running_ms)
         left_ms = work_ms / min(max(len(self._workers), 1), len(unfinished))
 
         return left_ms if left_ms >= 1000 else None
@@ -513,7 +516,9 @@ class RunView:
                     "open": not (settled and self._end is None),
                     "summaries": [
                         _group_summary(
-                            [sample for sample in members if sample.arm == arm["name"]], now_ms
+                            [sample for sample in members if sample.arm == arm["name"]],
+                            now_ms,
+                            live=state == "live",
                         )
                         for arm in arms
                     ],
@@ -995,8 +1000,11 @@ def _offset(milliseconds: int) -> str:
     return f"+{seconds // 60}:{seconds % 60:02d}"
 
 
-def _group_summary(samples: list[Sample], now_ms: int) -> dict:
-    """One arm's summary of a group: its text, its `done/total` and its completion bar."""
+def _group_summary(samples: list[Sample], now_ms: int, *, live: bool) -> dict:
+    """One arm's summary of a group: its text, its `done/total` and its completion bar.
+
+    The bar of a group in progress is accented only while the run is `live`.
+    """
     states = [sample.state(now_ms) for sample in samples]
     counted = [state for state in states if state != "n/a"]
     if not counted:
@@ -1016,14 +1024,12 @@ def _group_summary(samples: list[Sample], now_ms: int) -> dict:
     if all(state in IDLE for state in counted):
         return {"text": counted[0], "count": count, "muted": True, "bar": 0, "live": False}
 
-    ended = "unfinished" in counted
-
     return {
-        "text": rate or ("unfinished" if ended else "running"),
+        "text": rate or ("unfinished" if "unfinished" in counted else "running"),
         "count": count,
         "muted": rate is None,
         "bar": done / len(counted),
-        "live": not ended,
+        "live": live,
     }
 
 

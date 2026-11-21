@@ -133,7 +133,6 @@ def test_serial_run_writes_one_file_that_plans_and_closes_every_cell(
             _arm("baseline", "sonnet"),
             _arm("trial", "opus"),
         ],
-        "judge_timeout": 300,
         "cells": [],
         "cell_count": 4,
     }

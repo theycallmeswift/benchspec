@@ -437,6 +437,8 @@ def test_a_run_gone_silent_reads_stale_at_every_width(tmp_path: Path, pages: Pag
         expect(state).to_have_class("bs-stale")
         expect(page.locator("#headline .bs-el")).to_have_text("elapsed 4s")
         expect(page.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
+        pulse = "node => getComputedStyle(node, '::after').animationName"
+        assert page.locator("#matrix .bs-b-running").first.evaluate(pulse) == "none"
         expect(phone.locator("#run-state")).to_have_text("stale", use_inner_text=True)
         _shoot(page, "stale-dark", full_page=False)
 

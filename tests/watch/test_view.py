@@ -11,7 +11,6 @@ from benchspec.reporting import report
 from benchspec.watch.view import STALE_MARGIN_S, assertions_view, fail_step, rate_text
 from tests.support.watch import (
     CELL_CAP_S,
-    JUDGE_TIMEOUT_S,
     Recording,
     arm,
     cell_of,
@@ -411,6 +410,31 @@ def test_the_estimate_counts_down_between_events_and_never_goes_negative(tmp_pat
     assert estimates == ["~40s left", "~20s left", None]
 
 
+def test_the_estimate_hides_while_every_running_sample_is_past_the_mean(tmp_path: Path) -> None:
+    """The estimate hides while every running sample is past the mean."""
+    run = _one_cell(tmp_path, count=3)
+    run.done(CELL, 60, wall_s=60)
+    run.done("hello/greets/baseline/0", 60, wall_s=60, worker="gw1")
+    run.play("hello/greets/trial/1", 60)
+    run.play("hello/greets/baseline/1", 60, worker="gw1")
+
+    estimates = [fold(run, at=at)["counter"]["left"] for at in (119, 120, 500)]
+
+    assert estimates == ["~1m left", None, None]
+
+
+def test_no_estimate_shows_after_the_run_ends(tmp_path: Path) -> None:
+    """No estimate shows after the run ends."""
+    run = _one_cell(tmp_path, count=2)
+    run.done(CELL, 60, wall_s=60)
+    run.play("hello/greets/trial/1", 60)
+    run.end(70, exit_status=1)
+
+    view = fold(run, at=75)
+
+    assert view["counter"]["left"] is None
+
+
 def test_the_estimate_shares_the_remaining_samples_between_the_workers(tmp_path: Path) -> None:
     """The estimate shares the remaining samples between the workers."""
     run = _one_cell(tmp_path, count=3)
@@ -424,11 +448,11 @@ def test_the_estimate_shares_the_remaining_samples_between_the_workers(tmp_path:
     assert (one_worker, two_workers) == ("~4m left", "~2m left")
 
 
-def test_a_run_silent_past_its_cell_cap_and_judge_timeout_reads_stale(tmp_path: Path) -> None:
-    """A run silent past its cell cap and judge timeout reads stale."""
+def test_a_run_silent_past_its_longest_cell_cap_reads_stale(tmp_path: Path) -> None:
+    """A run silent past its longest cell cap reads stale."""
     run = _one_cell(tmp_path)
     run.play(CELL, 0, through="bind")
-    longest_silence_s = CELL_CAP_S + JUDGE_TIMEOUT_S + STALE_MARGIN_S
+    longest_silence_s = CELL_CAP_S + STALE_MARGIN_S
 
     healthy = fold(run, at=longest_silence_s)
     stale = fold(run, at=longest_silence_s + 1)
@@ -440,9 +464,8 @@ def test_a_run_silent_past_its_cell_cap_and_judge_timeout_reads_stale(tmp_path: 
         "suite": "",
         "count": None,
         "live": True,
-        "stale": True,
         "status": "stale",
-        "detail": "no events for 21m 01s",
+        "detail": "no events for 16m 01s",
     }
     assert (stale["counter"]["clock"], stale["counter"]["left"]) == ("0s", None)
     assert stale["counter"]["announce"] == "Run stale · 0 of 2 samples finished"
@@ -452,10 +475,12 @@ def test_a_stale_run_returns_to_live_when_events_resume(tmp_path: Path) -> None:
     """A stale run returns to live when events resume."""
     run = _one_cell(tmp_path)
     run.play(CELL, 0, through="bind")
+    silent = fold(run, at=1999)
     run.phase(CELL, "boot", 2000)
 
     view = fold(run, at=2001)
 
+    assert silent["state"] == "stale"
     assert (view["state"], view["top"]["status"]) == ("live", "live")
     assert view["counter"]["clock"] == "33m 21s"
 
@@ -613,7 +638,6 @@ def test_a_finished_run_tallies_only_what_happened_and_marks_a_lone_arm_best(
         "suite": "e2e",
         "count": "--count 3",
         "live": False,
-        "stale": False,
         "status": "ended · exit 1",
         "detail": None,
     }

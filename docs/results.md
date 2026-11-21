@@ -309,7 +309,7 @@ artifact path does.
 
 | Type | Fields | Emitted |
 |---|---|---|
-| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`, `timeout`), `judge_timeout`, `cells`, `cell_count` | Once, by the controller, after collection |
+| `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`, `timeout`), `cells`, `cell_count` | Once, by the controller, after collection |
 | `cell.start` | `cell`, `skill`, `eval_id`, `arm`, `sample`, `harness`, `model` | When a sample begins |
 | `cell.phase` | `cell`, `phase` | On entering `bind`, `boot`, `setup`, `agent`, or `grade`; each at most once, in that order |
 | `cell.delta` | `cell`, `kind` (`tool_call` or `text`), `name` (the tool, else `null`), `text` | Once per tool call or assistant text block of the agent's turn |
