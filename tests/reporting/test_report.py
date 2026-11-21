@@ -30,12 +30,44 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
     assert out["AUTH_TOKEN"] == "***"
 
 
-@pytest.mark.parametrize(
-    ("rate", "text"), [(0.125, "12%"), (0.375, "38%"), (0.625, "62%"), (0.996, "100%")]
-)
+@pytest.mark.parametrize(("rate", "text"), [(0.125, "12%"), (0.375, "38%"), (0.625, "62%")])
 def test_percent_rounds_a_half_to_even(rate: float, text: str) -> None:
     """Verify percent rounds a half to even."""
     assert report.percent(rate) == text
+
+
+@pytest.mark.parametrize(
+    ("passed", "total", "text"),
+    [(9, 9, "100%"), (199, 200, "99%"), (1, 300, "1%"), (0, 9, "0%"), (5, 9, "56%")],
+)
+def test_percent_reads_100_only_when_all_passed_and_0_only_when_none_did(
+    passed: int, total: int, text: str
+) -> None:
+    """Verify percent reads 100 only when all passed and 0 only when none did."""
+    assert report.percent(passed / total) == text
+
+
+def test_a_rate_averaged_over_samples_reads_100_only_when_every_sample_passed(
+    tmp_path: Path,
+) -> None:
+    """Verify a mean of sample rates that rounds to 100 or 0 reads 99 or 1."""
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=0, total=200, sample=0)
+    seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=200, sample=1)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=200, total=200, sample=0)
+    seed_arm(tmp_path / "archive", "alpha", "trial", passes=199, total=200, sample=1)
+    bench = report.write_benchmark(
+        tmp_path, report.discover_eval_dirs(tmp_path), label="iteration_01", baseline="baseline"
+    )
+
+    markdown = (tmp_path / "benchmark.md").read_text()
+    terminal = report.terminal_matrix(bench, tmp_path / "benchmark.md")
+
+    assert "baseline 1% → trial 99% (**+100pp**)" in markdown
+    assert "| archive/alpha | 1% | 99% (+100pp) |" in markdown
+    assert "| All evals | 1% | 99% (+100pp) |" in markdown
+    assert "- Pass rate: **99%**" in markdown
+    assert "| alpha | 2 | 399 | 400 | 99% | ±0% |" in markdown
+    assert _terminal_rows(terminal)["All evals"] == "1% 99%"
 
 
 def test_build_benchmark_baseline_and_arm_meta(tmp_path: Path) -> None:

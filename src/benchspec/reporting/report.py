@@ -404,8 +404,20 @@ def index_rows(
 
 
 def percent(rate: float) -> str:
-    """A rate as a whole percent, a half rounding to even: 0.125 is `12%`."""
-    return f"{rate:.0%}"
+    """A rate as a whole percent, a half rounding to even: 0.125 is `12%`.
+
+    `100%` and `0%` are kept for a rate of exactly 1 and 0; one that would round
+    there reads `99%` or `1%`.
+    """
+    text = f"{rate:.0%}"
+
+    if text == "100%" and rate < 1:
+        return "99%"
+
+    if text == "0%" and rate > 0:
+        return "1%"
+
+    return text
 
 
 def _pct(value: float | None) -> str:
@@ -843,7 +855,7 @@ def _format_markdown(benchmark: dict) -> str:
         for row in stats["per_eval"]:
             flakiness = ""
             if row["samples"] > 1 and row["pass_rate_stdev"] is not None:
-                flakiness = f"±{percent(row['pass_rate_stdev'])}"
+                flakiness = f"±{row['pass_rate_stdev']:.0%}"
             notes = []
             if row["errored_samples"]:
                 notes.append(f"{row['errored_samples']} errored")
