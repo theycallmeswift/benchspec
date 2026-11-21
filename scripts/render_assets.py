@@ -212,8 +212,8 @@ WORDMARK_LETTER_SPACING_EM = -0.01
 
 
 def svg_number(value: float) -> str:
-    """Format a coordinate with at most two decimals and no negative zero."""
-    return f"{round(value, 2) + 0:g}"
+    """Format a coordinate with at most two decimals."""
+    return f"{round(value, 2):g}"
 
 
 def wordmark_outline() -> str:
@@ -225,16 +225,17 @@ def wordmark_outline() -> str:
     font = TTFont(font_path(FontWeight.SEMIBOLD))
     glyphs = font.getGlyphSet()
     glyph_names = font.getBestCmap()
-    # fontTools sets table fields while parsing, where the type checker can't see them.
-    units_per_em = int(vars(font["head"])["unitsPerEm"])
 
     if glyph_names is None:
         raise ValueError("the bundled SemiBold has no Unicode character map")
 
+    # fontTools sets table fields while parsing, where the type checker can't see them.
+    units_per_em = int(vars(font["head"])["unitsPerEm"])
     scale = WORDMARK_FONT_SIZE / units_per_em
     pen = SVGPathPen(glyphs, ntos=svg_number)
 
     glyph_left = float(WORDMARK_LEFT)
+
     for character in PROJECT_NAME:
         glyph = glyphs[glyph_names[ord(character)]]
         glyph.draw(TransformPen(pen, (scale, 0, 0, -scale, glyph_left, WORDMARK_BASELINE)))
@@ -274,6 +275,7 @@ def logo_svg(mark: BracketMatrix, *, ink: str, with_wordmark: bool) -> str:
     ]
 
     size, radius = svg_number(mark.square_size), svg_number(mark.corner_radius)
+
     for row_y, row_colors in zip(mark.row_ys, mark.square_colors, strict=True):
         for column_x, color in zip(mark.column_xs, row_colors, strict=True):
             lines.append(
@@ -384,8 +386,10 @@ def rate_color(rate: int) -> str:
     """Color a pass rate by band, as the real terminal reporter does."""
     if rate >= 80:
         return TERMINAL_GREEN
+
     if rate >= 50:
         return TERMINAL_YELLOW
+
     return TERMINAL_RED
 
 
@@ -393,16 +397,20 @@ def delta_color(delta_pp: int) -> str:
     """Color a percentage-point delta by sign, as the real terminal reporter does."""
     if delta_pp > 0:
         return TERMINAL_GREEN
+
     if delta_pp < 0:
         return TERMINAL_RED
+
     return TERMINAL_YELLOW
 
 
 def rate_cell(rate: int, delta_pp: int | None = None) -> list[Span]:
     """Render one matrix cell: a bare rate for the baseline arm, else ``rate (+Npp)``."""
     spans = [Span(f"{rate}%", color=rate_color(rate))]
+
     if delta_pp is not None:
         spans.append(Span(f" ({delta_pp:+d}pp)", color=delta_color(delta_pp)))
+
     return spans
 
 
@@ -414,10 +422,12 @@ def span_width(spans: list[Span]) -> int:
 def matrix_line(label: Span, cells: list[list[Span]]) -> TerminalLine:
     """Lay out a matrix row: the label at column 0, each cell right-aligned to its column end."""
     spans = [label]
+
     for column_end, cell in zip(MATRIX_COLUMN_ENDS, cells, strict=True):
         padding = column_end - span_width(spans) - span_width(cell)
         spans.append(Span(" " * padding))
         spans.extend(cell)
+
     return TerminalLine(spans)
 
 
@@ -438,6 +448,7 @@ def report_lines() -> list[TerminalLine]:
     """Render the end-of-run report block, one entry per revealed line."""
     rule = f" {PROJECT_NAME} benchmark ".center(RULE_WIDTH, "=")
     header = matrix_line(Span("Eval"), [[Span("baseline")], [Span("trial")]])
+
     return [
         TerminalLine([Span(rule, color=TERMINAL_MUTED)], gap_before=REPORT_GAP),
         header,
@@ -538,6 +549,7 @@ def render_terminal_frames() -> tuple[list[Image.Image], list[int]]:
     storyboard = terminal_storyboard()
     frames = [render_terminal_frame(chrome, lines) for lines, _duration in storyboard]
     durations = [duration for _lines, duration in storyboard]
+
     return frames, durations
 
 
@@ -562,6 +574,7 @@ def write_gif(path: Path, frames: list[Image.Image], durations: list[int]) -> No
 def render_assets(assets_dir: Path) -> list[Path]:
     """Render every brand asset into ``assets_dir`` and return the files written."""
     written = []
+
     for name, svg in logo_svgs().items():
         (assets_dir / name).write_text(svg, encoding="utf-8", newline="\n")
         written.append(assets_dir / name)

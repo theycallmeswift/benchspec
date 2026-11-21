@@ -135,10 +135,7 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
   wordmark only. No others.
 - **Loading:** self-hosted from `fonts/` (`type.fonts`; `tokens.css` writes
   `@font-face`). Never from a third-party origin; family stacks only cover
-  missing files. The woff2 files aren't committed yet: they ship with the watch
-  implementation
-  ([#180](https://github.com/theycallmeswift/benchspec/issues/180)). Brand art
-  renders from the TTFs in `scripts/fonts/`.
+  missing files. Brand art renders from the TTFs in `scripts/fonts/`.
 - **Ligatures:** `font-variant-ligatures: none` on `.bs-app` and `.bs-brand`, so
   `--count`, `->` and `>=` render as typed.
 - **Swapping a family:** new woff2 files in `fonts/`, its `type.fonts` entries,

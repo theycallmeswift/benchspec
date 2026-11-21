@@ -50,8 +50,10 @@ def test_a_wordmark_is_outlined_paths_inside_its_view_box(name: str) -> None:
     svg = ElementTree.fromstring(render_assets.logo_svgs()[name])
 
     bounds = BoundsPen(None)
+
     for path in svg.iter(SVG_PATH):
         parse_path(path.attrib["d"], bounds)
+
     assert bounds.bounds is not None
     left, top, right, bottom = bounds.bounds
     _, _, width, height = (float(value) for value in svg.attrib["viewBox"].split())
