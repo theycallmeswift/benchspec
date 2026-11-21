@@ -337,7 +337,7 @@ class OpenCodeAgent(BaseAgent):
             + "test -f /root/.local/share/opencode/opencode.db && "
             # Starting an instance installs the config directory's plugin dependency; a
             # guest without the npm registry would retry that install on every start.
-            + "/usr/local/bin/opencode models > /dev/null 2>&1; "
+            + "{ /usr/local/bin/opencode models > /dev/null 2>&1 || true; } && "
             + f"test -d {_PLUGIN_DEPENDENCY_DIR}"
         )
 

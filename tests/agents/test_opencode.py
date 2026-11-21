@@ -755,10 +755,19 @@ def test_provision_script_verifies_warmed_plugin_dependency() -> None:
     """An instance start at build time installs the dependency a cell cannot fetch."""
     script = OpenCodeAgent().provision_script()
 
-    warm, _, check = script.rpartition("/usr/local/bin/opencode models > /dev/null 2>&1; ")
+    assert script.endswith(
+        "{ /usr/local/bin/opencode models > /dev/null 2>&1 || true; } && "
+        "test -d /root/.config/opencode/node_modules/@opencode-ai/plugin"
+    )
 
-    assert warm
-    assert check == "test -d /root/.config/opencode/node_modules/@opencode-ai/plugin"
+
+def test_provision_script_stays_one_chain_after_the_database_check() -> None:
+    """A `;` after the database check would let a later command mask its failure."""
+    script = OpenCodeAgent().provision_script()
+
+    tail = script.split("test -f /root/.local/share/opencode/opencode.db", 1)[1]
+
+    assert ";" not in tail.replace("|| true; }", "")
 
 
 def test_provision_script_pre_approves_every_permission() -> None:
