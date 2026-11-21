@@ -6,6 +6,7 @@ event-stream `cell`; a cell is eval × arm; a check is one graded assertion line
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import statistics
@@ -361,8 +362,7 @@ class RunView:
         elif stale:
             now_ms = self._last_event_ms
 
-        planned = [self._samples[cell["cell"]] for cell in self._plan["cells"]]
-        counted = [sample for sample in planned if sample.state(now_ms) != "n/a"]
+        planned, counted = self._samples_at(now_ms)
         finished = [sample for sample in counted if sample.state(now_ms) in FINISHED]
         total, done = len(counted), len(finished)
 
@@ -430,7 +430,7 @@ class RunView:
             "stopped": f"Run stopped · {done} of {total} samples",
             "stale": f"Run stale · {done} of {total} samples finished",
         }.get(state, finished_line)
-        left_ms = self._left_ms(counted, now_ms) if state == "live" else None
+        left_ms = self.left_ms(now_ms) if state == "live" else None
 
         return {
             "percent": 100 * done // total if total else 0,
@@ -450,37 +450,61 @@ class RunView:
             "workers": f"-n {len(self._workers)}" if self._workers and self._end is None else None,
         }
 
-    def _left_ms(self, counted: list[Sample], now_ms: int) -> float | None:
-        """The time left: each unfinished sample's expected remainder, shared by the workers.
+    def left_ms(self, now_ms: int) -> float | None:
+        """The time left: the rest of the run played forward on its workers.
 
-        A sample is expected to take the mean of the finished ones. None until one has
-        finished, while every running sample is past that mean, and under a second.
+        Each queued sample, in plan order, goes to the worker that frees first. Time is
+        split at the `agent` phase, so a snapshot build holding a sample in prep does not
+        pass for work. None until a sample has finished, once nothing is queued and every
+        running sample has outrun its arm's mean, and under a second.
         """
-        durations = [
-            sample.closed_ms - sample.started_ms
+        _, counted = self._samples_at(now_ms)
+        finished = [
+            (sample.arm, agent_ms - sample.started_ms, sample.closed_ms - agent_ms)
             for sample in counted
-            if sample.closed_ms is not None and sample.started_ms is not None
+            if sample.started_ms is not None
+            and sample.closed_ms is not None
+            and (agent_ms := sample.phase_started_ms("agent")) is not None
         ]
-
-        if not durations:
-            return None
-
         unfinished = [sample for sample in counted if sample.closed_ms is None]
-        if not unfinished:
+
+        if not finished or not unfinished:
             return None
 
-        expected_ms = statistics.mean(durations)
-        running_ms = [
-            now_ms - sample.started_ms for sample in unfinished if sample.started_ms is not None
-        ]
-        if running_ms and min(running_ms) >= expected_ms:
+        prep_ms = statistics.median(prep for _, prep, _ in finished)
+        all_work_ms = statistics.mean(work for _, _, work in finished)
+        arm_work_ms = {
+            arm: statistics.mean(work for name, _, work in finished if name == arm)
+            for arm in {name for name, _, _ in finished}
+        }
+        remainders = {
+            sample.cell: _remainder_ms(
+                sample, prep_ms, arm_work_ms.get(sample.arm, all_work_ms), now_ms
+            )
+            for sample in unfinished
+        }
+        running = [sample for sample in unfinished if sample.started_ms is not None]
+        free_at = [remainders[sample.cell] for sample in running]
+
+        if len(running) == len(unfinished) and not any(free_at):
             return None
 
-        queued = len(unfinished) - len(running_ms)
-        work_ms = queued * expected_ms + sum(max(expected_ms - ran_ms, 0) for ran_ms in running_ms)
-        left_ms = work_ms / min(max(len(self._workers), 1), len(unfinished))
+        free_at += [0.0] * (max(len(self._workers), 1) - len(running))
+        heapq.heapify(free_at)
+
+        for sample in unfinished:
+            if sample.started_ms is None:
+                heapq.heappush(free_at, heapq.heappop(free_at) + remainders[sample.cell])
+
+        left_ms = max(free_at)
 
         return left_ms if left_ms >= 1000 else None
+
+    def _samples_at(self, now_ms: int) -> tuple[list[Sample], list[Sample]]:
+        """The planned samples in plan order, and those of them that grade something."""
+        planned = [self._samples[cell["cell"]] for cell in self._plan["cells"]]
+
+        return planned, [sample for sample in planned if sample.state(now_ms) != "n/a"]
 
     def _matrix(self, planned: list[Sample], state: str, now_ms: int) -> dict:
         """The matrix: one group per skill, one row per eval, one cell per arm."""
@@ -834,6 +858,28 @@ def _mark_best(
             cell["sub"] = f"{known[arm] / winning:.2f}× {winner}"
 
     return cells
+
+
+def _remainder_ms(sample: Sample, prep_ms: float, work_ms: float, now_ms: int) -> float:
+    """What an unfinished sample is expected to still take.
+
+    Args:
+        sample: The unfinished sample.
+        prep_ms: The typical time from `cell.start` to the `agent` phase.
+        work_ms: The expected time from the `agent` phase to the close.
+        now_ms: The moment of the estimate.
+
+    Returns:
+        The prep and work left, each no less than 0.
+    """
+    agent_ms = sample.phase_started_ms("agent")
+
+    if agent_ms is not None:
+        return max(work_ms - (now_ms - agent_ms), 0)
+
+    in_prep_ms = now_ms - sample.started_ms if sample.started_ms is not None else 0
+
+    return max(prep_ms - in_prep_ms, 0) + work_ms
 
 
 def _coarse_duration(milliseconds: float) -> str:
