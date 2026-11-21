@@ -68,8 +68,12 @@ Deltas carry agent output, so the page is reachable only from this computer:
 
 Once the run ends, a sample that never closed (its fixtures failed, or its
 worker was killed) reads `unfinished`, and the run as
-`Run stopped · N of M finished`. A run killed before it wrote `run.end` keeps
-showing as live: `last event … ago` in the top bar is the sign.
+`Run stopped · N of M finished`.
+
+A run killed before it wrote `run.end` goes **stale**: the top bar reads
+`stale · no events for …` (`stale` on a phone) and the clocks stop at the last
+event. It turns stale once the stream is silent for a minute longer than the
+longest arm's cell `timeout`, and returns to live if events resume.
 
 ## How it counts
 
@@ -83,6 +87,10 @@ showing as live: `last event … ago` in the top bar is the sign.
 - **The leaderboard pass rate** pools only checks every arm runs, exactly as
   [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so it
   can differ from the cell rates. Its other rows cover graded samples.
+- **Time left.** Each unfinished sample is expected to take the mean time of
+  the finished ones, less the time it has run. Their sum is divided by the
+  worker count, or by the samples left when fewer. Nothing shows until a
+  sample finishes, or while every running sample is past the mean.
 - **Cost** is what the harness reported, never estimated: `not reported`
   otherwise.
 

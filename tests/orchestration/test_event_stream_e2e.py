@@ -138,7 +138,7 @@ def test_a_clean_cell_writes_start_phases_deltas_and_done_in_order(
         "cell.done",
     ]
     assert events[0] | {"ts_ms": 0} == {
-        "format_version": 1,
+        "format_version": 2,
         "type": "cell.start",
         "ts_ms": 0,
         "worker": "main",

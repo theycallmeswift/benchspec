@@ -83,6 +83,17 @@ def _run(
     )
 
 
+def _arm(name: str, model: str) -> dict:
+    """One arm as `run.start` lists it, on the default cell timeout."""
+    return {
+        "name": name,
+        "harness": "claude-code",
+        "model": model,
+        "effort": "medium",
+        "timeout": 900,
+    }
+
+
 def _iteration(pytester: pytest.Pytester) -> Path:
     """The run's iteration directory."""
     return pytester.path / "tmp" / "evals" / "iteration_01"
@@ -110,7 +121,7 @@ def test_serial_run_writes_one_file_that_plans_and_closes_every_cell(
     _assert_every_planned_cell_closed_once(events, PLANNED)
     assert events[0]["type"] == "run.start"
     assert events[0] | {"ts_ms": 0, "run_id": "", "cells": []} == {
-        "format_version": 1,
+        "format_version": 2,
         "type": "run.start",
         "ts_ms": 0,
         "worker": "main",
@@ -119,15 +130,15 @@ def test_serial_run_writes_one_file_that_plans_and_closes_every_cell(
         "set": "default",
         "baseline": "baseline",
         "arms": [
-            {"name": "baseline", "harness": "claude-code", "model": "sonnet", "effort": "medium"},
-            {"name": "trial", "harness": "claude-code", "model": "opus", "effort": "medium"},
+            _arm("baseline", "sonnet"),
+            _arm("trial", "opus"),
         ],
         "cells": [],
         "cell_count": 4,
     }
     assert [event["cell"] for event in of_type(events, "cell.error")] == ["myskill/beta/trial/0"]
     assert events[-1] | {"ts_ms": 0, "wall_ms": 0} == {
-        "format_version": 1,
+        "format_version": 2,
         "type": "run.end",
         "ts_ms": 0,
         "worker": "main",
