@@ -77,9 +77,6 @@ Grader = Callable[..., dict]
 # Binds one prose assertion to a checker spec, or None to punt it to the judge.
 Binder = Callable[[str], "dict | None"]
 
-# The checkers a skill's first dispatch settles for good.
-ACTIVATION_CHECKERS = ("skill_invoked", "not_skill_invoked")
-
 
 @dataclass
 class ArmOutcome:
@@ -233,7 +230,7 @@ def _stop_rule(specs: list[dict | None]) -> StopRule | None:
         A rule over the skills the lines name, or None for a full run.
     """
     if not specs or any(
-        spec is None or spec["checker"] not in ACTIVATION_CHECKERS for spec in specs
+        spec is None or spec["checker"] not in checkers.ACTIVATION_CHECKERS for spec in specs
     ):
         return None
     return settled_once_dispatched(spec["skill"] for spec in specs if spec is not None)
@@ -750,7 +747,7 @@ def _run_cell(
     candidate_skills = {
         spec["skill"]
         for spec in specs
-        if spec is not None and spec["checker"] in ACTIVATION_CHECKERS
+        if spec is not None and spec["checker"] in checkers.ACTIVATION_CHECKERS
     }
 
     # Fired skills = every real Skill-tool fire (target-independent) plus each candidate's

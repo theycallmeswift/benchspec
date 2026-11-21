@@ -292,7 +292,8 @@ per line, flushed as it happens. Each process appends only to its own file:
 are xdist workers. Under `--workers N` the controller writes only `run.start`
 and `run.end`, and each worker writes its own cells' events. Line order
 within a file is authoritative; `ts_ms` only merges across files.
-`benchspec.events.schema` is the authoritative shape.
+`benchspec.events.schema` is the authoritative shape, and
+[`benchspec watch`](watching/README.md) is the built-in reader.
 
 Every event carries the envelope:
 
@@ -342,8 +343,9 @@ artifact path does.
 ### Per-sample files
 
 - `grading.json`: the verdict. One entry per assertion with its text, `passed`,
-  `evidence`, and `type` (`deterministic` for a checker, `semantic` for the
-  judge), plus the sample's `errored` flag, a `binder_degraded` count, and, for a
+  `evidence`, and `type` (`deterministic` for a checker, which also names its
+  `checker`; `semantic` for the judge), plus the sample's `errored` flag, a
+  `binder_degraded` count, and, for a
   [timed-out sample](#timed-out-samples), `"timed_out": true`. A
   clause-bearing entry adds `scoped: true`; a skipped one is `{"text",
   "passed": null, "skipped": true, "scoped": true, "reason": "<clause>"}`.

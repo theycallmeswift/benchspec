@@ -18,6 +18,8 @@ from benchspec.sandbox import sandbox
 from benchspec.sandbox.errors import SandboxError
 from benchspec.specs import lint
 from benchspec.specs.schema import SchemaError
+from benchspec.watch import server as watch_server
+from benchspec.watch.tail import UnsupportedFormatError
 
 
 def _add_root_argument(command_parser: argparse.ArgumentParser) -> None:
@@ -77,6 +79,11 @@ def _add_run_flags(run_parser: argparse.ArgumentParser) -> None:
         type=run.workers_value,
         help="parallel cells: a positive integer or auto (default: [tool.benchspec] workers, "
         "else auto); 1 runs in-process",
+    )
+    run_parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="serve this run's live view on 127.0.0.1 until the run ends",
     )
     run_parser.add_argument(
         "--env",
@@ -239,6 +246,14 @@ def _run_run(args: argparse.Namespace) -> int:
     return _at_boundary(lambda: run.run(args))
 
 
+def _run_watch(args: argparse.Namespace) -> int:
+    """Serve an iteration's live view; a missing or unreadable event stream is a usage error."""
+    return _at_boundary(
+        lambda: watch_server.watch(args.root.resolve(), iteration=args.iteration, port=args.port),
+        usage=(watch_server.WatchError, UnsupportedFormatError),
+    )
+
+
 def _load_repo_dotenv() -> None:
     """Load a repo-root `.env` into the environment before any subcommand runs.
 
@@ -270,6 +285,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_root_argument(run_parser)
     _add_run_flags(run_parser)
+    watch_parser = sub.add_parser(
+        "watch", help="serve a local live view of a run's event stream on 127.0.0.1"
+    )
+    _add_root_argument(watch_parser)
+    watch_parser.add_argument(
+        "--iteration", help="iteration to watch (default: the newest with an event stream)"
+    )
+    watch_parser.add_argument(
+        "--port", type=int, default=0, help="port to bind on 127.0.0.1 (default: any free port)"
+    )
     sandbox_build_parser = sub.add_parser(
         "sandbox:build", help="build the agent-ready sandbox snapshot"
     )
@@ -300,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         "lint": _run_lint,
         "analyze": _run_analyze,
         "run": _run_run,
+        "watch": _run_watch,
         "sandbox:build": _run_sandbox_build,
         "sandbox:clean": _run_sandbox_clean,
     }

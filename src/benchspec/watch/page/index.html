@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>benchspec watch</title>
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="bs-app">
+  <header class="bs-top">
+    <div class="bs-id">
+      <svg class="bs-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <polyline class="bs-wm-ink" points="14,8 6,8 6,56 14,56" fill="none" stroke-width="4" stroke-linecap="round"/>
+        <polyline class="bs-wm-ink" points="50,8 58,8 58,56 50,56" fill="none" stroke-width="4" stroke-linecap="round"/>
+        <rect class="bs-wm-left" x="19" y="14" width="10" height="10" rx="2.5"/>
+        <rect class="bs-wm-left" x="19" y="27" width="10" height="10" rx="2.5"/>
+        <rect class="bs-wm-left" x="19" y="40" width="10" height="10" rx="2.5"/>
+        <rect class="bs-wm-right" x="35" y="14" width="10" height="10" rx="2.5"/>
+        <rect class="bs-wm-mid" x="35" y="27" width="10" height="10" rx="2.5"/>
+        <rect class="bs-wm-right" x="35" y="40" width="10" height="10" rx="2.5"/>
+      </svg>
+      <b id="iteration">benchspec watch</b>
+      <span id="suite"></span>
+    </div>
+    <div class="bs-id">
+      <span id="run-state"></span>
+      <button class="bs-toggle" id="theme" type="button" aria-pressed="false">Light theme</button>
+    </div>
+  </header>
+
+  <div class="bs-banner" id="banner" hidden></div>
+  <p class="bs-sr" id="status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+  <section class="bs-counter" id="counter" aria-label="Run progress" hidden>
+    <div class="bs-n" id="headline"></div>
+    <div class="bs-progbx" id="progress-frame">
+      <div class="bs-prog" id="progress" role="progressbar" aria-label="Run completion" aria-valuemin="0"><i></i></div>
+    </div>
+    <div class="bs-notes" id="notes" hidden>
+      <p id="report-line" hidden>Report <code id="report"></code>
+        <button class="bs-btn" type="button" data-copy="report">Copy</button></p>
+      <p id="reopen-line" hidden>This page is a snapshot — reopen with <code id="reopen"></code>
+        <button class="bs-btn" type="button" data-copy="reopen">Copy</button></p>
+    </div>
+    <ul class="bs-tally" id="tally"></ul>
+  </section>
+
+  <div class="bs-empty" id="empty" hidden><b id="empty-line"></b><span id="empty-hint"></span></div>
+
+  <main id="run" hidden>
+    <div class="bs-tabs" role="tablist" aria-label="Views">
+      <button class="bs-tab" id="tab-matrix" type="button" role="tab" aria-selected="true" aria-controls="panel-matrix">Matrix</button>
+      <button class="bs-tab" id="tab-leaderboard" type="button" role="tab" aria-selected="false" aria-controls="panel-leaderboard" tabindex="-1">Leaderboard</button>
+    </div>
+
+    <section id="panel-matrix" role="tabpanel" aria-labelledby="tab-matrix">
+      <p class="bs-mxcap" id="caption"></p>
+      <p class="bs-armhint" id="arm-hint" hidden></p>
+      <div id="matrix" role="grid" aria-labelledby="caption"></div>
+      <ul class="bs-legend" aria-label="Sample states">
+        <li><i class="bs-b bs-b-pass" aria-hidden="true"></i>pass</li>
+        <li><button class="bs-lgbtn" type="button" aria-describedby="tip-fail"><i class="bs-b bs-b-failsteps" aria-hidden="true"></i>fail</button><span class="bs-tip" id="tip-fail" role="tooltip">Darker = fewer checks passed.</span></li>
+        <li><i class="bs-b bs-b-timeout" aria-hidden="true"></i>timeout</li>
+        <li><i class="bs-b bs-b-error" aria-hidden="true"></i>error</li>
+        <li><i class="bs-b bs-b-running" aria-hidden="true"></i>running</li>
+        <li><i class="bs-b bs-b-booting" aria-hidden="true"></i>booting</li>
+        <li><i class="bs-b bs-b-quiet" aria-hidden="true"></i>quiet</li>
+        <li><i class="bs-b bs-b-queued" aria-hidden="true"></i>queued</li>
+        <li><i class="bs-b bs-b-na" aria-hidden="true"></i>n/a</li>
+      </ul>
+    </section>
+
+    <section id="panel-leaderboard" role="tabpanel" aria-labelledby="tab-leaderboard" hidden>
+      <h2 class="bs-section-label">[ leaderboard ]</h2>
+      <div id="leaderboard"></div>
+      <details class="bs-how">
+        <summary>How these numbers are counted</summary>
+        <p>Pass rate pools only the checks every arm runs, so arms are compared on the same lines. A check scoped to one arm counts in that arm's matrix cells, not here.</p>
+        <p>Every other row covers graded samples: those that passed, failed or timed out. Errored samples are left out, so n can differ per arm.</p>
+        <p>benchmark.md holds the final figures and their noise bands.</p>
+      </details>
+    </section>
+  </main>
+</div>
+
+<div class="bs-hc" id="hovercard" role="tooltip" hidden></div>
+<div class="bs-scrim" id="scrim" hidden></div>
+<aside class="bs-drawer" id="drawer" role="dialog" aria-label="Sample detail" hidden></aside>
+</body>
+</html>

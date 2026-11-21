@@ -196,6 +196,7 @@ has the long version: unit of evaluation, isolation, and statistics per tool.
 | [`docs/configuration.md`](docs/configuration.md) | Sets, arms, the judge, every CLI flag, exit codes. |
 | [`docs/sandbox.md`](docs/sandbox.md) | Snapshots, mounts, credentials, host requirements. |
 | [`docs/results.md`](docs/results.md) | Reading `benchmark.md` and the machine-readable artifacts. |
+| [`docs/watching/`](docs/watching/README.md) | `benchspec watch` and `run --watch`: the local live view of a run. |
 | [`docs/harnesses.md`](docs/harnesses.md) | `claude-code`, `codex`, `opencode`, and adding your own. |
 | [`docs/design/`](docs/design/README.md) | The visual design system: brand book, foundations (tokens, contrast), components, logos. |
 

@@ -45,6 +45,7 @@ dev = [
     "ruff>=0.16",
     "microsandbox>=0.7.3,<0.8",
     "ty>=0.0.79,<0.1",
+    "playwright>=1.63",
 ]
 
 [project.urls]
@@ -74,6 +75,7 @@ include = [
     "evals",
     "docs/*.md",
     "docs/style",
+    "docs/watching",
     "Makefile",
     # Anchored: an unanchored `README.md` matches at any depth, so a README anywhere
     # under docs/ would ship too.

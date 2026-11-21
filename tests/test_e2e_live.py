@@ -13,7 +13,9 @@ import re
 from pathlib import Path
 
 import pytest
+from playwright.sync_api import expect
 
+from tests.support.browser import chromium, watching
 from tests.support.cli import run_benchspec
 
 pytestmark = pytest.mark.e2e
@@ -71,3 +73,13 @@ def test_every_harness_stops_a_run_once_its_skill_fires() -> None:
 
     for eval_id in ("fires-on-a-greeting", "stays-quiet-on-a-listing"):
         assert _row(rows, eval_id, "baseline")["stopped"] is False
+
+
+def test_watch_replays_the_newest_run_of_the_in_repo_suite() -> None:
+    """Verify `benchspec watch` serves the last run and the page reaches its final state."""
+    with watching(REPO_ROOT) as served, chromium() as browser:
+        page = browser.new_page()
+        page.goto(served.url)
+
+        expect(page.locator("#reopen-line")).to_be_visible()
+        expect(page.locator("#run-state")).to_contain_text("ended · exit")

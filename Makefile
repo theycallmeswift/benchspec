@@ -7,8 +7,8 @@ help:  ## Show this help
 install:  ## Create the venv and install dev dependencies
 	uv sync
 
-test:  ## Run the unit test suite
-	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester
+test:  ## Run the unit test suite; PYTEST_ARGS appends pytest args
+	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -p pytester $(PYTEST_ARGS)
 
 # Shared by e2e and evals. Pinned rather than `auto` so CI is reproducible
 # whatever runner it lands on; `auto` sizes from the host and caps at 12 for the

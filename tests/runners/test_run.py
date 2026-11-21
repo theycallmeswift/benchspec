@@ -10,6 +10,8 @@ import argparse
 import subprocess
 import sys
 import textwrap
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,6 +93,7 @@ def _run_namespace(root: Path, **flags: object) -> argparse.Namespace:
     values["env"] = []
     values["passthrough"] = []
     values["workers"] = 1
+    values["watch"] = False
     values.update(flags)
     return argparse.Namespace(root=root, **values)
 
@@ -652,3 +655,54 @@ def test_malformed_project_default_raises_before_spawn(
 
     with pytest.raises(SchemaError, match="workers"):
         run.run(args, runner=_runner_that_must_not_run, preflight=_no_preflight)
+
+
+@dataclass
+class _WatchedSpawn:
+    """What a stand-in pytest saw of the watch server while it ran."""
+
+    argv: list[str] = field(default_factory=list)
+    url: str = ""
+    status: int = 0
+
+
+def test_watch_serves_the_runs_iteration_for_as_long_as_the_child_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify --watch names the iteration, serves it during the run, and stops after it."""
+    _populated_eval_project(tmp_path)
+    (tmp_path / "tmp" / "evals" / "iteration_06").mkdir(parents=True)
+    args = _run_namespace(tmp_path, watch=True)
+    seen = _WatchedSpawn()
+
+    def runner(argv: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        """Stand in for pytest: load the page the run printed, then exit 1."""
+        seen.argv = argv
+        seen.url = capsys.readouterr().out.split("Watching: ")[1].strip()
+        with urllib.request.urlopen(seen.url) as response:
+            seen.status = response.status
+
+        return subprocess.CompletedProcess(argv, 1)
+
+    exit_code = run.run(args, runner=runner, preflight=_no_preflight)
+
+    assert exit_code == 1
+    assert "--benchspec-iteration=iteration_07" in seen.argv
+    assert seen.url.startswith("http://127.0.0.1:")
+    assert seen.status == 200
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(seen.url)
+
+
+def test_a_run_without_watch_names_no_iteration_and_serves_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify a plain run passes no iteration option and prints no watch address."""
+    _populated_eval_project(tmp_path)
+    recorder = _SpawnRecord()
+    args = _run_namespace(tmp_path)
+
+    run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
+
+    assert not any(token.startswith("--benchspec-iteration") for token in recorder.argv)
+    assert "Watching" not in capsys.readouterr().out

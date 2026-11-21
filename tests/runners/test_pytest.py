@@ -454,6 +454,47 @@ def test_a_run_that_reports_eval_cells_claims_its_iteration(
     assert (skill_results_dir.parent.parent / "meta.json").exists()
 
 
+def _stub_arm(*args: object, **kwargs: object) -> ArmOutcome:
+    """Stand in for the sandbox run without writing anything."""
+    return ArmOutcome(grading={}, errored=False, duration_ms=0, total_tokens=0)
+
+
+def test_a_named_iteration_is_the_one_the_run_writes(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify --benchspec-iteration names the directory the run writes."""
+    _make_project(pytester)
+    monkeypatch.setattr(cases, "run_eval_arm", _stub_arm)
+
+    result = _run_cells_with_stubbed_arms(
+        pytester, monkeypatch, "-k", "alpha-baseline", "--benchspec-iteration=iteration_07"
+    )
+
+    assert result.ret == 0
+    assert (pytester.path / "tmp" / "evals" / "iteration_07" / "events-main.jsonl").exists()
+    assert not (pytester.path / "tmp" / "evals" / "iteration_01").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("iteration_03", "--benchspec-iteration: iteration_03 already exists"),
+        ("../elsewhere", "--benchspec-iteration must look like iteration_NN, got ../elsewhere"),
+    ],
+)
+def test_a_named_iteration_must_be_well_formed_and_new(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, name: str, message: str
+) -> None:
+    """Verify a malformed or existing iteration name is a usage error."""
+    _make_project(pytester)
+    (pytester.path / "tmp" / "evals" / "iteration_03").mkdir(parents=True)
+
+    result = _run_cells_with_stubbed_arms(pytester, monkeypatch, f"--benchspec-iteration={name}")
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines([f"*{message}*"])
+
+
 def test_a_session_without_eval_cells_leaves_the_iteration_alone(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:

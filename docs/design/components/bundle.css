@@ -182,8 +182,8 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: var(--type-body
 .bs-top .bs-id { display: flex; align-items: center; gap: var(--space-12); }
 .bs-top .bs-mark { width: var(--size-mark-ui); height: var(--size-mark-ui); }
 .bs-top b { color: var(--fg); font-weight: 500; }
-.bs-live { display: inline-flex; align-items: center; gap: var(--space-8); }
-.bs-live::before { content: ""; width: var(--size-live-dot); height: var(--size-live-dot); border-radius: 50%; background: var(--accent); }
+.bs-top .bs-live { display: inline-flex; align-items: center; gap: var(--space-8); }
+.bs-top .bs-live::before { content: ""; width: var(--size-live-dot); height: var(--size-live-dot); border-radius: 50%; background: var(--accent); }
 .bs-wm-ink { stroke: var(--wm-ink); } .bs-wm-text { fill: var(--wm-ink); } .bs-wm-left { fill: var(--wm-left); } .bs-wm-right { fill: var(--wm-right); } .bs-wm-mid { fill: var(--wm-mid); }
 
 /* Tabs */
