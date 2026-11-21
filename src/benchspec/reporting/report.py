@@ -526,9 +526,7 @@ def _column_order(benchmark: dict) -> list[str]:
     arms = benchmark["arms"]
     baseline = benchmark.get("baseline")
 
-    return ([baseline] if baseline in arms else []) + [
-        arm_name for arm_name in arms if arm_name != baseline
-    ]
+    return sorted(arms, key=lambda arm_name: arm_name != baseline)
 
 
 def _matrix_cells(benchmark: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:

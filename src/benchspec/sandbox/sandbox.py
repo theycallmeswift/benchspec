@@ -7,7 +7,7 @@ import contextlib
 import fcntl
 import shlex
 import tomllib
-from collections.abc import Coroutine, Iterable, Iterator
+from collections.abc import Coroutine, Generator, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -120,7 +120,7 @@ def preflight(
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
+def _file_lock(path: Path) -> Generator[None]:
     """Hold an exclusive filesystem lock for snapshot build coordination."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(path, "w")

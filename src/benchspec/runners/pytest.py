@@ -7,6 +7,7 @@ test bodies and fixtures live in `cases.py`.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import json
 import os
@@ -1031,9 +1032,9 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
     # WARNING: must run before anything reads item.location — it is cached on first
     # access. pytest derives the progress path from the nodeid (not reportinfo), and
-    # nodeid has no public setter; _nodeid is the same slot Node.__init__ fills.
+    # nodeid has no public setter; _id is the same slot Node.__init__ fills.
     relative = os.path.relpath(eval_file, item.config.rootpath).replace(os.sep, "/")
-    item._nodeid = f"{relative}::{item.name}"
+    item._id = dataclasses.replace(item.id, path=relative)
 
     item.stash[_EVAL_FILE] = eval_file
     item.__class__ = _AuthoredCell

@@ -57,7 +57,7 @@ def test_watch_adds_no_runtime_dependency() -> None:
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
     assert project["dependencies"] == [
-        "pytest>=8",
+        "pytest>=9.2",
         "pytest-xdist>=3",
         "python-dotenv>=1.0",
         "pyyaml>=6",

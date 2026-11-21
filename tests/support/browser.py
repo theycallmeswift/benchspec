@@ -7,7 +7,7 @@ import re
 import signal
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +22,7 @@ PHONE: ViewportSize = {"width": 390, "height": 844}
 
 
 @contextmanager
-def chromium() -> Iterator[Browser]:
+def chromium() -> Generator[Browser]:
     """Launch headless Chromium, skipping the test where it is not installed (never in CI)."""
     with sync_playwright() as playwright:
         try:
@@ -58,7 +58,7 @@ def _take_ctrl_c() -> None:
 
 
 @contextmanager
-def watching(root: Path) -> Iterator[Watching]:
+def watching(root: Path) -> Generator[Watching]:
     """Start the real entry point on `root` and stop it with Ctrl-C."""
     process = subprocess.Popen(
         [sys.executable, "-m", "benchspec", "watch", str(root)],

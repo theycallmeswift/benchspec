@@ -62,7 +62,7 @@ SDK_MISSING = (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from microsandbox import MountConfig, SecretModifySpec
 
@@ -111,7 +111,7 @@ async def _destroy_if_present(name: str) -> None:
 
 
 @contextlib.asynccontextmanager
-async def _translate_runtime_errors() -> AsyncIterator[None]:
+async def _translate_runtime_errors() -> AsyncGenerator[None]:
     """Translate a native `MicrosandboxError` into the backend-neutral `SandboxError`.
 
     Every microsandbox call that can hit a torn-down VM (guest commands, sandbox
