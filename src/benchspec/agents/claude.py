@@ -19,10 +19,12 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
+    BEARER_HEADER,
     DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
+    AuthHeader,
     BaseAgent,
     Credential,
     StreamDelta,
@@ -42,6 +44,8 @@ if TYPE_CHECKING:
 # Credentials Claude Code reads, in preference order. Whichever is set becomes a scoped
 # credential the backend injects (substituted only for the Anthropic API host).
 AUTH_ENV_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
+# A subscription token has no entry: it is untested behind header injection.
+_AUTH_HEADERS = {"ANTHROPIC_API_KEY": AuthHeader("x-api-key")}
 # Under `openrouter`, the host key Claude Code is handed as a bearer token.
 OPENROUTER_AUTH_ENV = "OPENROUTER_API_KEY"
 _OPENROUTER_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"
@@ -267,10 +271,19 @@ class ClaudeCodeAgent(BaseAgent):
         reach `openrouter.ai`, so under microsandbox the guest never sees the key and
         cannot send it anywhere else.
         """
-        allow_host = (
-            _OPENROUTER_HOST if self.provider == OPENROUTER_PROVIDER else "api.anthropic.com"
-        )
-        return [Credential(self._auth_env, self._auth_value, (allow_host,))]
+        if self.provider == OPENROUTER_PROVIDER:
+            return [
+                Credential(self._auth_env, self._auth_value, (_OPENROUTER_HOST,), BEARER_HEADER)
+            ]
+
+        return [
+            Credential(
+                self._auth_env,
+                self._auth_value,
+                ("api.anthropic.com",),
+                _AUTH_HEADERS.get(self._auth_env),
+            )
+        ]
 
     def build_command(
         self,

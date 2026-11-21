@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from benchspec.agents.base import Credential
+from benchspec.agents.base import BEARER_HEADER, Credential
 from benchspec.agents.codex import CodexAgent, _skill_dispatch_name, parse_codex_jsonl
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
@@ -201,7 +201,9 @@ def test_from_env_prefers_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     agent = CodexAgent.from_env()
 
-    assert agent.secrets() == [Credential("CODEX_API_KEY", "api-key", ("api.openai.com",))]
+    assert agent.secrets() == [
+        Credential("CODEX_API_KEY", "api-key", ("api.openai.com",), BEARER_HEADER)
+    ]
     assert agent.version() == "0.142.3"
 
 
@@ -228,7 +230,9 @@ def test_from_env_falls_back_to_openai_api_key_under_codex_name(
 
     agent = CodexAgent.from_env()
 
-    assert agent.secrets() == [Credential("CODEX_API_KEY", "sk-openai", ("api.openai.com",))]
+    assert agent.secrets() == [
+        Credential("CODEX_API_KEY", "sk-openai", ("api.openai.com",), BEARER_HEADER)
+    ]
 
 
 def test_from_env_prefers_codex_api_key_over_openai_api_key(
@@ -240,7 +244,9 @@ def test_from_env_prefers_codex_api_key_over_openai_api_key(
 
     agent = CodexAgent.from_env()
 
-    assert agent.secrets() == [Credential("CODEX_API_KEY", "sk-codex", ("api.openai.com",))]
+    assert agent.secrets() == [
+        Credential("CODEX_API_KEY", "sk-codex", ("api.openai.com",), BEARER_HEADER)
+    ]
 
 
 def test_from_env_reads_auth_json_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -322,7 +328,7 @@ def test_secrets_scopes_api_key_to_openai_host() -> None:
     """Verify secrets scopes api key to openai host."""
     secs = CodexAgent(auth_value="api-key", auth_env="CODEX_API_KEY").secrets()
 
-    assert secs == [Credential("CODEX_API_KEY", "api-key", ("api.openai.com",))]
+    assert secs == [Credential("CODEX_API_KEY", "api-key", ("api.openai.com",), BEARER_HEADER)]
 
 
 def test_secrets_scopes_access_token_to_codex_hosts() -> None:
@@ -1121,7 +1127,9 @@ def test_from_env_under_openrouter_reads_openrouter_api_key(
     agent = CodexAgent.from_env("openrouter")
 
     assert agent.provider == "openrouter"
-    assert agent.secrets() == [Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",))]
+    assert agent.secrets() == [
+        Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",), BEARER_HEADER)
+    ]
 
 
 def test_credential_error_under_openrouter_needs_only_openrouter_api_key(

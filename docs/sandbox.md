@@ -206,7 +206,7 @@ Each harness declares its credential once; the backends expose it differently:
 |---|---|
 | microsandbox | A scoped **secret**, injected at the network boundary and usable only toward the provider's hosts (an `ANTHROPIC_API_KEY` works only toward `api.anthropic.com`; under `provider = "openrouter"` the key works only toward `openrouter.ai`). Not readable by the agent or by `setup.sh`. |
 | Docker | A plain container environment variable (`-e ANTHROPIC_API_KEY=...`), readable by the agent and by `setup.sh`. No per-credential host scoping. |
-| E2B | A plain environment variable in a third-party VM, readable by the agent and by `setup.sh`. The guest's egress is limited to the provider hosts, so it can be sent nowhere else. |
+| E2B | An API key never enters the guest. The guest holds the placeholder `injected-by-e2b`, and E2B, which holds the key and re-signs the guest's TLS to do it, sets the key's header on requests to the provider's hosts. Not readable by the agent or by `setup.sh`. A subscription token (`CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_ACCESS_TOKEN`) is a plain environment variable they can read. Either way the guest's egress is limited to the provider hosts. |
 
 The one file-shaped exception, on Docker and microsandbox: Codex subscription auth,
 `CODEX_AUTH_JSON_PATH`, is mounted read-only and copied to

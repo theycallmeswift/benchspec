@@ -8,7 +8,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from benchspec.agents.base import FIXED_SKILLS_HOME, Credential
+from benchspec.agents.base import BEARER_HEADER, FIXED_SKILLS_HOME, AuthHeader, Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.orchestration.results import parse_run_json, parse_stream_run
@@ -755,7 +755,7 @@ def test_from_env_under_openrouter_reads_openrouter_api_key(
 
     assert agent.provider == "openrouter"
     assert agent.secrets() == [
-        Credential("ANTHROPIC_AUTH_TOKEN", "sk-or-test", ("openrouter.ai",))
+        Credential("ANTHROPIC_AUTH_TOKEN", "sk-or-test", ("openrouter.ai",), BEARER_HEADER)
     ]
 
 
@@ -778,7 +778,7 @@ def test_guest_env_under_default_is_unchanged() -> None:
 def test_secrets_under_default_stay_scoped_to_anthropic() -> None:
     """The `default` provider still scopes the credential to the Anthropic API host."""
     assert _agent().secrets() == [
-        Credential("ANTHROPIC_API_KEY", "sk-test", ("api.anthropic.com",))
+        Credential("ANTHROPIC_API_KEY", "sk-test", ("api.anthropic.com",), AuthHeader("x-api-key"))
     ]
 
 

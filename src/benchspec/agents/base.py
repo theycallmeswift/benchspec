@@ -186,6 +186,22 @@ class AgentCapabilities:
 
 
 @dataclass(frozen=True)
+class AuthHeader:
+    """The request header a provider reads a credential from.
+
+    Attributes:
+        name: The header name.
+        prefix: What precedes the credential in the header's value.
+    """
+
+    name: str
+    prefix: str = ""
+
+
+BEARER_HEADER = AuthHeader("Authorization", "Bearer ")
+
+
+@dataclass(frozen=True)
 class Credential:
     """A provider credential an agent needs in the guest, declared backend-neutrally.
 
@@ -196,11 +212,14 @@ class Credential:
         env_var: The environment variable name the guest process reads.
         value: The credential's secret value.
         allow_hosts: The guest hostnames this credential may be sent to.
+        header: The header the harness sends the value in, for a backend that injects
+            by header; None when the harness needs the real value in the guest.
     """
 
     env_var: str
     value: str
     allow_hosts: tuple[str, ...]
+    header: AuthHeader | None = None
 
 
 class BaseAgent(ABC):

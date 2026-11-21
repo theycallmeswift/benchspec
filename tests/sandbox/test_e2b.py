@@ -280,6 +280,16 @@ def _boot(
     )
 
 
+def _credential_options(project: _FakeProject) -> tuple[object, dict[str, object]]:
+    """The `envs` and `network` options of the one sandbox `project` was asked to create."""
+    ((_, options),) = project.calls
+    assert isinstance(options, dict)
+    network = options["network"]
+    assert isinstance(network, dict)
+
+    return options["envs"], network
+
+
 def _guest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -359,16 +369,52 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                     **e2b_mod.RUN_METADATA,
                     "benchspec-name": "benchspec-eval-hello-trial-main",
                 },
-                "envs": {"ANTHROPIC_API_KEY": "test-token"},
+                "envs": {"ANTHROPIC_API_KEY": e2b_mod.INJECTED_PLACEHOLDER},
                 "network": {
                     "allow_out": ["api.anthropic.com"],
                     "deny_out": ["0.0.0.0/0"],
+                    "rules": {
+                        "api.anthropic.com": [
+                            {"transform": {"headers": {"x-api-key": "test-token"}}}
+                        ]
+                    },
                     "dns_servers": [],
                     "allow_public_traffic": False,
                 },
             },
         )
     ]
+
+
+def test_create_sandbox_injects_a_bearer_credential_on_each_of_its_hosts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox injects a bearer credential on each of its hosts."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+
+    _boot(tmp_path, agent=CodexAgent(auth_value="sk-or-test", provider="openrouter"))
+
+    envs, network = _credential_options(project)
+    assert envs == {"OPENROUTER_API_KEY": e2b_mod.INJECTED_PLACEHOLDER}
+    assert network["rules"] == {
+        "openrouter.ai": [{"transform": {"headers": {"Authorization": "Bearer sk-or-test"}}}]
+    }
+
+
+def test_create_sandbox_leaves_a_credential_with_no_header_in_the_guest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox leaves a credential with no header in the guest."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    agent = ClaudeCodeAgent(auth_value="oauth-token", auth_env="CLAUDE_CODE_OAUTH_TOKEN")
+
+    _boot(tmp_path, agent=agent)
+
+    envs, network = _credential_options(project)
+    assert envs == {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"}
+    assert network["rules"] == {}
 
 
 def test_create_sandbox_uploads_both_trees_and_pins_the_provider_host(

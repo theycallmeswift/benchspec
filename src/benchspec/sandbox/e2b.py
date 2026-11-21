@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 from benchspec.agents import CodingAgent
+from benchspec.agents.base import Credential
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
     GUEST_WORKDIR,
@@ -48,7 +49,7 @@ except ImportError:  # the optional extra is absent
     e2b = None
 
 if TYPE_CHECKING:
-    from e2b import AsyncCommandHandle, AsyncSandbox
+    from e2b import AsyncCommandHandle, AsyncSandbox, SandboxNetworkRule
 
 SDK_MISSING = 'e2b SDK not installed — run `pip install "benchspec[e2b]"`'
 API_KEY_ENV = "E2B_API_KEY"
@@ -61,6 +62,9 @@ NAME_METADATA_KEY = "benchspec-name"
 # Names repeat across machines sharing one E2B project; this process's tag keeps
 # `discard_quietly` to its own sandboxes.
 RUN_METADATA = {"benchspec-run": uuid.uuid4().hex}
+
+# What the guest holds in place of a credential E2B adds to its requests.
+INJECTED_PLACEHOLDER = "injected-by-e2b"
 
 # Guest commands run as root, as they do in a container.
 _GUEST_USER = "root"
@@ -205,6 +209,30 @@ async def _pinned_hosts(hosts: list[str]) -> str:
         lines.append(f"{address} {host}")
 
     return "\n".join(lines)
+
+
+def _guest_envs(credentials: list[Credential]) -> dict[str, str]:
+    """Return the guest's credential variables: a placeholder for each injected one."""
+    return {
+        credential.env_var: credential.value if credential.header is None else INJECTED_PLACEHOLDER
+        for credential in credentials
+    }
+
+
+def _injection_rules(credentials: list[Credential]) -> dict[str, list[SandboxNetworkRule]]:
+    """Return E2B's per-host rules that set each injected credential's header."""
+    return {
+        host: [
+            {
+                "transform": {
+                    "headers": {credential.header.name: credential.header.prefix + credential.value}
+                }
+            }
+        ]
+        for credential in credentials
+        if credential.header is not None
+        for host in credential.allow_hosts
+    }
 
 
 def _owned(names: list[str]) -> bool:
@@ -478,6 +506,9 @@ class E2BBackend(SharedBackendBehavior):
     ) -> E2BSandbox:
         """Boot a sandbox from `snapshot`, limited to the provider hosts, and upload both trees.
 
+        A credential that declares its header never enters the guest: E2B sets the
+        header on requests to the credential's hosts. Any other is a guest variable.
+
         Raises:
             SandboxError: When the boot or upload fails, or the agent's credentials name
                 no provider host to allow.
@@ -501,10 +532,11 @@ class E2BBackend(SharedBackendBehavior):
                 template=snapshot,
                 timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
                 metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
-                envs={credential.env_var: credential.value for credential in credentials},
+                envs=_guest_envs(credentials),
                 network={
                     "allow_out": hosts,
                     "deny_out": [e2b.ALL_TRAFFIC],
+                    "rules": _injection_rules(credentials),
                     # The default leaves 8.8.8.8 open on every port, a data channel.
                     "dns_servers": [],
                     # Sandbox URLs for ports the guest opens need E2B's access token.
