@@ -85,6 +85,18 @@ def test_gather_facts_returns_tree_contents_and_shas(tmp_path: Path) -> None:
     assert len(shas["0. Inbox/a.md"]) == 64
 
 
+def test_gather_facts_lists_a_dangling_symlink_without_reading_it(tmp_path: Path) -> None:
+    """Verify a dangling symlink is in the tree but has no contents or SHA."""
+    (tmp_path / "a.txt").write_text("hello")
+    (tmp_path / "dangling").symlink_to(tmp_path / "missing")
+
+    tree, contents, shas = gather_facts(tmp_path)
+
+    assert tree.splitlines() == ["a.txt", "dangling"]
+    assert contents == {"a.txt": "hello"}
+    assert shas == {"a.txt": hashlib.sha256(b"hello").hexdigest()}
+
+
 
 
 def _stream(*pairs: tuple[str, str]) -> str:
