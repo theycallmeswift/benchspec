@@ -506,10 +506,10 @@ def uneven_run(root: Path) -> Recording:
     work_s = {"bare": 16, "claude-code": 20, "codex": 62, "opencode": 24}
     eval_pace = {
         "greets": 1.0,
-        "fixes-typo": 0.8,
-        "adds-test": 1.25,
-        "renames-symbol": 0.9,
-        "writes-docs": 1.1,
+        "fixes-typo": 1.2,
+        "adds-test": 0.85,
+        "renames-symbol": 1.1,
+        "writes-docs": 0.9,
         "reads-config": 1.0,
     }
     sample_pace = (0.9, 1.0, 1.15)
