@@ -203,16 +203,17 @@ def measured_duration(milliseconds: float) -> str:
     return live_duration(int(milliseconds))
 
 
-def rate_text(passed: float, total: float) -> str:
-    """A whole percent that reads `100%` only when all passed and `0%` only when none did."""
-    percent = math.floor(100 * passed / total + 0.5)
-    if passed < total:
-        percent = min(percent, 99)
+def rate_text(passed: int, total: int) -> str:
+    """The report's percent, but `100%` only when all passed and `0%` only when none did."""
+    text = report.percent(passed / total)
 
-    if passed > 0:
-        percent = max(percent, 1)
+    if text == "100%" and passed < total:
+        return "99%"
 
-    return f"{percent}%"
+    if text == "0%" and passed > 0:
+        return "1%"
+
+    return text
 
 
 def fail_step(passed: int, total: int) -> int:
@@ -742,7 +743,7 @@ class RunView:
                 pass_cells.append(missing(arm))
                 continue
 
-            cell: dict = {"value": rate_text(rate, 1), "fraction": rate}
+            cell: dict = {"value": report.percent(rate), "fraction": rate}
             delta_pp = self.gradings.delta_pp.get(arm)
             if delta_pp is not None:
                 cell["delta"] = f"{delta_pp:+.0f}pp"

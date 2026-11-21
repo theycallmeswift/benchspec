@@ -403,9 +403,14 @@ def index_rows(
     return rows
 
 
+def percent(rate: float) -> str:
+    """A rate as a whole percent, a half rounding to even: 0.125 is `12%`."""
+    return f"{rate:.0%}"
+
+
 def _pct(value: float | None) -> str:
     """Format a numeric rate as a percentage string."""
-    return "n/a" if value is None else f"{value:.0%}"
+    return "n/a" if value is None else percent(value)
 
 
 def _paired_evals(arm_a: dict, arm_b: dict) -> list[tuple[dict, dict]]:
@@ -517,8 +522,8 @@ def _rate_cell(rate: float | None, delta_pp: float | None) -> str:
     if rate is None:
         return "—"
     if delta_pp is None:
-        return f"{rate:.0%}"
-    return f"{rate:.0%} ({delta_pp:+.0f}pp)"
+        return percent(rate)
+    return f"{percent(rate)} ({delta_pp:+.0f}pp)"
 
 
 def _column_order(benchmark: dict) -> list[str]:
@@ -838,7 +843,7 @@ def _format_markdown(benchmark: dict) -> str:
         for row in stats["per_eval"]:
             flakiness = ""
             if row["samples"] > 1 and row["pass_rate_stdev"] is not None:
-                flakiness = f"±{row['pass_rate_stdev']:.0%}"
+                flakiness = f"±{percent(row['pass_rate_stdev'])}"
             notes = []
             if row["errored_samples"]:
                 notes.append(f"{row['errored_samples']} errored")
@@ -848,7 +853,7 @@ def _format_markdown(benchmark: dict) -> str:
                 notes.append(f"{row['timed_out_samples']} timed out")
             lines.append(
                 f"| {row['eval_id']} | {row['samples']} | {row['passed_total']} "
-                f"| {row['total_total']} | {row['pass_rate_mean']:.0%} | {flakiness} "
+                f"| {row['total_total']} | {percent(row['pass_rate_mean'])} | {flakiness} "
                 f"| {', '.join(notes)} |"
             )
 

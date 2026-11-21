@@ -30,6 +30,14 @@ def test_redact_env_masks_secrets_keeps_urls() -> None:
     assert out["AUTH_TOKEN"] == "***"
 
 
+@pytest.mark.parametrize(
+    ("rate", "text"), [(0.125, "12%"), (0.375, "38%"), (0.625, "62%"), (0.996, "100%")]
+)
+def test_percent_rounds_a_half_to_even(rate: float, text: str) -> None:
+    """Verify percent rounds a half to even."""
+    assert report.percent(rate) == text
+
+
 def test_build_benchmark_baseline_and_arm_meta(tmp_path: Path) -> None:
     """Verify build benchmark baseline and arm meta."""
     seed_arm(tmp_path / "archive", "alpha", "baseline", passes=1, total=2)
