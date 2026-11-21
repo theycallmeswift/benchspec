@@ -15,6 +15,7 @@ import shlex
 import shutil
 import socket
 import tarfile
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,9 @@ API_KEY_MISSING = f"{API_KEY_ENV} is not set — create a key at https://e2b.dev
 # project is ever selected.
 OWNER_METADATA = {"created-by": "benchspec"}
 NAME_METADATA_KEY = "benchspec-name"
+# Names repeat across machines sharing one E2B project; this process's tag keeps
+# `discard_quietly` to its own sandboxes.
+RUN_METADATA = {"benchspec-run": uuid.uuid4().hex}
 
 # Guest commands run as root, as they do in a container.
 _GUEST_USER = "root"
@@ -65,9 +69,13 @@ _GUEST_USER = "root"
 # sync out, and the bound on what a sandbox whose controller died can cost.
 LIFETIME_MARGIN_SECONDS = 120
 BUILD_LIFETIME_SECONDS = 1800
+SNAPSHOT_TIMEOUT_SECONDS = 600
 
 # The sync's own budget: it runs after the cell's cap has fired.
 SYNC_TIMEOUT_SECONDS = 120
+
+# The guest controls the workspace archive; a larger one, packed or unpacked, is refused.
+MAX_WORKSPACE_BYTES = 512 * 1024 * 1024
 
 _GUEST_ARCHIVE_DIR = "/tmp"
 _WORKSPACE_ARCHIVE = f"{_GUEST_ARCHIVE_DIR}/benchspec-workspace.tar.gz"
@@ -117,13 +125,19 @@ async def _translate_errors(
             raise TimeoutError(str(error)) from error
 
         raise SandboxError(str(error)) from error
-    except (e2b.SandboxException, e2b.AuthenticationException, e2b.BuildException) as error:
+    except (
+        e2b.SandboxException,
+        e2b.AuthenticationException,
+        e2b.BuildException,
+        e2b.ServiceBusyException,
+    ) as error:
         raise SandboxError(str(error)) from error
 
 
 def _pack(directory: Path) -> bytes:
     """Return a gzipped tar of `directory`'s children, members relative to it."""
     buffer = io.BytesIO()
+
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         for entry in sorted(directory.iterdir()):
             tar.add(entry, arcname=entry.name)
@@ -144,15 +158,34 @@ def _safe_member(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo |
 
 
 def _replace_contents(directory: Path, archive: bytes) -> None:
-    """Replace `directory`'s contents with the gzipped tar `archive`."""
-    for entry in directory.iterdir():
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
+    """Replace `directory`'s contents with the gzipped tar `archive`.
 
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        tar.extractall(directory, filter=_safe_member)
+    Raises:
+        SandboxError: When the archive is unreadable or unpacks past `MAX_WORKSPACE_BYTES`;
+            `directory` is emptied only once the archive has been read through.
+    """
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+            members = []
+            unpacked_bytes = 0
+            for member in tar:
+                unpacked_bytes += member.size
+                if unpacked_bytes > MAX_WORKSPACE_BYTES:
+                    raise SandboxError(
+                        f"{GUEST_WORKDIR} unpacks past the {MAX_WORKSPACE_BYTES}-byte limit"
+                    )
+
+                members.append(member)
+
+            for entry in directory.iterdir():
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+
+            tar.extractall(directory, members=members, filter=_safe_member)
+    except (tarfile.TarError, OSError) as error:
+        raise SandboxError(f"cannot unpack {GUEST_WORKDIR} from the guest: {error}") from error
 
 
 async def _pinned_hosts(hosts: list[str]) -> str:
@@ -162,6 +195,7 @@ async def _pinned_hosts(hosts: list[str]) -> str:
         SandboxError: When a host does not resolve.
     """
     lines = []
+
     for host in hosts:
         try:
             address = await asyncio.to_thread(socket.gethostbyname, host)
@@ -208,6 +242,7 @@ class E2BExecHandle:
             raise StopAsyncIteration
 
         event = await self._events.get()
+
         if event.event_type in ("exited", "failed"):
             self._finished = True
 
@@ -216,6 +251,7 @@ class E2BExecHandle:
     async def kill(self) -> None:
         """SIGKILL the guest command."""
         self._killed = True
+
         if self._native is not None:
             async with _translate_errors():
                 await self._native.kill()
@@ -271,6 +307,7 @@ class E2BSandbox:
 
         async with _translate_errors(self._native.is_running):
             handle = await self._start(cmd, args, cwd=cwd, env=env, stdin=stdin)
+
             try:
                 result = await asyncio.wait_for(handle.wait(), timeout)
             except e2b.CommandExitException as error:
@@ -315,6 +352,7 @@ class E2BSandbox:
                 on_stdout=lambda text: handle.emit("stdout", text),
                 on_stderr=lambda text: handle.emit("stderr", text),
             )
+
         handle.attach(native)
 
         return handle
@@ -327,13 +365,28 @@ class E2BSandbox:
     async def upload(self, guest_path: str, data: bytes | IO[bytes]) -> None:
         """Write `data` to `guest_path` over the file API."""
         async with _translate_errors(self._native.is_running):
-            await self._native.files.write(guest_path, data, user=_GUEST_USER)
+            await self._native.files.write(
+                guest_path, data, user=_GUEST_USER, request_timeout=SYNC_TIMEOUT_SECONDS
+            )
 
-    async def download(self, guest_path: str) -> bytes:
-        """Return the bytes of `guest_path` over the file API."""
+    async def download(self, guest_path: str, *, max_bytes: int) -> bytes:
+        """Return the bytes of `guest_path` over the file API.
+
+        Raises:
+            SandboxError: When the file is larger than `max_bytes`; it is not read.
+        """
         async with _translate_errors(self._native.is_running):
+            size = (await self._native.files.get_info(guest_path, user=_GUEST_USER)).size
+            if size > max_bytes:
+                raise SandboxError(f"{guest_path} is {size} bytes, over the {max_bytes} limit")
+
             return bytes(
-                await self._native.files.read(guest_path, format="bytes", user=_GUEST_USER)
+                await self._native.files.read(
+                    guest_path,
+                    format="bytes",
+                    user=_GUEST_USER,
+                    request_timeout=SYNC_TIMEOUT_SECONDS,
+                )
             )
 
     async def _start(
@@ -360,6 +413,7 @@ class E2BSandbox:
             # The SDK default kills a command at 60 s; benchspec enforces its own cap.
             timeout=0,
         )
+
         if stdin is not None:
             if stdin:
                 await handle.send_stdin(stdin)
@@ -433,6 +487,7 @@ class E2BBackend(SharedBackendBehavior):
 
         credentials = agent.secrets()
         hosts = sorted({host for credential in credentials for host in credential.allow_hosts})
+
         if not hosts:
             raise SandboxError(
                 f"harness `{agent.id}` declares no provider host for its credential, so "
@@ -440,20 +495,25 @@ class E2BBackend(SharedBackendBehavior):
             )
 
         pinned_hosts = await _pinned_hosts(hosts)
+
         async with _translate_errors():
             native = await e2b.AsyncSandbox.create(
                 template=snapshot,
                 timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
-                metadata={**OWNER_METADATA, NAME_METADATA_KEY: name},
+                metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
                 envs={credential.env_var: credential.value for credential in credentials},
                 network={
                     "allow_out": hosts,
                     "deny_out": [e2b.ALL_TRAFFIC],
                     # The default leaves 8.8.8.8 open on every port, a data channel.
                     "dns_servers": [],
+                    # Sandbox URLs for ports the guest opens need E2B's access token.
+                    "allow_public_traffic": False,
                 },
             )
+
         sandbox = E2BSandbox(native)
+
         try:
             await self._upload_trees(sandbox, host_workdir, staged_project, pinned_hosts)
         except BaseException:
@@ -477,18 +537,20 @@ class E2BBackend(SharedBackendBehavior):
             ["-czf", _WORKSPACE_ARCHIVE, "-C", GUEST_WORKDIR, "."],
             timeout=SYNC_TIMEOUT_SECONDS,
         )
+
         if packed.exit_code not in _TAR_USABLE_EXIT_CODES:
             raise SandboxError(
                 f"packing {GUEST_WORKDIR} failed (exit {packed.exit_code}): "
                 f"{packed.stderr_text[-_ERROR_TAIL_CHARS:]}"
             )
 
-        _replace_contents(host_workdir, await sandbox.download(_WORKSPACE_ARCHIVE))
+        archive = await sandbox.download(_WORKSPACE_ARCHIVE, max_bytes=MAX_WORKSPACE_BYTES)
+        _replace_contents(host_workdir, archive)
 
     async def discard_quietly(self, name: str) -> None:
-        """Kill every sandbox tagged `name` that a cancelled boot may have left running."""
+        """Kill this process's sandboxes tagged `name`, left by a cancelled boot."""
         with contextlib.suppress(SandboxError, TimeoutError, OSError):
-            await self._kill_tagged({**OWNER_METADATA, NAME_METADATA_KEY: name})
+            await self._kill_tagged({**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name})
 
     def prune(self) -> None:
         """Kill benchspec's sandboxes and delete its `benchspec-*` snapshots and templates.
@@ -508,6 +570,7 @@ class E2BBackend(SharedBackendBehavior):
             raise SandboxError(SDK_MISSING)
 
         snapshot_ids = []
+
         async with _translate_errors():
             pages = e2b.AsyncSandbox.list_snapshots(name=name)
             while pages.has_next:
@@ -536,6 +599,7 @@ class E2BBackend(SharedBackendBehavior):
             raise SandboxError(SDK_MISSING)
 
         await self._kill_tagged(OWNER_METADATA)
+
         for snapshot_id in await self._snapshot_ids():
             async with _translate_errors():
                 await e2b.AsyncSandbox.delete_snapshot(snapshot_id)
@@ -556,11 +620,13 @@ class E2BBackend(SharedBackendBehavior):
     ) -> None:
         """Upload and unpack `/workspace` and `/project`, then pin the provider hosts."""
         await sandbox.upload(_WORKSPACE_ARCHIVE, _pack(host_workdir))
+
         unpack = [
             "set -e",
             f"mkdir -p {GUEST_WORKDIR} {PROJECT_MOUNT}",
             f"tar -xzf {_WORKSPACE_ARCHIVE} --no-same-owner -C {GUEST_WORKDIR}",
         ]
+
         if staged_project is not None:
             with stage_archive(staged_project).open("rb") as archive:
                 await sandbox.upload(_PROJECT_ARCHIVE, archive)
@@ -572,6 +638,7 @@ class E2BBackend(SharedBackendBehavior):
             f"printf '%s\\n' {shlex.quote(pinned_hosts)} >> /etc/hosts",
         ]
         result = await sandbox.shell("\n".join(unpack))
+
         if result.exit_code != 0:
             raise SandboxError(
                 f"unpacking the uploaded trees failed (exit {result.exit_code}): "
@@ -588,6 +655,7 @@ class E2BBackend(SharedBackendBehavior):
             raise SandboxError(SDK_MISSING)
 
         base_name = f"{name}-base"
+
         async with _translate_errors():
             await e2b.AsyncTemplate.build(
                 e2b.Template().from_image(env.base_image or BASE_IMAGE),
@@ -595,6 +663,7 @@ class E2BBackend(SharedBackendBehavior):
                 cpu_count=VM_CPUS,
                 memory_mb=VM_MEMORY_MIB,
             )
+
         try:
             async with _translate_errors():
                 native = await e2b.AsyncSandbox.create(
@@ -605,13 +674,18 @@ class E2BBackend(SharedBackendBehavior):
                         NAME_METADATA_KEY: f"{NAME_PREFIX}build-{agent.id}",
                     },
                 )
+
             sandbox = E2BSandbox(native)
+
             try:
                 await agent.provision(sandbox)
                 await bridge_skills_home(sandbox, agent)
                 await run_environment_script(sandbox, agent, env)
+
                 async with _translate_errors():
-                    await native.create_snapshot(name, mode="filesystem")
+                    await native.create_snapshot(
+                        name, mode="filesystem", request_timeout=SNAPSHOT_TIMEOUT_SECONDS
+                    )
             finally:
                 await self.stop_quietly(sandbox)
         finally:

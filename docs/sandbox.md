@@ -50,6 +50,8 @@ The guest shares no filesystem with the host:
   the provider hosts are pinned in `/etc/hosts`. A `setup.sh` that downloads
   fails: put installs in `environment_script`, which runs at snapshot build
   with open egress. QUIC (UDP 443) is untested.
+- **Inbound**: a port the guest opens is not publicly reachable.
+- **Size**: a `/workspace` over 512 MiB, packed or unpacked, fails the sync.
 - **Lifetime**: E2B kills a sandbox 120 s after its cell's cap, so one whose
   controller died stops costing money.
 

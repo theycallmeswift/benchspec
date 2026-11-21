@@ -7,7 +7,7 @@ name = "benchspec"
 dynamic = ["version"]
 description = "benchspec is a framework for evaluating AI agents with repeatable, isolated benchmarks. Write evals as Markdown, run each eval across named benchmark arms, and compare how agent behavior changes by harness, model, effort, and environment."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 license = { text = "MIT" }
 authors = [{ name = "Swift", email = "swift@majorleaguehacking.com" }]
 classifiers = [

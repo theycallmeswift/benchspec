@@ -7,6 +7,7 @@ import io
 import tarfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
@@ -76,6 +77,9 @@ class _FakeNative:
     written: dict[str, bytes] = field(default_factory=dict)
     readable: dict[str, bytes] = field(default_factory=dict)
     write_error: Exception | None = None
+    reported_size: int | None = None
+    reads: list[str] = field(default_factory=list)
+    request_timeouts: list[object] = field(default_factory=list)
     snapshots: list[tuple[str, str]] = field(default_factory=list)
     killed: bool = False
 
@@ -101,15 +105,35 @@ class _FakeNative:
 
         return command
 
-    async def write(self, path: str, data: bytes | IO[bytes], *, user: str) -> None:
+    async def write(self, path: str, data: bytes | IO[bytes], **options: object) -> None:
         """Record an upload."""
         if self.write_error is not None:
             raise self.write_error
 
+        self.request_timeouts.append(options["request_timeout"])
         self.written[path] = data if isinstance(data, bytes) else data.read()
+
+    async def get_info(self, path: str, **options: object) -> e2b.EntryInfo:
+        """Report a file's size, or `reported_size` when the test fakes one."""
+        size = len(self.readable[path]) if self.reported_size is None else self.reported_size
+
+        return e2b.EntryInfo(
+            name=path,
+            type=e2b.FileType.FILE,
+            path=path,
+            size=size,
+            mode=0o644,
+            permissions="-rw-r--r--",
+            owner="root",
+            group="root",
+            modified_time=datetime.now(tz=UTC),
+        )
 
     async def read(self, path: str, **options: object) -> bytearray:
         """Serve a download."""
+        self.request_timeouts.append(options["request_timeout"])
+        self.reads.append(path)
+
         return bytearray(self.readable[path])
 
     async def is_running(self) -> bool:
@@ -122,8 +146,9 @@ class _FakeNative:
 
         return True
 
-    async def create_snapshot(self, name: str, *, mode: str) -> None:
+    async def create_snapshot(self, name: str, *, mode: str, request_timeout: float) -> None:
         """Record a snapshot."""
+        self.request_timeouts.append(request_timeout)
         self.snapshots.append((name, mode))
 
 
@@ -290,10 +315,10 @@ def _add_file(tar: tarfile.TarFile, name: str, content: bytes, mode: int = 0o644
     tar.addfile(member, io.BytesIO(content))
 
 
-def _add_link(tar: tarfile.TarFile, name: str, target: str) -> None:
-    """Add a symlink member."""
+def _add_link(tar: tarfile.TarFile, name: str, target: str, kind: bytes = tarfile.SYMTYPE) -> None:
+    """Add a symlink member, or a hardlink or device node of `kind`."""
     member = tarfile.TarInfo(name)
-    member.type = tarfile.SYMTYPE
+    member.type = kind
     member.linkname = target
     tar.addfile(member)
 
@@ -331,6 +356,7 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                 "timeout": 900 + e2b_mod.LIFETIME_MARGIN_SECONDS,
                 "metadata": {
                     "created-by": "benchspec",
+                    **e2b_mod.RUN_METADATA,
                     "benchspec-name": "benchspec-eval-hello-trial-main",
                 },
                 "envs": {"ANTHROPIC_API_KEY": "test-token"},
@@ -338,6 +364,7 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                     "allow_out": ["api.anthropic.com"],
                     "deny_out": ["0.0.0.0/0"],
                     "dns_servers": [],
+                    "allow_public_traffic": False,
                 },
             },
         )
@@ -410,6 +437,9 @@ def test_sync_out_replaces_the_host_workdir_and_drops_unsafe_members(
         _add_link(tar, "./relative", "out.txt")
         _add_link(tar, "./absolute", "/etc/passwd")
         _add_link(tar, "./escaping", "../../outside")
+        _add_link(tar, "./hardlink", "../../outside", kind=tarfile.LNKTYPE)
+        _add_link(tar, "./device", "", kind=tarfile.CHRTYPE)
+        _add_file(tar, "../escape", b"outside the room")
 
     native = _FakeNative(readable={"/tmp/benchspec-workspace.tar.gz": _tar_gz(workspace)})
 
@@ -418,6 +448,7 @@ def test_sync_out_replaces_the_host_workdir_and_drops_unsafe_members(
     asyncio.run(e2b_mod.E2BBackend().sync_out(guest, room))
 
     assert sorted(path.name for path in room.iterdir()) == ["out.txt", "relative"]
+    assert not (tmp_path / "escape").exists()
     assert (room / "relative").read_text(encoding="utf-8") == "agent wrote"
     assert (room / "out.txt").stat().st_mode & 0o7000 == 0
     assert native.runs[0]["cmd"] == "tar -czf /tmp/benchspec-workspace.tar.gz -C /workspace ."
@@ -442,6 +473,100 @@ def test_sync_out_accepts_a_tar_that_saw_files_change_but_not_a_failed_one(
             asyncio.run(sync)
 
     assert (room / "out.txt").exists() is synced
+
+
+def test_sync_out_keeps_the_host_workdir_when_the_guest_sends_a_bad_archive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sync out keeps the host workdir when the guest sends a bad archive."""
+    room = tmp_path / "room"
+    room.mkdir()
+    (room / "seed.txt").write_text("seed", encoding="utf-8")
+    native = _FakeNative(readable={"/tmp/benchspec-workspace.tar.gz": b"not a tar"})
+    guest = _guest(monkeypatch, tmp_path, native)
+
+    with pytest.raises(SandboxError, match="cannot unpack /workspace"):
+        asyncio.run(e2b_mod.E2BBackend().sync_out(guest, room))
+
+    assert (room / "seed.txt").read_text(encoding="utf-8") == "seed"
+
+
+def test_sync_out_refuses_an_oversized_archive_without_downloading_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sync out refuses an oversized archive without downloading it."""
+    archive = _tar_gz(lambda tar: _add_file(tar, "out.txt", b"x"))
+    native = _FakeNative(
+        readable={"/tmp/benchspec-workspace.tar.gz": archive},
+        reported_size=e2b_mod.MAX_WORKSPACE_BYTES + 1,
+    )
+    guest = _guest(monkeypatch, tmp_path, native)
+
+    with pytest.raises(SandboxError, match="over the"):
+        asyncio.run(e2b_mod.E2BBackend().sync_out(guest, tmp_path))
+
+    assert native.reads == []
+
+
+def test_sync_out_refuses_an_archive_that_unpacks_past_the_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sync out refuses an archive that unpacks past the limit."""
+    room = tmp_path / "room"
+    room.mkdir()
+    (room / "seed.txt").write_text("seed", encoding="utf-8")
+    monkeypatch.setattr(e2b_mod, "MAX_WORKSPACE_BYTES", 600)
+    archive = _tar_gz(lambda tar: _add_file(tar, "bomb.bin", bytes(4096)))
+    native = _FakeNative(readable={"/tmp/benchspec-workspace.tar.gz": archive})
+    guest = _guest(monkeypatch, tmp_path, native)
+
+    with pytest.raises(SandboxError, match="unpacks past"):
+        asyncio.run(e2b_mod.E2BBackend().sync_out(guest, room))
+
+    assert [path.name for path in room.iterdir()] == ["seed.txt"]
+
+
+def test_sync_and_snapshot_requests_outlast_the_sdk_default_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sync and snapshot requests outlast the sdk default timeout."""
+    archive = _tar_gz(lambda tar: _add_file(tar, "out.txt", b"x"))
+    native = _FakeNative(readable={"/tmp/benchspec-workspace.tar.gz": archive})
+    guest = _guest(monkeypatch, tmp_path, native)
+
+    asyncio.run(e2b_mod.E2BBackend().sync_out(guest, tmp_path))
+    e2b_mod.E2BBackend().build_snapshot(_claude(), "benchspec-e2b-snap", EnvConfig())
+
+    assert native.request_timeouts == [
+        e2b_mod.SYNC_TIMEOUT_SECONDS,
+        e2b_mod.SYNC_TIMEOUT_SECONDS,
+        e2b_mod.SNAPSHOT_TIMEOUT_SECONDS,
+    ]
+
+
+def test_a_busy_service_never_escapes_the_quiet_teardowns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A busy service never escapes the quiet teardowns."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    guest = _boot(tmp_path)
+
+    async def busy(*args: object, **options: object) -> bool:
+        """Refuse like an E2B 503."""
+        raise e2b.ServiceBusyException("no capacity")
+
+    monkeypatch.setattr(project.native, "kill", busy)
+    monkeypatch.setattr(e2b.AsyncSandbox, "kill", busy)
+    project.sandboxes.append(_Named(sandbox_id="leaked"))
+    backend = e2b_mod.E2BBackend()
+
+    asyncio.run(backend.stop_quietly(guest))
+    asyncio.run(backend.discard_quietly("benchspec-eval-hello-trial-main"))
+    backend.prune()
+
+    with pytest.raises(SandboxError, match="no capacity"):
+        asyncio.run(guest.stop())
 
 
 def test_sync_out_refuses_another_backends_guest(tmp_path: Path) -> None:
@@ -630,6 +755,13 @@ def test_discard_quietly_kills_only_the_sandbox_tagged_with_that_name(
     asyncio.run(e2b_mod.E2BBackend().discard_quietly("benchspec-eval-hello-trial-main"))
 
     assert project.calls == [
-        ("list", {"created-by": "benchspec", "benchspec-name": "benchspec-eval-hello-trial-main"}),
+        (
+            "list",
+            {
+                "created-by": "benchspec",
+                **e2b_mod.RUN_METADATA,
+                "benchspec-name": "benchspec-eval-hello-trial-main",
+            },
+        ),
         ("kill", "half-booted"),
     ]

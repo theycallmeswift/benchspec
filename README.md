@@ -39,7 +39,7 @@ off — in percentage points — how good each one actually is at accomplishing 
 
 | | |
 |---|---|
-| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in; an E2B account for the E2B opt-in. Python 3.11+. |
+| Platform | Any OS with a Docker daemon (default). Apple Silicon or Linux with `/dev/kvm` for the microsandbox opt-in; an E2B account for the E2B opt-in. Python 3.11.4+. |
 | Agent CLI | `claude`, `codex`, or `opencode` on `PATH`, with its credential (for Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). |
 | Binder credential | The binder is a fixed model call that classifies each assertion, required for every `analyze` and `run`: `GEMINI_API_KEY` by default, or `OPENROUTER_API_KEY` with `[tool.benchspec.binder] provider = "openrouter"`. |
 | Judge credential | The judge runs on the host through an agent CLI, using either its env credential or the CLI's own login (`claude login`, `codex login`); the default is `claude-code` with `sonnet`. Prefer a different vendor from the arms (this repo's own suite judges Claude arms with Codex). |

@@ -366,6 +366,7 @@ class SandboxSession:
                         await self._backend.sync_out(self._sandbox, self._host_workdir)
                 finally:
                     await self._backend.stop_quietly(self._sandbox)
+
                 raise
         self._artifact_base = await _snapshot_artifact_shas(
             self._sandbox, self._agent, self._backend
@@ -418,8 +419,10 @@ class SandboxSession:
             on_delta=self._events.delta,
         )
         self._events.phase(PHASE_GRADE)
+
         # Not bounded by the deadline: a turn that hit the cap is still graded.
         await self._backend.sync_out(sandbox, self._host_workdir)
+
         # Capture new or changed skill artifacts written outside the workdir mount.
         authored = await _read_authored(sandbox, self._agent, self._artifact_base, self._backend)
         if authored:

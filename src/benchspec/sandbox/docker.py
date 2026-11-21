@@ -478,7 +478,7 @@ class DockerSandbox:
     """A live container, exposing the guest surface every benchspec caller drives.
 
     Mirrors `MicrosandboxGuest` method for method — `shell`, `exec`, `exec_stream`,
-    `stop` — so agents and sessions work against either backend unchanged.
+    `stop` — so agents and sessions work against any backend unchanged.
     """
 
     def __init__(self, name: str, *, binary: Path) -> None:
