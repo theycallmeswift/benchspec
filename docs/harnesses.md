@@ -78,8 +78,8 @@ Notes that matter in practice:
   credential at the sandbox's network boundary, scoped to the provider's hosts
   and never readable in the guest; Docker injects it as a plain environment
   variable the agent and `setup.sh` can read; E2B adds an API key to the
-  guest's requests without putting it in the guest (see
-  [`sandbox.md`](sandbox.md#credentials)). On Docker and microsandbox,
+  guest's requests without putting it in the guest, and subscription tokens
+  stay environment variables (see [`sandbox.md`](sandbox.md#credentials)). On Docker and microsandbox,
   `CODEX_AUTH_JSON_PATH` is a read-only mount of the `auth.json`, not an env
   var; E2B refuses that arm. Three renames, to the
   names the CLIs actually read: OpenCode injects a host `GEMINI_API_KEY` as

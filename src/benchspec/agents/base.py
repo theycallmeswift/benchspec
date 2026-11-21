@@ -213,7 +213,8 @@ class Credential:
         value: The credential's secret value.
         allow_hosts: The guest hostnames this credential may be sent to.
         header: The header the harness sends the value in, for a backend that injects
-            by header; None when the harness needs the real value in the guest.
+            by header. None keeps the value in the guest: a subscription token is
+            untested behind injection.
     """
 
     env_var: str

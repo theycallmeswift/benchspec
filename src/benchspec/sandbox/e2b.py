@@ -220,19 +220,26 @@ def _guest_envs(credentials: list[Credential]) -> dict[str, str]:
 
 
 def _injection_rules(credentials: list[Credential]) -> dict[str, list[SandboxNetworkRule]]:
-    """Return E2B's per-host rules that set each injected credential's header."""
-    return {
-        host: [
-            {
-                "transform": {
-                    "headers": {credential.header.name: credential.header.prefix + credential.value}
-                }
-            }
-        ]
-        for credential in credentials
-        if credential.header is not None
-        for host in credential.allow_hosts
-    }
+    """Return E2B's per-host rules that set each injected credential's header.
+
+    Raises:
+        SandboxError: When two injected credentials share a host.
+    """
+    rules: dict[str, list[SandboxNetworkRule]] = {}
+
+    for credential in credentials:
+        if credential.header is None:
+            continue
+
+        header = {credential.header.name: credential.header.prefix + credential.value}
+
+        for host in credential.allow_hosts:
+            if host in rules:
+                raise SandboxError(f"two injected credentials share the host {host}")
+
+            rules[host] = [{"transform": {"headers": header}}]
+
+    return rules
 
 
 def _owned(names: list[str]) -> bool:
@@ -510,8 +517,8 @@ class E2BBackend(SharedBackendBehavior):
         header on requests to the credential's hosts. Any other is a guest variable.
 
         Raises:
-            SandboxError: When the boot or upload fails, or the agent's credentials name
-                no provider host to allow.
+            SandboxError: When the boot or upload fails, the agent's credentials name no
+                provider host to allow, or two injected credentials share a host.
         """
         if e2b is None:
             raise SandboxError(SDK_MISSING)
@@ -525,6 +532,7 @@ class E2BBackend(SharedBackendBehavior):
                 "E2B has nothing to allow; use an API-key credential"
             )
 
+        rules = _injection_rules(credentials)
         pinned_hosts = await _pinned_hosts(hosts)
 
         async with _translate_errors():
@@ -536,7 +544,7 @@ class E2BBackend(SharedBackendBehavior):
                 network={
                     "allow_out": hosts,
                     "deny_out": [e2b.ALL_TRAFFIC],
-                    "rules": _injection_rules(credentials),
+                    "rules": rules,
                     # The default leaves 8.8.8.8 open on every port, a data channel.
                     "dns_servers": [],
                     # Sandbox URLs for ports the guest opens need E2B's access token.

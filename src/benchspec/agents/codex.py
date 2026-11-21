@@ -44,7 +44,6 @@ _PROVIDER_HOSTS = {
     "OPENAI_API_KEY": ["api.openai.com"],
 }
 AUTH_ENV_VARS = tuple(_PROVIDER_HOSTS)
-# A subscription token has no entry: it is untested behind header injection.
 _AUTH_HEADERS = {"CODEX_API_KEY": BEARER_HEADER, "OPENAI_API_KEY": BEARER_HEADER}
 # Host env var → the name Codex reads; unlisted entries keep theirs. Codex CLI ignores
 # `OPENAI_API_KEY`, so accept it but inject it as `CODEX_API_KEY`, in guest and judge.
@@ -309,9 +308,12 @@ class CodexAgent(BaseAgent):
                     OPENROUTER_AUTH_ENV, self._auth_value, tuple(_OPENROUTER_HOSTS), BEARER_HEADER
                 )
             ]
+
         if self._auth_json_path:
             return []
+
         guest_env_name = _CODEX_ENV_NAMES.get(self._auth_env, self._auth_env)
+
         return [
             Credential(
                 guest_env_name,
