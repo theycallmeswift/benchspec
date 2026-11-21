@@ -40,7 +40,7 @@ token in its `usage` ([`tokens.json`](foundations/tokens.json)); ratios in
   status line, assertion verdicts and terminal report (`FAIL · 6/9 assertions`).
   Lowercase elsewhere (legend, tallies, hover-card problem lines, unfinished
   labels): pass, fail, timeout, error, queued, running, booting, quiet 52s, n/a
-  (never "skipped"), not run, 4 failed. `quiet Ns` counts live.
+  (never "skipped"), not run, 4 failed, stale. `quiet Ns` counts live.
 - **Separators:** middle dot with spaces (`claude-code · sonnet`). Durations
   `6m 41s`, `90.9s`; money `$0.073`.
 - **Captions:** section heads and the matrix caption are lowercase mono in

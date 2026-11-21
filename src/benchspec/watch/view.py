@@ -17,6 +17,7 @@ from benchspec.grading.checkers import ACTIVATION_CHECKERS
 from benchspec.reporting import report
 
 QUIET_AFTER_S = 30
+STALE_MARGIN_S = 60
 RECENT_DELTAS = 5
 
 GRADED = ("pass", "fail", "timeout")
@@ -338,13 +339,26 @@ class RunView:
             sample.error = event
             sample.closed_ms = ts_ms
 
+    def _stale_after_ms(self) -> int:
+        """A silence no live run can produce: its longest cell cap, the judge timeout, a margin."""
+        longest_cap = max((arm["timeout"] for arm in self._plan["arms"]), default=0)
+
+        return (longest_cap + self._plan["judge_timeout"] + STALE_MARGIN_S) * 1000
+
     def to_json(self, now_ms: int) -> dict:
-        """Everything the page draws at `now_ms`; the clock stops at `run.end`."""
+        """Everything the page draws at `now_ms`.
+
+        The clock stops at `run.end`, and at the last event while the run is stale.
+        """
         if self._start is None:
             return {"state": "loading"}
 
+        silent_ms = now_ms - self._last_event_ms
+        stale = self._end is None and silent_ms > self._stale_after_ms()
         if self._end is not None:
             now_ms = self._end["ts_ms"]
+        elif stale:
+            now_ms = self._last_event_ms
 
         planned = [self._samples[cell["cell"]] for cell in self._plan["cells"]]
         counted = [sample for sample in planned if sample.state(now_ms) != "n/a"]
@@ -354,13 +368,13 @@ class RunView:
         if total == 0:
             state = "empty"
         elif self._end is None:
-            state = "live"
+            state = "stale" if stale else "live"
         else:
             state = "finished" if done == total else "stopped"
 
         return {
             "state": state,
-            "top": self._top(planned, now_ms),
+            "top": self._top(planned, state, silent_ms),
             "counter": self._counter(counted, done, state, now_ms),
             "report": self._end["benchmark_md"] if self._end else None,
             "reopen": f"benchspec watch --iteration {self._plan['iteration']}",
@@ -368,22 +382,24 @@ class RunView:
             "leaderboard": self._leaderboard(counted, now_ms),
         }
 
-    def _top(self, planned: list[Sample], now_ms: int) -> dict:
-        """The top bar: iteration, suite and run state."""
+    def _top(self, planned: list[Sample], state: str, silent_ms: int) -> dict:
+        """The top bar: iteration, suite and run state, `silent_ms` after the last event."""
         skills = list(dict.fromkeys(sample.skill for sample in planned))
         count = max((sample.index for sample in planned), default=0) + 1
 
         if self._end is not None:
             status, detail = f"ended · exit {self._end['exit_status']}", None
+        elif state == "stale":
+            status, detail = "stale", f"no events for {live_duration(silent_ms)}"
         else:
-            status = "live"
-            detail = f"last event {live_duration(now_ms - self._last_event_ms)} ago"
+            status, detail = "live", f"last event {live_duration(silent_ms)} ago"
 
         return {
             "iteration": self._plan["iteration"],
             "suite": " · ".join([self._plan["set"], *(skills if len(skills) == 1 else [])]),
             "count": f"--count {count}" if count > 1 else None,
             "live": self._end is None,
+            "stale": state == "stale",
             "status": status,
             "detail": detail,
         }
@@ -412,10 +428,9 @@ class RunView:
             "empty": "No cells in this run.",
             "finished": f"Run finished · {done} of {total} samples",
             "stopped": f"Run stopped · {done} of {total} samples",
+            "stale": f"Run stale · {done} of {total} samples finished",
         }.get(state, finished_line)
-        left = None
-        if state == "live" and 0 < done < total:
-            left = f"~{_coarse_duration(elapsed_ms / done * (total - done))} left"
+        left_ms = self._left_ms(counted, now_ms) if state == "live" else None
 
         return {
             "percent": 100 * done // total if total else 0,
@@ -430,10 +445,37 @@ class RunView:
                 if self._end is not None
                 else live_duration(elapsed_ms)
             ),
-            "left": left,
+            "left": f"~{_coarse_duration(left_ms)} left" if left_ms is not None else None,
             "tally": [{"bucket": bucket, "count": count} for bucket, count in buckets.items()],
             "workers": f"-n {len(self._workers)}" if self._workers and self._end is None else None,
         }
+
+    def _left_ms(self, counted: list[Sample], now_ms: int) -> float | None:
+        """The time left: each unfinished sample's expected remainder, shared by the workers.
+
+        A sample is expected to take the mean of the finished ones. None until one has
+        finished, and when less than a second is expected.
+        """
+        durations = [
+            sample.closed_ms - sample.started_ms
+            for sample in counted
+            if sample.closed_ms is not None and sample.started_ms is not None
+        ]
+        if not durations:
+            return None
+
+        expected_ms = statistics.mean(durations)
+        unfinished = [sample for sample in counted if sample.closed_ms is None]
+        work_ms = sum(
+            expected_ms
+            if sample.started_ms is None
+            else max(expected_ms - (now_ms - sample.started_ms), 0)
+            for sample in unfinished
+        )
+        if work_ms < 1000:
+            return None
+
+        return work_ms / min(max(len(self._workers), 1), len(unfinished))
 
     def _matrix(self, planned: list[Sample], state: str, now_ms: int) -> dict:
         """The matrix: one group per skill, one row per eval, one cell per arm."""
@@ -466,7 +508,7 @@ class RunView:
                     "name": f"{skill}/",
                     "evals": _plural(len(rows), "eval"),
                     "note": _scope_note(members, [arm["name"] for arm in arms]),
-                    "open": not (settled and state == "live"),
+                    "open": not (settled and self._end is None),
                     "summaries": [
                         _group_summary(
                             [sample for sample in members if sample.arm == arm["name"]], now_ms
@@ -477,7 +519,7 @@ class RunView:
                 }
             )
 
-        word = {"live": "live", "finished": "finished"}.get(state, "stopped")
+        word = state if state in ("live", "stale", "finished") else "stopped"
 
         return {
             "caption": _caption(

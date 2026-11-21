@@ -207,13 +207,13 @@ def test_a_live_tail_reports_an_unsupported_format_and_closes(
     next_event(stream)
 
     with (run.iteration_dir / "events-gw9.jsonl").open("w", encoding="utf-8") as file:
-        file.write('{"format_version": 2, "type": "cell.start", "ts_ms": 1, "worker": "gw9"}\n')
+        file.write('{"format_version": 3, "type": "cell.start", "ts_ms": 1, "worker": "gw9"}\n')
 
     lines = stream.read().decode().strip().splitlines()
 
     assert lines[:2] == [
         "event: error",
-        "data: events format_version 2 is not supported by this benchspec",
+        "data: events format_version 3 is not supported by this benchspec",
     ]
 
 
@@ -280,7 +280,7 @@ def test_refuses_an_iteration_in_another_format(tmp_path: Path) -> None:
     """Refuses an iteration in another format."""
     events = iteration(tmp_path) / "events-main.jsonl"
     events.parent.mkdir(parents=True)
-    events.write_text('{"format_version": 2, "type": "run.start"}\n', encoding="utf-8")
+    events.write_text('{"format_version": 3, "type": "run.start"}\n', encoding="utf-8")
 
-    with pytest.raises(UnsupportedFormatError, match="format_version 2 is not supported"):
+    with pytest.raises(UnsupportedFormatError, match="format_version 3 is not supported"):
         find_iteration(tmp_path, None)

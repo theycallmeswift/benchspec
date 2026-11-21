@@ -445,9 +445,11 @@ def _emit_run_start(config: pytest.Config, nodeids: Sequence[str]) -> None:
                     "harness": arm.harness,
                     "model": arm.model,
                     "effort": arm.effort,
+                    "timeout": arm.timeout,
                 }
                 for arm in run_set.arms
             ],
+            "judge_timeout": resolved_judge_config(config).timeout,
             "cells": planned,
             "cell_count": len(planned),
         }

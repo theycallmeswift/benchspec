@@ -31,7 +31,7 @@ def test_each_event_is_one_enveloped_line_readable_before_close(tmp_path: Path) 
     lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert isinstance(lines[0]["ts_ms"], int)
     assert lines[0] | {"ts_ms": 0} == {
-        "format_version": 1,
+        "format_version": 2,
         "type": "cell.phase",
         "ts_ms": 0,
         "worker": "gw1",

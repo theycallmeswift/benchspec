@@ -97,7 +97,7 @@ function render() {
 
   if (!hasRun) return;
 
-  if (state !== "live" && state !== lastState && !pickedTab) tab = "leaderboard";
+  if (state !== "live" && state !== "stale" && state !== lastState && !pickedTab) tab = "leaderboard";
   lastState = state;
 
   renderTop();
@@ -141,7 +141,7 @@ function renderTop() {
   );
   const state = byId("run-state");
   document.querySelector(".bs-top").classList.toggle("bs-live-run", top.live);
-  setClass(state, top.live && connected ? "bs-live" : "");
+  setClass(state, top.stale ? "bs-stale" : top.live && connected ? "bs-live" : "");
   fill(state, top.status, top.detail ? el("span", { class: "bs-wide", text: ` · ${top.detail}` }) : "");
 }
 
