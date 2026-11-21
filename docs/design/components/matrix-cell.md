@@ -16,7 +16,8 @@ markers or badges.
   box colours.
 
 **Size:** `size-cell` (`size-cell-phone` below `breakpoint-phone`), `radius-4`,
-on `raised`, `space-12` side padding, `space-8` gap, `bs-type-cell`.
+on `raised`, `space-12` side padding (`space-8` from four arms, above
+`breakpoint-phone`), `space-8` gap, `bs-type-cell`.
 
 **Counting:** a cell's rate, its hover-card headline and rows count every check
 that cell's graded samples ran; errored samples add none. Only the Leaderboard

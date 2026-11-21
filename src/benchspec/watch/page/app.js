@@ -564,10 +564,7 @@ function showHover(key) {
 
 function hideHover() {
   clearTimeout(hoverTimer);
-  hoverTimer = setTimeout(() => {
-    if (byId("hovercard").matches(":hover")) return;
-    dismissHover();
-  }, 0);
+  hoverTimer = setTimeout(dismissHover, 0);
 }
 
 function dismissHover() {
@@ -637,13 +634,13 @@ function besideRow(card, button) {
 function underCell(card, button) {
   const cell = button.getBoundingClientRect();
   const gap = tokenPx("--space-4");
-  const edge = tokenPx("--space-16");
   const below = cell.bottom + gap;
-  const fits = below + card.offsetHeight <= innerHeight;
+  const above = cell.top - gap - card.offsetHeight;
+  const flips = below + card.offsetHeight > innerHeight && above >= 0;
 
   return {
-    left: Math.max(edge, Math.min(cell.left, innerWidth - edge - card.offsetWidth)),
-    top: fits ? below : cell.top - gap - card.offsetHeight,
+    left: Math.min(cell.left, innerWidth - tokenPx("--space-16") - card.offsetWidth),
+    top: flips ? above : below,
   };
 }
 
@@ -1067,7 +1064,6 @@ document.querySelector(".bs-tabs").addEventListener("keydown", (event) => {
 });
 
 byId("matrix").addEventListener("keydown", moveInGrid);
-byId("hovercard").addEventListener("mouseleave", dismissHover);
 byId("scrim").addEventListener("click", closeDrawer);
 
 document.addEventListener("keydown", (event) => {

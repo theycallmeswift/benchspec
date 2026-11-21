@@ -237,7 +237,7 @@ button.bs-lbh { appearance: none; padding: 0; border: 0; background: none; curso
 .bs-lbl .bs-err { font: var(--type-body-mono); color: var(--danger); }
 
 /* HoverCard and Drawer: floating panels with a hairline edge. */
-.bs-hc { max-width: var(--size-hovercard); display: grid; gap: var(--space-8); padding: var(--space-12); background: var(--popover); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); box-shadow: var(--shadow-hovercard); font: var(--type-body-mono); color: var(--fg); }
+.bs-hc { max-width: var(--size-hovercard); display: grid; gap: var(--space-8); padding: var(--space-12); background: var(--popover); border: var(--stroke-hair) solid var(--line); border-radius: var(--radius-8); box-shadow: var(--shadow-hovercard); font: var(--type-body-mono); color: var(--fg); pointer-events: none; }
 .bs-hc .bs-hh { display: flex; align-items: baseline; gap: var(--space-8); }
 .bs-hc .bs-hh b { font: var(--type-metric); }
 .bs-hc .bs-hr { display: grid; grid-template-columns: 1fr auto auto; gap: var(--space-12); }

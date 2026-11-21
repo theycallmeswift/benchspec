@@ -539,19 +539,21 @@ def uneven_run(root: Path, *, workers: int = 6, snapshot_s: float = 150) -> Reco
     return run
 
 
-def four_arm_live(root: Path) -> Recording:
-    """A live four-arm run with long model names and eval ids.
+def long_label_live(root: Path, *, arms: int = 4) -> Recording:
+    """A live run on up to four arms with long model names and eval ids.
 
-    One cell is booting and one running; `pi` finished a mid-table eval and `claude-code`
-    the last one.
+    The first arm has a cell booting for over two minutes and finished the second and last
+    evals;
+    the second has a cell running; the last finished a mid-table eval.
     """
-    elapsed_s = 95
-    arms = [
-        arm("claude-code", "claude-code", "anthropic/claude-haiku-4.5"),
-        arm("codex", "codex", "openai/gpt-5.1-codex-mini"),
-        arm("opencode", "opencode", "google/gemini-2.5-flash"),
-        arm("pi", "pi", "moonshotai/kimi-k2"),
-    ]
+    elapsed_s = 200
+    models = {
+        "claude-code": "anthropic/claude-haiku-4.5",
+        "codex": "openai/gpt-5.1-codex-mini",
+        "opencode": "google/gemini-2.5-flash",
+        "pi": "moonshotai/kimi-k2",
+    }
+    names = list(models)[:arms]
     evals = (
         "allows-filesystem-traversal",
         "blocks-network-egress",
@@ -562,7 +564,7 @@ def four_arm_live(root: Path) -> Recording:
     )
     run = Recording(
         iteration(root),
-        arms=arms,
+        arms=[arm(name, name, models[name]) for name in names],
         baseline=None,
         start_ms=int(time.time() * 1000) - elapsed_s * 1000,
     )
@@ -573,11 +575,12 @@ def four_arm_live(root: Path) -> Recording:
     run.begin()
 
     for sample in range(3):
-        run.done(f"sandbox/greets/claude-code/{sample}", 70 + sample, wall_s=40)
-        run.done(f"sandbox/keeps-secrets-out/pi/{sample}", 75 + sample, passed=2, wall_s=40)
+        run.done(f"sandbox/greets/{names[0]}/{sample}", 70 + sample, wall_s=40)
+        run.done(f"sandbox/blocks-network-egress/{names[0]}/{sample}", 80 + sample, wall_s=40)
+        run.done(f"sandbox/keeps-secrets-out/{names[-1]}/{sample}", 75 + sample, passed=2)
 
-    run.start("sandbox/allows-filesystem-traversal/claude-code/0", elapsed_s - 12)
-    run.play("sandbox/allows-filesystem-traversal/codex/0", elapsed_s - 31, worker="gw1")
+    run.start(f"sandbox/allows-filesystem-traversal/{names[0]}/0", elapsed_s - 144)
+    run.play(f"sandbox/allows-filesystem-traversal/{names[1]}/0", elapsed_s - 31, worker="gw1")
 
     return run
 
