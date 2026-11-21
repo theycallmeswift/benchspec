@@ -119,6 +119,12 @@ def test_a_rate_reads_100_only_when_all_passed_and_0_only_when_none_did(
     assert rate_text(passed, total) == text
 
 
+@pytest.mark.parametrize(("passed", "text"), [(1, "12%"), (3, "38%"), (5, "62%")])
+def test_a_cell_rate_ending_in_a_half_rounds_as_the_report_does(passed: int, text: str) -> None:
+    """A cell rate ending in a half rounds as the report does."""
+    assert rate_text(passed, 8) == text
+
+
 def test_finished_states_are_error_then_timeout_then_fail_then_pass(tmp_path: Path) -> None:
     """Finished states are error then timeout then fail then pass."""
     run = _one_cell(tmp_path, count=4)
@@ -617,6 +623,21 @@ def test_the_leaderboard_pass_rate_pools_like_benchmark_json(tmp_path: Path) -> 
     ]
     assert [cell.get("delta") for cell in cells] == [None, "+30pp", "+40pp", "+28pp"]
     assert [cell.get("best", False) for cell in cells] == [False, False, True, False]
+
+
+def test_a_pass_rate_ending_in_a_half_reads_the_same_as_benchmark_md(tmp_path: Path) -> None:
+    """A pass rate ending in a half reads the same as benchmark md."""
+    run = _one_cell(tmp_path, checks=8)
+    run.done("hello/greets/baseline/0", 70, passed=1)
+    run.done("hello/greets/trial/0", 80)
+    benchmark = report.build_benchmark(
+        report.discover_eval_dirs(run.iteration_dir / "skills"), "run", baseline="baseline"
+    )
+
+    cells = _row(fold(run, at=90), "Pass rate")
+
+    assert [cell["value"] for cell in cells] == ["12%", "100%"]
+    assert "| All evals | 12% | 100% (+88pp) |" in report._format_markdown(benchmark)
 
 
 def test_a_check_scoped_off_one_arm_counts_in_cells_but_not_in_the_pass_rate(

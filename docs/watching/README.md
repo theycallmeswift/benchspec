@@ -91,6 +91,9 @@ longest arm's cell `timeout`, and returns to live if events resume.
 - **The leaderboard pass rate** pools only checks every arm runs, exactly as
   [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so it
   can differ from the cell rates. Its other rows cover graded samples.
+- **Percentages** round as `benchmark.md` does, a half to even: 12.5% reads
+  `12%`. A cell or group reads `100%` only when every check passed and `0%`
+  only when none did.
 - **Time left.** Waiting samples are played forward, in plan order, onto the
   worker that frees first. A sample is expected to take its arm's mean, or
   every arm's until one of its own finishes. Time before the agent starts is
