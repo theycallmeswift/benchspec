@@ -422,8 +422,8 @@ class RunView:
         elif state == "stopped":
             buckets["unfinished"] = states.count("unfinished")
 
-        problem = (
-            _run_problem(self._end["exit_status"], buckets["errored"])
+        reason = (
+            _run_reason(self._end["exit_status"], buckets["errored"])
             if self._end is not None
             else None
         )
@@ -431,9 +431,8 @@ class RunView:
         line = f"Run stopped · {done} of {total} finished" if state == "stopped" else finished_line
         announce = {
             "empty": "No cells in this run.",
-            "finished": " · ".join(
-                filter(None, [f"Run finished · {done} of {total} samples", problem])
-            ),
+            "finished": f"Run finished · {done} of {total} samples"
+            + (f" · {reason}" if reason else ""),
             "stopped": f"Run stopped · {done} of {total} samples",
             "stale": f"Run stale · {done} of {total} samples finished",
         }.get(state, finished_line)
@@ -446,7 +445,7 @@ class RunView:
             "line": line,
             "progress": finished_line,
             "announce": announce,
-            "problem": problem,
+            "reason": reason,
             "clock_word": "elapsed" if self._end is None else "took",
             "clock": (
                 live_duration(self._end["wall_ms"])
@@ -856,9 +855,10 @@ def _coarse_duration(milliseconds: float) -> str:
     return live_duration(seconds * 1000)
 
 
-def _run_problem(exit_status: int, errored: int) -> str | None:
-    """What broke an ended run: a non-zero exit and its errored samples, or None."""
+def _run_reason(exit_status: int, errored: int) -> str | None:
+    """Why an ended run is not clean: a non-zero exit and its errored samples, or None."""
     parts = []
+
     if exit_status != 0:
         parts.append(f"exit {exit_status}")
 

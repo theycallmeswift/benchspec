@@ -273,7 +273,7 @@ def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -
 
         expect(page.locator("#tab-leaderboard")).to_have_attribute("aria-selected", "true")
         expect(page.locator("#headline .bs-bad")).to_have_text("✗ Finished")
-        expect(page.locator("#headline .bs-att")).to_have_text("exit 1 · 3 errored")
+        expect(page.locator("#headline .bs-att")).to_have_text("· exit 1 · 3 errored")
         expect(page.locator("#status")).to_have_text(
             "Run finished · 117 of 117 samples · exit 1 · 3 errored"
         )
@@ -312,12 +312,18 @@ def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -
         _shoot(page, "e")
 
 
-def _color(page: Page, selector: str, token: str | None = None) -> str:
-    """An element's computed colour, or with `token` what that design token computes to."""
-    declared = f"node.style.color = 'var(--{token})'; " if token else ""
+def _color(page: Page, selector: str) -> str:
+    """An element's computed colour."""
+    return page.locator(selector).evaluate("node => getComputedStyle(node).color")
 
-    return page.locator(selector).evaluate(
-        f"node => {{ {declared}return getComputedStyle(node).color; }}"
+
+def _token_color(page: Page, token: str) -> str:
+    """What a design token computes to, on a throwaway element."""
+    return page.evaluate(
+        "token => { const probe = document.body.appendChild(document.createElement('span'));"
+        " probe.style.color = `var(--${token})`; const color = getComputedStyle(probe).color;"
+        " probe.remove(); return color; }",
+        token,
     )
 
 
@@ -325,7 +331,7 @@ def _color(page: Page, selector: str, token: str | None = None) -> str:
     ("exit_status", "baseline", "mark", "token", "reason"),
     [
         (0, "pass", "✓ Finished", "success", None),
-        (1, "error", "✗ Finished", "danger", "exit 1 · 1 errored"),
+        (1, "error", "✗ Finished", "danger", "· exit 1 · 1 errored"),
         (0, "fail", "✓ Finished", "success", None),
     ],
 )
@@ -344,6 +350,7 @@ def test_the_ended_headline_follows_the_runs_outcome(
     run.plan("hello", "greets")
     run.begin()
     run.done("hello/greets/trial/0", 70)
+
     if baseline == "error":
         run.error("hello/greets/baseline/0", 70)
     else:
@@ -356,9 +363,10 @@ def test_the_ended_headline_follows_the_runs_outcome(
 
         expect(page.locator("#headline > span").first).to_have_text(mark)
         expect(page.locator("#headline .bs-att")).to_have_text([reason] if reason else [])
+
         headline = _color(page, "#headline > span >> nth=0")
         bar = page.locator("#progress i").evaluate("node => getComputedStyle(node).backgroundColor")
-        assert headline == bar == _color(page, "#status", token)
+        assert headline == bar == _token_color(page, token)
         _shoot(page, f"ended-{baseline}")
 
 

@@ -385,7 +385,7 @@ computable delta are exempt.
 | Code | Meaning |
 |---|---|
 | `0` | Success. |
-| `1` | A finding: lint warnings, a failed cell, a tripped `--fail-under` gate, or a sandbox build failure. |
+| `1` | A finding: lint warnings, an errored cell, a tripped `--fail-under` gate, or a sandbox build failure. |
 | `2` | Usage error, caught before any paid arm runs: a bad flag, unknown `--set`, unreadable `--config`, unsupported `runner`/`sandbox`, an unknown `provider`, or a failed preflight: an unready host, a missing agent credential, a missing judge binary, a missing or empty binder key (`GEMINI_API_KEY` or `OPENROUTER_API_KEY`, by provider), or (`analyze` only) a rejected key or binder transport failure. Printed as a single `error: ...` line on stderr. |
 | `5` | Nothing to do: no evals discovered under `root` (`run` only; `lint`/`analyze` exit `0` on an empty root). |
 

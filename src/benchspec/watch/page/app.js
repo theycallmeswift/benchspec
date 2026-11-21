@@ -161,8 +161,8 @@ function renderCounter(state) {
     headline.replaceChildren(
       el(
         "span",
-        { class: counter.problem ? "bs-bad" : "bs-ok" },
-        counter.problem ? "✗" : "✓",
+        { class: counter.reason ? "bs-bad" : "bs-ok" },
+        counter.reason ? "✗" : "✓",
         el("span", { class: "bs-wide", text: " Finished" }),
       ),
       el("span", { class: "bs-dot bs-wide", text: "·" }),
@@ -174,8 +174,7 @@ function renderCounter(state) {
         `${counter.done} of ${counter.total}`,
         el("span", { class: "bs-narrow", text: " samples" }),
       ),
-      counter.problem ? el("span", { class: "bs-dot", text: "·" }) : "",
-      counter.problem ? el("span", { class: "bs-att", text: counter.problem }) : "",
+      counter.reason ? el("span", { class: "bs-att", text: `· ${counter.reason}` }) : "",
       el(
         "span",
         { class: "bs-el" },
@@ -199,7 +198,7 @@ function renderCounter(state) {
 
   byId("progress-frame").hidden = state === "empty";
   const progress = byId("progress");
-  const done = counter.problem ? "bs-prog bs-bad" : "bs-prog bs-done";
+  const done = counter.reason ? "bs-prog bs-bad" : "bs-prog bs-done";
   setClass(progress, state === "finished" ? done : "bs-prog");
   progress.setAttribute("aria-valuemax", counter.total);
   progress.setAttribute("aria-valuenow", counter.done);
