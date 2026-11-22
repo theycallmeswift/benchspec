@@ -91,7 +91,8 @@ Notes that matter in practice:
   401 and writes the guest's copy only. If OpenAI rotates the refresh token
   (unconfirmed), the host and other cells fail their next refresh until
   `codex login`; log in shortly before a long run. A login whose issuer is
-  not `auth.openai.com` cannot refresh on E2B.
+  not `auth.openai.com` cannot refresh on E2B. A ChatGPT login supports only
+  the models its plan offers; an unsupported one errors the cell.
 - **`provider` is per arm and per judge.** `openrouter` changes only what happens
   at execution time (the credential, the guest env, CLI flags), never the
   snapshot, so mixing providers in one set builds nothing extra. Under
