@@ -258,8 +258,10 @@ git clone https://github.com/theycallmeswift/benchspec && cd benchspec
    in `tmp/evals/iteration_01/benchmark.md`.
 
 Then `make lint` (ruff, ty, houserules; needs `GEMINI_API_KEY`) before a pull
-request. On Claude Code on the web, the environment's setup script does steps 1
-and 3 once for every session; see
+request. A change to the E2B backend also runs `uv run pytest -m e2b`, which
+boots one real sandbox, calls no model, and needs `E2B_API_KEY`. On Claude Code
+on the web, the environment's setup script does steps 1 and 3 once for every
+session; see
 [`sandbox.md`](docs/sandbox.md#claude-code-on-the-web).
 
 Issues and pull requests are welcome at

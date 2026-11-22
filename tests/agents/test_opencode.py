@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from benchspec.agents.base import FIXED_SKILLS_HOME, Credential
+from benchspec.agents.base import BEARER_HEADER, FIXED_SKILLS_HOME, AuthHeader, Credential
 from benchspec.agents.opencode import OpenCodeAgent, parse_opencode_jsonl
 from benchspec.grading.trajectory import render_process_facts, skills_dispatched
 from benchspec.sandbox.errors import SandboxError
@@ -626,14 +626,16 @@ def test_secrets_scopes_to_provider_host() -> None:
 
     secs = agent.secrets()
 
-    assert secs == [Credential("OPENROUTER_API_KEY", "or-key", ("openrouter.ai",))]
+    assert secs == [Credential("OPENROUTER_API_KEY", "or-key", ("openrouter.ai",), BEARER_HEADER)]
 
 
 def test_secrets_anthropic_fallback_scopes_to_anthropic_host() -> None:
     """Verify secrets anthropic fallback scopes to anthropic host."""
     secs = OpenCodeAgent(auth_value="ak", auth_env="ANTHROPIC_API_KEY").secrets()
 
-    assert secs == [Credential("ANTHROPIC_API_KEY", "ak", ("api.anthropic.com",))]
+    assert secs == [
+        Credential("ANTHROPIC_API_KEY", "ak", ("api.anthropic.com",), AuthHeader("x-api-key"))
+    ]
 
 
 def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host() -> None:
@@ -644,7 +646,12 @@ def test_secrets_gemini_remaps_to_sdk_env_name_and_scopes_to_google_host() -> No
     secs = OpenCodeAgent(auth_value="gk", auth_env="GEMINI_API_KEY").secrets()
 
     assert secs == [
-        Credential("GOOGLE_GENERATIVE_AI_API_KEY", "gk", ("generativelanguage.googleapis.com",))
+        Credential(
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "gk",
+            ("generativelanguage.googleapis.com",),
+            AuthHeader("x-goog-api-key"),
+        )
     ]
 
 
@@ -654,7 +661,12 @@ def test_secrets_google_generative_ai_passthrough_unchanged() -> None:
     secs = OpenCodeAgent(auth_value="gk", auth_env="GOOGLE_GENERATIVE_AI_API_KEY").secrets()
 
     assert secs == [
-        Credential("GOOGLE_GENERATIVE_AI_API_KEY", "gk", ("generativelanguage.googleapis.com",))
+        Credential(
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "gk",
+            ("generativelanguage.googleapis.com",),
+            AuthHeader("x-goog-api-key"),
+        )
     ]
 
 
@@ -1439,7 +1451,9 @@ def test_from_env_under_openrouter_forces_openrouter_api_key(
     agent = OpenCodeAgent.from_env("openrouter")
 
     assert agent.provider == "openrouter"
-    assert agent.secrets() == [Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",))]
+    assert agent.secrets() == [
+        Credential("OPENROUTER_API_KEY", "sk-or-test", ("openrouter.ai",), BEARER_HEADER)
+    ]
 
 
 def test_from_env_under_openrouter_does_not_fall_back_to_another_key(

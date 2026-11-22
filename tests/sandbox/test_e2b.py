@@ -15,6 +15,7 @@ import e2b
 import pytest
 
 from benchspec.agents import CodingAgent
+from benchspec.agents.base import BEARER_HEADER, Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.sandbox import e2b as e2b_mod
@@ -185,6 +186,7 @@ class _FakeProject:
     snapshots: list[_Named] = field(default_factory=list)
     templates: list[_Named] = field(default_factory=list)
     calls: list[tuple[object, ...]] = field(default_factory=list)
+    create_error: Exception | None = None
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, project: _FakeProject) -> None:
@@ -197,6 +199,9 @@ def _install(monkeypatch: pytest.MonkeyPatch, project: _FakeProject) -> None:
         async def create(**options: object) -> _FakeNative:
             """Record or answer the SDK's `create`."""
             project.calls.append(("create", options))
+
+            if project.create_error is not None:
+                raise project.create_error
 
             return project.native
 
@@ -280,6 +285,16 @@ def _boot(
     )
 
 
+def _credential_options(project: _FakeProject) -> tuple[object, dict[str, object]]:
+    """The `envs` and `network` options of the one sandbox `project` was asked to create."""
+    ((_, options),) = project.calls
+    assert isinstance(options, dict)
+    network = options["network"]
+    assert isinstance(network, dict)
+
+    return options["envs"], network
+
+
 def _guest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -359,16 +374,85 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                     **e2b_mod.RUN_METADATA,
                     "benchspec-name": "benchspec-eval-hello-trial-main",
                 },
-                "envs": {"ANTHROPIC_API_KEY": "test-token"},
+                "envs": {"ANTHROPIC_API_KEY": e2b_mod.INJECTED_PLACEHOLDER},
                 "network": {
                     "allow_out": ["api.anthropic.com"],
                     "deny_out": ["0.0.0.0/0"],
+                    "rules": {
+                        "api.anthropic.com": [
+                            {"transform": {"headers": {"x-api-key": "test-token"}}}
+                        ]
+                    },
                     "dns_servers": [],
                     "allow_public_traffic": False,
                 },
             },
         )
     ]
+
+
+def test_create_sandbox_injects_a_bearer_credential_on_its_host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox injects a bearer credential on its host."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+
+    _boot(tmp_path, agent=CodexAgent(auth_value="sk-or-test", provider="openrouter"))
+
+    envs, network = _credential_options(project)
+    assert envs == {"OPENROUTER_API_KEY": e2b_mod.INJECTED_PLACEHOLDER}
+    assert network["rules"] == {
+        "openrouter.ai": [{"transform": {"headers": {"Authorization": "Bearer sk-or-test"}}}]
+    }
+
+
+def test_create_sandbox_leaves_a_credential_with_no_header_in_the_guest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox leaves a credential with no header in the guest."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    agent = ClaudeCodeAgent(auth_value="oauth-token", auth_env="CLAUDE_CODE_OAUTH_TOKEN")
+
+    _boot(tmp_path, agent=agent)
+
+    envs, network = _credential_options(project)
+    assert envs == {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"}
+    assert network["rules"] == {}
+
+
+def test_create_sandbox_refuses_two_injected_credentials_on_one_host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox refuses two injected credentials on one host."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    agent = _claude()
+    shared_host = [
+        Credential("FIRST_KEY", "first-value", ("api.example.com",), BEARER_HEADER),
+        Credential("SECOND_KEY", "second-value", ("api.example.com",), BEARER_HEADER),
+    ]
+    monkeypatch.setattr(agent, "secrets", lambda: shared_host)
+
+    with pytest.raises(SandboxError, match="share the host api.example.com"):
+        _boot(tmp_path, agent=agent)
+
+    assert project.calls == []
+
+
+def test_a_failed_create_does_not_name_the_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed create does not name the credential."""
+    project = _FakeProject(create_error=e2b.SandboxException("template not found"))
+    _install(monkeypatch, project)
+
+    with pytest.raises(SandboxError) as failure:
+        _boot(tmp_path)
+
+    assert "template not found" in str(failure.value)
+    assert "test-token" not in str(failure.value)
 
 
 def test_create_sandbox_uploads_both_trees_and_pins_the_provider_host(

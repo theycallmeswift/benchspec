@@ -19,10 +19,12 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from benchspec.agents.base import (
+    BEARER_HEADER,
     DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
+    AuthHeader,
     BaseAgent,
     Credential,
     StreamDelta,
@@ -45,6 +47,10 @@ AUTH_ENV_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 # Under `openrouter`, the host key Claude Code is handed as a bearer token.
 OPENROUTER_AUTH_ENV = "OPENROUTER_API_KEY"
 _OPENROUTER_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"
+_AUTH_HEADERS = {
+    "ANTHROPIC_API_KEY": AuthHeader("x-api-key"),
+    _OPENROUTER_TOKEN_ENV: BEARER_HEADER,
+}
 _OPENROUTER_HOST = "openrouter.ai"
 # No `/v1`: Claude Code appends `/v1/messages` itself, per OpenRouter's cookbook.
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api"
@@ -270,7 +276,9 @@ class ClaudeCodeAgent(BaseAgent):
         allow_host = (
             _OPENROUTER_HOST if self.provider == OPENROUTER_PROVIDER else "api.anthropic.com"
         )
-        return [Credential(self._auth_env, self._auth_value, (allow_host,))]
+        header = _AUTH_HEADERS.get(self._auth_env)
+
+        return [Credential(self._auth_env, self._auth_value, (allow_host,), header)]
 
     def build_command(
         self,

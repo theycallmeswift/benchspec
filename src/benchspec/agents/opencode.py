@@ -33,10 +33,12 @@ from textwrap import dedent
 from typing import TYPE_CHECKING, ClassVar
 
 from benchspec.agents.base import (
+    BEARER_HEADER,
     DEFAULT_CELL_TIMEOUT,
     DEFAULT_PROVIDER,
     OPENROUTER_PROVIDER,
     AgentCapabilities,
+    AuthHeader,
     BaseAgent,
     Credential,
     StreamDelta,
@@ -73,6 +75,13 @@ _PROVIDER_HOSTS = {
     "ANTHROPIC_API_KEY": "api.anthropic.com",
     "GEMINI_API_KEY": "generativelanguage.googleapis.com",
     "GOOGLE_GENERATIVE_AI_API_KEY": "generativelanguage.googleapis.com",
+}
+_GOOGLE_HEADER = AuthHeader("x-goog-api-key")
+_AUTH_HEADERS = {
+    "OPENROUTER_API_KEY": BEARER_HEADER,
+    "ANTHROPIC_API_KEY": AuthHeader("x-api-key"),
+    "GEMINI_API_KEY": _GOOGLE_HEADER,
+    "GOOGLE_GENERATIVE_AI_API_KEY": _GOOGLE_HEADER,
 }
 # Host env var → guest env var. Unlisted entries: guest sees the same name as host.
 # OpenCode is built on the Vercel AI SDK, whose Google provider reads
@@ -453,7 +462,11 @@ class OpenCodeAgent(BaseAgent):
         """Return the provider credentials to inject into the guest."""
         allow_host = _PROVIDER_HOSTS[self._auth_env]
         guest_env_name = _GUEST_ENV_NAMES.get(self._auth_env, self._auth_env)
-        return [Credential(guest_env_name, self._auth_value, (allow_host,))]
+        return [
+            Credential(
+                guest_env_name, self._auth_value, (allow_host,), _AUTH_HEADERS[self._auth_env]
+            )
+        ]
 
     def build_command(
         self,
