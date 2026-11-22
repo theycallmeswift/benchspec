@@ -50,13 +50,16 @@ The guest shares no filesystem with the host:
   the provider hosts are pinned in `/etc/hosts`. A `setup.sh` that downloads
   fails: put installs in `environment_script`, which runs at snapshot build
   with open egress. QUIC (UDP 443) is untested.
+- **Credential file**: a Codex subscription `auth.json`
+  (`CODEX_AUTH_JSON_PATH`) is uploaded when the cell boots, mode `0400`, never
+  into the snapshot, and is gone when the sandbox is killed. It adds
+  `chatgpt.com` and `auth.openai.com` to that arm's egress and no other's.
 - **Inbound**: a port the guest opens is not publicly reachable.
 - **Size**: a `/workspace` over 512 MiB, packed or unpacked, fails the sync.
 - **Lifetime**: E2B kills a sandbox 120 s after its cell's cap, so one whose
   controller died stops costing money.
 
-Not supported: Codex subscription auth (`CODEX_AUTH_JSON_PATH`), which names no
-provider host to allow. Keep timing comparisons on one backend.
+Keep timing comparisons on one backend.
 
 ## Host requirements and preflight
 
@@ -208,9 +211,10 @@ Each harness declares its credential once; the backends expose it differently:
 | Docker | A plain container environment variable (`-e ANTHROPIC_API_KEY=...`), readable by the agent and by `setup.sh`. No per-credential host scoping. |
 | E2B | An API key stays out of the guest, which holds the placeholder `injected-by-e2b`: E2B sets the key's header on every HTTPS request to the provider's hosts. Not readable by the agent or by `setup.sh`. E2B holds the key for the sandbox's life, and a holder of `E2B_API_KEY` can read it back from the sandbox-info API. A subscription token (`CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_ACCESS_TOKEN`) is a plain environment variable the guest can read. Egress is limited to the provider hosts either way. |
 
-The one file-shaped exception, on Docker and microsandbox: Codex subscription auth,
-`CODEX_AUTH_JSON_PATH`, is mounted read-only and copied to
-`/root/.codex/auth.json` inside the guest. Per-harness details are in
+The one file-shaped exception: Codex subscription auth, `CODEX_AUTH_JSON_PATH`,
+reaches the guest read-only, mounted on Docker and microsandbox and uploaded on
+E2B, and is copied to `/root/.codex/auth.json`, where the agent and `setup.sh`
+can read it. Per-harness details, token refresh included, are in
 [`harnesses.md`](harnesses.md).
 
 ## Customizing the image

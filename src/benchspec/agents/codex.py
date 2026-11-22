@@ -25,6 +25,7 @@ from benchspec.agents.base import (
     AgentCapabilities,
     BaseAgent,
     Credential,
+    CredentialFile,
     StreamDelta,
 )
 from benchspec.grading.trajectory import dict_or_empty, iter_events
@@ -37,10 +38,13 @@ if TYPE_CHECKING:
     from benchspec.grading.judges.config import JudgeConfig
     from benchspec.sandbox.backend import LiveSandbox
 
+# A ChatGPT login sends model requests to `chatgpt.com/backend-api/codex` and refreshes
+# its token at `auth.openai.com/oauth/token`.
+_CHATGPT_HOSTS = ["chatgpt.com", "auth.openai.com"]
 # In preference order.
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
-    "CODEX_ACCESS_TOKEN": ["chatgpt.com", "auth.openai.com"],
+    "CODEX_ACCESS_TOKEN": _CHATGPT_HOSTS,
     "OPENAI_API_KEY": ["api.openai.com"],
 }
 AUTH_ENV_VARS = tuple(_PROVIDER_HOSTS)
@@ -283,9 +287,16 @@ class CodexAgent(BaseAgent):
         # for benchspec's artifact reader, so Codex reports workdir outputs only.
         return []
 
-    def auth_json_path(self) -> str:
-        """Auth json path."""
-        return self._auth_json_path
+    def credential_files(self) -> list[CredentialFile]:
+        """Return the `codex login` auth.json, when it is the credential."""
+        if not self._auth_json_path:
+            return []
+
+        return [
+            CredentialFile(
+                self._auth_json_path, self.AUTH_JSON_GUEST_SOURCE, tuple(_CHATGPT_HOSTS)
+            )
+        ]
 
     def guest_env(self) -> dict[str, str]:
         """Return environment variables passed to guest agent commands."""

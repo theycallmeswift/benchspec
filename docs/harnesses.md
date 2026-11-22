@@ -43,7 +43,7 @@ arms = [
 | OpenRouter `routing` | rejected | rejected | delivered: the arm model's `options.provider`, set inline through `OPENCODE_CONFIG_CONTENT` |
 | Token split (input/output) | yes | yes | yes; reasoning counts as output |
 | Cost reported (`cost_usd`) | `total_cost_usd` on the closing `result` event | none | `cost` summed over finished steps |
-| Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, mounted into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
+| Credentials (`provider = "default"`) | `CLAUDE_CODE_OAUTH_TOKEN` (preferred; from `claude setup-token`) or `ANTHROPIC_API_KEY` | `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY`, or `CODEX_AUTH_JSON_PATH` (a `codex login` auth.json, copied into the guest), in that order | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, in that order |
 | `provider = "openrouter"` | `OPENROUTER_API_KEY`, injected as `ANTHROPIC_AUTH_TOKEN` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api` and an empty `ANTHROPIC_API_KEY`; model is a vendor slug (`anthropic/claude-sonnet-4.6`) | `OPENROUTER_API_KEY`, with benchspec-owned `-c model_provider="openrouter"` and `model_providers.openrouter.*` overrides on every invocation; model is a vendor slug (`openai/gpt-5.5`) | `OPENROUTER_API_KEY` only; model is `openrouter/<vendor>/<model>` |
 | Version pin | `BENCHSPEC_CLAUDE_VERSION` | `BENCHSPEC_CODEX_VERSION` | `BENCHSPEC_OPENCODE_VERSION`, then `[tool.benchspec] opencode_version` |
 | Guest install | `curl -fsSL https://claude.ai/install.sh \| bash` | `npm i -g @openai/codex@<version>` | `npm i -g opencode-ai@<version>` |
@@ -79,13 +79,21 @@ Notes that matter in practice:
   and never readable in the guest; Docker injects it as a plain environment
   variable the agent and `setup.sh` can read; E2B adds an API key to the
   guest's requests without putting it in the guest, and subscription tokens
-  stay environment variables (see [`sandbox.md`](sandbox.md#credentials)). On Docker and microsandbox,
-  `CODEX_AUTH_JSON_PATH` is a read-only mount of the `auth.json`, not an env
-  var; E2B refuses that arm. Three renames, to the
+  stay environment variables (see [`sandbox.md`](sandbox.md#credentials)).
+  `CODEX_AUTH_JSON_PATH` is a read-only copy of the `auth.json`, not an env
+  var: mounted on Docker and microsandbox, uploaded on E2B. Three renames, to the
   names the CLIs actually read: OpenCode injects a host `GEMINI_API_KEY` as
   `GOOGLE_GENERATIVE_AI_API_KEY`; Codex, as arm or judge, injects
   `OPENAI_API_KEY` as `CODEX_API_KEY`; Claude Code under `provider = "openrouter"`
   injects `OPENROUTER_API_KEY` as `ANTHROPIC_AUTH_TOKEN`.
+- **A Codex subscription token refreshes in the guest, never on the host.**
+  Codex refreshes within five minutes of the access token's expiry, or on a
+  401, at `auth.openai.com`, and writes the new tokens to the guest's copy, so
+  a run can outlive the token it started with. The host's `auth.json` keeps
+  the old refresh token. If OpenAI rotated it, the host and every other cell
+  fail their next refresh ("refresh token was already used") until
+  `codex login` runs again; that rotation is unconfirmed. Log in shortly
+  before a long run so no cell has to refresh.
 - **`provider` is per arm and per judge.** `openrouter` changes only what happens
   at execution time (the credential, the guest env, CLI flags), never the
   snapshot, so mixing providers in one set builds nothing extra. Under

@@ -202,16 +202,11 @@ def _agent_extra_volumes(
     agent: CodingAgent, volume_cls: VolumeBinder[MountT]
 ) -> dict[str, MountT]:
     """Optional agent-owned host files that must be visible in the guest."""
-    path_getter = getattr(agent, "auth_json_path", None)
-    if not callable(path_getter):
-        return {}
-    path = path_getter()
-    if not path:
-        return {}
     return {
-        "/benchspec-codex-auth/auth.json": volume_cls.bind(
-            host_mount_path(path), readonly=True
-        ),
+        credential_file.guest_path: volume_cls.bind(
+            host_mount_path(credential_file.host_path), readonly=True
+        )
+        for credential_file in agent.credential_files()
     }
 
 

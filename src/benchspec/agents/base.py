@@ -223,6 +223,21 @@ class Credential:
     header: AuthHeader | None = None
 
 
+@dataclass(frozen=True)
+class CredentialFile:
+    """A host credential file an agent needs in the guest, read-only.
+
+    Attributes:
+        host_path: The file on the host.
+        guest_path: Where the guest sees it.
+        allow_hosts: The hostnames the credential in it is used against.
+    """
+
+    host_path: str
+    guest_path: str
+    allow_hosts: tuple[str, ...]
+
+
 class BaseAgent(ABC):
     """Shared behavior for the built-in adapters, plus the class-level factory contract.
 
@@ -274,6 +289,10 @@ class BaseAgent(ABC):
             raise ValueError(f"harness `{self.id}` cannot deliver OpenRouter `routing`")
 
         return {}
+
+    def credential_files(self) -> list[CredentialFile]:
+        """Return the host credential files the guest must see; none by default."""
+        return []
 
     @classmethod
     @abstractmethod
@@ -540,6 +559,10 @@ class CodingAgent(Protocol):
 
     def secrets(self) -> list[Credential]:
         """Return the provider credentials to inject into the guest."""
+        ...
+
+    def credential_files(self) -> list[CredentialFile]:
+        """Return the host credential files the guest must see."""
         ...
 
     def guest_env(self) -> dict[str, str]:
