@@ -378,6 +378,7 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                     "benchspec-name": "benchspec-eval-hello-trial-main",
                 },
                 "envs": {"ANTHROPIC_API_KEY": e2b_mod.INJECTED_PLACEHOLDER},
+                "lifecycle": {"on_timeout": "kill"},
                 "network": {
                     "allow_out": ["api.anthropic.com"],
                     "deny_out": ["0.0.0.0/0"],

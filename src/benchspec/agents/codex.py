@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 # A ChatGPT login sends model requests to `chatgpt.com/backend-api/codex` and refreshes
 # its token at `auth.openai.com/oauth/token`.
 _CHATGPT_HOSTS = ["chatgpt.com", "auth.openai.com"]
+
 # In preference order.
 _PROVIDER_HOSTS = {
     "CODEX_API_KEY": ["api.openai.com"],
@@ -393,13 +394,14 @@ class CodexAgent(BaseAgent):
         ]
 
     async def _write_auth_json(self, sandbox: LiveSandbox) -> None:
-        """Stage Codex auth JSON into the guest home when needed."""
+        """Stage Codex auth JSON into the guest home, keeping a copy Codex has refreshed."""
         if not self._auth_json_path:
             return
         res = await sandbox.shell(
             "mkdir -p /root/.codex && "
             "umask 077 && "
-            f"cp {self.AUTH_JSON_GUEST_SOURCE} /root/.codex/auth.json",
+            "{ test -e /root/.codex/auth.json || "
+            f"cp {self.AUTH_JSON_GUEST_SOURCE} /root/.codex/auth.json; }}",
             env=self.guest_env(),
         )
         if res.exit_code != 0:

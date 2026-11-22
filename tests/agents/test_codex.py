@@ -1033,7 +1033,7 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
     assert len(sandbox.calls) == 2
     auth_copy_script = shell_call(sandbox, 0).script
     assert CodexAgent.AUTH_JSON_GUEST_SOURCE in auth_copy_script
-    assert "/root/.codex/auth.json" in auth_copy_script
+    assert "test -e /root/.codex/auth.json || cp" in auth_copy_script
     assert exec_call(sandbox, 1).cmd == "/usr/local/bin/codex"
 
 

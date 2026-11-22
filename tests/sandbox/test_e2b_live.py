@@ -42,6 +42,7 @@ _CREDENTIAL_FILE = '{"tokens": {"access_token": "benchspec-file-canary"}}'
 _INJECTED_REQUEST = "an HTTPS request to an allowed host"
 _UPLOADED_FILE = "the uploaded credential file"
 _OUTSIDE_REQUEST = "an HTTPS request to a host outside the allowlist"
+_SYNCED_COPY = "a copy of the credential file the guest left in /workspace"
 _PLAIN_HTTP_REQUEST = "a plain HTTP request to an allowed host"
 
 
@@ -114,6 +115,10 @@ async def _run_probes(room: Path) -> dict[str, str]:
             result = await sandbox.shell(script)
             views[place] = result.stdout_text + result.stderr_text
 
+        await sandbox.shell(f"cp {CodexAgent.AUTH_JSON_GUEST_SOURCE} /workspace/copy.json")
+        await backend.sync_out(sandbox, room)
+        views[_SYNCED_COPY] = (room / "copy.json").read_text(encoding="utf-8")
+
         return views
     finally:
         await backend.stop_quietly(sandbox)
@@ -143,6 +148,11 @@ def test_a_plain_http_request_reaches_the_host_without_the_credential(
 def test_a_credential_file_is_uploaded_read_only(views: dict[str, str]) -> None:
     """Verify a credential file is uploaded read-only."""
     assert views[_UPLOADED_FILE] == f"400 root\n{_CREDENTIAL_FILE}"
+
+
+def test_a_copy_the_guest_leaves_in_the_workspace_is_synced_out(views: dict[str, str]) -> None:
+    """Verify a copy the guest leaves in the workspace is synced out."""
+    assert views[_SYNCED_COPY] == _CREDENTIAL_FILE
 
 
 def test_a_host_outside_the_allowlist_is_unreachable(views: dict[str, str]) -> None:

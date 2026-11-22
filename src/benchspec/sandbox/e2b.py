@@ -569,6 +569,8 @@ class E2BBackend(SharedBackendBehavior):
                 timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
                 metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
                 envs=_guest_envs(credentials),
+                # A pause would keep the guest's disk, credential file included.
+                lifecycle={"on_timeout": "kill"},
                 network={
                     "allow_out": hosts,
                     "deny_out": [e2b.ALL_TRAFFIC],

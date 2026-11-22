@@ -80,20 +80,18 @@ Notes that matter in practice:
   variable the agent and `setup.sh` can read; E2B adds an API key to the
   guest's requests without putting it in the guest, and subscription tokens
   stay environment variables (see [`sandbox.md`](sandbox.md#credentials)).
-  `CODEX_AUTH_JSON_PATH` is a read-only copy of the `auth.json`, not an env
-  var: mounted on Docker and microsandbox, uploaded on E2B. Three renames, to the
+  `CODEX_AUTH_JSON_PATH` is a copy of the `auth.json`, not an env var: mounted
+  on Docker and microsandbox, uploaded on E2B. Three renames, to the
   names the CLIs actually read: OpenCode injects a host `GEMINI_API_KEY` as
   `GOOGLE_GENERATIVE_AI_API_KEY`; Codex, as arm or judge, injects
   `OPENAI_API_KEY` as `CODEX_API_KEY`; Claude Code under `provider = "openrouter"`
   injects `OPENROUTER_API_KEY` as `ANTHROPIC_AUTH_TOKEN`.
 - **A Codex subscription token refreshes in the guest, never on the host.**
-  Codex refreshes within five minutes of the access token's expiry, or on a
-  401, at `auth.openai.com`, and writes the new tokens to the guest's copy, so
-  a run can outlive the token it started with. The host's `auth.json` keeps
-  the old refresh token. If OpenAI rotated it, the host and every other cell
-  fail their next refresh ("refresh token was already used") until
-  `codex login` runs again; that rotation is unconfirmed. Log in shortly
-  before a long run so no cell has to refresh.
+  Codex refreshes at `auth.openai.com` within five minutes of expiry or on a
+  401 and writes the guest's copy only. If OpenAI rotates the refresh token
+  (unconfirmed), the host and other cells fail their next refresh until
+  `codex login`; log in shortly before a long run. A login whose issuer is
+  not `auth.openai.com` cannot refresh on E2B.
 - **`provider` is per arm and per judge.** `openrouter` changes only what happens
   at execution time (the credential, the guest env, CLI flags), never the
   snapshot, so mixing providers in one set builds nothing extra. Under
