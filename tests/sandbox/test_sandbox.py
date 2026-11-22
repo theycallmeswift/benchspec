@@ -549,6 +549,11 @@ def test_agent_extra_volumes_mounts_codex_auth_json(tmp_path: Path) -> None:
     }
 
 
+def test_agent_extra_volumes_is_empty_without_a_credential_file() -> None:
+    """Verify agent extra volumes is empty without a credential file."""
+    assert sandbox._agent_extra_volumes(CodexAgent(auth_value="sk-test"), DockerVolume) == {}
+
+
 def test_arm_session_runs_turn_and_tears_down(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

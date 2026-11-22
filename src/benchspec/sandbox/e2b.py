@@ -1,8 +1,9 @@
 """The E2B implementation of the sandbox seam: one remote microVM per guest.
 
 E2B shares no filesystem with the host, so `create_sandbox` uploads `/workspace` and
-`/project` as tar archives and `sync_out` downloads `/workspace` before the host grades
-it. The `e2b` package is an optional extra, imported under a guard like microsandbox's.
+`/project` as tar archives, uploads an agent's credential files, and `sync_out`
+downloads `/workspace` before the host grades it. The `e2b` package is an optional
+extra, imported under a guard like microsandbox's.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 from benchspec.agents import CodingAgent
-from benchspec.agents.base import Credential
+from benchspec.agents.base import Credential, CredentialFile
 from benchspec.sandbox.backend import (
     BASE_IMAGE,
     GUEST_WORKDIR,
@@ -240,6 +241,23 @@ def _injection_rules(credentials: list[Credential]) -> dict[str, list[SandboxNet
             rules[host] = [{"transform": {"headers": header}}]
 
     return rules
+
+
+def _credential_uploads(credential_files: list[CredentialFile]) -> dict[str, bytes]:
+    """Return each credential file's bytes, keyed by its guest path.
+
+    Raises:
+        SandboxError: When a file cannot be read.
+    """
+    uploads = {}
+
+    for credential_file in credential_files:
+        try:
+            uploads[credential_file.guest_path] = Path(credential_file.host_path).read_bytes()
+        except OSError as error:
+            raise SandboxError(f"cannot read the credential file: {error}") from error
+
+    return uploads
 
 
 def _owned(names: list[str]) -> bool:
@@ -514,25 +532,35 @@ class E2BBackend(SharedBackendBehavior):
         """Boot a sandbox from `snapshot`, limited to the provider hosts, and upload both trees.
 
         A credential that declares its header never enters the guest: E2B sets the
-        header on requests to the credential's hosts. Any other is a guest variable.
+        header on requests to the credential's hosts. Any other is a guest variable,
+        and a credential file is uploaded.
 
         Raises:
-            SandboxError: When the boot or upload fails, the agent's credentials name no
-                provider host to allow, or two injected credentials share a host.
+            SandboxError: When the boot or upload fails, a credential file is unreadable,
+                the agent's credentials name no provider host to allow, or two injected
+                credentials share a host.
         """
         if e2b is None:
             raise SandboxError(SDK_MISSING)
 
         credentials = agent.secrets()
-        hosts = sorted({host for credential in credentials for host in credential.allow_hosts})
+        credential_files = agent.credential_files()
+        hosts = sorted(
+            {
+                host
+                for credential in (*credentials, *credential_files)
+                for host in credential.allow_hosts
+            }
+        )
 
         if not hosts:
             raise SandboxError(
                 f"harness `{agent.id}` declares no provider host for its credential, so "
-                "E2B has nothing to allow; use an API-key credential"
+                "E2B has nothing to allow"
             )
 
         rules = _injection_rules(credentials)
+        credential_uploads = _credential_uploads(credential_files)
         pinned_hosts = await _pinned_hosts(hosts)
 
         async with _translate_errors():
@@ -541,6 +569,8 @@ class E2BBackend(SharedBackendBehavior):
                 timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
                 metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
                 envs=_guest_envs(credentials),
+                # A pause would keep the guest's disk, credential file included.
+                lifecycle={"on_timeout": "kill"},
                 network={
                     "allow_out": hosts,
                     "deny_out": [e2b.ALL_TRAFFIC],
@@ -555,7 +585,9 @@ class E2BBackend(SharedBackendBehavior):
         sandbox = E2BSandbox(native)
 
         try:
-            await self._upload_trees(sandbox, host_workdir, staged_project, pinned_hosts)
+            await self._upload_trees(
+                sandbox, host_workdir, staged_project, pinned_hosts, credential_uploads
+            )
         except BaseException:
             await self.stop_quietly(sandbox)
             raise
@@ -657,8 +689,9 @@ class E2BBackend(SharedBackendBehavior):
         host_workdir: Path,
         staged_project: Path | None,
         pinned_hosts: str,
+        credential_uploads: dict[str, bytes],
     ) -> None:
-        """Upload and unpack `/workspace` and `/project`, then pin the provider hosts."""
+        """Upload `/workspace`, `/project` and the credential files; pin the provider hosts."""
         await sandbox.upload(_WORKSPACE_ARCHIVE, _pack(host_workdir))
 
         unpack = [
@@ -672,6 +705,10 @@ class E2BBackend(SharedBackendBehavior):
                 await sandbox.upload(_PROJECT_ARCHIVE, archive)
 
             unpack.append(f"tar -xzf {_PROJECT_ARCHIVE} --no-same-owner -C {PROJECT_MOUNT}")
+
+        for guest_path, content in credential_uploads.items():
+            await sandbox.upload(guest_path, content)
+            unpack.append(f"chmod 0400 {shlex.quote(guest_path)}")
 
         unpack += [
             f"rm -f {_WORKSPACE_ARCHIVE} {_PROJECT_ARCHIVE}",

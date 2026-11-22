@@ -263,6 +263,9 @@ def _install(monkeypatch: pytest.MonkeyPatch, project: _FakeProject) -> None:
     monkeypatch.setenv(e2b_mod.API_KEY_ENV, "e2b_test")
 
 
+_AUTH_JSON = '{"tokens": {"access_token": "canary-access-token"}}'
+
+
 def _claude() -> ClaudeCodeAgent:
     """A Claude Code agent whose credential may reach `api.anthropic.com`."""
     return ClaudeCodeAgent(auth_value="test-token", version="1.2.3")
@@ -375,6 +378,7 @@ def test_create_sandbox_limits_egress_to_the_provider_host_and_bounds_the_lifeti
                     "benchspec-name": "benchspec-eval-hello-trial-main",
                 },
                 "envs": {"ANTHROPIC_API_KEY": e2b_mod.INJECTED_PLACEHOLDER},
+                "lifecycle": {"on_timeout": "kill"},
                 "network": {
                     "allow_out": ["api.anthropic.com"],
                     "deny_out": ["0.0.0.0/0"],
@@ -486,11 +490,78 @@ def test_create_sandbox_refuses_a_credential_with_no_provider_host(
     """Create sandbox refuses a credential with no provider host."""
     project = _FakeProject()
     _install(monkeypatch, project)
-    auth = tmp_path / "auth.json"
-    auth.write_text("{}", encoding="utf-8")
+    agent = _claude()
+    monkeypatch.setattr(agent, "secrets", list)
 
     with pytest.raises(SandboxError, match="declares no provider host"):
-        _boot(tmp_path, agent=CodexAgent(auth_json_path=str(auth)))
+        _boot(tmp_path, agent=agent)
+
+    assert project.calls == []
+
+
+def test_create_sandbox_uploads_a_credential_file_read_only_and_allows_its_hosts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox uploads a credential file read-only and allows its hosts."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    auth = tmp_path / "auth.json"
+    auth.write_text(_AUTH_JSON, encoding="utf-8")
+    room = tmp_path / "room"
+    room.mkdir()
+
+    _boot(room, agent=CodexAgent(auth_json_path=str(auth)))
+
+    envs, network = _credential_options(project)
+    assert envs == {}
+    assert network["allow_out"] == ["auth.openai.com", "chatgpt.com"]
+    assert network["rules"] == {}
+    assert project.native.written[CodexAgent.AUTH_JSON_GUEST_SOURCE] == _AUTH_JSON.encode()
+    assert f"chmod 0400 {CodexAgent.AUTH_JSON_GUEST_SOURCE}" in str(project.native.runs[-1]["cmd"])
+    assert _AUTH_JSON not in str(project.calls)
+    assert _AUTH_JSON not in str(project.native.runs)
+
+
+def test_a_credential_file_leaves_another_arms_allowlist_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A credential file leaves another arm's allowlist alone."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+    auth = tmp_path / "auth.json"
+    auth.write_text(_AUTH_JSON, encoding="utf-8")
+    room = tmp_path / "room"
+    room.mkdir()
+
+    arms = [CodexAgent(auth_json_path=str(auth)), CodexAgent(auth_value="sk-test"), _claude()]
+    booted = []
+
+    for agent in arms:
+        project.calls.clear()
+        project.native.written.clear()
+
+        _boot(room, agent=agent)
+
+        _, network = _credential_options(project)
+        uploaded = CodexAgent.AUTH_JSON_GUEST_SOURCE in project.native.written
+        booted.append((network["allow_out"], uploaded))
+
+    assert booted == [
+        (["auth.openai.com", "chatgpt.com"], True),
+        (["api.openai.com"], False),
+        (["api.anthropic.com"], False),
+    ]
+
+
+def test_create_sandbox_refuses_an_unreadable_credential_file_before_booting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Create sandbox refuses an unreadable credential file before booting."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+
+    with pytest.raises(SandboxError, match="cannot read the credential file"):
+        _boot(tmp_path, agent=CodexAgent(auth_json_path=str(tmp_path / "missing.json")))
 
     assert project.calls == []
 

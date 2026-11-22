@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from benchspec.agents.base import BEARER_HEADER, Credential
+from benchspec.agents.base import BEARER_HEADER, Credential, CredentialFile
 from benchspec.agents.codex import CodexAgent, _skill_dispatch_name, parse_codex_jsonl
 from benchspec.grading.trajectory import skills_dispatched
 from benchspec.sandbox.errors import SandboxError
@@ -267,7 +267,11 @@ def test_from_env_reads_auth_json_path(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     agent = CodexAgent.from_env()
 
-    assert agent.auth_json_path() == str(auth)
+    assert agent.credential_files() == [
+        CredentialFile(
+            str(auth), "/benchspec-codex-auth/auth.json", ("chatgpt.com", "auth.openai.com")
+        )
+    ]
     assert agent.secrets() == []
 
 
@@ -341,6 +345,11 @@ def test_secrets_scopes_access_token_to_codex_hosts() -> None:
 def test_secrets_empty_when_auth_json_path_is_used() -> None:
     """Verify secrets empty when auth json path is used."""
     assert CodexAgent(auth_json_path="/host/auth.json").secrets() == []
+
+
+def test_credential_files_empty_when_an_env_credential_is_used() -> None:
+    """Verify credential files empty when an env credential is used."""
+    assert CodexAgent(auth_value="sk-codex").credential_files() == []
 
 
 def test_codex_skill_load_dir_is_agents_path() -> None:
@@ -1024,7 +1033,7 @@ def test_invoke_copies_mounted_auth_json_before_codex_exec() -> None:
     assert len(sandbox.calls) == 2
     auth_copy_script = shell_call(sandbox, 0).script
     assert CodexAgent.AUTH_JSON_GUEST_SOURCE in auth_copy_script
-    assert "/root/.codex/auth.json" in auth_copy_script
+    assert "test -e /root/.codex/auth.json || cp" in auth_copy_script
     assert exec_call(sandbox, 1).cmd == "/usr/local/bin/codex"
 
 
