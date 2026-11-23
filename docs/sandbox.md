@@ -182,8 +182,7 @@ Ctrl-C, and SIGTERM to the run's process group, take the same path: each
 process running cells cancels its cell, which tears its sandbox down (or removes
 it by name, if it was still booting) before the run stops. Teardown is best
 effort: a second signal abandons it, and with more than one worker the workers
-are interrupted about 5 s after the controller stops. E2B kills a sandbox that
-survives 120 s after its cell's cap.
+are interrupted about 5 s after the controller stops.
 
 Under Docker, a guest command that times out or is killed ends the `docker exec`
 client on the host, not the process it started inside the container: that process
