@@ -17,8 +17,7 @@ benchspec watch --iteration iteration_05 --port 8765
 ```
 
 - **`run --watch`** prints `Watching: http://127.0.0.1:<port>/` and serves until
-  the run ends. It never outlives the run, so it cannot hang a CI job. To name
-  its iteration up front it passes pytest `--benchspec-iteration`.
+  the run ends. It never outlives the run, so it cannot hang a CI job.
 - **`watch`** replays an iteration from its first event, so a finished run
   shows its final state at once, and serves until Ctrl-C. Use it to keep a
   page open after `run --watch` exits, or to look at an older run.

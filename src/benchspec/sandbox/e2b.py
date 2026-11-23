@@ -70,8 +70,8 @@ INJECTED_PLACEHOLDER = "injected-by-e2b"
 
 # The 429 E2B answers once the account runs its concurrent-sandbox limit, which the
 # message names: "...maximum number of concurrent E2B sandboxes (10)...".
-_CONCURRENCY_REFUSAL = re.compile(
-    r"maximum number of concurrent E2B sandboxes(?: \((?P<limit>\d+)\))?"
+_CAPACITY_REFUSAL = re.compile(
+    r"maximum number of concurrent (?:E2B )?sandboxes(?: \((?P<limit>\d+)\))?", re.IGNORECASE
 )
 
 # Guest commands run as root, as they do in a container.
@@ -291,7 +291,7 @@ async def _create_native(creating: Coroutine[object, object, AsyncSandbox]) -> A
 
         raise
     except e2b.RateLimitException as error:
-        refusal = _CONCURRENCY_REFUSAL.search(str(error))
+        refusal = _CAPACITY_REFUSAL.search(str(error))
         if refusal is None:
             raise
 

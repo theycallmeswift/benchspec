@@ -57,9 +57,9 @@ The guest shares no filesystem with the host:
   egress and no other's.
 - **Inbound**: a port the guest opens is not publicly reachable.
 - **Size**: a `/workspace` over 512 MiB, packed or unpacked, fails the sync.
-- **Concurrency**: an E2B account runs a limited number of sandboxes at once.
+- **Capacity**: an E2B account runs a limited number of sandboxes at once.
   A cell that E2B refuses for that limit waits in `boot` and retries, backing
-  off from 2 s to 15 s with jitter, until a sandbox frees or its cap runs out;
+  off from about 2 s to at most 15 s, until a sandbox frees or its cap runs out;
   only then does it error, naming the refusal. `benchspec run` warns once per
   run, on stderr, with the account's limit and the `--workers` that matches
   it. Any other 429 still fails the boot at once.
@@ -178,9 +178,12 @@ overestimate there: set `workers` explicitly. A cell, in order:
    tool-call stream.
 5. Tears down.
 
-Ctrl-C and SIGTERM take the same path: each process running cells cancels its
-cell, which tears its sandbox down (or removes it by name, if it was still
-booting) before the run stops.
+Ctrl-C, and SIGTERM to the run's process group, take the same path: each
+process running cells cancels its cell, which tears its sandbox down (or removes
+it by name, if it was still booting) before the run stops. Teardown is best
+effort: a second signal abandons it, and with more than one worker the workers
+are interrupted about 5 s after the controller stops. E2B kills a sandbox that
+survives 120 s after its cell's cap.
 
 Under Docker, a guest command that times out or is killed ends the `docker exec`
 client on the host, not the process it started inside the container: that process

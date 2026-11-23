@@ -305,7 +305,7 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
 | `--progress {cells,dots}` | `--benchspec-progress` | Live progress: one line per finished sample, or pytest's dots. See [`results.md`](results.md#the-terminal-summary). |
-| `--watch` | `--benchspec-iteration` | Serve this run's [live view](watching/README.md) on `127.0.0.1` until the run ends. `run` picks the next iteration name and passes it on, so the page knows which directory to follow. |
+| `--watch` | none (served by `run`) | Serve this run's [live view](watching/README.md) on `127.0.0.1` until the run ends. |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is in seconds and must stay below every arm's `--timeout`. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
@@ -318,6 +318,10 @@ workers. On E2B, workers past the account's concurrent-sandbox limit cost nothin
 time: their cells wait in boot for a free sandbox, and `run` warns once with the limit
 (see [E2B](sandbox.md#e2b)). E2B does not report the limit up front, so `auto` cannot
 size to it.
+
+`run` picks the next iteration name and passes it as `--benchspec-iteration`, so that
+warning and `--watch` know which directory to follow. A passthrough
+`--benchspec-iteration` wins. `--collect-only` names none.
 
 ```bash
 benchspec run                          # workers = auto
