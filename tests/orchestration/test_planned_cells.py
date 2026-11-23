@@ -38,9 +38,13 @@ def _nodeid(case: EvalCase, arm: Arm, repeat: str = "") -> str:
     return f"skills/hello/evals/{case.eval_id}/eval.md::test_eval[{param}]"
 
 
-def _plan(nodeids: list[str], pairs: list[tuple[EvalCase, Arm]], count: int = 1) -> list[str]:
+def _plan(
+    tmp_path: Path, nodeids: list[str], pairs: list[tuple[EvalCase, Arm]], count: int = 1
+) -> list[str]:
     """The planned cell keys."""
-    cells = planned_cells(nodeids, pairs, count=count, baseline="baseline", eval_set="")
+    cells = planned_cells(
+        nodeids, pairs, count=count, baseline="baseline", eval_set="", repo_root=tmp_path
+    )
 
     return [cell["cell"] for cell in cells]
 
@@ -56,6 +60,7 @@ def test_every_collected_pair_is_one_cell_at_count_one(tmp_path: Path) -> None:
         count=1,
         baseline="baseline",
         eval_set="",
+        repo_root=tmp_path,
     )
 
     assert cells == [
@@ -78,7 +83,7 @@ def test_count_three_plans_three_zero_based_samples_per_pair(tmp_path: Path) -> 
     case = _case(tmp_path, "greets", ["greeting written"])
     nodeids = [_nodeid(case, TRIAL, f"-{step}-3") for step in (1, 2, 3)]
 
-    assert _plan(nodeids, [(case, TRIAL)], count=3) == [
+    assert _plan(tmp_path, nodeids, [(case, TRIAL)], count=3) == [
         "hello/greets/trial/0",
         "hello/greets/trial/1",
         "hello/greets/trial/2",
@@ -91,7 +96,7 @@ def test_a_deselected_cell_stays_out(tmp_path: Path) -> None:
     waves = _case(tmp_path, "waves", ["wave written"])
     pairs = [(greets, BASELINE), (greets, TRIAL), (waves, BASELINE), (waves, TRIAL)]
 
-    assert _plan([_nodeid(waves, TRIAL)], pairs) == ["hello/waves/trial/0"]
+    assert _plan(tmp_path, [_nodeid(waves, TRIAL)], pairs) == ["hello/waves/trial/0"]
 
 
 def test_an_arm_name_that_prefixes_another_matches_only_itself(tmp_path: Path) -> None:
@@ -99,8 +104,10 @@ def test_an_arm_name_that_prefixes_another_matches_only_itself(tmp_path: Path) -
     case = _case(tmp_path, "greets", ["greeting written"])
     pairs = [(case, TRIAL), (case, TRIAL_OVERRIDES)]
 
-    assert _plan([_nodeid(case, TRIAL_OVERRIDES)], pairs) == ["hello/greets/trial-overrides/0"]
-    assert _plan([_nodeid(case, TRIAL), _nodeid(case, TRIAL_OVERRIDES)], pairs) == [
+    assert _plan(tmp_path, [_nodeid(case, TRIAL_OVERRIDES)], pairs) == [
+        "hello/greets/trial-overrides/0"
+    ]
+    assert _plan(tmp_path, [_nodeid(case, TRIAL), _nodeid(case, TRIAL_OVERRIDES)], pairs) == [
         "hello/greets/trial/0",
         "hello/greets/trial-overrides/0",
     ]
@@ -118,6 +125,7 @@ def test_applies_is_false_for_a_line_scoped_off_the_arm(tmp_path: Path) -> None:
         count=1,
         baseline="baseline",
         eval_set="",
+        repo_root=tmp_path,
     )
 
     assert [cell["applies"] for cell in cells] == [[True, False], [True, True], [False]]
@@ -131,12 +139,13 @@ def test_applies_is_false_for_a_line_scoped_off_the_arm(tmp_path: Path) -> None:
         ("evals/e2e/hello/evals/hello-routing", "hello/hello-routing"),
         ("skills/to-spec/evals/triggers", "to-spec/triggers"),
         ("skills/pull-request/evals/triggers", "pull-request/triggers"),
+        ("evals/triggers", "triggers"),
     ],
 )
-def test_the_folder_is_the_group_under_its_skill_skipping_evals_folders(
+def test_the_folder_is_the_group_under_its_skill_or_alone_without_one(
     tmp_path: Path, eval_dir: str, folder: str
 ) -> None:
-    """The folder is the group under its skill, skipping `evals` folders."""
+    """Only folders below the repo root count, so a flat layout reads the same on every machine."""
     group = Path(eval_dir).name
     case = EvalCase(
         group=group,
@@ -151,6 +160,7 @@ def test_the_folder_is_the_group_under_its_skill_skipping_evals_folders(
         count=1,
         baseline="baseline",
         eval_set="",
+        repo_root=tmp_path,
     )
 
     assert [cell["folder"] for cell in cells] == [folder]

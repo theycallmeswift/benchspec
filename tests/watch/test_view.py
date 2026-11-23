@@ -964,6 +964,7 @@ def _planned(repo: Path, eval_dir: str, eval_id: str) -> list[dict]:
         count=1,
         baseline=None,
         eval_set="",
+        repo_root=repo,
     )
 
     return [dict(cell) for cell in cells]

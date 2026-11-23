@@ -329,7 +329,8 @@ artifact path does.
   as written), and `applies`, one
   flag per assertion line, true where the line is graded in that arm. A sample
   with no true flag grades nothing. The skill in `folder` is the nearest
-  ancestor folder not named `evals`.
+  folder above the group, below the repo root, not named `evals`; a flat
+  `evals/<group>/` layout has none, so `folder` is the group alone.
 - **Phases.** `bind` is the binder; `boot` creates the sandbox; `setup` is
   `setup.sh`; `agent` is the turn; `grade` is everything after it. A
   [timed-out sample](#timed-out-samples) skips the phases the cap cut off. A
