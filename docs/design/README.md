@@ -169,8 +169,8 @@ in the README, `size-wordmark-ui` tall in the watch sheet.
 - **Depth:** surface steps. Shadows (`shadow-*`) only on floating panels, each
   also with a 1px `line` border.
 - **Lines:** 1px `line` hairlines separate rows.
-- **Motion:** the running box's dot pulses (`dur-pulse`, scale only; the ring
-  never fades); disclosures turn in `dur-disclosure`. `prefers-reduced-motion`
+- **Motion:** the running and booting boxes' dot pulses (`dur-pulse`, scale
+  only; the ring never fades); disclosures turn in `dur-disclosure`. `prefers-reduced-motion`
   stops all animation and transitions.
 - **Page states:** PageState.
 

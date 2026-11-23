@@ -106,6 +106,7 @@ def planned_cells(
     count: int,
     baseline: str | None,
     eval_set: str,
+    repo_root: Path,
 ) -> list[PlannedCell]:
     """The samples a run collected, in `pairs` order, for `run.start`.
 
@@ -118,6 +119,7 @@ def planned_cells(
         count: Samples per pair (`--count`).
         baseline: The set's baseline arm, for scope clauses.
         eval_set: The selected set's name, for scope clauses.
+        repo_root: The repo root discovery ran under; a skill is named only below it.
     """
     collected = {
         nodeid.partition("::test_eval[")[2].removesuffix("]")
@@ -144,10 +146,25 @@ def planned_cells(
                     "applies": scope.applicable(
                         case, arm, baseline=baseline, eval_set=eval_set
                     ),
+                    "folder": _folder(case, repo_root),
+                    "assertions": case.assertions,
                 }
             )
 
     return cells
+
+
+def _folder(case: EvalCase, repo_root: Path) -> str:
+    """The eval's group under its skill, or the group alone when no skill folder holds it.
+
+    The skill is the nearest folder above the group, below `repo_root`, not named
+    `evals`; a flat `evals/<group>/` layout has none.
+    """
+    above = case.eval_dir.parent
+    between = above.relative_to(repo_root).parts if above.is_relative_to(repo_root) else ()
+    skill = next((name for name in reversed(between) if name != "evals"), None)
+
+    return f"{skill}/{case.group}" if skill else case.group
 
 
 def _resolve_scope_clauses(

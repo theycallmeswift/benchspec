@@ -44,7 +44,11 @@
       <p id="reopen-line" hidden>This page is a snapshot — reopen with <code id="reopen"></code>
         <button class="bs-btn" type="button" data-copy="reopen">Copy</button></p>
     </div>
-    <ul class="bs-tally" id="tally"></ul>
+    <div class="bs-trow">
+      <ul class="bs-tally" id="tally" aria-label="Samples by state; pick one to filter the matrix"></ul>
+      <button class="bs-btn" id="clear-filters" type="button" hidden>Clear filters</button>
+    </div>
+    <div class="bs-rph" id="run-phases" hidden></div>
   </section>
 
   <div class="bs-empty" id="empty" hidden><b id="empty-line"></b><span id="empty-hint"></span></div>
@@ -58,6 +62,7 @@
     <section id="panel-matrix" role="tabpanel" aria-labelledby="tab-matrix">
       <p class="bs-mxcap" id="caption"></p>
       <p class="bs-armhint" id="arm-hint" hidden></p>
+      <p class="bs-fnote" id="filter-note" hidden></p>
       <div id="matrix" role="grid" aria-labelledby="caption"></div>
       <ul class="bs-legend" aria-label="Sample states">
         <li><i class="bs-b bs-b-pass" aria-hidden="true"></i>pass</li>

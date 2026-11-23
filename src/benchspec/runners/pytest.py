@@ -444,6 +444,7 @@ def _emit_run_start(config: pytest.Config, nodeids: Sequence[str]) -> None:
         count=getattr(config.option, "count", 1),
         baseline=run_set.baseline if run_set else None,
         eval_set=option_str(config, "benchspec_set") or "",
+        repo_root=resolve_repo_root(config),
     )
     if run_set is None or not planned:
         return

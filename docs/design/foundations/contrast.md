@@ -20,7 +20,8 @@ Opaque pairs hold at every animation frame (the running dot pulses by scale).
 
 | Token | Where | `bg` | `surface` | `raised` | `hover` | `band` | `lbl` | `popover` |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `accent` | live dot, running/booting rings, selected ring, focus, tab underline | 6.21/4.04 | 5.67/4.33 | 5.34/3.73 | 4.76/3.53 | 5.94/3.87 | 6.02/3.60 | 4.76/4.33 |
+| `accent` | live dot, selected ring, focus, tab underline | 6.21/4.04 | 5.67/4.33 | 5.34/3.73 | 4.76/3.53 | 5.94/3.87 | 6.02/3.60 | 4.76/4.33 |
+| `status-running` | running/booting rings and pulsing dot (`fg`) | 14.85/14.63 | 13.56/15.68 | 12.78/13.51 | 11.40/12.79 | 14.21/14.01 | 14.41/13.04 | 11.40/15.68 |
 | `status-pass` | pass box fill | 6.28/4.37 | 5.74/4.68 | 5.41/4.03 | 4.82/3.82 | 6.01/4.18 | 6.10/3.89 | 4.82/4.68 |
 | `status-fail-1` | fail box, step 1 | 7.84/3.83 | 7.16/4.10 | 6.75/3.54 | 6.02/3.35 | 7.51/3.67 | 7.61/3.41 | 6.02/4.10 |
 | `status-fail-2` | fail box, step 2 | 5.85/5.10 | 5.34/5.47 | 5.04/4.71 | 4.49/4.46 | 5.60/4.89 | 5.68/4.55 | 4.49/5.47 |

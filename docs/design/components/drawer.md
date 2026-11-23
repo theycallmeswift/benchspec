@@ -9,14 +9,15 @@ plus previous/next sample handlers.
 
 | Part | Spec |
 | --- | --- |
-| panel, desktop | a floating panel over the right of the page (`position: fixed`), not docked and not a column beside the matrix; the page sets its `top` below the Counter so the Counter stays visible. `size-drawer` wide, `bg`, 1px `line` border, `radius-8`, `shadow-popover`, `space-24` padding and section gap; scrolls inside itself |
+| panel, desktop | a floating panel over the right of the page (`position: fixed`), not docked and not a column beside the matrix; the page sets its `top` below the Counter so the Counter stays visible, and it is as tall as its content, up to the viewport. `size-drawer` wide, `bg`, 1px `line` border, `radius-8`, `shadow-popover`, `space-24` padding and section gap; scrolls inside itself |
 | panel, phone | `bs-sheet`: full-width bottom sheet, top corners `radius-8`, `shadow-sheet`, `max-height: 85vh`; same header lines (`bs-sub` in `bs-type-body-mono`) and sample nav |
 | status line | `bs-type-status`; verdict word uppercase, `danger` for FAIL and ERROR |
 | eval id | `bs-type-eval-id`: path in `fg-tertiary`, leaf in `fg` 500. Each segment is a `nowrap` span with `<wbr>` after its `/`: breaks only after `/`, never at a hyphen or mid-word |
+| doing | under the eval id, `bs-type-help`, `muted`: what an unfinished sample is doing or waiting on (`Waiting for a free worker; 6 samples running now.`, `Building the sandbox snapshot, …`) |
 | sample nav | after `sample 1 of 3`, `‹ ›` `bs-iconbtn` buttons in a `bs-nav`, `space-4` apart, `aria-label` `Previous sample` / `Next sample`, `disabled` at either end; `size-close`, `size-control-phone` in the sheet |
 | close | `×` in a `size-close` `bs-iconbtn`, `aria-label="Close"` |
 | section heads | `bs-section-label` captions: `[ assertions · 3 failed · 6 passed · 1 n/a ]` (scoped-off assertions are `n/a`, never "skipped"), `[ phases · 90.9s ]`, `[ recent output · last 5 lines ]`; `space-8` to content |
-| assertions | `bs-alst` on `surface`, `radius-8`: ✗ in `danger`, ✓ in `muted`, failures first; evidence behind a disclosure |
+| assertions | `bs-alst` on `surface`, `radius-8`: ✗ in `danger`, ✓ in `muted`, failures first; evidence behind a disclosure. Before grading, the planned lines with a `·` in `fg-tertiary` (`[ assertions · 11 planned · 1 n/a ]`) |
 | phases | `size-progress` bar with 2px `bg` gaps: bind, boot, setup in `fg-tertiary` (one prep tone), agent `accent`, grade `fg`. Labels on one row, `space-16` apart, each led by a `size-swatch` `radius-2` swatch in its segment colour. `role="img"` with the timings |
 | path footer | `bs-path`, `bs-type-meta`, `fg-tertiary`, `space-24` below the last section; breaks only after `/` |
 

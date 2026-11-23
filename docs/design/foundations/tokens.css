@@ -25,7 +25,7 @@
   --dot-3: var(--wm-left);
   --status-timeout: var(--warn);
   --status-error: var(--danger);
-  --status-running: var(--accent);
+  --status-running: var(--fg);
   --status-quiet: var(--warn);
   --status-queued: var(--fg-tertiary);
   --status-na: var(--fg-tertiary);

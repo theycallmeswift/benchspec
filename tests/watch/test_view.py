@@ -8,7 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.config.arms import Arm
+from benchspec.orchestration.cases import planned_cells
 from benchspec.reporting import report
+from benchspec.specs.discovery import EvalCase
 from benchspec.watch.view import STALE_MARGIN_S, assertions_view, fail_step
 from tests.support.watch import (
     CELL_CAP_S,
@@ -25,6 +28,7 @@ from tests.support.watch import (
 )
 
 CELL = "hello/greets/trial/0"
+TRIAL = Arm("trial", "claude-code", "sonnet")
 
 
 def _one_cell(tmp_path: Path, *, checks: int = 3, count: int = 1) -> Recording:
@@ -126,8 +130,8 @@ def test_finished_states_are_error_then_timeout_then_fail_then_pass(tmp_path: Pa
     )
 
 
-def test_a_cell_error_before_bind_has_no_phase(tmp_path: Path) -> None:
-    """A cell error before bind has no phase."""
+def test_a_cell_error_before_bind_shows_the_snapshot_stage_it_died_in(tmp_path: Path) -> None:
+    """A cell error before bind shows the snapshot stage it died in."""
     run = _one_cell(tmp_path)
     run.error(CELL, 20, phase=None, message="snapshot build failed")
 
@@ -135,7 +139,7 @@ def test_a_cell_error_before_bind_has_no_phase(tmp_path: Path) -> None:
 
     assert (sample["verdict"], sample["detail"]) == ("ERROR", "exception · before bind")
     assert sample["message"] == "snapshot build failed"
-    assert sample["phases"] is None
+    assert sample["phases"]["label"] == "snapshot 10.0s"
 
 
 def test_a_sample_that_never_starts_stays_queued_and_the_run_reads_stopped(tmp_path: Path) -> None:
@@ -185,6 +189,7 @@ def test_no_sample_reads_as_active_once_the_run_has_ended(tmp_path: Path) -> Non
         "muted": True,
         "bar": 0,
         "live": False,
+        "tally": [{"bucket": "unfinished", "count": 2}],
     }
 
 
@@ -292,6 +297,14 @@ def test_groups_follow_run_start_order_with_scope_notes_and_summaries(tmp_path: 
         "muted": False,
         "bar": 7 / 15,
         "live": True,
+        "tally": [
+            {"bucket": "passed", "count": 1},
+            {"bucket": "failed", "count": 5},
+            {"bucket": "errored", "count": 1},
+            {"bucket": "running", "count": 1},
+            {"bucket": "quiet", "count": 1},
+            {"bucket": "waiting", "count": 6},
+        ],
     }
     assert quiet["summaries"][0]["text"] == "n/a"
     assert quiet["summaries"][1]["text"] == "100%"
@@ -301,8 +314,8 @@ def test_groups_follow_run_start_order_with_scope_notes_and_summaries(tmp_path: 
         "muted": True,
         "bar": 0,
         "live": True,
+        "tally": [{"bucket": "running", "count": 1}, {"bucket": "waiting", "count": 11}],
     }
-    assert all(group["open"] for group in groups)
 
 
 @pytest.mark.parametrize(
@@ -330,21 +343,23 @@ def test_a_scope_note_names_the_checks_that_do_not_run_everywhere(
     assert (group["evals"], group["note"]) == ("1 eval", note)
 
 
-def test_a_group_that_finished_cleanly_collapses_while_the_run_is_live(tmp_path: Path) -> None:
-    """A group that finished cleanly collapses while the run is live."""
+def test_groups_start_collapsed_unless_the_run_has_only_one(tmp_path: Path) -> None:
+    """Groups start collapsed, live or ended, unless the run has only one."""
     run = Recording(iteration(tmp_path))
     run.plan("done", "first")
     run.plan("pending", "second")
     run.begin()
-    run.done("done/first/baseline/0", 70)
     run.done("done/first/trial/0", 80, passed=1)
 
     live = fold(run, at=90)["matrix"]["groups"]
     run.end(95)
     ended = fold(run, at=99)["matrix"]["groups"]
 
-    assert [group["open"] for group in live] == [False, True]
-    assert [group["open"] for group in ended] == [True, True]
+    assert [group["open"] for group in live] == [False, False]
+    assert [group["open"] for group in ended] == [False, False]
+    assert [
+        group["open"] for group in fold(_one_cell(tmp_path / "one"), at=1)["matrix"]["groups"]
+    ] == [True]
 
 
 def test_the_drawer_keeps_the_last_five_deltas_and_the_phases_in_order(tmp_path: Path) -> None:
@@ -643,20 +658,43 @@ def test_a_rate_with_one_check_off_reads_the_same_everywhere(tmp_path: Path) -> 
     assert "| All evals | 1% | 99% (+99pp) |" in report._format_markdown(benchmark)
 
 
-def test_a_check_scoped_off_one_arm_counts_in_cells_but_not_in_the_pass_rate(
+def test_a_check_scoped_off_one_arm_stays_out_of_every_rate_as_in_benchmark_md(
     tmp_path: Path,
 ) -> None:
-    """A check scoped off one arm counts in cells but not in the pass rate."""
+    """A check scoped off one arm stays out of cell, group and arm rates, as in benchmark.md."""
     run = Recording(iteration(tmp_path))
-    run.plan("hello", "greets", checks=2, only={1: ["trial"]})
+    run.plan("hello", "greets", checks=12, only={11: ["trial"]})
     run.begin()
-    run.done("hello/greets/baseline/0", 70)
-    run.done("hello/greets/trial/0", 80, passed=1)
+    run.done("hello/greets/baseline/0", 70, passed=3)
+    run.done("hello/greets/trial/0", 80, passed=10)
+    benchmark = report.build_benchmark(
+        report.discover_eval_dirs(run.iteration_dir / "skills"), "run", baseline="baseline"
+    )
 
     view = fold(run, at=90)
+    trial = cell_of(view, "greets", "trial")
 
-    assert cell_of(view, "greets", "trial")["label"] == "50%"
-    assert [cell["value"] for cell in _row(view, "Pass rate")] == ["100%", "100%"]
+    assert trial["label"] == "91%"
+    assert (trial["hover"]["checks"], trial["hover"]["scoped"]) == (
+        "10 of 11 checks passed",
+        "+ 0 of 1 scoped, outside the rate",
+    )
+    assert view["matrix"]["groups"][0]["summaries"][1]["text"] == "91%"
+    assert [cell["value"] for cell in _row(view, "Pass rate")] == ["27%", "91%"]
+    assert "| hello/greets | 27% | 91% (+64pp) |" in report._format_markdown(benchmark)
+
+
+def test_an_eval_graded_only_on_scoped_checks_is_rated_on_them(tmp_path: Path) -> None:
+    """An eval graded only on scoped checks is rated on them, and says so."""
+    run = Recording(iteration(tmp_path))
+    run.plan("triggers", "spec-this-out", checks=["skill_invoked"], only={0: ["trial"]})
+    run.begin()
+    run.done("triggers/spec-this-out/trial/0", 80)
+
+    trial = cell_of(fold(run, at=90), "spec-this-out", "trial")
+
+    assert (trial["label"], trial["hover"]["checks"]) == ("100%", "1 of 1 scoped checks passed")
+    assert trial["hover"]["scoped"] is None
 
 
 def test_the_leaderboard_compares_arms_on_graded_samples(tmp_path: Path) -> None:
@@ -752,3 +790,251 @@ def test_a_finished_run_tallies_only_what_happened_and_marks_a_lone_arm_best(
         "status": "ended · exit 1",
         "detail": None,
     }
+
+
+def test_a_sample_that_grades_nothing_shows_its_work_but_counts_nowhere(tmp_path: Path) -> None:
+    """A sample that grades nothing shows its work while it runs, but counts nowhere.
+
+    Its worker is busy all the same: in a fresh run these are often the samples building
+    the snapshot, and every counted sample reads queued meanwhile.
+    """
+    run = Recording(iteration(tmp_path))
+    run.plan("not-triggers", "export-session", checks=["not_skill_invoked"], only={0: ["trial"]})
+    run.begin()
+    run.start("not-triggers/export-session/baseline/0", 1)
+
+    building = fold(run, at=91)
+    cell = cell_of(building, "export-session", "baseline")
+    run.done("not-triggers/export-session/baseline/0", 120, wall_s=119, held_s=100)
+    finished = cell_of(fold(run, at=121), "export-session", "baseline")
+
+    assert (cell["kind"], cell["label"], cell["boxes"]) == (
+        "na",
+        "n/a · snapshot 1m 30s",
+        ["bs-b-booting"],
+    )
+    assert _tally(building) == {
+        "passed": 0,
+        "failed": 0,
+        "errored": 0,
+        "running": 0,
+        "quiet": 0,
+        "waiting": 1,
+    }
+    assert building["counter"]["phases"]["label"] == "snapshot 1m 30s, 1 now"
+    assert building["matrix"]["groups"][0]["summaries"][0]["tally"] == [
+        {"bucket": "running", "count": 1}
+    ]
+    assert (finished["label"], finished["boxes"]) == ("n/a", ["bs-b-na"])
+
+
+def test_the_counter_splits_sample_time_by_phase_and_counts_who_is_in_each(
+    tmp_path: Path,
+) -> None:
+    """The counter splits sample time by phase and counts the samples in each now."""
+    run = _one_cell(tmp_path)
+    run.done("hello/greets/baseline/0", 70, wall_s=60, held_s=30)
+    run.play(CELL, 60, through="boot")
+
+    phases = fold(run, at=70)["counter"]["phases"]
+
+    assert phases["caption"] == "[ sample time by phase · 1m 10s ]"
+    assert phases["label"] == (
+        "snapshot 30s, bind 2s, boot 11s, 1 now, setup 1s, agent 21s, grade 5s"
+    )
+    assert [segment["kind"] for segment in phases["segments"]] == [
+        "prep",
+        "prep",
+        "prep",
+        "prep",
+        "agent",
+        "grade",
+    ]
+    assert sum(segment["share"] for segment in phases["segments"]) == pytest.approx(1)
+    assert fold(_one_cell(tmp_path / "idle"), at=5)["counter"]["phases"] is None
+
+
+def test_a_boot_waiting_for_a_sandbox_slot_reads_as_waiting_not_failing(tmp_path: Path) -> None:
+    """A boot waiting for a sandbox slot reads as waiting, never as an error."""
+    run = _one_cell(tmp_path)
+    run.play(CELL, 0, through="boot")
+    run.wait(CELL, 2)
+
+    view = fold(run, at=40)
+    cell = cell_of(view, "greets", "trial")
+    sample = cell["samples"][0]
+    run.phase(CELL, "setup", 50)
+    resumed = cell_of(fold(run, at=51), "greets", "trial")
+
+    assert (cell["boxes"], cell["progress"]) == (["bs-b-booting"], "slot wait 38s")
+    assert cell["hover"]["rows"][0]["verdict"] == "slot wait"
+    assert resumed["hover"]["rows"][0]["verdict"] == "booting"
+    assert (sample["verdict"], sample["detail"], sample["doing"]) == (
+        "booting",
+        "slot wait 38s",
+        "Waiting for a free e2b sandbox slot, all 10 in use.",
+    )
+    assert _tally(view)["errored"] == 0
+    assert "slot wait 38s, 1 now" in view["counter"]["phases"]["label"]
+    assert resumed["samples"][0]["phases"]["label"] == (
+        "bind 1.0s, boot 1.0s, slot wait 48.0s, setup 1.0s"
+    )
+
+
+def test_the_drawer_says_what_an_unfinished_sample_is_doing(tmp_path: Path) -> None:
+    """The drawer says what an unfinished sample is doing, or what it waits on."""
+    run = _one_cell(tmp_path, count=2)
+    run.start(CELL, 0)
+    run.play("hello/greets/baseline/0", 30, through="setup", worker="gw1")
+
+    view = fold(run, at=45)
+    building = cell_of(view, "greets", "trial")["samples"][0]
+    queued = cell_of(view, "greets", "trial")["samples"][1]
+    in_setup = cell_of(view, "greets", "baseline")["samples"][0]
+
+    assert (building["verdict"], building["detail"], building["doing"]) == (
+        "booting",
+        "snapshot 45s",
+        "Building the sandbox snapshot, or waiting for another worker's build.",
+    )
+    assert building["phases"]["label"] == "snapshot 45.0s"
+    assert (queued["verdict"], queued["detail"], queued["phases"]) == ("queued", None, None)
+    assert queued["doing"] == "Waiting for a free worker; 2 samples running now."
+    assert in_setup["doing"] == "Running the eval's setup.sh."
+    assert in_setup["pending"] == "Graded when the sample finishes."
+
+
+def test_groups_keep_each_skills_folders_together_under_its_name(tmp_path: Path) -> None:
+    """Groups keep each skill's folders together, named skill first."""
+    run = Recording(iteration(tmp_path))
+    run.plan("triggers", "fellowship-outcomes", folder="writing-mlh-reports/triggers")
+    run.plan("spec-from-context", "spec-from-context", folder="to-spec/spec-from-context")
+    run.plan("triggers", "open-pr", folder="pull-request/triggers")
+    run.plan("triggers", "capture-as-spec", folder="to-spec/triggers")
+    run.begin()
+
+    view = fold(run, at=1)
+    groups = view["matrix"]["groups"]
+
+    assert [(group["parent"], group["name"], group["key"]) for group in groups] == [
+        ("writing-mlh-reports/", "triggers/", "writing-mlh-reports/triggers"),
+        ("to-spec/", "spec-from-context/", "to-spec/spec-from-context"),
+        ("to-spec/", "triggers/", "to-spec/triggers"),
+        ("pull-request/", "triggers/", "pull-request/triggers"),
+    ]
+    assert [[row["id"] for row in group["rows"]] for group in groups] == [
+        ["fellowship-outcomes"],
+        ["spec-from-context"],
+        ["capture-as-spec"],
+        ["open-pr"],
+    ]
+    assert cell_of(view, "open-pr", "trial")["samples"][0]["folder"] == "pull-request/triggers"
+    assert view["top"]["suite"] == "e2e"
+
+
+def test_a_one_skill_run_names_the_skill_once_in_the_top_bar(tmp_path: Path) -> None:
+    """A one-skill run names the skill once, in the top bar, not on every group."""
+    run = Recording(iteration(tmp_path))
+    run.plan("spec-from-context", "spec-from-context", folder="to-spec/spec-from-context")
+    run.plan("triggers", "capture-as-spec", folder="to-spec/triggers")
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert [(group["parent"], group["name"]) for group in view["matrix"]["groups"]] == [
+        ("", "spec-from-context/"),
+        ("", "triggers/"),
+    ]
+    assert view["top"]["suite"] == "e2e · to-spec"
+
+
+def _planned(repo: Path, eval_dir: str, eval_id: str) -> list[dict]:
+    """The trial arm's planned sample of one eval file under `repo`, as the run plans it."""
+    group = Path(eval_dir).name
+    case = EvalCase(
+        group=group,
+        eval_dir=repo / eval_dir,
+        eval_file=repo / eval_dir / f"{eval_id}.eval.md",
+        eval={"id": eval_id, "prompt": "Say hi.", "assertions": ["greeting written"]},
+    )
+
+    cells = planned_cells(
+        [f"{eval_dir}/{eval_id}.eval.md::test_eval[{group}-{eval_id}-trial]"],
+        [(case, TRIAL)],
+        count=1,
+        baseline=None,
+        eval_set="",
+        repo_root=repo,
+    )
+
+    return [dict(cell) for cell in cells]
+
+
+def test_a_suite_nested_under_evals_folders_groups_under_its_skill(tmp_path: Path) -> None:
+    """A suite laid out as the in-repo `hello` one groups under `hello`, not `evals`."""
+    run = Recording(iteration(tmp_path), arms=[arm("trial")], baseline=None)
+    run.planned = [
+        *_planned(tmp_path, "evals/e2e/hello/evals/hello", "greets-by-name"),
+        *_planned(tmp_path, "evals/e2e/hello/evals/hello-routing", "fires-on-a-greeting"),
+    ]
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert view["top"]["suite"] == "e2e · hello"
+    assert [(group["parent"], group["name"]) for group in view["matrix"]["groups"]] == [
+        ("", "hello/"),
+        ("", "hello-routing/"),
+    ]
+
+
+def test_same_named_groups_under_two_skills_evals_folders_stay_apart(tmp_path: Path) -> None:
+    """Two skills' `evals/triggers/` folders are two groups, each under its skill."""
+    run = Recording(iteration(tmp_path), arms=[arm("trial")], baseline=None)
+    run.planned = [
+        *_planned(tmp_path, "skills/to-spec/evals/triggers", "capture-as-spec"),
+        *_planned(tmp_path, "skills/pull-request/evals/triggers", "open-pr"),
+    ]
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert [(group["parent"], group["name"]) for group in view["matrix"]["groups"]] == [
+        ("to-spec/", "triggers/"),
+        ("pull-request/", "triggers/"),
+    ]
+
+
+def test_each_arm_head_carries_the_leaderboards_pass_rate_and_delta(tmp_path: Path) -> None:
+    """Each arm head carries the leaderboard's pass rate and delta, once anything is graded."""
+    view = fold(finished_run(tmp_path), at=0)
+    leaderboard = _row(view, "Pass rate")
+    unrated = fold(_one_cell(tmp_path / "unrated"), at=1)["matrix"]["arms"]
+
+    assert [head["rate"] for head in view["matrix"]["arms"]] == [
+        cell["value"] for cell in leaderboard
+    ]
+    assert [head["delta"] for head in view["matrix"]["arms"]] == [
+        None,
+        "+30pp",
+        "+40pp",
+        "+28pp",
+    ]
+    assert [(head["rate"], head["delta"]) for head in unrated] == [(None, None), (None, None)]
+
+
+def test_a_cell_names_the_tally_buckets_its_samples_fall_in(tmp_path: Path) -> None:
+    """A cell names the tally buckets its samples fall in, for the tally's filters."""
+    view = fold(mid_run(tmp_path), at=401)
+
+    assert cell_of(view, "codex-logged-out", "baseline")["buckets"] == [
+        "passed",
+        "failed",
+        "errored",
+    ]
+    assert cell_of(view, "plan-implement-task", "baseline")["buckets"] == [
+        "failed",
+        "running",
+        "quiet",
+    ]
+    assert "buckets" not in cell_of(view, "codex-eperm-debug", "baseline")

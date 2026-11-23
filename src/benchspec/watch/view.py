@@ -11,6 +11,7 @@ import json
 import math
 import statistics
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +25,38 @@ RECENT_DELTAS = 5
 GRADED = ("pass", "fail", "timeout")
 FINISHED = (*GRADED, "error")
 IDLE = ("queued", "unfinished")
-PREP_PHASES = ("bind", "boot", "setup")
+ACTIVE = ("booting", "running", "quiet")
+# Before `bind` a sample is building the sandbox snapshot, or waiting on another
+# worker's build: the event stream names no phase there.
+SNAPSHOT = "snapshot"
+# A boot the sandbox backend refused for capacity waits here (`cell.wait`) until its
+# next phase.
+SLOT_WAIT = "slot wait"
+PREP_PHASES = (SNAPSHOT, "bind", "boot", SLOT_WAIT, "setup")
+PHASE_ORDER = (*PREP_PHASES, "agent", "grade")
+# A stage shorter than this, such as the snapshot check of a run that already has
+# one, is not worth a segment of its own.
+STAGE_SHOWN_FROM_MS = 1000
+TALLY_ORDER = ("passed", "failed", "errored", "running", "quiet", "waiting", "unfinished")
+BUCKETS = {
+    "pass": "passed",
+    "fail": "failed",
+    "timeout": "failed",
+    "error": "errored",
+    "booting": "running",
+    "running": "running",
+    "quiet": "quiet",
+    "queued": "waiting",
+    "unfinished": "unfinished",
+}
+DOING = {
+    SNAPSHOT: "Building the sandbox snapshot, or waiting for another worker's build.",
+    "bind": "Binding the assertions to their checkers.",
+    "boot": "Booting the sandbox.",
+    "setup": "Running the eval's setup.sh.",
+    "agent": "The agent is working.",
+    "grade": "Grading the workspace.",
+}
 
 _MEASURED_SECONDS_BELOW_MS = 120_000
 _PROBLEM_TEXT_LIMIT = 80
@@ -39,9 +71,11 @@ class Sample:
     eval_id: str
     arm: str
     index: int
+    folder: str = ""
     applies: list[bool] | None = None
     started_ms: int | None = None
     phases: list[tuple[str, int]] = field(default_factory=list)
+    wait: dict | None = None
     last_delta_ms: int | None = None
     deltas: deque[dict] = field(default_factory=lambda: deque(maxlen=RECENT_DELTAS))
     closed_ms: int | None = None
@@ -54,6 +88,35 @@ class Sample:
         """The phase the sample is in; None before `bind`."""
         return self.phases[-1][0] if self.phases else None
 
+    @property
+    def stage(self) -> str:
+        """The phase as the page names it: `snapshot` before `bind`."""
+        return self.phase or SNAPSHOT
+
+    @property
+    def applicable(self) -> bool:
+        """Whether any of the sample's assertion lines is graded on its arm."""
+        return self.applies is None or any(self.applies)
+
+    def stage_started_ms(self) -> int:
+        """When the sample entered its current stage."""
+        return self.phases[-1][1] if self.phases else self.started_ms or 0
+
+    def stages(self, now_ms: int) -> list[tuple[str, int]]:
+        """Each stage the sample entered, in order, with the time it spent there."""
+        if self.started_ms is None:
+            return []
+
+        end_ms = self.closed_ms or now_ms
+        marks = [(SNAPSHOT, self.started_ms), *self.phases]
+        spans = []
+
+        for position, (name, started_ms) in enumerate(marks):
+            later = marks[position + 1 :]
+            spans.append((name, max((later[0][1] if later else end_ms) - started_ms, 0)))
+
+        return spans
+
     def phase_started_ms(self, phase: str) -> int | None:
         """When the sample entered `phase`; None when it never did."""
         return next((ts_ms for name, ts_ms in self.phases if name == phase), None)
@@ -65,10 +128,11 @@ class Sample:
         return now_ms - since
 
     def state(self, now_ms: int) -> str:
-        """The sample's state word."""
-        if self.applies is not None and not any(self.applies):
-            return "n/a"
+        """The sample's state word; `n/a` when it grades nothing."""
+        return self.live_state(now_ms) if self.applicable else "n/a"
 
+    def live_state(self, now_ms: int) -> str:
+        """What the sample is doing, whether or not it grades anything."""
         if self.error is not None:
             return "error"
 
@@ -100,6 +164,38 @@ class Sample:
         return self.done["passed"], self.done["total"]
 
 
+@dataclass(frozen=True)
+class Checks:
+    """Checks passed and graded on the rated lines, then on the scoped lines left out.
+
+    The rated lines are those every arm of the eval grades, as `benchmark.md` rates
+    them. An eval with no such line is rated on its scoped lines instead.
+    """
+
+    passed: int = 0
+    total: int = 0
+    scoped_passed: int = 0
+    scoped_total: int = 0
+    scoped_only: bool = False
+    rate: float | None = None
+
+    def line(self) -> str:
+        """The rated checks in words: `10 of 11 checks passed`."""
+        if not self.total:
+            return "no checks graded"
+
+        noun = "scoped checks" if self.scoped_only else "checks"
+
+        return f"{self.passed} of {self.total} {noun} passed"
+
+    def scoped_line(self) -> str | None:
+        """The scoped checks left out of the rate, or None without any."""
+        if not self.scoped_total:
+            return None
+
+        return f"+ {self.scoped_passed} of {self.scoped_total} scoped, outside the rate"
+
+
 @dataclass
 class Gradings:
     """What the leaderboard reads from `grading.json`, keyed by arm."""
@@ -107,6 +203,7 @@ class Gradings:
     pass_rate: dict[str, float | None] = field(default_factory=dict)
     delta_pp: dict[str, float | None] = field(default_factory=dict)
     activation: dict[str, tuple[int, int]] = field(default_factory=dict)
+    verdicts: dict[str, list[bool | None]] = field(default_factory=dict)
 
 
 def read_gradings(iteration_dir: Path, arms: list[str], baseline: str | None) -> Gradings:
@@ -131,7 +228,30 @@ def read_gradings(iteration_dir: Path, arms: list[str], baseline: str | None) ->
         gradings.delta_pp[arm] = stats.get("delta_pp")
         gradings.activation[arm] = _activation(eval_dirs, arm)
 
+    gradings.verdicts = _verdicts(eval_dirs)
+
     return gradings
+
+
+def _verdicts(eval_dirs: list[Path]) -> dict[str, list[bool | None]]:
+    """Each graded sample's line verdicts by cell key: None for a line scoped off its arm."""
+    verdicts: dict[str, list[bool | None]] = {}
+
+    for eval_dir in eval_dirs:
+        group, eval_id = eval_dir.parent.name, eval_dir.name.removeprefix("eval-")
+
+        for path in eval_dir.glob("*/sample-*/grading.json"):
+            grading = json.loads(path.read_text(encoding="utf-8"))
+            if grading.get("errored"):
+                continue
+
+            arm, sample = path.parent.parent.name, path.parent.name.removeprefix("sample-")
+            verdicts[f"{group}/{eval_id}/{arm}/{sample}"] = [
+                None if assertion.get("skipped") else bool(assertion.get("passed"))
+                for assertion in grading.get("assertions", [])
+            ]
+
+    return verdicts
 
 
 def _activation(eval_dirs: list[Path], arm: str) -> tuple[int, int]:
@@ -179,6 +299,22 @@ def assertions_view(grading: dict) -> dict:
         for word, state in (("failed", "fail"), ("passed", "pass"), ("n/a", "n/a"))
         if (count := sum(1 for entry in entries if entry["state"] == state))
     ]
+
+    return {"caption": _caption("assertions", *counts), "assertions": entries}
+
+
+def plan_view(planned: dict) -> dict:
+    """Shape a planned sample's assertion lines for the drawer, before it is graded."""
+    entries = [
+        {"index": index, "state": "planned" if holds else "n/a", "text": text}
+        for index, (text, holds) in enumerate(
+            zip(planned["assertions"], planned["applies"], strict=True)
+        )
+    ]
+    entries.sort(key=lambda entry: entry["state"] == "n/a")
+    graded = sum(1 for entry in entries if entry["state"] == "planned")
+    skipped = len(entries) - graded
+    counts = [f"{graded} planned", *([f"{skipped} n/a"] if skipped else [])]
 
     return {"caption": _caption("assertions", *counts), "assertions": entries}
 
@@ -282,7 +418,9 @@ class RunView:
             self._start = event
 
             for planned in event["cells"]:
-                self._sample(planned).applies = planned["applies"]
+                sample = self._sample(planned)
+                sample.applies = planned["applies"]
+                sample.folder = planned["folder"]
 
         elif kind == "run.end":
             self._end = event
@@ -305,6 +443,7 @@ class RunView:
                 named["eval_id"],
                 named["arm"],
                 named["sample"],
+                folder=named["skill"],
                 run_ended=self.ended,
             )
 
@@ -318,6 +457,9 @@ class RunView:
             sample.started_ms = ts_ms
         elif kind == "cell.phase":
             sample.phases.append((event["phase"], ts_ms))
+        elif kind == "cell.wait":
+            sample.wait = event
+            sample.phases.append((SLOT_WAIT, ts_ms))
         elif kind == "cell.delta":
             sample.last_delta_ms = ts_ms
             sample.deltas.append(event)
@@ -373,7 +515,7 @@ class RunView:
 
     def _top(self, planned: list[Sample], state: str, silent_ms: int) -> dict:
         """The top bar: iteration, suite and run state, `silent_ms` after the last event."""
-        skills = list(dict.fromkeys(sample.skill for sample in planned))
+        skills = list(dict.fromkeys(_skill_of(sample.folder) for sample in planned))
         count = max((sample.index for sample in planned), default=0) + 1
 
         if self._end is not None:
@@ -398,17 +540,7 @@ class RunView:
         states = [sample.state(now_ms) for sample in counted]
         elapsed_ms = now_ms - self._plan["ts_ms"]
 
-        buckets = {
-            "passed": states.count("pass"),
-            "failed": states.count("fail") + states.count("timeout"),
-            "errored": states.count("error"),
-        }
-        if self._end is None:
-            buckets["running"] = states.count("running") + states.count("booting")
-            buckets["quiet"] = states.count("quiet")
-            buckets["waiting"] = states.count("queued")
-        elif state == "stopped":
-            buckets["unfinished"] = states.count("unfinished")
+        buckets = _tally(states, live=self._end is None, stopped=state == "stopped")
 
         reason = (
             _run_reason(self._end["exit_status"], buckets["errored"])
@@ -443,6 +575,50 @@ class RunView:
             "left": f"~{_coarse_duration(left_ms)} left" if left_ms is not None else None,
             "tally": [{"bucket": bucket, "count": count} for bucket, count in buckets.items()],
             "workers": f"-n {len(self._workers)}" if self._workers and self._end is None else None,
+            "phases": self._run_phases(now_ms),
+        }
+
+    def _run_phases(self, now_ms: int) -> dict | None:
+        """The time every started sample spent in each phase, and how many are in it now.
+
+        Samples that grade nothing count too: they hold a worker all the same.
+        """
+        spent: dict[str, int] = {}
+        now: dict[str, int] = {}
+
+        for sample in self._samples.values():
+            for name, spent_ms in sample.stages(now_ms):
+                spent[name] = spent.get(name, 0) + spent_ms
+
+            if sample.live_state(now_ms) in ACTIVE:
+                now[sample.stage] = now.get(sample.stage, 0) + 1
+
+        shown = [name for name in spent if spent[name] >= STAGE_SHOWN_FROM_MS or name in now]
+        if not shown:
+            return None
+
+        names = [name for name in PHASE_ORDER if name in shown]
+        names += [name for name in shown if name not in PHASE_ORDER]
+        total_ms = max(sum(spent[name] for name in names), 1)
+        segments = [
+            {
+                "name": name,
+                "kind": _phase_kind(name),
+                "time": live_duration(spent[name]),
+                "share": spent[name] / total_ms,
+                "now": f"{now[name]} now" if now.get(name) else None,
+            }
+            for name in names
+        ]
+
+        return {
+            "caption": _caption("sample time by phase", live_duration(total_ms)),
+            "label": ", ".join(
+                f"{segment['name']} {segment['time']}"
+                + (f", {segment['now']}" if segment["now"] else "")
+                for segment in segments
+            ),
+            "segments": segments,
         }
 
     def left_ms(self, now_ms: int) -> float | None:
@@ -502,40 +678,51 @@ class RunView:
         return planned, [sample for sample in planned if sample.state(now_ms) != "n/a"]
 
     def _matrix(self, planned: list[Sample], state: str, now_ms: int) -> dict:
-        """The matrix: one group per skill, one row per eval, one cell per arm."""
+        """The matrix: one group per eval folder, skill by skill; a row per eval, a cell per arm."""
         arms = self._plan["arms"]
-        evals = list(dict.fromkeys((sample.skill, sample.eval_id) for sample in planned))
+        folders = _ordered_folders(planned)
+        names = _group_names(folders)
         by_cell: dict[tuple[str, str, str], list[Sample]] = {}
+        by_eval: dict[tuple[str, str], list[Sample]] = {}
 
         for sample in planned:
-            by_cell.setdefault((sample.skill, sample.eval_id, sample.arm), []).append(sample)
+            by_cell.setdefault((sample.folder, sample.eval_id, sample.arm), []).append(sample)
+            by_eval.setdefault((sample.folder, sample.eval_id), []).append(sample)
 
+        shared = {key: _shared_lines(samples) for key, samples in by_eval.items()}
         groups = []
 
-        for skill in dict.fromkeys(skill for skill, _ in evals):
+        for folder in folders:
+            eval_ids = [eval_id for each, eval_id in by_eval if each == folder]
             rows = [
                 {
                     "id": eval_id,
                     "cells": [
-                        self._cell(by_cell.get((skill, eval_id, arm["name"]), []), eval_id, now_ms)
+                        self._cell(
+                            by_cell.get((folder, eval_id, arm["name"]), []),
+                            eval_id,
+                            shared[(folder, eval_id)],
+                            now_ms,
+                        )
                         for arm in arms
                     ],
                 }
-                for group, eval_id in evals
-                if group == skill
+                for eval_id in eval_ids
             ]
-            members = [sample for sample in planned if sample.skill == skill]
-            states = {sample.state(now_ms) for sample in members}
-            settled = states <= {"pass", "fail", "n/a"}
+            members = [sample for sample in planned if sample.folder == folder]
+            parent, name = names[folder]
             groups.append(
                 {
-                    "name": f"{skill}/",
+                    "key": folder,
+                    "parent": parent,
+                    "name": name,
                     "evals": _plural(len(rows), "eval"),
                     "note": _scope_note(members, [arm["name"] for arm in arms]),
-                    "open": not (settled and self._end is None),
+                    "open": len(folders) == 1,
                     "summaries": [
                         _group_summary(
                             [sample for sample in members if sample.arm == arm["name"]],
+                            self._rated(shared),
                             now_ms,
                             live=state == "live",
                         )
@@ -549,16 +736,42 @@ class RunView:
 
         return {
             "caption": _caption(
-                f"{_plural(len(evals), 'eval')} × {_plural(len(arms), 'arm')}", word
+                f"{_plural(len(by_eval), 'eval')} × {_plural(len(arms), 'arm')}", word
             ),
-            "arms": [
-                {"name": arm["name"], "detail": f"{arm['harness']} · {arm['model']}"}
-                for arm in arms
-            ],
+            "arms": self._arm_heads(),
             "groups": groups,
         }
 
-    def _cell(self, samples: list[Sample], eval_id: str, now_ms: int) -> dict:
+    def _arm_heads(self) -> list[dict]:
+        """Each arm's column head: its name, harness and model, and its pooled pass rate."""
+        heads = []
+
+        for arm in self._plan["arms"]:
+            rate = self.gradings.pass_rate.get(arm["name"])
+            delta_pp = self.gradings.delta_pp.get(arm["name"])
+            heads.append(
+                {
+                    "name": arm["name"],
+                    "detail": f"{arm['harness']} · {arm['model']}",
+                    "rate": report.percent(rate) if rate is not None else None,
+                    "delta": f"{delta_pp:+.0f}pp" if delta_pp is not None else None,
+                }
+            )
+
+        return heads
+
+    def _rated(self, shared: dict[tuple[str, str], set[int]]) -> Callable[[Sample], Checks]:
+        """A sample's checks split the way `benchmark.md` rates them, for this view's gradings."""
+
+        def rated(sample: Sample) -> Checks:
+            """The sample's checks against the lines every arm of its eval grades."""
+            return _split_checks(
+                sample, shared[(sample.folder, sample.eval_id)], self.gradings.verdicts
+            )
+
+        return rated
+
+    def _cell(self, samples: list[Sample], eval_id: str, shared: set[int], now_ms: int) -> dict:
         """One eval × arm cell: its boxes, its one label, hover card and drawer data."""
         if not samples:
             return {"kind": "notrun", "label": "not run"}
@@ -566,18 +779,25 @@ class RunView:
         states = [sample.state(now_ms) for sample in samples]
         boxes = [_box_class(sample, now_ms) for sample in samples]
         if all(state == "n/a" for state in states):
+            busy = any(sample.live_state(now_ms) in ACTIVE for sample in samples)
+            label = f"n/a · {_progress(samples, now_ms)}" if busy else "n/a"
+
             return {
                 "kind": "na",
-                "label": "n/a",
+                "label": label,
                 "boxes": boxes,
-                "aria": f"{eval_id} on {samples[0].arm}: n/a",
+                "aria": f"{eval_id} on {samples[0].arm}: {label}",
             }
 
         done = sum(1 for state in states if state in FINISHED)
-        passed = sum(sample.checks()[0] for sample in samples)
-        checks = sum(sample.checks()[1] for sample in samples)
-        graded = any(state in GRADED for state in states)
-        rate = report.percent(passed / checks) if graded and checks else "—"
+        checks = _pooled(
+            [
+                _split_checks(sample, shared, self.gradings.verdicts)
+                for sample in samples
+                if sample.state(now_ms) in GRADED
+            ]
+        )
+        rate = report.percent(checks.rate) if checks.rate is not None else "—"
 
         kind, muted, short, count, progress = "run", False, "", None, None
         if done == len(samples):
@@ -599,13 +819,15 @@ class RunView:
             "short": short,
             "muted": muted,
             "boxes": boxes,
+            "buckets": sorted({BUCKETS[state] for state in states}, key=TALLY_ORDER.index),
             "aria": (
                 f"{eval_id} on {samples[0].arm}: {label}; "
                 f"{_plural(len(samples), 'sample')}: {words}"
             ),
             "hover": {
                 "rate": rate,
-                "checks": f"{passed} of {checks} checks passed" if checks else "no checks graded",
+                "checks": checks.line(),
+                "scoped": checks.scoped_line(),
                 "problem": _worst_problem(samples, now_ms),
                 "rows": [_hover_row(sample, now_ms) for sample in samples],
             },
@@ -613,7 +835,7 @@ class RunView:
         }
 
     def _detail(self, sample: Sample, of: int, now_ms: int) -> dict:
-        """One sample's drawer: status, key numbers, phases, recent output and path."""
+        """One sample's drawer: status, what it is doing, key numbers, phases, output and path."""
         state = sample.state(now_ms)
         closing = sample.done or sample.error or {}
         passed, total = sample.checks()
@@ -626,6 +848,8 @@ class RunView:
             verdict, detail = "ERROR", f"{sample.error['error_kind']} · {where}"
         elif state == "quiet":
             verdict = f"quiet {live_duration(sample.silent_ms(now_ms))}"
+        elif sample.live_state(now_ms) in ACTIVE:
+            detail = f"{sample.stage} {live_duration(now_ms - sample.stage_started_ms())}"
 
         pending = None
         if sample.closed_ms is None and not sample.run_ended:
@@ -651,11 +875,12 @@ class RunView:
             "cell": sample.cell,
             "number": sample.index + 1,
             "of": of,
-            "skill": sample.skill,
+            "folder": sample.folder,
             "eval_id": sample.eval_id,
             "arm": sample.arm,
             "verdict": verdict,
             "detail": detail,
+            "doing": self._doing(sample, now_ms),
             "pending": pending,
             "bad": state in ("fail", "error"),
             "passes": state == "pass",
@@ -678,6 +903,28 @@ class RunView:
                 f"{sample.arm}/sample-{sample.index}/"
             ),
         }
+
+    def _doing(self, sample: Sample, now_ms: int) -> str | None:
+        """What an unfinished sample is doing or waiting on, in one sentence."""
+        state = sample.live_state(now_ms)
+        if state == "queued":
+            busy = sum(1 for other in self._samples.values() if other.live_state(now_ms) in ACTIVE)
+
+            return f"Waiting for a free worker; {_plural(busy, 'sample')} running now."
+
+        if state == "quiet":
+            return f"The agent has been silent for {live_duration(sample.silent_ms(now_ms))}."
+
+        if state in ACTIVE and sample.stage == SLOT_WAIT and sample.wait is not None:
+            limit = sample.wait.get("limit")
+            held = f", all {limit} in use" if limit else ""
+
+            return f"Waiting for a free {sample.wait['sandbox']} sandbox slot{held}."
+
+        if state in ACTIVE:
+            return DOING.get(sample.stage, f"In {sample.stage}.")
+
+        return None
 
     def _scoped_to(self, sample: Sample) -> dict[str, str]:
         """For each line scoped off this sample's arm, the arms it runs on."""
@@ -903,13 +1150,15 @@ def _run_reason(exit_status: int, errored: int) -> str | None:
 
 
 def _box_class(sample: Sample, now_ms: int) -> str:
-    """The sample's StatusBox class."""
+    """The sample's StatusBox class; one that grades nothing shows only while it runs."""
     state = sample.state(now_ms)
     if state == "fail":
         return f"bs-b-fail bs-f{fail_step(*sample.checks())}"
 
     if state == "n/a":
-        return "bs-b-na"
+        live = sample.live_state(now_ms)
+
+        return f"bs-b-{live}" if live in ACTIVE else "bs-b-na"
 
     return "bs-b-queued" if state in IDLE else f"bs-b-{state}"
 
@@ -939,9 +1188,8 @@ def _progress(samples: list[Sample], now_ms: int) -> str:
         return "queued"
 
     lead = min(running, key=lambda sample: sample.started_ms or 0)
-    since = lead.phases[-1][1] if lead.phases else lead.started_ms or now_ms
 
-    return f"{lead.phase or 'booting'} {live_duration(now_ms - since)}"
+    return f"{lead.stage} {live_duration(now_ms - lead.stage_started_ms())}"
 
 
 def _sample_duration(sample: Sample, now_ms: int) -> str:
@@ -967,6 +1215,8 @@ def _hover_row(sample: Sample, now_ms: int) -> dict:
         verdict = "ERROR"
     elif state == "quiet":
         verdict = f"quiet {live_duration(sample.silent_ms(now_ms))}"
+    elif state == "booting" and sample.stage == SLOT_WAIT:
+        verdict = SLOT_WAIT
     else:
         verdict = state
 
@@ -1020,25 +1270,30 @@ def _worst_problem(samples: list[Sample], now_ms: int) -> dict | None:
 
 
 def _phases(sample: Sample, now_ms: int) -> dict | None:
-    """The sample's phase bar: one segment per phase it entered, sized by its time."""
-    if not sample.phases:
+    """The sample's phase bar: one segment per phase it entered, sized by its time.
+
+    A stage that took under a second, such as the snapshot check of a run that already
+    has one, is left out unless the sample is in it.
+    """
+    entered = sample.stages(now_ms)
+    stages = [
+        (name, stage_ms)
+        for position, (name, stage_ms) in enumerate(entered)
+        if stage_ms >= STAGE_SHOWN_FROM_MS or position == len(entered) - 1
+    ]
+    if not stages:
         return None
 
-    end_ms = sample.closed_ms or now_ms
-    total_ms = max(end_ms - sample.phases[0][1], 1)
-    segments = []
-
-    for position, (phase, started_ms) in enumerate(sample.phases):
-        later = sample.phases[position + 1 :]
-        phase_ms = (later[0][1] if later else end_ms) - started_ms
-        segments.append(
-            {
-                "name": phase,
-                "kind": "prep" if phase in PREP_PHASES else phase,
-                "time": measured_duration(phase_ms),
-                "share": phase_ms / total_ms,
-            }
-        )
+    total_ms = max(sum(stage_ms for _, stage_ms in stages), 1)
+    segments = [
+        {
+            "name": name,
+            "kind": _phase_kind(name),
+            "time": measured_duration(stage_ms),
+            "share": stage_ms / total_ms,
+        }
+        for name, stage_ms in stages
+    ]
 
     return {
         "caption": _caption("phases", measured_duration(total_ms)),
@@ -1054,8 +1309,10 @@ def _offset(milliseconds: int) -> str:
     return f"+{seconds // 60}:{seconds % 60:02d}"
 
 
-def _group_summary(samples: list[Sample], now_ms: int, *, live: bool) -> dict:
-    """One arm's summary of a group: its text, its `done/total` and its completion bar.
+def _group_summary(
+    samples: list[Sample], rated: Callable[[Sample], Checks], now_ms: int, *, live: bool
+) -> dict:
+    """One arm's summary of a group: its rate, `done/total`, completion bar and tally.
 
     The bar of a group in progress is accented only while the run is `live`.
     """
@@ -1063,28 +1320,138 @@ def _group_summary(samples: list[Sample], now_ms: int, *, live: bool) -> dict:
     counted = [state for state in states if state != "n/a"]
     if not counted:
         word = "n/a" if samples else "not run"
+        # Samples that grade nothing still hold a worker while they run.
+        busy = [
+            BUCKETS[state] for sample in samples if (state := sample.live_state(now_ms)) in ACTIVE
+        ]
+        tally = [
+            {"bucket": bucket, "count": busy.count(bucket)}
+            for bucket in TALLY_ORDER
+            if bucket in busy
+        ]
 
-        return {"text": word, "count": None, "muted": True, "bar": 0, "live": False}
+        return {"text": word, "count": None, "muted": True, "bar": 0, "live": False, "tally": tally}
 
     done = sum(1 for state in counted if state in FINISHED)
-    passed = sum(sample.checks()[0] for sample in samples)
-    checks = sum(sample.checks()[1] for sample in samples)
-    rate = report.percent(passed / checks) if checks else None
+    checks = _pooled([rated(sample) for sample in samples if sample.state(now_ms) in GRADED])
+    rate = report.percent(checks.rate) if checks.rate is not None else None
     count = f"{done}/{len(counted)}"
+    tally = [
+        {"bucket": bucket, "count": number}
+        for bucket in TALLY_ORDER
+        if (number := sum(1 for state in counted if BUCKETS[state] == bucket))
+    ]
 
     if done == len(counted):
-        return {"text": rate or "—", "count": None, "muted": False, "bar": 1, "live": False}
+        summary = {"text": rate or "—", "count": None, "muted": False, "bar": 1, "live": False}
+    elif all(state in IDLE for state in counted):
+        summary = {"text": counted[0], "count": count, "muted": True, "bar": 0, "live": False}
+    else:
+        summary = {
+            "text": rate or ("unfinished" if "unfinished" in counted else "running"),
+            "count": count,
+            "muted": rate is None,
+            "bar": done / len(counted),
+            "live": live,
+        }
 
-    if all(state in IDLE for state in counted):
-        return {"text": counted[0], "count": count, "muted": True, "bar": 0, "live": False}
+    return summary | {"tally": tally}
+
+
+def _tally(states: list[str], *, live: bool, stopped: bool) -> dict[str, int]:
+    """The counter's buckets: what finished, then what is under way or never closed."""
+    shown = ["passed", "failed", "errored"]
+    if live:
+        shown += ["running", "quiet", "waiting"]
+    elif stopped:
+        shown.append("unfinished")
+
+    return {bucket: sum(1 for state in states if BUCKETS[state] == bucket) for bucket in shown}
+
+
+def _phase_kind(name: str) -> str:
+    """A phase's segment colour: one tone for every step before the agent."""
+    return name if name in ("agent", "grade") else "prep"
+
+
+def _shared_lines(samples: list[Sample]) -> set[int]:
+    """The lines every arm of an eval grades: those its rate counts, as in `benchmark.md`."""
+    flags = [sample.applies for sample in samples if sample.applies is not None]
+    if not flags:
+        return set()
 
     return {
-        "text": rate or ("unfinished" if "unfinished" in counted else "running"),
-        "count": count,
-        "muted": rate is None,
-        "bar": done / len(counted),
-        "live": live,
+        index
+        for index in range(max(len(each) for each in flags))
+        if all(index < len(each) and each[index] for each in flags)
     }
+
+
+def _split_checks(
+    sample: Sample, shared: set[int], verdicts: dict[str, list[bool | None]]
+) -> Checks:
+    """A graded sample's checks, split on `shared`, the lines every arm of its eval grades.
+
+    Until its `grading.json` is read, every check it closed with counts as rated.
+    """
+    lines = verdicts.get(sample.cell)
+    if lines is None:
+        passed, total = sample.checks()
+
+        return Checks(passed, total, scoped_only=not shared, rate=passed / total if total else None)
+
+    on_shared = [verdict for index, verdict in enumerate(lines) if index in shared]
+    off_shared = [verdict for index, verdict in enumerate(lines) if index not in shared]
+    rated = [verdict for verdict in (on_shared if shared else off_shared) if verdict is not None]
+    scoped = [verdict for verdict in off_shared if verdict is not None] if shared else []
+
+    return Checks(
+        sum(rated),
+        len(rated),
+        sum(scoped),
+        len(scoped),
+        scoped_only=not shared,
+        rate=sum(rated) / len(rated) if rated else None,
+    )
+
+
+def _pooled(samples: list[Checks]) -> Checks:
+    """Samples' checks summed, rated as `benchmark.md` does: the mean of their rates."""
+    rates = [checks.rate for checks in samples if checks.rate is not None]
+
+    return Checks(
+        sum(checks.passed for checks in samples),
+        sum(checks.total for checks in samples),
+        sum(checks.scoped_passed for checks in samples),
+        sum(checks.scoped_total for checks in samples),
+        scoped_only=any(checks.scoped_only for checks in samples),
+        rate=statistics.mean(rates) if rates else None,
+    )
+
+
+def _skill_of(folder: str) -> str:
+    """The skill a folder belongs to: its parent, or the folder itself without one."""
+    return folder.partition("/")[0]
+
+
+def _ordered_folders(planned: list[Sample]) -> list[str]:
+    """The planned eval folders in plan order, each skill's folders together."""
+    folders = list(dict.fromkeys(sample.folder for sample in planned))
+    skills = list(dict.fromkeys(_skill_of(folder) for folder in folders))
+
+    return sorted(folders, key=lambda folder: skills.index(_skill_of(folder)))
+
+
+def _group_names(folders: list[str]) -> dict[str, tuple[str, str]]:
+    """Each folder as `(skill, group)` labels; the skill is left out when every group shares it."""
+    parents = {folder.rpartition("/")[0] for folder in folders}
+    names = {}
+
+    for folder in folders:
+        parent, _, name = folder.rpartition("/")
+        names[folder] = (f"{parent}/" if parent and len(parents) > 1 else "", f"{name}/")
+
+    return names
 
 
 def _scope_note(samples: list[Sample], arms: list[str]) -> str | None:

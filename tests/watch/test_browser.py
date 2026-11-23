@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import FloatRect, Locator, Page, expect
+from playwright.sync_api import FloatRect, Locator, Page, ViewportSize, expect
 
 from tests.support.browser import DESKTOP, PHONE, SCREENSHOTS, WIDE, Pages, watching
 from tests.support.cli import run_benchspec
@@ -35,6 +35,17 @@ def _rect(locator: Locator) -> FloatRect:
     assert rect is not None
 
     return rect
+
+
+def _open_groups(page: Page) -> None:
+    """Expand every group; a run with more than one group starts with all of them collapsed."""
+    collapsed = page.locator(".bs-gl[aria-expanded='false']")
+    expect(page.locator(".bs-gl").first).to_be_visible()
+
+    for _ in range(collapsed.count()):
+        collapsed.first.click()
+
+    expect(collapsed).to_have_count(0)
 
 
 def _shoot(page: Page, name: str, *, full_page: bool = True) -> None:
@@ -64,6 +75,7 @@ def test_a_live_run_shows_its_counter_matrix_and_hover_card(tmp_path: Path, page
         )
         expect(page.locator("#caption")).to_have_text("[ 13 evals × 2 arms · live ]")
         expect(page.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
+        _open_groups(page)
 
         judges = page.locator(JUDGES)
         expect(judges.locator(".bs-b")).to_have_class(
@@ -80,7 +92,9 @@ def test_a_live_run_shows_its_counter_matrix_and_hover_card(tmp_path: Path, page
         )
         assert page.locator(".bs-cell :is(.bs-badge, .bs-pill, svg, img)").count() == 0
         expect(page.locator(".bs-grp").nth(1)).to_contain_text("4 evals · [trial-only]")
-        expect(page.locator(".bs-grp").first.locator(".bs-gs").first).to_have_text("69% · 7/15")
+        expect(page.locator(".bs-grp").first.locator(".bs-gs").first).to_have_text(
+            "69% · 7/151 passed · 5 failed · 1 errored · 1 running · 1 quiet · 6 waiting"
+        )
 
         page.locator(LOGGED_OUT).hover()
         card = page.locator("#hovercard")
@@ -118,6 +132,7 @@ def test_the_drawer_opens_on_the_first_sample_that_did_not_pass(
 
     with watching(tmp_path) as served:
         page = pages.open(served)
+        _open_groups(page)
         cell = page.locator(LOGGED_OUT)
         cell.click()
         drawer = page.locator("#drawer")
@@ -165,6 +180,7 @@ def test_the_keyboard_reaches_a_cell_and_opens_its_drawer(tmp_path: Path, pages:
 
     with watching(tmp_path) as served:
         page = pages.open(served)
+        _open_groups(page)
         expect(page.locator("button.bs-cell[tabindex='0']")).to_have_count(1)
 
         page.locator("#tab-matrix").focus()
@@ -184,10 +200,10 @@ def test_the_keyboard_reaches_a_cell_and_opens_its_drawer(tmp_path: Path, pages:
         expect(page.locator(JUDGES)).to_be_focused()
 
 
-def test_the_keyboard_reaches_open_groups_after_the_first_one_collapses(
+def test_the_keyboard_opens_a_collapsed_group_and_reaches_its_cells(
     tmp_path: Path, pages: Pages
 ) -> None:
-    """The keyboard reaches open groups after the first one collapses."""
+    """The keyboard opens a collapsed group and reaches its cells."""
     run = Recording(iteration(tmp_path))
     run.plan("settled", "first")
     run.plan("pending", "second")
@@ -197,14 +213,17 @@ def test_the_keyboard_reaches_open_groups_after_the_first_one_collapses(
 
     with watching(tmp_path) as served:
         page = pages.open(served)
-        expect(page.locator(".bs-gl").first).to_have_attribute("aria-expanded", "false")
+        expect(page.locator(".bs-gl")).to_have_count(2)
+        expect(page.locator(".bs-gl[aria-expanded='false']")).to_have_count(2)
+        expect(page.locator("button.bs-cell[tabindex='0']")).to_have_count(0)
 
         page.locator(".bs-gl").nth(1).focus()
+        page.keyboard.press("Enter")
         page.keyboard.press("Tab")
         expect(page.locator("button.bs-cell[aria-label^='second on baseline']")).to_be_focused()
 
-        page.locator(".bs-gl").first.click()
         page.locator(".bs-gl").nth(1).click()
+        page.locator(".bs-gl").first.click()
         reopened = page.locator("button.bs-cell[aria-label^='first on baseline']")
         expect(reopened).to_have_attribute("tabindex", "0")
         page.locator(".bs-gl").first.focus()
@@ -219,6 +238,7 @@ def test_a_narrow_desktop_keeps_a_live_cells_elapsed_time(tmp_path: Path, pages:
 
     with watching(tmp_path) as served:
         page = pages.open(served, {"width": 768, "height": 900})
+        _open_groups(page)
         label = page.locator(f"{IMPLEMENT} .bs-t")
 
         expect(label).to_have_text(re.compile(r"^agent 2m \d\ds$"), use_inner_text=True)
@@ -263,16 +283,17 @@ def test_four_arms_span_a_wide_desktop_with_the_hover_card_under_its_cell(
 ) -> None:
     """Four arms span a wide desktop, with the hover card under its cell."""
     long_label_live(tmp_path)
+    tall: ViewportSize = {"width": WIDE["width"], "height": 1000}
 
     with watching(tmp_path) as served:
-        page = pages.open(served, WIDE)
+        page = pages.open(served, tall)
         booting = _cell(page, "allows-filesystem-traversal").locator(".bs-t")
 
         for part in ("#matrix", "#caption", ".bs-legend"):
             edges = _rect(page.locator(part))
             assert (edges["x"], edges["width"]) == (32, WIDE["width"] - 64)
 
-        expect(booting).to_have_text(re.compile(r"^0/3 · booting 2m \d\ds$"), use_inner_text=True)
+        expect(booting).to_have_text(re.compile(r"^snapshot 2m \d\ds$"), use_inner_text=True)
         assert booting.evaluate("node => node.clientWidth - node.scrollWidth") >= 0
         assert _fits(page.locator(".bs-eval"))
         assert _fits(page.locator(".bs-mhead > span"))
@@ -315,9 +336,7 @@ def test_the_hover_card_follows_the_pointer_down_and_up_a_column(
         expect(lower).not_to_have_attribute("aria-describedby", "hovercard")
 
 
-def test_a_hover_card_with_no_room_above_or_below_stays_below(
-    tmp_path: Path, pages: Pages
-) -> None:
+def test_a_hover_card_with_no_room_above_or_below_stays_below(tmp_path: Path, pages: Pages) -> None:
     """A hover card with no room above or below stays below."""
     long_label_live(tmp_path)
 
@@ -381,6 +400,7 @@ def test_new_events_update_the_page_without_a_reload(tmp_path: Path, pages: Page
 
     with watching(tmp_path) as served:
         page = pages.open(served)
+        _open_groups(page)
         quiet = page.locator(f"{IMPLEMENT} .bs-b").nth(2)
         expect(quiet).to_have_class(re.compile("bs-b-quiet"))
 
@@ -406,6 +426,7 @@ def test_new_events_update_the_page_without_a_reload(tmp_path: Path, pages: Page
         expect(quiet).to_have_class(re.compile("bs-b-pass"))
         expect(page.locator("#headline")).to_contain_text("20 of 54 samples finished")
         expect(page.locator("#tally li").first).to_have_text("13 passed")
+        expect(page.locator("#tally button").first).to_have_attribute("aria-pressed", "false")
 
 
 def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -> None:
@@ -444,6 +465,7 @@ def test_a_finished_run_opens_on_the_leaderboard(tmp_path: Path, pages: Pages) -
         assert table.locator("[aria-sort]").count() == 0
 
         page.locator("#tab-matrix").click()
+        _open_groups(page)
         expect(page.locator("#caption")).to_have_text("[ 10 evals × 4 arms · finished ]")
         expect(page.locator("div.bs-k-notrun")).to_have_text("not run")
         errored = page.locator("button.bs-cell[aria-label^='cites-lines on codex']")
@@ -534,6 +556,7 @@ def test_a_finished_two_arm_run_reads_like_the_mockups(tmp_path: Path, pages: Pa
         _shoot(page, "b")
 
         page.locator("#tab-matrix").click()
+        _open_groups(page)
         page.locator(JUDGES).click()
         drawer = page.locator("#drawer")
         expect(drawer.locator(".bs-st")).to_have_text("FAIL · 6/9 assertions")
@@ -590,10 +613,14 @@ def test_the_page_moves_to_the_leaderboard_at_run_end_unless_a_tab_was_picked(
         expect(untouched.locator("#status")).to_have_text("Run stopped · 19 of 54 samples")
         untouched.locator("#tab-matrix").click()
         expect(untouched.locator("#tally")).to_have_text("12 passed6 failed1 errored35 unfinished")
+        _open_groups(untouched)
         untouched.locator(IMPLEMENT).click()
         untouched.locator("#drawer .bs-next").click()
         expect(untouched.locator("#drawer .bs-st")).to_have_text("unfinished")
-        expect(untouched.locator("#drawer .bs-checks")).to_have_text("[ assertions ]")
+        expect(untouched.locator("#drawer .bs-checks .bs-section-label")).to_have_text(
+            "[ assertions · 9 planned ]"
+        )
+        expect(untouched.locator("#drawer .bs-pend")).to_have_count(0)
         expect(picked.locator("#reopen-line")).to_be_visible()
         expect(picked.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
         expect(picked.locator("#caption")).to_have_text("[ 13 evals × 2 arms · stopped ]")
@@ -607,6 +634,7 @@ def test_a_phone_shows_boxes_short_rates_and_a_bottom_sheet(tmp_path: Path, page
         page = pages.open(served, PHONE)
 
         assert page.evaluate("document.documentElement.scrollWidth") == PHONE["width"]
+        _open_groups(page)
         expect(page.locator("#run-state")).to_have_text("live", use_inner_text=True)
         expect(page.locator("#suite")).to_be_visible()
         assert _rect(page.locator(".bs-top"))["height"] == _rect(page.locator("#theme"))["height"]
@@ -660,6 +688,7 @@ def test_a_phone_scrolls_four_arms_under_a_pinned_eval_column(tmp_path: Path, pa
         expect(page.locator(".bs-lbc .bs-dl").first).to_have_text("codex is best · +40pp vs bare")
 
         page.locator("#tab-matrix").tap()
+        _open_groups(page)
         hint = page.locator("#arm-hint")
         expect(hint).to_have_text("arms 1–2 of 4 →")
         page.locator(".bs-mx-scroll").evaluate("scroller => scroller.scrollTo(240, 0)")
@@ -722,3 +751,132 @@ def test_watch_refuses_events_in_another_format(tmp_path: Path) -> None:
     assert result.stderr.strip() == (
         "error: events format_version 3 is not supported by this benchspec"
     )
+
+
+def test_without_room_beside_the_row_the_hover_card_sits_under_its_cell(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """Without room beside the row, the hover card sits under its cell, not over the ids."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served, {"width": 1100, "height": 1100})
+        _open_groups(page)
+        cell = page.locator("button.bs-cell[aria-label^='plan-review-judges-findings on trial']")
+        cell.evaluate("node => scrollBy(0, node.getBoundingClientRect().top - 200)")
+
+        box, card = _hover_card(page, cell)
+
+        assert card["y"] == _under(box)
+        assert card["x"] == pytest.approx(min(box["x"], 1100 - 16 - card["width"]), abs=1)
+        assert card["x"] > _rect(page.locator(".bs-eval").first)["x"] + 200
+
+
+def test_the_tally_filters_the_matrix_by_sample_state(tmp_path: Path, pages: Pages) -> None:
+    """The tally filters the matrix by sample state, from the mouse or the keyboard."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        failed = page.locator("#tally button", has_text="failed")
+        errored = page.locator("#tally button", has_text="errored")
+        rows = page.locator("#matrix .bs-mrow:not(.bs-grp):not(.bs-mhead):visible .bs-eval")
+
+        failed.click()
+        expect(failed).to_have_attribute("aria-pressed", "true")
+        expect(rows).to_have_text(
+            ["codex-logged-out", "plan-implement-task", "plan-review-judges-findings"]
+        )
+        expect(page.locator(".bs-grp:visible")).to_have_count(1)
+        expect(page.locator("#filter-note")).to_have_text("Showing 3 evals with failed samples.")
+
+        errored.focus()
+        page.keyboard.press("Enter")
+        failed.focus()
+        page.keyboard.press("Space")
+        expect(failed).to_have_attribute("aria-pressed", "false")
+        expect(rows).to_have_text(["codex-logged-out"])
+
+        page.locator("#clear-filters").click()
+        expect(page.locator("#clear-filters")).to_be_hidden()
+        expect(errored).to_have_attribute("aria-pressed", "false")
+        expect(page.locator("#filter-note")).to_be_hidden()
+        expect(page.locator(".bs-grp:visible")).to_have_count(3)
+        expect(page.locator(".bs-gl[aria-expanded='false']")).to_have_count(3)
+
+        page.locator("#tab-leaderboard").click()
+        failed.click()
+        expect(page.locator("#tab-matrix")).to_have_attribute("aria-selected", "true")
+
+
+def test_collapsed_groups_summarize_each_arm_and_heads_carry_its_rate(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """Groups start collapsed, each summarizing every arm; arm heads carry the pass rate."""
+    finished_frame(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        page.locator("#tab-matrix").click()
+
+        expect(page.locator(".bs-gl[aria-expanded='false']")).to_have_count(3)
+        expect(page.locator(".bs-eval:visible")).to_have_count(0)
+        expect(page.locator(".bs-grp").first.locator(".bs-gt")).to_have_text(
+            ["15 failed", "14 passed · 1 errored"]
+        )
+        expect(page.locator(".bs-mhead > span > b")).to_have_text(
+            ["baseline70%", "trial100% (+30pp)"]
+        )
+        _shoot(page, "collapsed")
+
+
+def test_the_drawer_of_a_queued_sample_lists_its_planned_lines(
+    tmp_path: Path, pages: Pages
+) -> None:
+    """The drawer of a queued sample says what it waits on and lists the lines to grade."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        _open_groups(page)
+        page.locator("button.bs-cell[aria-label^='user-review-presents on trial']").click()
+        drawer = page.locator("#drawer")
+
+        expect(drawer.locator(".bs-st")).to_have_text("queued")
+        expect(drawer.locator(".bs-doing")).to_have_text(
+            "Waiting for a free worker; 5 samples running now."
+        )
+        expect(drawer.locator(".bs-checks .bs-section-label")).to_have_text(
+            "[ assertions · 9 planned ]"
+        )
+        expect(drawer.locator(".bs-alst li")).to_have_count(9)
+        expect(drawer.locator(".bs-pend")).to_have_text("Graded when the sample finishes.")
+        path = _rect(drawer.locator(".bs-path"))
+        assert _rect(drawer)["y"] + _rect(drawer)["height"] == pytest.approx(
+            path["y"] + path["height"] + 24, abs=2
+        )
+        _shoot(page, "drawer-queued", full_page=False)
+
+
+def test_a_sample_at_work_pulses_in_a_neutral_colour(tmp_path: Path, pages: Pages) -> None:
+    """A running or booting box pulses in the foreground colour, never the error colour."""
+    mid_run(tmp_path)
+
+    with watching(tmp_path) as served:
+        page = pages.open(served)
+        _open_groups(page)
+        dot = (
+            "node => { const dot = getComputedStyle(node, '::after');"
+            " return [dot.animationName, dot.backgroundColor]; }"
+        )
+
+        for box in ("#matrix .bs-b-running", "#matrix .bs-b-booting"):
+            animation, color = page.locator(box).first.evaluate(dot)
+            assert (animation, color) == ("bs-pulse", _token_color(page, "fg"))
+            assert color != _token_color(page, "danger")
+
+        still = pages.open(served)
+        still.emulate_media(reduced_motion="reduce")
+        _open_groups(still)
+        count = "node => getComputedStyle(node, '::after').animationIterationCount"
+        assert still.locator("#matrix .bs-b-running").first.evaluate(count) == "1"

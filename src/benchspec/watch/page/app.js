@@ -18,7 +18,11 @@ let pickedTab = false;
 let lastState = null;
 let shape = "";
 let cells = new Map();
+let inert = new Map();
 let groups = new Map();
+let heads = [];
+let tallyShape = "";
+const filters = new Set();
 let selected = null;
 let drawerShown = "";
 let hovered = null;
@@ -207,28 +211,101 @@ function renderCounter(state) {
   progress.setAttribute("aria-valuetext", counter.progress);
   progress.firstElementChild.style.width = `${counter.total ? (100 * counter.done) / counter.total : 0}%`;
 
-  const marks = {
-    failed: "bs-att bs-failed",
-    errored: "bs-att",
-    quiet: "bs-warn",
-    waiting: "bs-wait",
-    unfinished: "bs-warn",
-  };
-  byId("tally").replaceChildren(
-    ...counter.tally.map(({ bucket, count }) =>
-      el("li", {
-        class: count ? marks[bucket] || "" : `bs-zero ${bucket === "failed" ? "bs-failed" : ""}`,
-        text: `${count} ${bucket}`,
-      }),
-    ),
-    counter.workers ? el("li", { class: "bs-wk", text: counter.workers }) : "",
-  );
+  renderTally(counter);
+  fillRunPhases(byId("run-phases"), counter.phases);
 
   byId("notes").hidden = !view.report && !ended;
   byId("report-line").hidden = !view.report;
   setText(byId("report"), view.report || "");
   byId("reopen-line").hidden = !ended;
   setText(byId("reopen"), view.reopen);
+}
+
+const TALLY_MARKS = {
+  failed: "bs-att bs-failed",
+  errored: "bs-att",
+  quiet: "bs-warn",
+  waiting: "bs-wait",
+  unfinished: "bs-warn",
+};
+
+// The tally's buckets are toggle buttons that filter the matrix. They are built once per
+// set of buckets and updated in place, so a live update never takes focus from one.
+function renderTally(counter) {
+  const tally = byId("tally");
+  const next = JSON.stringify([counter.tally.map(({ bucket }) => bucket), Boolean(counter.workers)]);
+
+  if (next !== tallyShape) {
+    tallyShape = next;
+    const known = new Set(counter.tally.map(({ bucket }) => bucket));
+    for (const bucket of [...filters]) if (!known.has(bucket)) filters.delete(bucket);
+    tally.replaceChildren(
+      ...counter.tally.map(({ bucket }) =>
+        el(
+          "li",
+          { "data-bucket": bucket },
+          el("button", { class: "bs-tf", type: "button", onclick: () => toggleFilter(bucket) }),
+        ),
+      ),
+      counter.workers ? el("li", { class: "bs-wk" }) : "",
+    );
+  }
+
+  for (const { bucket, count } of counter.tally) {
+    const item = tally.querySelector(`li[data-bucket="${bucket}"]`);
+    const pressed = filters.has(bucket);
+    setClass(item, count ? TALLY_MARKS[bucket] || "" : `bs-zero ${bucket === "failed" ? "bs-failed" : ""}`);
+    const button = item.firstElementChild;
+    setText(button, `${count} ${bucket}`);
+    button.setAttribute("aria-pressed", String(pressed));
+    button.disabled = !count && !pressed;
+  }
+
+  if (counter.workers) setText(tally.querySelector(".bs-wk"), counter.workers);
+  byId("clear-filters").hidden = filters.size === 0;
+}
+
+function toggleFilter(bucket) {
+  if (filters.has(bucket)) filters.delete(bucket);
+  else filters.add(bucket);
+
+  if (filters.size && tab !== "matrix") pickTab("matrix", false);
+  else render();
+}
+
+function clearFilters() {
+  filters.clear();
+  render();
+  const first = byId("tally").querySelector("button.bs-tf:not(:disabled)");
+
+  if (first) first.focus();
+}
+
+function fillRunPhases(section, phases) {
+  section.hidden = !phases;
+
+  if (!phases) return;
+
+  const bar = el("div", { class: "bs-phase", role: "img", "aria-label": phases.label });
+  const labels = el("div", { class: "bs-phl" });
+
+  for (const segment of phases.segments) {
+    const part = el("i", { class: `bs-p-${segment.kind}` });
+    part.style.width = `${100 * segment.share}%`;
+    bar.append(part);
+    labels.append(
+      el(
+        "span",
+        {},
+        el("i", { class: `bs-p-${segment.kind}` }),
+        segment.name,
+        el("b", { text: segment.time }),
+        segment.now ? el("span", { class: "bs-now", text: `· ${segment.now}` }) : "",
+      ),
+    );
+  }
+
+  section.replaceChildren(el("h3", { class: "bs-section-label", text: phases.caption }), bar, labels);
 }
 
 function announce(state) {
@@ -274,9 +351,9 @@ function renderMatrix() {
   const scrolls = phone.matches && !armsFit(matrix.arms.length);
   const next = JSON.stringify([
     scrolls,
-    matrix.arms,
+    matrix.arms.map((arm) => [arm.name, arm.detail]),
     matrix.groups.map((group) => [
-      group.name,
+      group.key,
       group.rows.map((row) => [
         row.id,
         row.cells.map((cell) => [cell.kind === "na", (cell.boxes || []).length]),
@@ -289,10 +366,28 @@ function renderMatrix() {
     buildMatrix(matrix, scrolls);
   }
 
+  matrix.arms.forEach((arm, index) => {
+    fill(
+      heads[index],
+      arm.rate || "",
+      arm.delta ? [" (", el(arm.delta.startsWith("+") ? "b" : "span", { text: arm.delta }), ")"] : "",
+    );
+    heads[index].hidden = !arm.rate;
+  });
+
+  let shown = 0;
+
   for (const group of matrix.groups) {
-    const refs = groups.get(group.name);
-    const open = groupToggles.has(group.name) ? groupToggles.get(group.name) : group.open;
+    const refs = groups.get(group.key);
+    const matches = group.rows.map(
+      (row) => filters.size === 0 || row.cells.some((cell) => (cell.buckets || []).some((b) => filters.has(b))),
+    );
+    const anyMatch = matches.some(Boolean);
+    const toggled = groupToggles.has(group.key) ? groupToggles.get(group.key) : group.open;
+    const open = filters.size ? anyMatch : toggled;
+    refs.head.hidden = filters.size > 0 && !anyMatch;
     refs.button.setAttribute("aria-expanded", String(open));
+    refs.button.disabled = filters.size > 0;
     setText(refs.chevron, open ? "▾" : "▸");
     refs.meta.replaceChildren(
       group.evals,
@@ -300,7 +395,10 @@ function renderMatrix() {
       group.note ? el("span", { text: group.note }) : "",
     );
 
-    for (const row of refs.rows) row.hidden = !open;
+    refs.rows.forEach((row, index) => {
+      row.hidden = !open || !matches[index];
+    });
+    shown += filters.size ? matches.filter(Boolean).length : 0;
     group.summaries.forEach((summary, index) => {
       const ref = refs.summaries[index];
       ref.text.replaceChildren(
@@ -310,23 +408,45 @@ function renderMatrix() {
       setClass(ref.box, summary.muted ? "bs-gs bs-q" : "bs-gs");
       setClass(ref.bar, summary.live ? "bs-gbar bs-live" : "bs-gbar");
       ref.bar.firstElementChild.style.width = `${100 * summary.bar}%`;
+      fill(
+        ref.tally,
+        summary.tally.map(({ bucket, count }, position) => [
+          position ? " · " : "",
+          el("span", { class: TALLY_MARKS[bucket] === "bs-wait" ? "" : TALLY_MARKS[bucket] || "", text: `${count} ${bucket}` }),
+        ]),
+      );
     });
 
     for (const row of group.rows) {
       row.cells.forEach((cell, column) => {
-        if (cells.has(keyOf(group, row, column))) updateCell(keyOf(group, row, column), cell);
+        const key = keyOf(group, row, column);
+
+        if (cells.has(key)) updateCell(key, cell);
+        else if (inert.has(key)) updateInert(key, cell);
       });
     }
   }
 
+  renderFilterNote(shown);
   keepACellReachable();
   updateArmHint();
+}
+
+function renderFilterNote(shown) {
+  const note = byId("filter-note");
+  note.hidden = filters.size === 0;
+
+  if (!filters.size) return;
+
+  const buckets = [...filters].join(" or ");
+  setText(note, shown ? `Showing ${shown} ${shown === 1 ? "eval" : "evals"} with ${buckets} samples.` : `No eval has ${buckets} samples.`);
 }
 
 function buildMatrix(matrix, scrolls) {
   const grid = byId("matrix");
   grid.style.setProperty("--bs-arms", matrix.arms.length);
   cells = new Map();
+  inert = new Map();
   groups = new Map();
   const small = matrix.arms.length >= MANY_ARMS || phone.matches;
 
@@ -339,10 +459,18 @@ function buildMatrix(matrix, scrolls) {
       el("span", { class: "bs-wide", text: "skill/eval_id" }),
       el("span", { class: "bs-narrow", text: "eval" }),
     ),
-    matrix.arms.map((arm) =>
-      el("span", { role: "columnheader" }, el("b", { text: arm.name }), el("span", {}, unbroken(arm.detail))),
-    ),
+    matrix.arms.map((arm, index) => {
+      heads[index] = el("span", { class: "bs-arate" });
+
+      return el(
+        "span",
+        { role: "columnheader" },
+        el("b", {}, el("span", { text: arm.name }), heads[index]),
+        el("span", {}, unbroken(arm.detail)),
+      );
+    }),
   );
+  heads.length = matrix.arms.length;
   const body = [];
   let rowIndex = 0;
 
@@ -351,24 +479,30 @@ function buildMatrix(matrix, scrolls) {
     const meta = el("span", { class: "bs-gmeta" });
     const button = el(
       "button",
-      { class: "bs-gl", type: "button", role: "rowheader", onclick: () => toggleGroup(group.name) },
-      el("span", { class: "bs-gname" }, chevron, group.name),
+      { class: "bs-gl", type: "button", role: "rowheader", onclick: () => toggleGroup(group.key) },
+      el(
+        "span",
+        { class: "bs-gname" },
+        chevron,
+        group.parent ? el("span", { class: "bs-gpar", text: group.parent }) : "",
+        group.name,
+      ),
       meta,
     );
     const summaries = group.summaries.map(() => {
       const text = el("span");
       const bar = el("div", { class: "bs-gbar" }, el("i"));
+      const tally = el("span", { class: "bs-gt" });
 
-      return { text, bar, box: el("div", { class: "bs-gs", role: "gridcell" }, text, bar) };
+      return { text, bar, tally, box: el("div", { class: "bs-gs", role: "gridcell" }, text, bar, tally) };
     });
-    body.push(
-      el(
-        "div",
-        { class: "bs-mrow bs-grp", role: "row" },
-        button,
-        summaries.map((summary) => summary.box),
-      ),
+    const head = el(
+      "div",
+      { class: "bs-mrow bs-grp", role: "row" },
+      button,
+      summaries.map((summary) => summary.box),
     );
+    body.push(head);
 
     const rows = group.rows.map((row) => {
       const position = rowIndex++;
@@ -387,7 +521,7 @@ function buildMatrix(matrix, scrolls) {
       );
     });
     body.push(...rows);
-    groups.set(group.name, { button, chevron, meta, summaries, rows });
+    groups.set(group.key, { head, button, chevron, meta, summaries, rows });
   }
 
   if (scrolls) {
@@ -424,7 +558,7 @@ function unbroken(text) {
 }
 
 function keyOf(group, row, column) {
-  return `${group.name}${row.id}/${column}`;
+  return `${group.key}/${row.id}/${column}`;
 }
 
 function buildCell(cell, key, row, column, small) {
@@ -437,16 +571,17 @@ function buildCell(cell, key, row, column, small) {
   }
 
   if (cell.kind === "na") {
-    return el(
+    const boxes = cell.boxes.map((name) => el("i", { class: `bs-b ${name}` }));
+    const label = el("span", { class: "bs-t bs-rate", text: cell.label });
+    const node = el(
       "div",
       { class: "bs-cell bs-k-na", role: "img", "aria-label": cell.aria },
-      el(
-        "span",
-        { class: small ? "bs-bx bs-sm" : "bs-bx" },
-        cell.boxes.map((name) => el("i", { class: `bs-b ${name}` })),
-      ),
-      el("span", { class: "bs-t bs-rate", text: cell.label }),
+      el("span", { class: small ? "bs-bx bs-sm" : "bs-bx" }, boxes),
+      label,
     );
+    inert.set(key, { node, boxes, label });
+
+    return node;
   }
 
   const boxes = cell.boxes.map(() => el("i"));
@@ -492,10 +627,19 @@ function updateCell(key, cell) {
   else setText(ref.label, cell.label);
 }
 
-function toggleGroup(name) {
-  const refs = groups.get(name);
-  groupToggles.set(name, refs.button.getAttribute("aria-expanded") !== "true");
-  schedule();
+// A cell that grades nothing on its arm: its boxes still show a sample at work.
+function updateInert(key, cell) {
+  const ref = inert.get(key);
+  ref.node.setAttribute("aria-label", cell.aria);
+  cell.boxes.forEach((name, index) => setClass(ref.boxes[index], `bs-b ${name}`));
+  setText(ref.label, cell.label);
+}
+
+// Renders at once, not on the next frame, so focus can move into a group just opened.
+function toggleGroup(key) {
+  const refs = groups.get(key);
+  groupToggles.set(key, refs.button.getAttribute("aria-expanded") !== "true");
+  renderMatrix();
 }
 
 function syncArms(event) {
@@ -589,7 +733,7 @@ function renderHoverCard() {
   const sample = ref.data.samples[0];
   fill(
     card,
-    el("div", { class: "bs-hid", text: `${sample.skill}/${sample.eval_id}` }),
+    el("div", { class: "bs-hid", text: `${sample.folder}/${sample.eval_id}` }),
     el("div", { class: "bs-muted", text: sample.arm }),
     el(
       "div",
@@ -597,6 +741,7 @@ function renderHoverCard() {
       el("b", { text: hover.rate }),
       el("span", { class: "bs-muted", text: hover.checks }),
     ),
+    hover.scoped ? el("div", { class: "bs-muted", text: hover.scoped }) : "",
     hover.problem
       ? el("div", { class: hover.problem.warn ? "bs-hprob bs-warn" : "bs-hprob", text: hover.problem.text })
       : "",
@@ -622,13 +767,16 @@ function renderHoverCard() {
   card.style.top = `${top}px`;
 }
 
+// Right of the row when the window leaves room there; otherwise under the hovered cell.
 function besideRow(card, button) {
   const row = button.closest(".bs-mrow").getBoundingClientRect();
   const gap = tokenPx("--space-16");
-  const beside = row.right + gap + card.offsetWidth <= innerWidth;
+
+  if (row.right + gap + card.offsetWidth > innerWidth) return underCell(card, button);
+
   const top = row.top + card.offsetHeight > innerHeight ? row.bottom - card.offsetHeight : row.top;
 
-  return { left: beside ? row.right + gap : row.left, top: Math.max(gap, top) };
+  return { left: row.right + gap, top: Math.max(gap, top) };
 }
 
 function underCell(card, button) {
@@ -688,9 +836,9 @@ function renderDrawer() {
   const sample = samples[Math.min(selected.sample, samples.length - 1)];
   setClass(drawer, phone.matches ? "bs-drawer bs-sheet" : "bs-drawer");
   const gap = tokenPx("--space-16");
-  drawer.style.top = phone.matches
-    ? ""
-    : `${Math.max(gap, byId("counter").getBoundingClientRect().bottom + gap)}px`;
+  const top = Math.max(gap, byId("counter").getBoundingClientRect().bottom + gap);
+  drawer.style.top = phone.matches ? "" : `${top}px`;
+  drawer.style.maxHeight = phone.matches ? "" : `${innerHeight - top - tokenPx("--space-32")}px`;
 
   const showing = JSON.stringify([sample.cell, sample.graded]);
 
@@ -705,7 +853,12 @@ function renderDrawer() {
     el("span", { class: sample.bad ? "bs-bad" : "", text: sample.verdict }),
     sample.detail ? ` · ${sample.detail}` : "",
   );
-  setText(drawer.querySelector(".bs-facts"), phone.matches ? sample.facts_phone : sample.facts);
+  const doing = drawer.querySelector(".bs-doing");
+  doing.hidden = !sample.doing;
+  setText(doing, sample.doing || "");
+  const facts = drawer.querySelector(".bs-facts");
+  facts.hidden = !sample.facts;
+  setText(facts, phone.matches ? sample.facts_phone : sample.facts);
   fillPhases(drawer.querySelector(".bs-phases"), sample.phases);
   drawer
     .querySelector(".bs-out")
@@ -736,13 +889,8 @@ function buildDrawer(drawer, samples, sample) {
       "div",
       { class: "bs-dh" },
       el("div", { class: "bs-st" }),
-      el(
-        "div",
-        { class: "bs-id" },
-        el("span", { text: `${sample.skill}/` }),
-        el("wbr"),
-        el("b", { text: sample.eval_id }),
-      ),
+      el("div", { class: "bs-id" }, breakable(sample.folder), el("b", { text: sample.eval_id })),
+      el("p", { class: "bs-doing" }),
       el(
         "div",
         { class: "bs-sub" },
@@ -782,7 +930,7 @@ function buildDrawer(drawer, samples, sample) {
       "section",
       { class: "bs-checks" },
       el("h3", { class: "bs-section-label", text: "[ assertions ]" }),
-      el("p", { class: "bs-muted", text: sample.pending || "" }),
+      el("p", { class: "bs-pend", text: sample.pending || "" }),
     ),
     el("section", { class: "bs-phases", hidden: true }),
     el(
@@ -799,6 +947,7 @@ function fillPhases(section, phases) {
   section.hidden = !phases;
 
   if (!phases) return;
+
   const bar = el("div", { class: "bs-phase", role: "img", "aria-label": phases.label });
   const labels = el("div", { class: "bs-phl" });
 
@@ -820,14 +969,15 @@ function fillPhases(section, phases) {
   section.replaceChildren(el("h3", { class: "bs-section-label", text: phases.caption }), bar, labels);
 }
 
+// A graded sample shows its verdicts; one still to grade shows the lines it will be graded on.
 async function loadAssertions(sample) {
-  if (!sample.graded) return;
-  const response = await fetch(`grading?cell=${encodeURIComponent(sample.cell)}`);
+  const route = sample.graded ? "grading" : "plan";
+  const response = await fetch(`${route}?cell=${encodeURIComponent(sample.cell)}`);
   const section = byId("drawer").querySelector(".bs-checks");
 
   if (!section || drawerShown !== JSON.stringify([sample.cell, sample.graded])) return;
   if (!response.ok) {
-    section.lastElementChild.textContent = "No grading for this sample.";
+    if (sample.graded) section.lastElementChild.textContent = "No grading for this sample.";
 
     return;
   }
@@ -835,6 +985,10 @@ async function loadAssertions(sample) {
   const grading = await response.json();
   let opened = false;
   const items = grading.assertions.map((assertion) => {
+    if (assertion.state === "planned") {
+      return el("li", {}, el("span", { class: "bs-pl", text: "·" }), el("span", { text: assertion.text }));
+    }
+
     if (assertion.state === "n/a") {
       return el(
         "li",
@@ -868,6 +1022,7 @@ async function loadAssertions(sample) {
   section.replaceChildren(
     el("h3", { class: "bs-section-label", text: grading.caption }),
     el("ul", { class: "bs-alst" }, items),
+    sample.pending ? el("p", { class: "bs-pend", text: sample.pending }) : "",
   );
 }
 
@@ -1064,6 +1219,7 @@ document.querySelector(".bs-tabs").addEventListener("keydown", (event) => {
 });
 
 byId("matrix").addEventListener("keydown", moveInGrid);
+byId("clear-filters").addEventListener("click", clearFilters);
 byId("scrim").addEventListener("click", closeDrawer);
 
 document.addEventListener("keydown", (event) => {

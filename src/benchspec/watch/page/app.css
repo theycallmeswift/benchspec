@@ -23,7 +23,7 @@
   --dot-3: var(--wm-left);
   --status-timeout: var(--warn);
   --status-error: var(--danger);
-  --status-running: var(--accent);
+  --status-running: var(--fg);
   --status-quiet: var(--warn);
   --status-queued: var(--fg-tertiary);
   --status-na: var(--fg-tertiary);
@@ -242,15 +242,15 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: var(--type-body
 }
 .bs-b-error { background: var(--danger-tint); box-shadow: inset 0 0 0 var(--stroke-ring) var(--status-error); }
 .bs-b-running { box-shadow: inset 0 0 0 var(--stroke-ring) var(--status-running); }
-.bs-b-running::after { content: ""; position: absolute; inset: 0; margin: auto; width: var(--size-dot); height: var(--size-dot); border-radius: 50%; background: var(--status-running); animation: bs-pulse var(--dur-pulse) ease-in-out infinite; }
+.bs-b-running::after, .bs-b-booting::after { content: ""; position: absolute; inset: 0; margin: auto; width: var(--size-dot); height: var(--size-dot); border-radius: 50%; background: var(--status-running); animation: bs-pulse var(--dur-pulse) ease-in-out infinite; }
 .bs-b-booting { border: var(--stroke-ring) dashed var(--status-running); }
 /* At size-box-sm a dashed border renders solid: cut the side midpoints so the ring stays dashed. */
 .bs-sm .bs-b-booting { border: 0; box-shadow: inset 0 0 0 var(--stroke-ring) var(--status-running); mask: linear-gradient(#000, #000), linear-gradient(#000, #000) center / 34% 100% no-repeat, linear-gradient(#000, #000) center / 100% 34% no-repeat; mask-composite: exclude; }
 .bs-b-quiet { box-shadow: inset 0 0 0 var(--stroke-ring) var(--status-quiet); background: linear-gradient(var(--status-quiet), var(--status-quiet)) center / var(--size-quiet-bar) var(--stroke-ring) no-repeat; }
 .bs-b-queued { box-shadow: inset 0 0 0 var(--stroke-outline) var(--status-queued); }
 .bs-b-na { box-shadow: inset 0 0 0 var(--stroke-outline) var(--status-na); background: linear-gradient(135deg, transparent 44%, var(--status-na) 44% 56%, transparent 56%); }
-@keyframes bs-pulse { 50% { transform: scale(0.7); } }
-.bs-stale-run .bs-b-running::after { animation: none; }
+@keyframes bs-pulse { 50% { transform: scale(0.4); } }
+.bs-stale-run :is(.bs-b-running, .bs-b-booting)::after { animation: none; }
 
 /* Legend: its own band under the matrix, boxes at cell size. */
 .bs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); margin: var(--space-16) 0 0; padding: var(--space-12) 0 0; border-top: var(--stroke-hair) solid var(--line); list-style: none; font: var(--type-meta); color: var(--muted); }
@@ -528,5 +528,32 @@ button.bs-gl { appearance: none; padding: 0; border: 0; background: none; color:
 .bs-lb .bs-v.bs-muted, .bs-lbl .bs-v.bs-muted { color: var(--muted); }
 .bs-cell.bs-k-na { cursor: default; }
 .bs-cell.bs-k-na:hover { background: transparent; }
-/* Between phone and desktop a live label keeps its phase and time, not its count. */
+/* Between phone and desktop, and in four-arm cells, a live label keeps its phase and time, not its count. */
 @media (max-width: 1023px) { .bs-cell .bs-count { display: none; } }
+#matrix:has(.bs-sm) .bs-cell .bs-count { display: none; }
+/* The drawer sizes to its content, up to the room under the Counter (set by the page). */
+.bs-drawer { bottom: auto; align-content: start; }
+.bs-dh .bs-doing { margin: var(--space-4) 0 0; font: var(--type-help); color: var(--muted); }
+.bs-checks .bs-pend { margin: 0; font: var(--type-help); color: var(--muted); }
+.bs-checks .bs-alst + .bs-pend { margin-top: var(--space-8); }
+.bs-alst .bs-pl { color: var(--fg-tertiary); }
+/* Tally buckets are filter toggles: pressed reads as selected, a 2px accent underline. */
+.bs-tf { appearance: none; padding: var(--space-4) 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.bs-tf:hover:not(:disabled) { color: var(--fg); }
+.bs-tf[aria-pressed="true"] { color: var(--fg); box-shadow: inset 0 calc(-1 * var(--stroke-ring)) var(--accent); }
+.bs-tf:disabled { color: var(--fg-tertiary); cursor: not-allowed; }
+.bs-trow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-24); }
+.bs-trow .bs-btn { height: auto; padding: var(--space-4) var(--space-8); }
+.bs-fnote { margin: 0 0 var(--space-8); font: var(--type-meta); color: var(--muted); }
+.bs-gname .bs-gpar { color: var(--fg-tertiary); font-weight: 400; }
+.bs-gt { font: var(--type-meta); color: var(--muted); }
+.bs-gt > span { white-space: nowrap; }
+.bs-gt .bs-att { color: var(--danger); }
+.bs-gt .bs-warn { color: var(--warn); }
+.bs-mhead b > span { overflow: hidden; text-overflow: ellipsis; }
+.bs-mhead .bs-arate { margin-left: var(--space-8); color: var(--fg); font-weight: 400; }
+.bs-mhead .bs-arate b { display: inline; color: var(--success); font-weight: 400; }
+.bs-rph .bs-phl .bs-now { color: var(--muted); }
+@media (max-width: 639px) {
+  .bs-gt, .bs-mhead .bs-arate { display: none; }
+}

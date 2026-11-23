@@ -74,7 +74,8 @@ samples otherwise, `—` for an arm with no graded sample:
 | hello/greets-by-name · Skill `hello` invoked | skipped | pass |
 
 If every line of an eval is scoped out of an arm, that matrix cell is `—`, like
-an all-errored one.
+an all-errored one. The [watch page](watching/README.md#how-it-counts) rates
+an eval whose every line is scoped on those lines instead.
 
 **Per-arm sections.** One per arm: pass rate, harness, model and cell timeout,
 pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,
@@ -323,9 +324,13 @@ artifact path does.
 | `run.end` | `exit_status`, `wall_ms`, `done`, `errored`, `benchmark_md`, `benchmark_json` (repo-relative; `null` when not written) | Once, by the controller, after the reports; on Ctrl-C too |
 
 - **`run.start.cells`** lists every planned sample, honoring `-k` and
-  `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, and `applies`, one
+  `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, `folder` (the eval's
+  group under its skill, such as `to-spec/triggers`), `assertions` (the lines
+  as written), and `applies`, one
   flag per assertion line, true where the line is graded in that arm. A sample
-  with no true flag grades nothing.
+  with no true flag grades nothing. The skill in `folder` is the nearest
+  folder above the group, below the repo root, not named `evals`; a flat
+  `evals/<group>/` layout has none, so `folder` is the group alone.
 - **Phases.** `bind` is the binder; `boot` creates the sandbox; `setup` is
   `setup.sh`; `agent` is the turn; `grade` is everything after it. A
   [timed-out sample](#timed-out-samples) skips the phases the cap cut off. A

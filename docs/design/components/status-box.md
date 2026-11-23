@@ -15,8 +15,8 @@ text equivalent; never omit it: every state in order, a fail with its checks
 | fail | `bs-b-fail` + `bs-f1` / `bs-f2` / `bs-f3` | `status-fail-1` / `-2` / `-3` | solid square, same size as pass | At least one check failed. |
 | timeout | `bs-b-timeout` | `status-timeout` | warn fill, knocked-out horizontal bar | Hit the time cap; checks still graded. |
 | error | `bs-b-error` | `status-error` | 2px danger ring on `danger-tint` | Crashed before grading. |
-| running | `bs-b-running` | `status-running` | 2px accent ring, 5px centre dot (only the dot pulses) | The agent is working. |
-| booting | `bs-b-booting` | `status-running` | 2px dashed accent ring | Sandbox starting or `setup.sh` running. |
+| running | `bs-b-running` | `status-running` | 2px `fg` ring, 5px centre dot (only the dot pulses) | The agent is working. |
+| booting | `bs-b-booting` | `status-running` | 2px dashed `fg` ring, 5px centre dot (only the dot pulses) | Snapshot, sandbox starting, waiting for a slot, or `setup.sh` running. |
 | quiet | `bs-b-quiet` | `status-quiet` | 2px warn ring, 6×2px centre bar | Running agent silent for 30s or more. |
 | queued | `bs-b-queued` | `status-queued` | empty 1.5px outline | Waiting for a free worker. |
 | n/a | `bs-b-na` | `status-na` | 1.5px outline, diagonal slash | Every check runs only on another arm. |
@@ -51,5 +51,7 @@ or warn.
   (`bs-b-failsteps`) in a button whose tooltip reads "Darker = fewer checks
   passed." (`role="tooltip"`, `aria-describedby`, hover and focus open it, Esc
   dismisses; never `title`).
+- Work in progress is neutral (`fg`) and pulses; never draw it in `accent` or
+  `danger`, where it reads as a failure.
 - Don't: add states, recolour pass green, grade pass or other states, add a
   pass-rate colour ramp, fade boxes with opacity, or draw an outline in `line`.
