@@ -829,6 +829,38 @@ def test_arm_session_setup_that_outlives_the_cell_cap_stops_the_guest(
     assert guest.stopped is True
 
 
+def test_arm_session_interrupted_during_the_artifact_baseline_stops_the_guest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A booted guest whose baseline snapshot is cancelled is stopped, not left running."""
+    guest = FakeSandbox()
+
+    async def boots(**kwargs: object) -> FakeSandbox:
+        """Boot the fake guest at once."""
+        return guest
+
+    async def never_finishes(*args: object, **kwargs: object) -> None:
+        """Hang like a guest that never answers."""
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(sandbox, "_snapshot_artifact_shas", never_finishes)
+    session = _session_with_a_nearly_spent_deadline(
+        monkeypatch, tmp_path, setup_reldir=None, create_sandbox=boots
+    )
+
+    async def interrupt_the_baseline() -> None:
+        """Enter the session, then cancel it the way Ctrl-C cancels `asyncio.run`."""
+        entering = asyncio.ensure_future(session.__aenter__())
+        await asyncio.sleep(0.01)
+        entering.cancel()
+        await entering
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(interrupt_the_baseline())
+
+    assert guest.stopped is True
+
+
 def test_arm_session_syncs_the_workspace_out_before_stopping_a_guest_capped_in_setup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

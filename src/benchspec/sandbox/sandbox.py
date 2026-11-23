@@ -65,6 +65,8 @@ PROJECT_MOUNT = "/project"
 # enough to take a slot soon after one frees.
 CAPACITY_RETRY_FIRST_SECONDS = 2.0
 CAPACITY_RETRY_MAX_SECONDS = 15.0
+# Enough doublings to pass the ceiling; unbounded, a long wait overflows a float.
+CAPACITY_RETRY_MAX_DOUBLINGS = 3
 
 
 def snapshot_name(
@@ -205,9 +207,8 @@ def capacity_retry_delay(attempt: int, *, jitter: Callable[[], float] = random.r
     `CAPACITY_RETRY_MAX_SECONDS`, then keeps a random 50-100% of it, so cells refused
     together do not all retry together.
     """
-    ceiling = min(
-        CAPACITY_RETRY_MAX_SECONDS, CAPACITY_RETRY_FIRST_SECONDS * 2 ** min(attempt, 16)
-    )
+    doublings = min(attempt, CAPACITY_RETRY_MAX_DOUBLINGS)
+    ceiling = min(CAPACITY_RETRY_MAX_SECONDS, CAPACITY_RETRY_FIRST_SECONDS * 2**doublings)
 
     return ceiling * (0.5 + jitter() / 2)
 
@@ -359,6 +360,7 @@ class SandboxSession:
                 ) from error
 
             raise
+
         self._events.phase(PHASE_SETUP)
         # Install before the artifact baseline so only later agent-authored files surface.
         if self._setup_reldir is not None:
@@ -385,9 +387,16 @@ class SandboxSession:
                     await self._backend.stop_quietly(self._sandbox)
 
                 raise
-        self._artifact_base = await _snapshot_artifact_shas(
-            self._sandbox, self._agent, self._backend
-        )
+
+        try:
+            self._artifact_base = await _snapshot_artifact_shas(
+                self._sandbox, self._agent, self._backend
+            )
+        except BaseException:
+            await self._backend.stop_quietly(self._sandbox)
+
+            raise
+
         return self._run
 
     async def _boot(self, run_name: str) -> LiveSandbox:
