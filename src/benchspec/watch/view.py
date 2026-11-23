@@ -73,7 +73,6 @@ class Sample:
     index: int
     folder: str = ""
     applies: list[bool] | None = None
-    assertions: list[str] = field(default_factory=list)
     started_ms: int | None = None
     phases: list[tuple[str, int]] = field(default_factory=list)
     wait: dict | None = None
@@ -309,7 +308,7 @@ def plan_view(planned: dict) -> dict:
     entries = [
         {"index": index, "state": "planned" if holds else "n/a", "text": text}
         for index, (text, holds) in enumerate(
-            zip(planned.get("assertions", []), planned["applies"], strict=False)
+            zip(planned["assertions"], planned["applies"], strict=True)
         )
     ]
     entries.sort(key=lambda entry: entry["state"] == "n/a")
@@ -421,8 +420,7 @@ class RunView:
             for planned in event["cells"]:
                 sample = self._sample(planned)
                 sample.applies = planned["applies"]
-                sample.folder = planned.get("folder", planned["skill"])
-                sample.assertions = planned.get("assertions", [])
+                sample.folder = planned["folder"]
 
         elif kind == "run.end":
             self._end = event
@@ -877,14 +875,13 @@ class RunView:
             "cell": sample.cell,
             "number": sample.index + 1,
             "of": of,
-            "group": sample.folder,
+            "folder": sample.folder,
             "eval_id": sample.eval_id,
             "arm": sample.arm,
             "verdict": verdict,
             "detail": detail,
             "doing": self._doing(sample, now_ms),
             "pending": pending,
-            "lines": len(sample.assertions),
             "bad": state in ("fail", "error"),
             "passes": state == "pass",
             "graded": sample.closed_ms is not None,

@@ -8,7 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from benchspec.config.arms import Arm
+from benchspec.orchestration.cases import planned_cells
 from benchspec.reporting import report
+from benchspec.specs.discovery import EvalCase
 from benchspec.watch.view import STALE_MARGIN_S, assertions_view, fail_step
 from tests.support.watch import (
     CELL_CAP_S,
@@ -25,6 +28,7 @@ from tests.support.watch import (
 )
 
 CELL = "hello/greets/trial/0"
+TRIAL = Arm("trial", "claude-code", "sonnet")
 
 
 def _one_cell(tmp_path: Path, *, checks: int = 3, count: int = 1) -> Recording:
@@ -894,7 +898,6 @@ def test_the_drawer_says_what_an_unfinished_sample_is_doing(tmp_path: Path) -> N
     assert building["phases"]["label"] == "snapshot 45.0s"
     assert (queued["verdict"], queued["detail"], queued["phases"]) == ("queued", None, None)
     assert queued["doing"] == "Waiting for a free worker; 2 samples running now."
-    assert queued["lines"] == 3
     assert in_setup["doing"] == "Running the eval's setup.sh."
     assert in_setup["pending"] == "Graded when the sample finishes."
 
@@ -923,7 +926,7 @@ def test_groups_keep_each_skills_folders_together_under_its_name(tmp_path: Path)
         ["capture-as-spec"],
         ["open-pr"],
     ]
-    assert cell_of(view, "open-pr", "trial")["samples"][0]["group"] == "pull-request/triggers"
+    assert cell_of(view, "open-pr", "trial")["samples"][0]["folder"] == "pull-request/triggers"
     assert view["top"]["suite"] == "e2e"
 
 
@@ -941,6 +944,62 @@ def test_a_one_skill_run_names_the_skill_once_in_the_top_bar(tmp_path: Path) -> 
         ("", "triggers/"),
     ]
     assert view["top"]["suite"] == "e2e · to-spec"
+
+
+def _planned(repo: Path, eval_dir: str, eval_id: str) -> list[dict]:
+    """The trial arm's planned sample of one eval file under `repo`, as the run plans it."""
+    group = Path(eval_dir).name
+    case = EvalCase(
+        group=group,
+        eval_dir=repo / eval_dir,
+        eval_file=repo / eval_dir / f"{eval_id}.eval.md",
+        eval={"id": eval_id, "prompt": "Say hi.", "assertions": ["greeting written"]},
+    )
+
+    cells = planned_cells(
+        [f"{eval_dir}/{eval_id}.eval.md::test_eval[{group}-{eval_id}-trial]"],
+        [(case, TRIAL)],
+        count=1,
+        baseline=None,
+        eval_set="",
+    )
+
+    return [dict(cell) for cell in cells]
+
+
+def test_a_suite_nested_under_evals_folders_groups_under_its_skill(tmp_path: Path) -> None:
+    """A suite laid out as the in-repo `hello` one groups under `hello`, not `evals`."""
+    run = Recording(iteration(tmp_path), arms=[arm("trial")], baseline=None)
+    run.planned = [
+        *_planned(tmp_path, "evals/e2e/hello/evals/hello", "greets-by-name"),
+        *_planned(tmp_path, "evals/e2e/hello/evals/hello-routing", "fires-on-a-greeting"),
+    ]
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert view["top"]["suite"] == "e2e · hello"
+    assert [(group["parent"], group["name"]) for group in view["matrix"]["groups"]] == [
+        ("", "hello/"),
+        ("", "hello-routing/"),
+    ]
+
+
+def test_same_named_groups_under_two_skills_evals_folders_stay_apart(tmp_path: Path) -> None:
+    """Two skills' `evals/triggers/` folders are two groups, each under its skill."""
+    run = Recording(iteration(tmp_path), arms=[arm("trial")], baseline=None)
+    run.planned = [
+        *_planned(tmp_path, "skills/to-spec/evals/triggers", "capture-as-spec"),
+        *_planned(tmp_path, "skills/pull-request/evals/triggers", "open-pr"),
+    ]
+    run.begin()
+
+    view = fold(run, at=1)
+
+    assert [(group["parent"], group["name"]) for group in view["matrix"]["groups"]] == [
+        ("to-spec/", "triggers/"),
+        ("pull-request/", "triggers/"),
+    ]
 
 
 def test_each_arm_head_carries_the_leaderboards_pass_rate_and_delta(tmp_path: Path) -> None:

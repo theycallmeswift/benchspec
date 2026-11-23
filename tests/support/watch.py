@@ -61,8 +61,8 @@ class Recording:
             only: Line index to the arms that line is scoped to; other lines run everywhere.
             arms: The arms that collected this eval; every arm when None.
             count: Samples per arm.
-            folder: The eval's folder under its parent, such as `to-spec/triggers`; left
-                out of the plan when None, as a stream written before it was added.
+            folder: The eval's group under its skill, such as `to-spec/triggers`;
+                `<skill>/<skill>` when None.
         """
         names = ["judge"] * checks if isinstance(checks, int) else checks
         self.checkers[(skill, eval_id)] = names
@@ -80,7 +80,7 @@ class Recording:
                             name in (only or {}).get(index, [name]) for index in range(len(names))
                         ],
                         "assertions": [_line_text(index) for index in range(len(names))],
-                        **({"folder": folder} if folder else {}),
+                        "folder": folder or f"{skill}/{skill}",
                     }
                 )
 

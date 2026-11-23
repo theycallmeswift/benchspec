@@ -285,6 +285,7 @@ function fillRunPhases(section, phases) {
   section.hidden = !phases;
 
   if (!phases) return;
+
   const bar = el("div", { class: "bs-phase", role: "img", "aria-label": phases.label });
   const labels = el("div", { class: "bs-phl" });
 
@@ -436,6 +437,7 @@ function renderFilterNote(shown) {
   note.hidden = filters.size === 0;
 
   if (!filters.size) return;
+
   const buckets = [...filters].join(" or ");
   setText(note, shown ? `Showing ${shown} ${shown === 1 ? "eval" : "evals"} with ${buckets} samples.` : `No eval has ${buckets} samples.`);
 }
@@ -731,7 +733,7 @@ function renderHoverCard() {
   const sample = ref.data.samples[0];
   fill(
     card,
-    el("div", { class: "bs-hid", text: `${sample.group}/${sample.eval_id}` }),
+    el("div", { class: "bs-hid", text: `${sample.folder}/${sample.eval_id}` }),
     el("div", { class: "bs-muted", text: sample.arm }),
     el(
       "div",
@@ -771,6 +773,7 @@ function besideRow(card, button) {
   const gap = tokenPx("--space-16");
 
   if (row.right + gap + card.offsetWidth > innerWidth) return underCell(card, button);
+
   const top = row.top + card.offsetHeight > innerHeight ? row.bottom - card.offsetHeight : row.top;
 
   return { left: row.right + gap, top: Math.max(gap, top) };
@@ -886,7 +889,7 @@ function buildDrawer(drawer, samples, sample) {
       "div",
       { class: "bs-dh" },
       el("div", { class: "bs-st" }),
-      el("div", { class: "bs-id" }, breakable(sample.group), el("b", { text: sample.eval_id })),
+      el("div", { class: "bs-id" }, breakable(sample.folder), el("b", { text: sample.eval_id })),
       el("p", { class: "bs-doing" }),
       el(
         "div",
@@ -944,6 +947,7 @@ function fillPhases(section, phases) {
   section.hidden = !phases;
 
   if (!phases) return;
+
   const bar = el("div", { class: "bs-phase", role: "img", "aria-label": phases.label });
   const labels = el("div", { class: "bs-phl" });
 
