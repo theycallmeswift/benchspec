@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
 import textwrap
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -800,3 +803,92 @@ def test_a_run_warns_once_when_its_cells_wait_for_a_sandbox_slot(
         "warning: this e2b account runs at most 10 sandboxes at once; cells past that wait "
         "in boot for a free one. Pass --workers 10 to match (this run has 20)."
     ]
+
+
+def test_a_passthrough_iteration_wins_and_the_run_follows_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `run` picks no iteration when pytest args name one, and warns from that one."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, passthrough=["--benchspec-iteration", "iteration_09"])
+    recorder = _SpawnRecord()
+
+    def runner(argv: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        """Stand in for pytest: a cell of the named iteration is refused for capacity."""
+        recorder.argv = argv
+        iteration_dir = tmp_path / "tmp" / "evals" / "iteration_09"
+        iteration_dir.mkdir(parents=True)
+        wait = {
+            "format_version": FORMAT_VERSION,
+            "type": "cell.wait",
+            "ts_ms": 0,
+            "worker": "main",
+            "cell": "myskill/alpha/main/0",
+            "sandbox": "e2b",
+            "limit": 10,
+        }
+        (iteration_dir / "events-main.jsonl").write_text(json.dumps(wait) + "\n")
+
+        return subprocess.CompletedProcess(argv, 0)
+
+    run.run(args, runner=runner, preflight=_no_preflight)
+
+    assert not any(token.startswith("--benchspec-iteration=") for token in recorder.argv)
+    assert "warning: this e2b account runs at most 10 sandboxes" in capsys.readouterr().err
+
+
+# Stands in for the child pytest: takes half a second to tear down after Ctrl-C. SIGINT
+# is reset because a test run in the background inherits it ignored.
+_SLOW_TEARDOWN_CHILD = textwrap.dedent(
+    """\
+    import pathlib
+    import signal
+    import sys
+    import time
+
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    pathlib.Path(sys.argv[1]).write_text("running")
+
+    try:
+        time.sleep(30)
+    except KeyboardInterrupt:
+        time.sleep(0.5)
+        pathlib.Path(sys.argv[2]).write_text("torn down")
+    """
+)
+
+# Stands in for `benchspec run`: launches the child the way `run` does.
+_PARENT = textwrap.dedent(
+    """\
+    import signal
+    import sys
+
+    from benchspec.runners import run
+
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    run.run_child([sys.executable, *sys.argv[1:]])
+    """
+)
+
+
+def test_ctrl_c_waits_out_the_childs_teardown(tmp_path: Path) -> None:
+    """Verify Ctrl-C, which reaches parent and child alike, lets the child finish."""
+    child_script = tmp_path / "child.py"
+    child_script.write_text(_SLOW_TEARDOWN_CHILD)
+    running = tmp_path / "running"
+    torn_down = tmp_path / "torn-down"
+    parent = subprocess.Popen(
+        [sys.executable, "-c", _PARENT, str(child_script), str(running), str(torn_down)],
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    give_up_at = time.monotonic() + 20
+
+    while not running.exists() and time.monotonic() < give_up_at:
+        time.sleep(0.01)
+
+    os.killpg(parent.pid, signal.SIGINT)
+    parent.wait(timeout=20)
+
+    assert torn_down.read_text() == "torn down"
+    assert parent.returncode == -signal.SIGINT

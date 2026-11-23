@@ -60,6 +60,8 @@ _APPEND_OPTIONS = {
 # preflight is skipped exactly as the plugin skips it (fixtures never set up).
 _COLLECT_ONLY_FLAGS = frozenset({"--collect-only", "--co"})
 
+_ITERATION_OPTION = "--benchspec-iteration"
+
 # Each local cell reserves a 2 GB sandbox, so `auto` sizes against total RAM. A remote
 # backend's sandboxes take none of it, so there only cores count: the host still runs
 # each worker and its judge.
@@ -292,10 +294,46 @@ def resolve_workers(args: argparse.Namespace) -> Workers:
     return Workers(count=configured, source="config")
 
 
+def _passthrough_iteration(passthrough: list[str]) -> str | None:
+    """Return the iteration the pytest args name, which wins over any `run` would pick."""
+    iteration = None
+
+    for index, token in enumerate(passthrough):
+        if token.startswith(f"{_ITERATION_OPTION}="):
+            iteration = token.partition("=")[2]
+        elif token == _ITERATION_OPTION and index + 1 < len(passthrough):
+            iteration = passthrough[index + 1]
+
+    return iteration
+
+
+def run_child(
+    argv: list[str], *, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run the child pytest to its end, waiting out its teardown on Ctrl-C.
+
+    The terminal sends Ctrl-C to the child too, so this process only waits for it
+    instead of killing it.
+
+    Raises:
+        KeyboardInterrupt: On Ctrl-C, once the child has exited.
+    """
+    child = subprocess.Popen(argv, env=env)
+
+    try:
+        status = child.wait()
+    except KeyboardInterrupt:
+        child.wait()
+
+        raise
+
+    return subprocess.CompletedProcess(argv, status)
+
+
 def run(
     args: argparse.Namespace,
     *,
-    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess] = run_child,
     preflight: Callable[[argparse.Namespace], None] = preflight_run,
 ) -> int:
     """Run the eval suite by spawning a pytest subprocess, mapping its status to an exit code.
@@ -311,17 +349,16 @@ def run(
     once (no `-p benchspec.runners.pytest`, which would double-register it), and the
     child's return code maps through the shared exit-code contract.
 
-    A run that is not collect-only names its iteration itself and follows its event
-    files for as long as the child runs, warning once when cells start waiting for a
-    sandbox slot. `--watch` also serves the iteration's live view from a daemon thread,
-    stopped when the child exits.
+    A run that is not collect-only names its iteration itself, unless the passthrough
+    does, and follows its event files for as long as the child runs, warning once when
+    cells start waiting for a sandbox slot. `--watch` also serves the iteration's live
+    view from a daemon thread, stopped when the child exits.
 
     Args:
         args: The parsed `run` namespace — `root` (a `Path`), the curated `--benchspec-*`
             flags, `workers` (an int, `auto`, or None), `watch`, and `passthrough`
             (verbatim pytest args after `--`).
-        runner: Injectable process launcher with `subprocess.run`'s contract; called as
-            `runner(argv, env=child_env)` and expected to expose `.returncode`.
+        runner: Injectable process launcher with `run_child`'s contract.
         preflight: Injectable preflight with `preflight_run`'s contract.
 
     Returns:
@@ -367,9 +404,12 @@ def run(
     server = None
     notice = None
     if not collect_only:
-        iteration = workspace.next_iteration_name(root)
+        iteration = _passthrough_iteration(args.passthrough)
+        if iteration is None:
+            iteration = workspace.next_iteration_name(root)
+            iteration_tokens = [f"{_ITERATION_OPTION}={iteration}"]
+
         iteration_dir = workspace.evals_root(root) / iteration
-        iteration_tokens = [f"--benchspec-iteration={iteration}"]
         notice = CapacityNotice(iteration_dir, workers=workers.count if workers else None)
         notice.start()
 
