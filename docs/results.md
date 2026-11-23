@@ -325,10 +325,11 @@ artifact path does.
 
 - **`run.start.cells`** lists every planned sample, honoring `-k` and
   `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, `folder` (the eval's
-  group under its skill, such as `to-spec/triggers`; the skill is the nearest
-  ancestor folder not named `evals`), `assertions` (the lines as written), and
-  `applies`, one flag per assertion line, true where the line is graded in
-  that arm. A sample with no true flag grades nothing.
+  group under its skill, such as `to-spec/triggers`), `assertions` (the lines
+  as written), and `applies`, one
+  flag per assertion line, true where the line is graded in that arm. A sample
+  with no true flag grades nothing. The skill in `folder` is the nearest
+  ancestor folder not named `evals`.
 - **Phases.** `bind` is the binder; `boot` creates the sandbox; `setup` is
   `setup.sh`; `agent` is the turn; `grade` is everything after it. A
   [timed-out sample](#timed-out-samples) skips the phases the cap cut off. A
