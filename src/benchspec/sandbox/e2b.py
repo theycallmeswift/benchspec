@@ -12,12 +12,13 @@ import asyncio
 import contextlib
 import io
 import os
+import re
 import shlex
 import shutil
 import socket
 import tarfile
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
@@ -39,7 +40,7 @@ from benchspec.sandbox.backend import (
     fingerprint_inputs_for,
     run_environment_script,
 )
-from benchspec.sandbox.errors import SandboxError
+from benchspec.sandbox.errors import SandboxCapacityError, SandboxError
 from benchspec.sandbox.project import stage_archive
 from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.specs.discovery import EnvConfig
@@ -66,6 +67,12 @@ RUN_METADATA = {"benchspec-run": uuid.uuid4().hex}
 
 # What the guest holds in place of a credential E2B adds to its requests.
 INJECTED_PLACEHOLDER = "injected-by-e2b"
+
+# The 429 E2B answers once the account runs its concurrent-sandbox limit, which the
+# message names: "...maximum number of concurrent E2B sandboxes (10)...".
+_CONCURRENCY_REFUSAL = re.compile(
+    r"maximum number of concurrent E2B sandboxes(?: \((?P<limit>\d+)\))?"
+)
 
 # Guest commands run as root, as they do in a container.
 _GUEST_USER = "root"
@@ -258,6 +265,38 @@ def _credential_uploads(credential_files: list[CredentialFile]) -> dict[str, byt
             raise SandboxError(f"cannot read the credential file: {error}") from error
 
     return uploads
+
+
+async def _create_native(creating: Coroutine[object, object, AsyncSandbox]) -> AsyncSandbox:
+    """Await the SDK's `create`, killing the sandbox it makes for a caller that gave up.
+
+    A cancel mid-request does not stop E2B creating the sandbox, and one not listed yet
+    escapes `discard_quietly`, so the request runs to its end and whatever it made is
+    killed.
+
+    Raises:
+        SandboxCapacityError: When E2B refused because the account already runs as many
+            sandboxes as it allows.
+    """
+    if e2b is None:
+        raise SandboxError(SDK_MISSING)
+
+    pending = asyncio.ensure_future(creating)
+
+    try:
+        return await asyncio.shield(pending)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await (await pending).kill()
+
+        raise
+    except e2b.RateLimitException as error:
+        refusal = _CONCURRENCY_REFUSAL.search(str(error))
+        if refusal is None:
+            raise
+
+        limit = refusal.group("limit")
+        raise SandboxCapacityError(str(error), limit=int(limit) if limit else None) from error
 
 
 def _owned(names: list[str]) -> bool:
@@ -484,6 +523,7 @@ class E2BBackend(SharedBackendBehavior):
     """
 
     id = "e2b"
+    remote = True
 
     def preflight(self) -> list[str]:
         """Return host-readiness errors: the SDK is installed and the API key is set."""
@@ -536,6 +576,8 @@ class E2BBackend(SharedBackendBehavior):
         and a credential file is uploaded.
 
         Raises:
+            SandboxCapacityError: When the account already runs as many sandboxes as E2B
+                allows it.
             SandboxError: When the boot or upload fails, a credential file is unreadable,
                 the agent's credentials name no provider host to allow, or two injected
                 credentials share a host.
@@ -564,22 +606,24 @@ class E2BBackend(SharedBackendBehavior):
         pinned_hosts = await _pinned_hosts(hosts)
 
         async with _translate_errors():
-            native = await e2b.AsyncSandbox.create(
-                template=snapshot,
-                timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
-                metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
-                envs=_guest_envs(credentials),
-                # A pause would keep the guest's disk, credential file included.
-                lifecycle={"on_timeout": "kill"},
-                network={
-                    "allow_out": hosts,
-                    "deny_out": [e2b.ALL_TRAFFIC],
-                    "rules": rules,
-                    # The default leaves 8.8.8.8 open on every port, a data channel.
-                    "dns_servers": [],
-                    # Sandbox URLs for ports the guest opens need E2B's access token.
-                    "allow_public_traffic": False,
-                },
+            native = await _create_native(
+                e2b.AsyncSandbox.create(
+                    template=snapshot,
+                    timeout=cap_seconds + LIFETIME_MARGIN_SECONDS,
+                    metadata={**OWNER_METADATA, **RUN_METADATA, NAME_METADATA_KEY: name},
+                    envs=_guest_envs(credentials),
+                    # A pause would keep the guest's disk, credential file included.
+                    lifecycle={"on_timeout": "kill"},
+                    network={
+                        "allow_out": hosts,
+                        "deny_out": [e2b.ALL_TRAFFIC],
+                        "rules": rules,
+                        # The default leaves 8.8.8.8 open on every port, a data channel.
+                        "dns_servers": [],
+                        # Sandbox URLs for ports the guest opens need E2B's access token.
+                        "allow_public_traffic": False,
+                    },
+                )
             )
 
         sandbox = E2BSandbox(native)

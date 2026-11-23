@@ -17,3 +17,15 @@ class SandboxError(RuntimeError):
     Every backend raises this directly, or wraps its own runtime's exceptions into it,
     so agents and the CLI classify a runtime failure without naming a concrete runtime.
     """
+
+
+class SandboxCapacityError(SandboxError):
+    """The runtime refused a new sandbox because the account runs as many as it allows.
+
+    The refusal is temporary: a create succeeds again once another sandbox stops.
+    """
+
+    def __init__(self, message: str, *, limit: int | None) -> None:
+        """Record the refusal and the account's concurrent-sandbox limit, when it names one."""
+        super().__init__(message)
+        self.limit = limit

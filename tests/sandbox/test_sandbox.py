@@ -25,6 +25,7 @@ from benchspec.sandbox import backend as backend_mod
 from benchspec.sandbox import microsandbox as microsandbox_mod
 from benchspec.sandbox import registry, sandbox
 from benchspec.sandbox.docker import DockerBackend, DockerMount, DockerVolume
+from benchspec.sandbox.errors import SandboxCapacityError
 from benchspec.sandbox.provenance import ImageIdentity
 from benchspec.specs.discovery import EnvConfig
 from benchspec.specs.schema import SchemaError
@@ -672,6 +673,132 @@ def test_arm_session_boot_that_outlives_the_cell_cap_raises_a_boot_timeout(
 
     assert raised.value.phase == "boot"
     assert raised.value.cap_seconds == 1
+    assert len(destroyed) == 1
+    assert destroyed[0].startswith(f"{backend_mod.NAME_PREFIX}eval-e1-with_skill")
+
+
+class _RecordingSink:
+    """Keeps every event it is given."""
+
+    def __init__(self) -> None:
+        """Start empty."""
+        self.events: list[Mapping[str, object]] = []
+
+    def emit(self, event: Mapping[str, object]) -> None:
+        """Record the event."""
+        self.events.append(event)
+
+
+def _refused_for_capacity(times: int, guest: FakeSandbox) -> object:
+    """A `create_sandbox` that refuses for capacity `times` times, then boots `guest`."""
+    refusals = [SandboxCapacityError("at the limit", limit=10)] * times
+
+    async def create(**kwargs: object) -> FakeSandbox:
+        """Refuse while refusals remain, then boot."""
+        if refusals:
+            raise refusals.pop()
+
+        return guest
+
+    return create
+
+
+def test_capacity_retry_delay_doubles_to_its_ceiling_and_keeps_half_to_all_of_it() -> None:
+    """The delay doubles from the first to the ceiling; jitter keeps 50-100% of it."""
+    full = [sandbox.capacity_retry_delay(attempt, jitter=lambda: 1.0) for attempt in range(5)]
+    half = sandbox.capacity_retry_delay(0, jitter=lambda: 0.0)
+
+    assert full == [2.0, 4.0, 8.0, 15.0, 15.0]
+    assert half == 1.0
+    assert sandbox.capacity_retry_delay(10_000, jitter=lambda: 1.0) == 15.0
+
+
+def test_arm_session_waits_out_capacity_refusals_then_boots(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A create refused for capacity is retried in boot, with one `cell.wait`, until it boots."""
+    guest = FakeSandbox()
+    sink = _RecordingSink()
+    microsandbox_backend = registry.resolve_sandbox("microsandbox")
+    monkeypatch.setattr(microsandbox_backend, "create_sandbox", _refused_for_capacity(3, guest))
+    monkeypatch.setattr(sandbox, "capacity_retry_delay", lambda attempt: 0)
+    session = sandbox.arm_session(
+        agent=ClaudeCodeAgent(auth_value="test-token", version="v"),
+        snapshot="snap",
+        eval_id="e1",
+        config="trial",
+        host_workdir=tmp_path / "wd",
+        staged_project=None,
+        model="sonnet",
+        effort="medium",
+        backend=microsandbox_backend,
+        deadline=CellDeadline(DEFAULT_CELL_TIMEOUT),
+        events=CellEvents(sink, "cell"),
+    )
+
+    asyncio.run(session.__aenter__())
+
+    assert session._sandbox is guest
+    assert [event for event in sink.events if event["type"] == "cell.wait"] == [
+        {"type": "cell.wait", "cell": "cell", "sandbox": "microsandbox", "limit": 10}
+    ]
+
+
+def test_arm_session_cap_that_fires_while_waiting_for_capacity_is_an_infra_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A cell that never gets a sandbox errors, naming the refusal, instead of timing out."""
+    destroyed: list[str] = []
+
+    async def record_destroy(name: str) -> None:
+        """Record the best-effort removal by name."""
+        destroyed.append(name)
+
+    monkeypatch.setattr(sandbox, "capacity_retry_delay", lambda attempt: 0.01)
+    session = _session_with_a_nearly_spent_deadline(
+        monkeypatch,
+        tmp_path,
+        setup_reldir=None,
+        create_sandbox=_refused_for_capacity(10_000, FakeSandbox()),
+    )
+    monkeypatch.setattr(session._backend, "discard_quietly", record_destroy)
+
+    with pytest.raises(SandboxCapacityError, match="within the 1s cell cap: at the limit"):
+        asyncio.run(session.__aenter__())
+
+    assert len(destroyed) == 1
+
+
+def test_arm_session_interrupted_mid_boot_discards_the_sandbox_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A boot cancelled by an interrupt returns no handle, so it is removed by name."""
+    destroyed: list[str] = []
+
+    async def never_boots(**kwargs: object) -> FakeSandbox:
+        """Hang like a VM that never comes up."""
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def record_destroy(name: str) -> None:
+        """Record the best-effort removal by name."""
+        destroyed.append(name)
+
+    session = _session_with_a_nearly_spent_deadline(
+        monkeypatch, tmp_path, setup_reldir=None, create_sandbox=never_boots
+    )
+    monkeypatch.setattr(session._backend, "discard_quietly", record_destroy)
+
+    async def interrupt_the_boot() -> None:
+        """Enter the session, then cancel it the way Ctrl-C cancels `asyncio.run`."""
+        entering = asyncio.ensure_future(session.__aenter__())
+        await asyncio.sleep(0)
+        entering.cancel()
+        await entering
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(interrupt_the_boot())
+
     assert len(destroyed) == 1
     assert destroyed[0].startswith(f"{backend_mod.NAME_PREFIX}eval-e1-with_skill")
 

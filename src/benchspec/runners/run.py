@@ -22,6 +22,8 @@ import pytest
 from benchspec.config.sets import resolved_judge_config, session_run_set, validate_cell_caps
 from benchspec.exit_codes import ExitCode, exit_code_for_pytest_status
 from benchspec.orchestration import cases, workspace
+from benchspec.runners.notices import CapacityNotice
+from benchspec.sandbox.registry import resolve_sandbox
 from benchspec.sandbox.sandbox import format_preflight_failure
 from benchspec.specs import discovery
 from benchspec.specs.schema import SchemaError
@@ -58,7 +60,9 @@ _APPEND_OPTIONS = {
 # preflight is skipped exactly as the plugin skips it (fixtures never set up).
 _COLLECT_ONLY_FLAGS = frozenset({"--collect-only", "--co"})
 
-# Each local cell reserves a 2 GB sandbox, so `auto` sizes against total RAM.
+# Each local cell reserves a 2 GB sandbox, so `auto` sizes against total RAM. A remote
+# backend's sandboxes take none of it, so there only cores count: the host still runs
+# each worker and its judge.
 GIB_PER_CELL = 2
 
 # Binder fan-out past about 12 workers trips the Gemini call's 60 s timeout.
@@ -219,16 +223,41 @@ class Workers:
         return f"workers: {self.count} ({self.source})"
 
 
-def _auto_plan() -> Workers:
-    """Resolve `auto` against this host."""
-    cores = host_cpu_count()
-    ram_bytes = host_ram_bytes()
+def _auto_plan(remote_sandbox: str | None) -> Workers:
+    """Resolve `auto` against this host; RAM is left out when sandboxes run remotely.
 
+    Args:
+        remote_sandbox: The run's backend when its sandboxes run off this host, else None.
+    """
+    cores = host_cpu_count()
     source = f"auto: {cores} cores"
+
+    if remote_sandbox is not None:
+        source += f"; RAM not counted, sandboxes run on {remote_sandbox}"
+
+        return Workers(count=auto_workers(cores, None), source=source)
+
+    ram_bytes = host_ram_bytes()
     if ram_bytes is not None:
         source += f", {ram_bytes / 1024**3:.1f} GB RAM"
 
     return Workers(count=auto_workers(cores, ram_bytes), source=source)
+
+
+def _remote_sandbox(args: argparse.Namespace) -> str | None:
+    """The resolved set's backend when its sandboxes run off this host; None otherwise.
+
+    Raises:
+        pytest.UsageError: a malformed or unknown set.
+        SchemaError: an unsupported sandbox backend.
+    """
+    run_set = session_run_set(PluginOptions.from_args(args))
+    if run_set is None:
+        return None
+
+    backend = resolve_sandbox(run_set.sandbox)
+
+    return backend.id if backend.remote else None
 
 
 def _passthrough_sets_workers(passthrough: list[str]) -> bool:
@@ -246,17 +275,19 @@ def resolve_workers(args: argparse.Namespace) -> Workers:
     """Resolve the worker count: `--workers`, then `[tool.benchspec] workers`, then `auto`.
 
     Raises:
-        SchemaError: the project `workers` value is malformed.
+        SchemaError: the project `workers` value is malformed, or the set names an
+            unsupported sandbox.
+        pytest.UsageError: `auto` met a malformed or unknown set.
     """
     flag = args.workers
     if flag is not None and flag != "auto":
         return Workers(count=flag, source="flag")
     if flag == "auto":
-        return _auto_plan()
+        return _auto_plan(_remote_sandbox(args))
 
     configured = discovery.pyproject_workers(args.root.resolve())
     if configured is None or configured == "auto":
-        return _auto_plan()
+        return _auto_plan(_remote_sandbox(args))
 
     return Workers(count=configured, source="config")
 
@@ -280,8 +311,10 @@ def run(
     once (no `-p benchspec.runners.pytest`, which would double-register it), and the
     child's return code maps through the shared exit-code contract.
 
-    `--watch` names the run's iteration itself, serves its live view from a daemon thread
-    for as long as the child runs, and stops it when the child exits.
+    A run that is not collect-only names its iteration itself and follows its event
+    files for as long as the child runs, warning once when cells start waiting for a
+    sandbox slot. `--watch` also serves the iteration's live view from a daemon thread,
+    stopped when the child exits.
 
     Args:
         args: The parsed `run` namespace — `root` (a `Path`), the curated `--benchspec-*`
@@ -310,7 +343,6 @@ def run(
         print("error: --workers conflicts with -n/--numprocesses; pass one", file=sys.stderr)
         return ExitCode.USAGE
 
-    workers = resolve_workers(args)
     collect_only = bool(_COLLECT_ONLY_FLAGS.intersection(args.passthrough))
 
     if not collect_only:
@@ -323,20 +355,28 @@ def run(
     child_env = {**os.environ}
     child_env.pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD", None)
 
+    workers: Workers | None = None
     worker_tokens: list[str] = []
     if not collect_only and not passthrough_sets_workers:
+        workers = resolve_workers(args)
         print(workers.describe(), flush=True)
         if workers.count > 1:
             worker_tokens = [f"-n={workers.count}"]
 
-    watch_tokens: list[str] = []
+    iteration_tokens: list[str] = []
     server = None
-    if args.watch and not collect_only:
+    notice = None
+    if not collect_only:
         iteration = workspace.next_iteration_name(root)
-        watch_tokens = [f"--benchspec-iteration={iteration}"]
-        server = WatchServer(workspace.evals_root(root) / iteration)
-        server.start()
-        print(f"Watching: {server.url}", flush=True)
+        iteration_dir = workspace.evals_root(root) / iteration
+        iteration_tokens = [f"--benchspec-iteration={iteration}"]
+        notice = CapacityNotice(iteration_dir, workers=workers.count if workers else None)
+        notice.start()
+
+        if args.watch:
+            server = WatchServer(iteration_dir)
+            server.start()
+            print(f"Watching: {server.url}", flush=True)
 
     argv = [
         sys.executable,
@@ -344,7 +384,7 @@ def run(
         "pytest",
         *worker_tokens,
         *translate_run_flags(args),
-        *watch_tokens,
+        *iteration_tokens,
         *args.passthrough,
     ]
     try:
@@ -352,5 +392,7 @@ def run(
     finally:
         if server is not None:
             server.stop()
+        if notice is not None:
+            notice.stop()
 
     return exit_code_for_pytest_status(int(completed.returncode))

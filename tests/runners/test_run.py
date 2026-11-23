@@ -7,6 +7,7 @@ emits for it.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import textwrap
@@ -20,6 +21,7 @@ from typing import NoReturn
 import pytest
 
 from benchspec.config.options import RunOptions
+from benchspec.events.schema import FORMAT_VERSION
 from benchspec.runners import run
 from benchspec.runners.run import PluginOptions, translate_run_flags
 from benchspec.specs.schema import SchemaError
@@ -239,7 +241,7 @@ def test_absent_flags_add_nothing() -> None:
 
 
 def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify run spawns `python -m pytest` with translated flags and no `-p` plugin token."""
+    """Verify run spawns `python -m pytest` with translated flags, its iteration, no `-p` token."""
     monkeypatch.setattr(run.discovery, "discover_eval_cases", lambda root, eval_paths: [object()])
     args = _run_namespace(Path("repo"), set="default")
     recorder = _SpawnRecord()
@@ -253,6 +255,7 @@ def test_run_assembles_pytest_argv_and_maps_success(monkeypatch: pytest.MonkeyPa
         "pytest",
         f"--benchspec-repo-root={Path('repo').resolve()}",
         "--benchspec-set=default",
+        "--benchspec-iteration=iteration_01",
     ]
 
 
@@ -606,6 +609,50 @@ def test_auto_prints_cores_and_ram_and_sizes_from_the_host(
     assert "workers: 5 (auto: 8 cores, 11.4 GB RAM)" in capsys.readouterr().out
 
 
+def test_auto_on_a_remote_sandbox_counts_cores_alone_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `auto` leaves host RAM out when the set's sandboxes run on E2B."""
+    _populated_eval_project(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        _ARMS_TOML.replace('model = "sonnet"\n', 'model = "sonnet"\nsandbox = "e2b"\n')
+    )
+    monkeypatch.setattr(run, "host_cpu_count", lambda: 10)
+    monkeypatch.setattr(run, "host_ram_bytes", lambda: 4 * GIB)
+    recorder = _SpawnRecord()
+
+    run.run(
+        _run_namespace(tmp_path, workers="auto"),
+        runner=_runner_returning(0, recorder),
+        preflight=_no_preflight,
+    )
+
+    assert recorder.argv[3] == "-n=10"
+    assert (
+        "workers: 10 (auto: 10 cores; RAM not counted, sandboxes run on e2b)"
+        in capsys.readouterr().out
+    )
+
+
+def test_auto_on_a_local_sandbox_still_counts_ram(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify `auto` keeps the RAM term for a set on a local backend."""
+    _populated_eval_project(tmp_path)
+    monkeypatch.setattr(run, "host_cpu_count", lambda: 10)
+    monkeypatch.setattr(run, "host_ram_bytes", lambda: 4 * GIB)
+    recorder = _SpawnRecord()
+
+    run.run(
+        _run_namespace(tmp_path, workers="auto"),
+        runner=_runner_returning(0, recorder),
+        preflight=_no_preflight,
+    )
+
+    assert recorder.argv[3] == "-n=2"
+    assert "workers: 2 (auto: 10 cores, 4.0 GB RAM)" in capsys.readouterr().out
+
+
 def test_auto_without_ram_omits_the_ram_figure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -694,15 +741,62 @@ def test_watch_serves_the_runs_iteration_for_as_long_as_the_child_runs(
         urllib.request.urlopen(seen.url)
 
 
-def test_a_run_without_watch_names_no_iteration_and_serves_nothing(
+def test_a_run_without_watch_names_its_iteration_and_serves_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Verify a plain run passes no iteration option and prints no watch address."""
+    """Verify a plain run still names its iteration, and prints no watch address."""
     _populated_eval_project(tmp_path)
+    (tmp_path / "tmp" / "evals" / "iteration_02").mkdir(parents=True)
     recorder = _SpawnRecord()
     args = _run_namespace(tmp_path)
 
     run.run(args, runner=_runner_returning(0, recorder), preflight=_no_preflight)
 
-    assert not any(token.startswith("--benchspec-iteration") for token in recorder.argv)
+    assert "--benchspec-iteration=iteration_03" in recorder.argv
     assert "Watching" not in capsys.readouterr().out
+
+
+def test_a_collect_only_run_names_no_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a collect-only run leaves the iteration to pytest, as it writes none."""
+    args = _run_namespace(Path("repo"), passthrough=["--collect-only"])
+
+    _, recorder = _spawn(monkeypatch, args)
+
+    assert not any(token.startswith("--benchspec-iteration") for token in recorder.argv)
+
+
+def test_a_run_warns_once_when_its_cells_wait_for_a_sandbox_slot(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify the cells' `cell.wait` events, across workers, become one warning."""
+    _populated_eval_project(tmp_path)
+    args = _run_namespace(tmp_path, workers=20)
+
+    def runner(argv: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        """Stand in for pytest: two workers each log a cell refused for capacity."""
+        iteration = next(
+            token.split("=")[1] for token in argv if token.startswith("--benchspec-iteration=")
+        )
+        iteration_dir = tmp_path / "tmp" / "evals" / iteration
+        iteration_dir.mkdir(parents=True)
+        for worker in ("gw0", "gw1"):
+            wait = {
+                "format_version": FORMAT_VERSION,
+                "type": "cell.wait",
+                "ts_ms": 0,
+                "worker": worker,
+                "cell": f"myskill/alpha/{worker}/0",
+                "sandbox": "e2b",
+                "limit": 10,
+            }
+            (iteration_dir / f"events-{worker}.jsonl").write_text(json.dumps(wait) + "\n")
+
+        return subprocess.CompletedProcess(argv, 0)
+
+    run.run(args, runner=runner, preflight=_no_preflight)
+
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "warning" in line]
+    assert warnings == [
+        "warning: this e2b account runs at most 10 sandboxes at once; cells past that wait "
+        "in boot for a free one. Pass --workers 10 to match (this run has 20)."
+    ]

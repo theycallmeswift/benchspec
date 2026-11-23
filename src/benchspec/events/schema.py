@@ -85,6 +85,18 @@ class CellPhase(Envelope):
     phase: str
 
 
+class CellWait(Envelope):
+    """A sample's boot is waiting for `sandbox` to free a slot, until its next phase or close.
+
+    `limit` is the account's concurrent-sandbox limit, or None when the backend did not
+    name it.
+    """
+
+    cell: str
+    sandbox: str
+    limit: int | None
+
+
 class CellDelta(Envelope):
     """One tool call or assistant text block from the agent's turn."""
 
@@ -147,6 +159,7 @@ EVENT_TYPES: dict[str, type[Envelope]] = {
     "run.start": RunStart,
     "cell.start": CellStart,
     "cell.phase": CellPhase,
+    "cell.wait": CellWait,
     "cell.delta": CellDelta,
     "cell.done": CellDone,
     "cell.error": CellError,

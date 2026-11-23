@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import random
 import shlex
 import tomllib
-from collections.abc import Coroutine, Generator, Iterable
+from collections.abc import Callable, Coroutine, Generator, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -49,6 +50,7 @@ from benchspec.sandbox.backend import (
     VolumeBinder,
     host_mount_path,
 )
+from benchspec.sandbox.errors import SandboxCapacityError
 from benchspec.sandbox.registry import DEFAULT_SANDBOX, registered_backends, resolve_sandbox
 from benchspec.specs.discovery import EnvConfig, pyproject_table, resolve_environment_config
 from benchspec.specs.schema import SchemaError
@@ -57,6 +59,12 @@ _Result = TypeVar("_Result")
 
 GUEST_WORKDIR = "/workspace"
 PROJECT_MOUNT = "/project"
+
+# A full account frees a slot only when another cell ends, minutes apart. Retries back
+# off from the first delay to the ceiling, which keeps a waiting cell polling often
+# enough to take a slot soon after one frees.
+CAPACITY_RETRY_FIRST_SECONDS = 2.0
+CAPACITY_RETRY_MAX_SECONDS = 15.0
 
 
 def snapshot_name(
@@ -190,6 +198,20 @@ def ensure_snapshot(
     return name
 
 
+def capacity_retry_delay(attempt: int, *, jitter: Callable[[], float] = random.random) -> float:
+    """Seconds to wait before retrying a create the backend refused for capacity.
+
+    Doubles from `CAPACITY_RETRY_FIRST_SECONDS` per `attempt` (0-based) up to
+    `CAPACITY_RETRY_MAX_SECONDS`, then keeps a random 50-100% of it, so cells refused
+    together do not all retry together.
+    """
+    ceiling = min(
+        CAPACITY_RETRY_MAX_SECONDS, CAPACITY_RETRY_FIRST_SECONDS * 2 ** min(attempt, 16)
+    )
+
+    return ceiling * (0.5 + jitter() / 2)
+
+
 def _sandbox_run_name(eval_id: str, config: str) -> str:
     """Build a stable guest run name for a snapshot or cell."""
     return f"{NAME_PREFIX}eval-{eval_id}-{config}-{workspace.worker_tag()}"
@@ -315,27 +337,27 @@ class SandboxSession:
         # Populated by __aenter__; None until the VM is booted.
         self._sandbox: LiveSandbox | None = None
         self._artifact_base: dict[str, str] | None = None
+        # The backend's latest refusal for capacity; None while it has refused none.
+        self._capacity_refusal: SandboxCapacityError | None = None
 
     async def __aenter__(self) -> TurnRunner:
         """Enter the arm session and capture baseline artifact state."""
         run_name = _sandbox_run_name(self._eval_id, self._config)
         try:
-            self._sandbox = await self._within_deadline(
-                PHASE_BOOT,
-                self._backend.create_sandbox(
-                    agent=self._agent,
-                    snapshot=self._snapshot,
-                    name=run_name,
-                    host_workdir=self._host_workdir,
-                    staged_project=self._staged_project,
-                    extra_volumes=_agent_extra_volumes,
-                    cap_seconds=self._deadline.cap_seconds,
-                ),
-            )
+            self._sandbox = await self._within_deadline(PHASE_BOOT, self._boot(run_name))
         except BaseException as error:
-            if isinstance(error, CellTimeoutError):
-                # A cancelled boot returns no handle, so remove the sandbox by name.
+            # A boot cut short by the cap or by an interrupt returns no handle, so remove
+            # the sandbox by name.
+            if isinstance(error, CellTimeoutError) or not isinstance(error, Exception):
                 await self._backend.discard_quietly(run_name)
+
+            refusal = self._capacity_refusal
+            if isinstance(error, CellTimeoutError) and refusal is not None:
+                raise SandboxCapacityError(
+                    f"no sandbox came free within the {error.cap_seconds}s cell cap: {refusal}",
+                    limit=refusal.limit,
+                ) from error
+
             raise
         self._events.phase(PHASE_SETUP)
         # Install before the artifact baseline so only later agent-authored files surface.
@@ -367,6 +389,35 @@ class SandboxSession:
             self._sandbox, self._agent, self._backend
         )
         return self._run
+
+    async def _boot(self, run_name: str) -> LiveSandbox:
+        """Create the cell's sandbox, waiting while the backend is at capacity.
+
+        A refusal for capacity is retried, after `capacity_retry_delay`, until a create
+        succeeds or the caller's deadline cancels the wait. The first refusal emits the
+        cell's `cell.wait`.
+        """
+        attempt = 0
+
+        while True:
+            try:
+                return await self._backend.create_sandbox(
+                    agent=self._agent,
+                    snapshot=self._snapshot,
+                    name=run_name,
+                    host_workdir=self._host_workdir,
+                    staged_project=self._staged_project,
+                    extra_volumes=_agent_extra_volumes,
+                    cap_seconds=self._deadline.cap_seconds,
+                )
+            except SandboxCapacityError as refusal:
+                if self._capacity_refusal is None:
+                    self._events.wait(sandbox=self._backend.id, limit=refusal.limit)
+
+                self._capacity_refusal = refusal
+
+            await asyncio.sleep(capacity_retry_delay(attempt))
+            attempt += 1
 
     async def _within_deadline(
         self, phase: str, pending: Coroutine[object, object, _Result]

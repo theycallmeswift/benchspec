@@ -316,6 +316,7 @@ artifact path does.
 | `run.start` | `iteration`, `run_id` (`meta.json`'s), `set`, `baseline` (nullable), `arms` (each `name`, `harness`, `model`, `effort`, `timeout`), `cells`, `cell_count` | Once, by the controller, after collection |
 | `cell.start` | `cell`, `skill`, `eval_id`, `arm`, `sample`, `harness`, `model` | When a sample begins |
 | `cell.phase` | `cell`, `phase` | On entering `bind`, `boot`, `setup`, `agent`, or `grade`; each at most once, in that order |
+| `cell.wait` | `cell`, `sandbox` (the backend, such as `e2b`), `limit` (the account's concurrent-sandbox limit; `null` when the backend does not name it) | At most once, in `boot`, when the backend first refuses a sandbox because the account runs as many as it allows; the wait lasts until the next phase or closing event |
 | `cell.delta` | `cell`, `kind` (`tool_call` or `text`), `name` (the tool, else `null`), `text` | Once per tool call or assistant text block of the agent's turn |
 | `cell.done` | `cell`, `passed`, `total`, `pass_rate` (`null` when `total` is 0), `wall_ms`, `stopped`, then the timing fields | After the sample's artifacts are written |
 | `cell.error` | `cell`, `phase` (the one running; `null` before `bind`), `error_kind`, `message`, `wall_ms`, then the timing fields | When the sample errored |
