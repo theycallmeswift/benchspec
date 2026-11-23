@@ -102,8 +102,8 @@ longest arm's cell `timeout`, and returns to live if events resume.
   ends, samples that never closed count as unfinished.
 - **Rates match `benchmark.md`.** A cell's rate, a group's and an arm's count
   only the checks every arm of the eval runs, averaged per sample, exactly as
-  [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so the
-  page and the report never show two numbers for one cell. A check scoped to
+  [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so a
+  rate the report shows reads the same on the page. A check scoped to
   some arms is left out of the rate; the hover card counts it on its own line
   (`+ 1 of 1 scoped, outside the rate`). An eval whose every check is scoped,
   such as a trigger eval, is rated on those checks instead (`1 of 1 scoped
