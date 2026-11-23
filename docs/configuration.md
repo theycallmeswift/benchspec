@@ -319,8 +319,8 @@ time: their cells wait in boot for a free sandbox, and `run` warns once with the
 (see [E2B](sandbox.md#e2b)). E2B does not report the limit up front, so `auto` cannot
 size to it.
 
-`run` picks the next iteration name and passes it as `--benchspec-iteration`, so that
-warning and `--watch` know which directory to follow. A passthrough
+`run` picks the next iteration name and passes it as `--benchspec-iteration`, so the
+capacity warning and `--watch` know which directory to follow. A passthrough
 `--benchspec-iteration` wins. `--collect-only` names none.
 
 ```bash
