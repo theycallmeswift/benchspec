@@ -64,6 +64,8 @@ def test_every_collected_pair_is_one_cell_at_count_one(tmp_path: Path) -> None:
             "arm": arm,
             "sample": 0,
             "applies": [True],
+            "folder": "evals/hello",
+            "assertions": ["greeting written"],
         }
         for arm in ("baseline", "trial")
     ]

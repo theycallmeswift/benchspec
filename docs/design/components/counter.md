@@ -14,7 +14,8 @@ quiet, waiting; they sum to M) and the worker count (`-n 4`).
 | N of M | `31 of 78 samples finished`, 16px mono, `muted` |
 | elapsed · ETA | right end of the row: `elapsed 6m 41s · ~10m left`; phone keeps `elapsed 6m 41s`, drops the ETA |
 | bar | `size-progress` on a `line` track, `radius-2`, `accent` fill while live, inside `bs-progbx`: the [README's bracket](../README.md#layout-shape-and-depth) as caps, `size-bracket-cap` tall |
-| tally | `bs-tally`, `muted`; failed and errored above zero in `danger` (`bs-att`), quiet above zero in `warn` (`bs-warn`): `3 running · 1 quiet`; waiting `bs-wait`; worker count `fg-tertiary` (`bs-wk`) |
+| tally | `bs-tally`, `muted`; each bucket a toggle button (`aria-pressed`) that filters the matrix, pressed with a 2px `accent` underline, disabled at zero; `Clear filters` (`bs-btn`) beside it while any is pressed; failed and errored above zero in `danger` (`bs-att`), quiet above zero in `warn` (`bs-warn`): `3 running · 1 quiet`; waiting `bs-wait`; worker count `fg-tertiary` (`bs-wk`) |
+| phases | under the tally: `[ sample time by phase · 20m 36s ]`, then the Drawer's phase bar and labels over every started sample, each label adding `· 6 now` while samples are in it |
 | finished | `✓ Finished · 100% · 78 of 78` in `bs-type-counter-finished`, `%` at `text-18`; the word in `bs-type-title`, `success`; bar `success` at full opacity; `took 19m 42s` |
 | finished, non-zero exit | `✗ Finished · 100% · 78 of 78 · exit 1 · 1 errored`; mark and word (`bs-bad`), the reason (`bs-att`) and the bar (`bs-bad`) in `danger`. Failed samples alone keep `success` |
 

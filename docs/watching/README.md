@@ -43,11 +43,25 @@ Deltas carry agent output, so the page is reachable only from this computer:
 
 - **Counter.** Percent of samples finished, `N of M samples finished`, elapsed
   time and an estimate of what is left, then a tally: passed, failed, errored,
-  running, quiet, waiting, and the worker count.
-- **Matrix.** One row per eval, grouped by its folder, one column per arm, one
-  box per sample. Hover or focus a cell for its samples; click it for one
-  sample's assertions, phases, last five output lines and artifact path. A
-  group that finishes cleanly collapses while the run is live.
+  running, quiet, waiting, and the worker count. Each tally bucket is a toggle
+  that filters the matrix to the evals with a sample in it; pick several to see
+  any of them, and **Clear filters** to see every eval again.
+- **Sample time by phase.** Under the tally, the time every started sample
+  spent in each phase (`snapshot`, `bind`, `boot`, `slot wait`, `setup`,
+  `agent`, `grade`), and how many samples are in each one now, such as
+  `snapshot 10m 02s · 6 now`. Samples that grade nothing count here too: they
+  hold a worker all the same.
+- **Matrix.** One row per eval, one column per arm, one box per sample. Each
+  arm's head carries its pass rate, and on other arms its delta from the
+  baseline (`97% (+35pp)`), as the leaderboard shows them. Evals are grouped by
+  their folder, skill first (`to-spec/triggers/`); a run of one skill names it
+  once, in the top bar. Groups start collapsed (a run with one group starts
+  open): a group's row gives each arm's rate, `done/total` and how its samples
+  stand (`3 passed · 1 failed · 2 running`). Hover or focus a cell for its
+  samples; the card sits beside the row when the window leaves room, else under
+  the cell. Click a cell for one sample: what it is doing or waiting on, its
+  assertions (the planned lines until it is graded), phases, last five output
+  lines and artifact path.
 - **Leaderboard.** Arms as columns: pass rate, skill triggered, samples, median
   time, median first output and mean cost. The page moves here when the run
   ends unless you already picked a tab.
@@ -57,13 +71,13 @@ Deltas carry agent output, so the page is reachable only from this computer:
 | Box | Sample state |
 | --- | --- |
 | queued | Planned, not started. |
-| booting | Started; building a snapshot, binding, booting or in `setup.sh`. |
-| running | The agent is working, or the sample is being graded. |
+| booting | Started; building a snapshot, binding, booting, waiting for a sandbox slot or in `setup.sh`. Its dot pulses. |
+| running | The agent is working, or the sample is being graded. Its dot pulses. |
 | quiet | The agent has emitted nothing for 30 seconds. |
 | pass, fail | Graded. A fail is darker the fewer checks passed. |
 | timeout | Hit its cap and was graded as it stood. |
 | error | An infra failure; never graded. |
-| n/a | Every assertion is scoped off this arm. |
+| n/a | Every assertion is scoped off this arm. While such a sample runs, its box shows booting or running and its cell reads `n/a · snapshot 1m 30s`. |
 | unfinished | Never closed before the run ended; drawn as queued. |
 
 A finished run reads `✓ Finished` in green when it exited 0, failed samples
@@ -86,11 +100,20 @@ longest arm's cell `timeout`, and returns to live if events resume.
   nowhere.
 - **Tally.** A timeout counts as failed; the buckets sum to `M`. After the run
   ends, samples that never closed count as unfinished.
-- **A cell's rate** counts every check its graded samples ran. Errored samples
-  add none; a cell whose every sample errored shows `—`.
-- **The leaderboard pass rate** pools only checks every arm runs, exactly as
-  [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so it
-  can differ from the cell rates. Its other rows cover graded samples.
+- **Rates match `benchmark.md`.** A cell's rate, a group's and an arm's count
+  only the checks every arm of the eval runs, averaged per sample, exactly as
+  [`benchmark.md`](../results.md#benchmarkmd-section-by-section) does, so the
+  page and the report never show two numbers for one cell. A check scoped to
+  some arms is left out of the rate; the hover card counts it on its own line
+  (`+ 1 of 1 scoped, outside the rate`). An eval whose every check is scoped,
+  such as a trigger eval, is rated on those checks instead (`1 of 1 scoped
+  checks passed`), where `benchmark.md` shows `—`. Errored samples add nothing;
+  a cell whose every sample errored shows `—`. The leaderboard's other rows
+  cover graded samples.
+- **Before `bind`** a sample is in `snapshot`: building the sandbox snapshot,
+  or waiting on another worker's build. A boot the sandbox backend refuses for
+  capacity (`cell.wait`) is in `slot wait` until its next phase: it reads as
+  booting, never as an error.
 - **Percentages** read as `benchmark.md`'s do: `100%` only when every check
   passed, `0%` only when none did.
 - **Time left.** Waiting samples are played forward, in plan order, onto the

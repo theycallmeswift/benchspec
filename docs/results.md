@@ -323,7 +323,9 @@ artifact path does.
 | `run.end` | `exit_status`, `wall_ms`, `done`, `errored`, `benchmark_md`, `benchmark_json` (repo-relative; `null` when not written) | Once, by the controller, after the reports; on Ctrl-C too |
 
 - **`run.start.cells`** lists every planned sample, honoring `-k` and
-  `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, and `applies`, one
+  `--count`: `cell`, `skill`, `eval_id`, `arm`, `sample`, `folder` (the eval's
+  folder under its parent, such as `to-spec/triggers`), `assertions` (the lines
+  as written), and `applies`, one
   flag per assertion line, true where the line is graded in that arm. A sample
   with no true flag grades nothing.
 - **Phases.** `bind` is the binder; `boot` creates the sandbox; `setup` is

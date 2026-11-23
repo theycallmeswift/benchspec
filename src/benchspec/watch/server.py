@@ -21,8 +21,9 @@ from benchspec.watch.tail import (
     UnsupportedFormatError,
     check_format,
     event_files,
+    planned_cell,
 )
-from benchspec.watch.view import Gradings, RunView, assertions_view, read_gradings
+from benchspec.watch.view import Gradings, RunView, assertions_view, plan_view, read_gradings
 
 LOOPBACK = "127.0.0.1"
 RETRY_MS = 5000
@@ -203,6 +204,8 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                 self._stream()
             elif url.path == "/grading":
                 self._grading(parse_qs(url.query).get("cell", [""])[0])
+            elif url.path == "/plan":
+                self._plan(parse_qs(url.query).get("cell", [""])[0])
             else:
                 self._send(HTTPStatus.NOT_FOUND)
 
@@ -259,6 +262,17 @@ def _handler_for(server: WatchServer) -> type[BaseHTTPRequestHandler]:
                 return
 
             body = json.dumps(assertions_view(grading)).encode()
+            self._send(HTTPStatus.OK, body, "application/json")
+
+        def _plan(self, cell: str) -> None:
+            """Send one planned sample's assertion lines, as `run.start` lists them."""
+            planned = planned_cell(server.iteration_dir, cell)
+            if planned is None:
+                self._send(HTTPStatus.NOT_FOUND)
+
+                return
+
+            body = json.dumps(plan_view(planned)).encode()
             self._send(HTTPStatus.OK, body, "application/json")
 
         def _stream(self) -> None:

@@ -49,6 +49,7 @@ class Recording:
         only: dict[int, list[str]] | None = None,
         arms: list[str] | None = None,
         count: int = 1,
+        folder: str | None = None,
     ) -> None:
         """Plan an eval's samples.
 
@@ -60,6 +61,8 @@ class Recording:
             only: Line index to the arms that line is scoped to; other lines run everywhere.
             arms: The arms that collected this eval; every arm when None.
             count: Samples per arm.
+            folder: The eval's folder under its parent, such as `to-spec/triggers`; left
+                out of the plan when None, as a stream written before it was added.
         """
         names = ["judge"] * checks if isinstance(checks, int) else checks
         self.checkers[(skill, eval_id)] = names
@@ -76,8 +79,14 @@ class Recording:
                         "applies": [
                             name in (only or {}).get(index, [name]) for index in range(len(names))
                         ],
+                        "assertions": [_line_text(index) for index in range(len(names))],
+                        **({"folder": folder} if folder else {}),
                     }
                 )
+
+    def wait(self, cell: str, at: float, *, limit: int | None = 10, worker: str = "gw0") -> None:
+        """Emit `cell.wait`: the boot found the sandbox backend at capacity."""
+        self.emit("cell.wait", at, worker=worker, cell=cell, sandbox="e2b", limit=limit)
 
     def emit(self, event_type: str, at: float, *, worker: str = "gw0", **fields: object) -> None:
         """Append one event to its worker's file."""
@@ -262,7 +271,7 @@ class Recording:
         graded = 0
 
         for index, (name, applies) in enumerate(zip(names, planned["applies"], strict=True)):
-            text = f"line {index + 1} holds"
+            text = _line_text(index)
             if not applies:
                 assertions.append(
                     {"text": text, "passed": None, "skipped": True, "scoped": True, "reason": "if"}
@@ -301,6 +310,11 @@ class Recording:
         }
         (sample_dir / "grading.json").write_text(json.dumps(grading), encoding="utf-8")
         (sample_dir / "timing.json").write_text(json.dumps(timing), encoding="utf-8")
+
+
+def _line_text(index: int) -> str:
+    """The text of a recorded eval's assertion line."""
+    return f"line {index + 1} holds"
 
 
 def iteration(root: Path, name: str = "iteration_12") -> Path:

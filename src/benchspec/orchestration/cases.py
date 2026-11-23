@@ -144,6 +144,8 @@ def planned_cells(
                     "applies": scope.applicable(
                         case, arm, baseline=baseline, eval_set=eval_set
                     ),
+                    "folder": f"{case.eval_dir.parent.name}/{case.group}",
+                    "assertions": case.assertions,
                 }
             )
 

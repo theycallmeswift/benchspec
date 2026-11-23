@@ -129,7 +129,16 @@ def test_only_get_is_allowed(server: WatchServer) -> None:
     assert _get(server, "/", method="POST").status == 405
 
 
-@pytest.mark.parametrize("path", ["/", "/events", "/grading?cell=hello/greets/trial/0", "/nope"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/",
+        "/events",
+        "/grading?cell=hello/greets/trial/0",
+        "/plan?cell=hello/greets/trial/0",
+        "/nope",
+    ],
+)
 def test_another_host_header_is_forbidden_on_every_route(server: WatchServer, path: str) -> None:
     """Another host header is forbidden on every route."""
     assert _get(server, path, host="evil.example").status == 403
@@ -251,6 +260,49 @@ def test_grading_reads_nothing_but_a_finished_samples_file(
     (run.iteration_dir / "skills" / "grading.json").write_text("{}", encoding="utf-8")
 
     assert _get(server, f"/grading?cell={cell}").status == 404
+
+
+def test_plan_returns_a_samples_lines_before_it_is_graded(server: WatchServer) -> None:
+    """Plan returns a sample's lines, as run.start lists them, before it is graded."""
+    response = _get(server, f"/plan?cell={CELL}")
+    body = json.loads(response.read())
+
+    assert response.status == 200
+    assert body == {
+        "caption": "[ assertions · 3 planned ]",
+        "assertions": [
+            {"index": index, "state": "planned", "text": f"line {index + 1} holds"}
+            for index in range(3)
+        ],
+    }
+
+
+def test_plan_lists_a_line_scoped_off_the_arm_last_as_na(tmp_path: Path) -> None:
+    """Plan lists a line scoped off the arm last, as n/a."""
+    run = Recording(iteration(tmp_path))
+    run.plan("hello", "greets", checks=2, only={0: ["trial"]})
+    run.begin()
+    watch_server = WatchServer(run.iteration_dir)
+    watch_server.start()
+
+    try:
+        body = json.loads(_get(watch_server, "/plan?cell=hello/greets/baseline/0").read())
+    finally:
+        watch_server.stop()
+
+    assert body["caption"] == "[ assertions · 1 planned · 1 n/a ]"
+    assert [(entry["index"], entry["state"]) for entry in body["assertions"]] == [
+        (1, "planned"),
+        (0, "n/a"),
+    ]
+
+
+@pytest.mark.parametrize("cell", ["hello/missing/trial/0", "../greets/trial/0", ""])
+def test_plan_finds_nothing_for_a_sample_the_run_did_not_plan(
+    server: WatchServer, cell: str
+) -> None:
+    """Plan finds nothing for a sample the run did not plan."""
+    assert _get(server, f"/plan?cell={cell}").status == 404
 
 
 def test_finds_the_newest_iteration_with_an_event_stream(tmp_path: Path) -> None:

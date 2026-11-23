@@ -44,7 +44,12 @@ class ArmInfo(TypedDict):
 
 
 class PlannedCell(TypedDict):
-    """One planned sample; `applies` flags each assertion line graded in its arm."""
+    """One planned sample; `applies` flags each assertion line graded in its arm.
+
+    `folder` is the eval's folder under its parent, such as `to-spec/triggers`, so a
+    reader can tell apart same-named groups of different skills. `assertions` holds the
+    lines as written, before any placeholder is substituted.
+    """
 
     cell: str
     skill: str
@@ -52,6 +57,8 @@ class PlannedCell(TypedDict):
     arm: str
     sample: int
     applies: list[bool]
+    folder: str
+    assertions: list[str]
 
 
 class RunStart(Envelope):

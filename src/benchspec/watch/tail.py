@@ -9,6 +9,8 @@ from pathlib import Path
 from benchspec.events.schema import FORMAT_VERSION
 
 POLL_INTERVAL_S = 0.25
+# The controller writes `run.start` and `run.end` to its own file.
+CONTROLLER_EVENTS = "events-main.jsonl"
 
 
 class UnsupportedFormatError(Exception):
@@ -91,6 +93,22 @@ def _parse(line: bytes) -> dict | None:
         return None
 
     return event if isinstance(event, dict) else None
+
+
+def planned_cell(iteration_dir: Path, cell: str) -> dict | None:
+    """One sample as the controller's `run.start` plans it; None before that or if unplanned."""
+    try:
+        with (iteration_dir / CONTROLLER_EVENTS).open("rb") as file:
+            for line in file:
+                event = _parse(line)
+                if event is not None and event.get("type") == "run.start":
+                    return next(
+                        (planned for planned in event["cells"] if planned["cell"] == cell), None
+                    )
+    except OSError:
+        return None
+
+    return None
 
 
 def check_format(iteration_dir: Path) -> None:
