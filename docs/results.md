@@ -74,7 +74,8 @@ samples otherwise, `—` for an arm with no graded sample:
 | hello/greets-by-name · Skill `hello` invoked | skipped | pass |
 
 If every line of an eval is scoped out of an arm, that matrix cell is `—`, like
-an all-errored one.
+an all-errored one. The [watch page](watching/README.md#how-it-counts) rates
+an eval whose every line is scoped on those lines instead.
 
 **Per-arm sections.** One per arm: pass rate, harness, model and cell timeout,
 pass-through args, env (redacted: keys containing `TOKEN`, `KEY`, `SECRET`,

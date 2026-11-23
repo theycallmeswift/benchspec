@@ -107,9 +107,10 @@ longest arm's cell `timeout`, and returns to live if events resume.
   some arms is left out of the rate; the hover card counts it on its own line
   (`+ 1 of 1 scoped, outside the rate`). An eval whose every check is scoped,
   such as a trigger eval, is rated on those checks instead (`1 of 1 scoped
-  checks passed`), where `benchmark.md` shows `—`. Errored samples add nothing;
-  a cell whose every sample errored shows `—`. The leaderboard's other rows
-  cover graded samples.
+  checks passed`), where `benchmark.md` shows `—`; a group's rate includes
+  such evals, an arm's does not. Errored samples add nothing; a cell whose
+  every sample errored shows `—`. The leaderboard's other rows cover graded
+  samples.
 - **Before `bind`** a sample is in `snapshot`: building the sandbox snapshot,
   or waiting on another worker's build. A boot the sandbox backend refuses for
   capacity (`cell.wait`) is in `slot wait` until its next phase: it reads as
