@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from benchspec.config.arms import Arm
 from benchspec.orchestration.cases import planned_cells
 from benchspec.specs.discovery import EvalCase
@@ -64,7 +66,7 @@ def test_every_collected_pair_is_one_cell_at_count_one(tmp_path: Path) -> None:
             "arm": arm,
             "sample": 0,
             "applies": [True],
-            "folder": "evals/hello",
+            "folder": "hello/hello",
             "assertions": ["greeting written"],
         }
         for arm in ("baseline", "trial")
@@ -119,3 +121,36 @@ def test_applies_is_false_for_a_line_scoped_off_the_arm(tmp_path: Path) -> None:
     )
 
     assert [cell["applies"] for cell in cells] == [[True, False], [True, True], [False]]
+
+
+@pytest.mark.parametrize(
+    ("eval_dir", "folder"),
+    [
+        ("evals/to-spec/triggers", "to-spec/triggers"),
+        ("evals/to-spec/too-thin-defers", "to-spec/too-thin-defers"),
+        ("evals/e2e/hello/evals/hello-routing", "hello/hello-routing"),
+        ("skills/to-spec/evals/triggers", "to-spec/triggers"),
+        ("skills/pull-request/evals/triggers", "pull-request/triggers"),
+    ],
+)
+def test_the_folder_is_the_group_under_its_skill_skipping_evals_folders(
+    tmp_path: Path, eval_dir: str, folder: str
+) -> None:
+    """The folder is the group under its skill, skipping `evals` folders."""
+    group = Path(eval_dir).name
+    case = EvalCase(
+        group=group,
+        eval_dir=tmp_path / eval_dir,
+        eval_file=tmp_path / eval_dir / "greets.eval.md",
+        eval={"id": "greets", "prompt": "Say hi.", "assertions": ["greeting written"]},
+    )
+
+    cells = planned_cells(
+        [f"{eval_dir}/greets.eval.md::test_eval[{group}-greets-trial]"],
+        [(case, TRIAL)],
+        count=1,
+        baseline="baseline",
+        eval_set="",
+    )
+
+    assert [cell["folder"] for cell in cells] == [folder]

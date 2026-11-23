@@ -144,12 +144,19 @@ def planned_cells(
                     "applies": scope.applicable(
                         case, arm, baseline=baseline, eval_set=eval_set
                     ),
-                    "folder": f"{case.eval_dir.parent.name}/{case.group}",
+                    "folder": _folder(case),
                     "assertions": case.assertions,
                 }
             )
 
     return cells
+
+
+def _folder(case: EvalCase) -> str:
+    """The eval's group under its skill: the nearest ancestor folder not named `evals`."""
+    skill = next(parent.name for parent in case.eval_dir.parents if parent.name != "evals")
+
+    return f"{skill}/{case.group}"
 
 
 def _resolve_scope_clauses(
