@@ -64,9 +64,9 @@ The guest shares no filesystem with the host:
   run, on stderr, with the account's limit and the `--workers` that matches
   it. Any other 429 still fails the boot at once.
 - **Lifetime**: E2B kills a sandbox 120 s after its cell's cap, so one whose
-  controller died stops costing money. Stopping a run with Ctrl-C or SIGTERM
-  kills its sandboxes, including one whose create was still in flight; only a
-  SIGKILL leaves them to that cap.
+  controller died stops costing money. Stopping a run with Ctrl-C, or SIGTERM
+  to its process group, kills its sandboxes, including one whose create was
+  still in flight; a SIGKILL leaves them to that cap.
 
 Keep timing comparisons on one backend.
 
