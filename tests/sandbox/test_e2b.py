@@ -266,7 +266,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, project: _FakeProject) -> None:
 _AUTH_JSON = '{"tokens": {"access_token": "canary-access-token"}}'
 
 # The 429 E2B answered a 20-worker run on an account capped at 10 concurrent sandboxes.
-_CONCURRENCY_429 = (
+_CAPACITY_429 = (
     "429: Rate limit exceeded, please try again later. - you have reached the maximum "
     "number of concurrent E2B sandboxes (10). If you need more, please visit "
     "'https://e2b.dev/docs/billing'"
@@ -466,24 +466,32 @@ def test_a_failed_create_does_not_name_the_credential(
     assert "test-token" not in str(failure.value)
 
 
-def test_a_create_refused_at_the_concurrency_limit_is_a_capacity_error_naming_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("message", "limit"),
+    [
+        (_CAPACITY_429, 10),
+        ("429: You have reached the Maximum number of concurrent sandboxes (20).", 20),
+        ("429: you have reached the maximum number of concurrent E2B sandboxes.", None),
+    ],
+)
+def test_a_create_refused_at_the_sandbox_limit_is_a_capacity_error_naming_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, message: str, limit: int | None
 ) -> None:
-    """E2B's concurrency 429 becomes a `SandboxCapacityError` carrying the account limit."""
-    project = _FakeProject(create_error=e2b.RateLimitException(_CONCURRENCY_429))
+    """E2B's capacity 429 becomes a `SandboxCapacityError` carrying the limit it names."""
+    project = _FakeProject(create_error=e2b.RateLimitException(message))
     _install(monkeypatch, project)
 
     with pytest.raises(SandboxCapacityError) as refused:
         _boot(tmp_path)
 
-    assert refused.value.limit == 10
-    assert "maximum number of concurrent E2B sandboxes (10)" in str(refused.value)
+    assert refused.value.limit == limit
+    assert message in str(refused.value)
 
 
 def test_any_other_rate_limit_stays_a_plain_sandbox_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A 429 that is not the concurrency limit fails the boot as before."""
+    """A 429 that is not the sandbox limit fails the boot as before."""
     project = _FakeProject(
         create_error=e2b.RateLimitException("429: Rate limit exceeded, please try again later.")
     )
