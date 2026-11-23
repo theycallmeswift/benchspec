@@ -867,6 +867,8 @@ def test_a_boot_waiting_for_a_sandbox_slot_reads_as_waiting_not_failing(tmp_path
     resumed = cell_of(fold(run, at=51), "greets", "trial")
 
     assert (cell["boxes"], cell["progress"]) == (["bs-b-booting"], "slot wait 38s")
+    assert cell["hover"]["rows"][0]["verdict"] == "slot wait"
+    assert resumed["hover"]["rows"][0]["verdict"] == "booting"
     assert (sample["verdict"], sample["detail"], sample["doing"]) == (
         "booting",
         "slot wait 38s",

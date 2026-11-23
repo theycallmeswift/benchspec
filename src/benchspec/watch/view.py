@@ -1215,6 +1215,8 @@ def _hover_row(sample: Sample, now_ms: int) -> dict:
         verdict = "ERROR"
     elif state == "quiet":
         verdict = f"quiet {live_duration(sample.silent_ms(now_ms))}"
+    elif state == "booting" and sample.stage == SLOT_WAIT:
+        verdict = SLOT_WAIT
     else:
         verdict = state
 
