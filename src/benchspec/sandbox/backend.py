@@ -208,6 +208,8 @@ class SandboxBackend(Protocol):
     """The sandbox-runtime boundary a set's `sandbox` value selects."""
 
     id: str  # snapshot-cache key segment + report label
+    # Whether guests run off this host, so host RAM does not bound how many run at once.
+    remote: bool
 
     def preflight(self) -> list[str]:
         """Return host-readiness error strings (empty list ⇒ host is ready)."""

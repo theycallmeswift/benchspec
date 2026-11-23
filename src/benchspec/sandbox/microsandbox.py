@@ -211,6 +211,7 @@ class MicrosandboxBackend(SharedBackendBehavior):
     """The microsandbox implementation of `SandboxBackend`: one microVM per guest."""
 
     id = "microsandbox"
+    remote = False
 
     def installed(self) -> bool:
         """Return whether the `msb` runtime the SDK resolves is present on disk."""

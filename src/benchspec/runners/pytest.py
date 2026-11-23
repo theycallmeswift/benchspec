@@ -14,7 +14,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import Generator, MutableMapping, Sequence
+from collections.abc import Callable, Generator, MutableMapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -48,6 +48,7 @@ from benchspec.reporting.cells import (
     CellResult,
     format_cell_line,
 )
+from benchspec.runners.interrupt import interrupt_on_sigterm
 from benchspec.sandbox.project import discard_stage, stage_project
 from benchspec.specs.discovery import EvalCase, pyproject_table, resolve_repo_root
 
@@ -61,6 +62,8 @@ _BIND_SUMMARY = pytest.StashKey[str]()
 _RUN_ID = pytest.StashKey[str]()
 # The monotonic time `run.start` was emitted; unset until it is.
 _RUN_STARTED = pytest.StashKey[float]()
+# Puts back the SIGTERM handler a session running eval cells replaced.
+_RESTORE_SIGTERM = pytest.StashKey[Callable[[], None]]()
 
 
 def _help(*parts: str) -> str:
@@ -349,6 +352,11 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.args_source != pytest.Config.ArgsSource.ARGS:
         config.args = [str(_CASES)]
 
+    # Every process of a run with eval cells (controller, xdist worker, or serial run)
+    # stops on SIGTERM through Ctrl-C's teardown, so a terminated run kills its sandboxes.
+    if _targets_cases(config):
+        config.stash[_RESTORE_SIGTERM] = interrupt_on_sigterm()
+
     config.stash[PROGRESS_STYLE] = resolve_progress_style(
         option_str(config, "benchspec_progress"), project_table.get("progress")
     )
@@ -398,10 +406,14 @@ def _iteration_name(config: pytest.Config, repo_root: Path) -> str:
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
-    """Close this process's event file and, on the controller, remove the project stage."""
+    """Close this process's event file, put SIGTERM back, and remove the project stage."""
     sink = config.stash.get(cases.EVENT_SINK, None)
     if sink is not None:
         sink.close()
+
+    restore_sigterm = config.stash.get(_RESTORE_SIGTERM, None)
+    if restore_sigterm is not None:
+        restore_sigterm()
 
     discard_stage(config.stash.get(cases.STAGED_PROJECT, None))
 

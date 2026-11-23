@@ -71,6 +71,16 @@ class CellEvents:
 
         self._emit("cell.phase", {"phase": phase})
 
+    def wait(self, *, sandbox: str, limit: int | None) -> None:
+        """Emit `cell.wait`: the boot is waiting for `sandbox` to free a slot.
+
+        Args:
+            sandbox: The backend at capacity, such as `e2b`.
+            limit: The account's concurrent-sandbox limit; None when the backend did not
+                name it.
+        """
+        self._emit("cell.wait", {"sandbox": sandbox, "limit": limit})
+
     def delta(self, delta: StreamDelta) -> None:
         """Emit `cell.delta`, its text cut to `DELTA_TEXT_LIMIT`."""
         if self._first_delta is None:

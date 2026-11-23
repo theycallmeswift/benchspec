@@ -624,6 +624,7 @@ class DockerBackend(SharedBackendBehavior):
     """
 
     id = "docker"
+    remote = False
 
     def preflight(self) -> list[str]:
         """Return host-readiness errors: the CLI is installed and the daemon answers.

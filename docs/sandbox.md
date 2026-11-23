@@ -57,8 +57,16 @@ The guest shares no filesystem with the host:
   egress and no other's.
 - **Inbound**: a port the guest opens is not publicly reachable.
 - **Size**: a `/workspace` over 512 MiB, packed or unpacked, fails the sync.
+- **Capacity**: an E2B account runs a limited number of sandboxes at once.
+  A cell that E2B refuses for that limit waits in `boot` and retries, backing
+  off from about 2 s to at most 15 s, until a sandbox frees or its cap runs out;
+  only then does it error, naming the refusal. `benchspec run` warns once per
+  run, on stderr, with the account's limit and the `--workers` that matches
+  it. Any other 429 still fails the boot at once.
 - **Lifetime**: E2B kills a sandbox 120 s after its cell's cap, so one whose
-  controller died stops costing money.
+  controller died stops costing money. Stopping a run with Ctrl-C, or SIGTERM
+  to its process group, kills its sandboxes, including one whose create was
+  still in flight; a SIGKILL leaves them to that cap.
 
 Keep timing comparisons on one backend.
 
@@ -157,7 +165,8 @@ bad invocation.
 Each `(eval × arm × sample)` boots its own sandbox from the snapshot (2 vCPUs,
 2 GiB on every backend — `--cpus 2 --memory 2048m` for a Docker container) and
 tears it down after the turn. `benchspec run --workers auto` budgets that 2 GiB
-per cell against total host RAM. On macOS and Windows the Docker backend runs
+per cell against total host RAM, except on E2B, whose sandboxes take none of it.
+On macOS and Windows the Docker backend runs
 sandboxes in a VM whose memory is separate from host RAM, so `auto` can
 overestimate there: set `workers` explicitly. A cell, in order:
 
@@ -168,6 +177,12 @@ overestimate there: set `workers` explicitly. A cell, in order:
 4. Gathers facts: file tree, contents, SHA-256s, the final message, the
    tool-call stream.
 5. Tears down.
+
+Ctrl-C, and SIGTERM to the run's process group, take the same path: each
+process running cells cancels its cell, which tears its sandbox down (or removes
+it by name, if it was still booting) before the run stops. Teardown is best
+effort: a second signal abandons it, and with more than one worker the workers
+are interrupted about 5 s after the controller stops.
 
 Under Docker, a guest command that times out or is killed ends the `docker exec`
 client on the host, not the process it started inside the container: that process

@@ -19,7 +19,7 @@ from benchspec.agents.base import BEARER_HEADER, Credential
 from benchspec.agents.claude import ClaudeCodeAgent
 from benchspec.agents.codex import CodexAgent
 from benchspec.sandbox import e2b as e2b_mod
-from benchspec.sandbox.errors import SandboxError
+from benchspec.sandbox.errors import SandboxCapacityError, SandboxError
 from benchspec.sandbox.project import stage_archive
 from benchspec.sandbox.sandbox import _agent_extra_volumes
 from benchspec.specs.discovery import EnvConfig
@@ -265,6 +265,13 @@ def _install(monkeypatch: pytest.MonkeyPatch, project: _FakeProject) -> None:
 
 _AUTH_JSON = '{"tokens": {"access_token": "canary-access-token"}}'
 
+# The 429 E2B answered a 20-worker run on an account capped at 10 concurrent sandboxes.
+_CAPACITY_429 = (
+    "429: Rate limit exceeded, please try again later. - you have reached the maximum "
+    "number of concurrent E2B sandboxes (10). If you need more, please visit "
+    "'https://e2b.dev/docs/billing'"
+)
+
 
 def _claude() -> ClaudeCodeAgent:
     """A Claude Code agent whose credential may reach `api.anthropic.com`."""
@@ -457,6 +464,87 @@ def test_a_failed_create_does_not_name_the_credential(
 
     assert "template not found" in str(failure.value)
     assert "test-token" not in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    ("message", "limit"),
+    [
+        (_CAPACITY_429, 10),
+        ("429: You have reached the Maximum number of concurrent sandboxes (20).", 20),
+        ("429: you have reached the maximum number of concurrent E2B sandboxes.", None),
+    ],
+)
+def test_a_create_refused_at_the_sandbox_limit_is_a_capacity_error_naming_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, message: str, limit: int | None
+) -> None:
+    """E2B's capacity 429 becomes a `SandboxCapacityError` carrying the limit it names."""
+    project = _FakeProject(create_error=e2b.RateLimitException(message))
+    _install(monkeypatch, project)
+
+    with pytest.raises(SandboxCapacityError) as refused:
+        _boot(tmp_path)
+
+    assert refused.value.limit == limit
+    assert message in str(refused.value)
+
+
+def test_any_other_rate_limit_stays_a_plain_sandbox_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A 429 that is not the sandbox limit fails the boot as before."""
+    project = _FakeProject(
+        create_error=e2b.RateLimitException("429: Rate limit exceeded, please try again later.")
+    )
+    _install(monkeypatch, project)
+
+    with pytest.raises(SandboxError) as refused:
+        _boot(tmp_path)
+
+    assert not isinstance(refused.value, SandboxCapacityError)
+
+
+def test_a_boot_cancelled_mid_create_kills_the_sandbox_e2b_still_made(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A create already sent runs to its end after a cancel, and its sandbox is killed."""
+    project = _FakeProject()
+    _install(monkeypatch, project)
+
+    async def cancel_mid_create() -> None:
+        """Cancel the boot while its create is in flight, then let the create finish."""
+        started = asyncio.Event()
+        released = asyncio.Event()
+
+        async def slow_create(**options: object) -> _FakeNative:
+            """Answer only once released, like a request already on the wire."""
+            started.set()
+            await released.wait()
+
+            return project.native
+
+        monkeypatch.setattr(e2b.AsyncSandbox, "create", slow_create)
+        booting = asyncio.ensure_future(
+            e2b_mod.E2BBackend().create_sandbox(
+                agent=_claude(),
+                snapshot="benchspec-e2b-snap",
+                name="benchspec-eval-hello-trial-main",
+                host_workdir=tmp_path,
+                staged_project=None,
+                extra_volumes=_agent_extra_volumes,
+                cap_seconds=900,
+            )
+        )
+        await started.wait()
+        booting.cancel()
+        await asyncio.sleep(0)
+        released.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await booting
+
+    asyncio.run(cancel_mid_create())
+
+    assert project.native.killed is True
 
 
 def test_create_sandbox_uploads_both_trees_and_pins_the_provider_host(

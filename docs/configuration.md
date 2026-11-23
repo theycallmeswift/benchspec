@@ -256,7 +256,7 @@ sample's `provenance.json` records the arm's resolved `effort`, `provider`, and
 | `binder` | table | The run's binder (above). |
 | `eval_paths` | array of strings | Discovery search paths, relative to the repo root (default `skills`, `tests`, `evals`, `benchmarks`). See [`writing-evals.md`](writing-evals.md#discovery). |
 | `progress` | string | Live progress: `cells` (default) or `dots`. `--progress` wins. See [`results.md`](results.md#the-terminal-summary). |
-| `workers` | `"auto"` or positive integer | Parallel cells for `benchspec run` (default `"auto"`). `auto` is `min(cores, total RAM / 2 GB)`, clamped to 1–12. `1` runs in-process with no xdist. Not a set key: it describes the machine, not the experiment, and is not part of `config_hash`. Overridden by `--workers` or a passthrough `-n`. |
+| `workers` | `"auto"` or positive integer | Parallel cells for `benchspec run` (default `"auto"`). `auto` is `min(cores, total RAM / 2 GB)`, clamped to 1–12; on a remote sandbox (`e2b`) RAM is not counted, so it is cores alone. `1` runs in-process with no xdist. Not a set key: it describes the machine, not the experiment, and is not part of `config_hash`. Overridden by `--workers` or a passthrough `-n`. |
 | `base_image` | string | OCI image the sandbox snapshot builds from (default `ubuntu:latest`). Must be an apt-family image with glibc. Changing it rebuilds the snapshot. See [`sandbox.md`](sandbox.md). |
 | `environment_script` | string | Repo-relative shell script baked into the snapshot after the agent installs: the escape hatch for extra tools. Content-hashed into the cache identity; a missing file fails at config-read time. |
 | `opencode_version` | string | Default OpenCode version pin when `BENCHSPEC_OPENCODE_VERSION` is unset. |
@@ -300,20 +300,28 @@ plugin option, so the same knobs work when driving pytest directly:
 | `--harness H` | `--benchspec-harness` | Override the set's `harness` default. |
 | `--effort E` | `--benchspec-effort` | Override the set's `effort` default. |
 | `--timeout S` | `--benchspec-timeout` | Override the set's `timeout` default (whole-cell cap, seconds). Arms that declared their own keep it. |
-| `--workers N\|auto` | none (resolved by `run`) | Parallel cells: a positive integer or `auto`. Beats `[tool.benchspec] workers`. `auto` sizes from CPU cores and total RAM at 2 GB per cell, capped at 12; `1` runs in-process. Combining it with a passthrough `-n` exits `2`. |
+| `--workers N\|auto` | none (resolved by `run`) | Parallel cells: a positive integer or `auto`. Beats `[tool.benchspec] workers`. `auto` sizes from CPU cores and total RAM at 2 GB per cell (cores alone on `e2b`), capped at 12; `1` runs in-process. Combining it with a passthrough `-n` exits `2`. |
 | `--env K=V` | `--benchspec-env` | Add or override a set-default env entry (repeatable; `$VAR` expands at execution). |
 | `--eval-paths P1,P2` | `--benchspec-eval-paths` | Override discovery search paths. |
 | `--fail-under PP` | `--benchspec-fail-under` | CI gate (below). |
 | `--progress {cells,dots}` | `--benchspec-progress` | Live progress: one line per finished sample, or pytest's dots. See [`results.md`](results.md#the-terminal-summary). |
-| `--watch` | `--benchspec-iteration` | Serve this run's [live view](watching/README.md) on `127.0.0.1` until the run ends. `run` picks the next iteration name and passes it on, so the page knows which directory to follow. |
+| `--watch` | none (served by `run`) | Serve this run's [live view](watching/README.md) on `127.0.0.1` until the run ends. |
 | `--judge-harness` / `--judge-provider` / `--judge-model` / `--judge-effort` / `--judge-timeout` | `--benchspec-judge-*` | Per-run judge overrides. `--judge-timeout` is in seconds and must stay below every arm's `--timeout`. |
 | `--binder-provider` / `--binder-model` | `--benchspec-binder-*` | Per-run binder overrides. |
 
 `run` prints its worker count once at start: `workers: 5 (auto: 8 cores, 11.4 GB RAM)`,
+`workers: 8 (auto: 8 cores; RAM not counted, sandboxes run on e2b)`,
 `workers: 4 (flag)`, or `workers: 3 (config)`. Resolution order is `--workers`, then
 a passthrough `-n` / `--numprocesses` (pytest-xdist, which still works and wins over the
 project default), then `[tool.benchspec] workers`, then `auto`. `--collect-only` adds no
-workers.
+workers. On E2B, workers past the account's concurrent-sandbox limit cost nothing but
+time: their cells wait in boot for a free sandbox, and `run` warns once with the limit
+(see [E2B](sandbox.md#e2b)). E2B does not report the limit up front, so `auto` cannot
+size to it.
+
+`run` picks the next iteration name and passes it as `--benchspec-iteration`, so the
+capacity warning and `--watch` know which directory to follow. A passthrough
+`--benchspec-iteration` wins. `--collect-only` names none.
 
 ```bash
 benchspec run                          # workers = auto

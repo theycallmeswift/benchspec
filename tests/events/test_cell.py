@@ -158,3 +158,17 @@ def test_delta_text_is_cut_to_the_limit() -> None:
         "name": "Bash",
         "text": "y" * DELTA_TEXT_LIMIT,
     }
+
+
+def test_wait_names_the_backend_and_its_account_limit() -> None:
+    """Wait names the backend at capacity and the limit it reported."""
+    cell, sink, _clock = _started_cell()
+
+    cell.wait(sandbox="e2b", limit=10)
+
+    assert sink.events[-1] == {
+        "type": "cell.wait",
+        "cell": "hello/greets/trial/0",
+        "sandbox": "e2b",
+        "limit": 10,
+    }
