@@ -49,7 +49,7 @@ dev = [
     "playwright>=1.63",
     "e2b>=2.64,<3",
     "fonttools>=4.60,<5",
-    "pillow>=12,<13",
+    "pillow>=12,<14",
 ]
 
 [project.urls]
